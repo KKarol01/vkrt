@@ -4,5 +4,6 @@
 
 class Renderer {
   public:
-    virtual void render_model(Model& model) {}
+    virtual ~Renderer() = default;
+    virtual void render_model(Model& model) = 0;
 };

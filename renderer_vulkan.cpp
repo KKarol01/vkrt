@@ -2,10 +2,9 @@
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
 
-
 Buffer::Buffer(const std::string& name, uint64_t size, VkBufferUsageFlags usage, bool map) {
 	RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-	vk::BufferCreateInfo binfo;
+	vks::BufferCreateInfo binfo;
 	VmaAllocationCreateInfo vinfo{};
 	const auto use_bda = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) > 0;
 
@@ -24,7 +23,7 @@ Buffer::Buffer(const std::string& name, uint64_t size, VkBufferUsageFlags usage,
 	mapped = vainfo.pMappedData;
 
 	if(use_bda) {
-		vk::BufferDeviceAddressInfo bdainfo;
+		vks::BufferDeviceAddressInfo bdainfo;
 		bdainfo.buffer = buffer;
 		bda = vkGetBufferDeviceAddress(renderer->dev, &bdainfo);
 	}
@@ -37,7 +36,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
 	  VkSampleCountFlagBits samples, VkImageUsageFlags usage)
 	: format(format), mips(mips), layers(layers) {
 	RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-	vk::ImageCreateInfo iinfo;
+	vks::ImageCreateInfo iinfo;
 
 	int dims = -1;
 	if(width > 1) { ++dims; }
@@ -68,7 +67,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
 	VkImageAspectFlags view_aspect{ VK_IMAGE_ASPECT_COLOR_BIT };
 	if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) { view_aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; }
 
-	vk::ImageViewCreateInfo ivinfo;
+	vks::ImageViewCreateInfo ivinfo;
 	ivinfo.image = image;
 	ivinfo.viewType = view_types[dims];
 	ivinfo.components = {};
@@ -85,7 +84,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
 
 void Image::transition_layout(VkImageLayout dst, bool from_undefined) {
 	RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-	vk::ImageMemoryBarrier2 imgb;
+	vks::ImageMemoryBarrier2 imgb;
 	imgb.image = image;
 	imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
 	imgb.newLayout = dst;
@@ -101,21 +100,21 @@ void Image::transition_layout(VkImageLayout dst, bool from_undefined) {
 		.layerCount = layers,
 	};
 
-	vk::CommandBufferBeginInfo cmdbi;
+	vks::CommandBufferBeginInfo cmdbi;
 	cmdbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(renderer->cmd, &cmdbi);
 
-	vk::DependencyInfo dep;
+	vks::DependencyInfo dep;
 	dep.pImageMemoryBarriers = &imgb;
 	dep.imageMemoryBarrierCount = 1;
 	vkCmdPipelineBarrier2(renderer->cmd, &dep);
 
 	vkEndCommandBuffer(renderer->cmd);
 
-	vk::CommandBufferSubmitInfo cmdsinfo;
+	vks::CommandBufferSubmitInfo cmdsinfo;
 	cmdsinfo.commandBuffer = renderer->cmd;
 
-	vk::SubmitInfo2 sinfo;
+	vks::SubmitInfo2 sinfo;
 	sinfo.commandBufferInfoCount = 1;
 	sinfo.pCommandBufferInfos = &cmdsinfo;
 	vkQueueSubmit2(renderer->gq, 1, &sinfo, nullptr);

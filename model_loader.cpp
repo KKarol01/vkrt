@@ -8,10 +8,75 @@
 #include "model_loader.hpp"
 #include "set_debug_name.hpp"
 
+static void load_image(fastgltf::Asset& asset, fastgltf::Image& image, Model& model) {
+    std::visit(fastgltf::visitor{
+                   [](auto& arg) { throw std::runtime_error{ "Fastgltf Image source type not supported" }; },
+                   [&](fastgltf::sources::BufferView& source) {
+                       auto& view = asset.bufferViews.at(source.bufferViewIndex);
+                       auto& buffer = asset.buffers.at(view.bufferIndex);
+
+                       std::visit(fastgltf::visitor{
+                                      [](auto& arg) { throw std::runtime_error{ "Fastgltf Buffer source type not supported" }; },
+                                      [&](fastgltf::sources::Array& source) {
+                                          int w, h, ch;
+                                          uint8_t* d = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(source.bytes.data() + view.byteOffset), view.byteLength, &w, &h, &ch, 4);
+                                          model.textures.emplace_back(image.name.c_str(), w, h, 4, d);
+                                          stbi_image_free(d);
+                                      } },
+                                  buffer.data);
+                   },
+               },
+               image.data);
+}
+
+static void load_mesh(fastgltf::Asset& asset, fastgltf::Mesh& mesh, Model& model) {
+    for(uint32_t i = 0; i < mesh.primitives.size(); ++i) {
+        auto& prim = mesh.primitives.at(i);
+        ModelMesh mmesh;
+
+        if(prim.materialIndex) {
+            auto& mat = asset.materials.at(prim.materialIndex.value());
+            mmesh.material.name = mat.name;
+            if(mat.pbrData.baseColorTexture) {
+                auto& base_tex = asset.textures.at(mat.pbrData.baseColorTexture->textureIndex);
+                mmesh.material.base_texture = base_tex.imageIndex.value();
+            }
+        }
+
+        auto itp = prim.findAttribute("POSITION");
+        const auto pos_count = asset.accessors.at(itp->accessorIndex).count;
+
+        if(pos_count == 0) { continue; }
+
+        mmesh.vertices.resize(pos_count);
+
+        const auto push_vertex_attrib = [&]<typename GLM>(auto&& it, uint64_t offset) {
+            auto& acc = asset.accessors.at(it->accessorIndex);
+            auto& index = acc.bufferViewIndex;
+
+            if(index) {
+                fastgltf::iterateAccessorWithIndex<GLM>(asset, asset.accessors.at(it->accessorIndex), [&](const GLM& p, uint64_t idx) {
+                    memcpy(reinterpret_cast<std::byte*>(&mmesh.vertices.at(idx)) + offset, &p, sizeof(GLM));
+                });
+            }
+        };
+
+        push_vertex_attrib.operator()<glm::vec3>(itp, offsetof(Vertex, pos));
+        push_vertex_attrib.operator()<glm::vec3>(prim.findAttribute("NORMAL"), offsetof(Vertex, nor));
+        push_vertex_attrib.operator()<glm::vec2>(prim.findAttribute("TEXCOORD_0"), offsetof(Vertex, uv));
+
+        auto& indices = asset.accessors.at(prim.indicesAccessor.value());
+        mmesh.indices.resize(indices.count);
+        fastgltf::copyFromAccessor<uint32_t>(asset, indices, mmesh.indices.data());
+
+        model.meshes.push_back(std::move(mmesh));
+    }
+}
+
 ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_t* data) : name(name) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
-    vk::ImageCreateInfo info;
+    vks::ImageCreateInfo info;
     info.imageType = VK_IMAGE_TYPE_2D;
     info.mipLevels = 1 + std::log2(w < h ? w : h);
     info.arrayLayers = 1;
@@ -23,7 +88,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
     info.format = VK_FORMAT_R8G8B8A8_SRGB;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    vk::BufferCreateInfo buffer_info;
+    vks::BufferCreateInfo buffer_info;
     buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     buffer_info.size = w * h * ch;
 
@@ -44,7 +109,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
         throw std::runtime_error{ "ModelTexture Image could not be allocated" };
     }
 
-    vk::ImageViewCreateInfo view_info;
+    vks::ImageViewCreateInfo view_info;
     view_info.image = image;
     view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view_info.components = {};
@@ -63,7 +128,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
 
     memcpy(buffer_alloc_info.pMappedData, data, w * h * ch);
 
-    vk::BufferImageCopy2 image_copy;
+    vks::BufferImageCopy2 image_copy;
     image_copy.bufferOffset = 0;
     image_copy.bufferImageHeight = 0;
     image_copy.bufferRowLength = 0;
@@ -76,7 +141,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
         .layerCount = 1,
     };
 
-    vk::CopyBufferToImageInfo2 buffer_copy_info;
+    vks::CopyBufferToImageInfo2 buffer_copy_info;
     buffer_copy_info.srcBuffer = staging_buffer;
     buffer_copy_info.dstImage = image;
     buffer_copy_info.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -86,7 +151,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
     static constexpr auto to_layout = [&](VkCommandBuffer cmd, VkImage image, uint32_t mip, VkImageLayout old_layout,
                                           VkImageLayout new_layout, VkPipelineStageFlags2 src_stage, VkPipelineStageFlags2 dst_stage,
                                           VkAccessFlags2 src_access, VkAccessFlags2 dst_access) {
-        vk::ImageMemoryBarrier2 imgb;
+        vks::ImageMemoryBarrier2 imgb;
         imgb.image = image;
         imgb.oldLayout = old_layout;
         imgb.newLayout = new_layout;
@@ -102,14 +167,14 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
             .layerCount = 1,
         };
 
-        vk::DependencyInfo dep;
+        vks::DependencyInfo dep;
         dep.pImageMemoryBarriers = &imgb;
         dep.imageMemoryBarrierCount = 1;
 
         vkCmdPipelineBarrier2(cmd, &dep);
     };
 
-    vk::CommandBufferBeginInfo cmdbi;
+    vks::CommandBufferBeginInfo cmdbi;
     cmdbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     vkBeginCommandBuffer(renderer->cmd, &cmdbi);
@@ -123,7 +188,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
         to_layout(renderer->cmd, image, i, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_NONE,
                   VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_NONE, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
-        vk::ImageBlit2 region;
+        vks::ImageBlit2 region;
         region.srcOffsets[0] = {};
         region.srcOffsets[1] = { w >> (i - 1), h >> (i - 1), 1 };
         region.dstOffsets[0] = {};
@@ -131,7 +196,7 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
         region.srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = i - 1, .baseArrayLayer = 0, .layerCount = 1 };
         region.dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = i, .baseArrayLayer = 0, .layerCount = 1 };
 
-        vk::BlitImageInfo2 blit;
+        vks::BlitImageInfo2 blit;
         blit.srcImage = image;
         blit.dstImage = image;
         blit.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -151,10 +216,10 @@ ModelTexture::ModelTexture(const std::string& name, int w, int h, int ch, uint8_
 
     vkEndCommandBuffer(renderer->cmd);
 
-    vk::CommandBufferSubmitInfo cmd_submit_info;
+    vks::CommandBufferSubmitInfo cmd_submit_info;
     cmd_submit_info.commandBuffer = renderer->cmd;
 
-    vk::SubmitInfo2 submit_info;
+    vks::SubmitInfo2 submit_info;
     submit_info.pCommandBufferInfos = &cmd_submit_info;
     submit_info.commandBufferInfoCount = 1;
     vkQueueSubmit2(renderer->gq, 1, &submit_info, nullptr);
@@ -193,69 +258,4 @@ Model ModelLoader::load_model(const std::filesystem::path& path) {
     model.build();
 
     return model;
-}
-
-static void load_image(fastgltf::Asset& asset, fastgltf::Image& image, Model& model) {
-    std::visit(fastgltf::visitor{
-                   [](auto& arg) { throw std::runtime_error{ "Fastgltf Image source type not supported" }; },
-                   [&](fastgltf::sources::BufferView& source) {
-                       auto& view = asset.bufferViews.at(source.bufferViewIndex);
-                       auto& buffer = asset.buffers.at(view.bufferIndex);
-
-                       std::visit(fastgltf::visitor{
-                                      [](auto& arg) { throw std::runtime_error{ "Fastgltf Buffer source type not supported" }; },
-                                      [&](fastgltf::sources::Array& source) {
-                                          int w, h, ch;
-                                          uint8_t* d = stbi_load_from_memory(source.bytes.data() + view.byteOffset, view.byteLength, &w, &h, &ch, 4);
-                                          model.textures.emplace_back(image.name.c_str(), w, h, 4, d);
-                                          stbi_image_free(d);
-                                      } },
-                                  buffer.data);
-                   },
-               },
-               image.data);
-}
-
-static void load_mesh(fastgltf::Asset& asset, fastgltf::Mesh& mesh, Model& model) {
-    for(uint32_t i = 0; i < mesh.primitives.size(); ++i) {
-        auto& prim = mesh.primitives.at(i);
-        ModelMesh mmesh;
-
-        if(prim.materialIndex) {
-            auto& mat = asset.materials.at(prim.materialIndex.value());
-            mmesh.material.name = mat.name;
-            if(mat.pbrData.baseColorTexture) {
-                auto& base_tex = asset.textures.at(mat.pbrData.baseColorTexture->textureIndex);
-                mmesh.material.base_texture = base_tex.imageIndex.value();
-            }
-        }
-
-        auto itp = prim.findAttribute("POSITION");
-        const auto pos_count = asset.accessors.at(itp->second).count;
-
-        if(pos_count == 0) { continue; }
-
-        mmesh.vertices.resize(pos_count);
-
-        const auto push_vertex_attrib = [&]<typename GLM>(auto&& it, uint64_t offset) {
-            auto& acc = asset.accessors.at(it->second);
-            auto& index = acc.bufferViewIndex;
-
-            if(index) {
-                fastgltf::iterateAccessorWithIndex<GLM>(asset, asset.accessors.at(it->second), [&](const GLM& p, uint64_t idx) {
-                    memcpy(reinterpret_cast<std::byte*>(&mmesh.vertices.at(idx)) + offset, &p, sizeof(GLM));
-                });
-            }
-        };
-
-        push_vertex_attrib.operator()<glm::vec3>(itp, offsetof(Vertex, pos));
-        push_vertex_attrib.operator()<glm::vec3>(prim.findAttribute("NORMAL"), offsetof(Vertex, nor));
-        push_vertex_attrib.operator()<glm::vec2>(prim.findAttribute("TEXCOORD_0"), offsetof(Vertex, uv));
-
-        auto& indices = asset.accessors.at(prim.indicesAccessor.value());
-        mmesh.indices.resize(indices.count);
-        fastgltf::copyFromAccessor<uint32_t>(asset, indices, mmesh.indices.data());
-
-        model.meshes.push_back(std::move(mmesh));
-    }
 }

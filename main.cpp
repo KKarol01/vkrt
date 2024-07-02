@@ -37,7 +37,7 @@ static Camera camera;
 static void build_blas(Model& model) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
-    vk::AccelerationStructureGeometryTrianglesDataKHR triangles;
+    vks::AccelerationStructureGeometryTrianglesDataKHR triangles;
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
     triangles.vertexData.deviceAddress = renderer->vertex_buffer.bda;
     triangles.vertexStride = sizeof(Vertex);
@@ -46,25 +46,25 @@ static void build_blas(Model& model) {
     triangles.maxVertex = model.num_vertices - 1;
     triangles.transformData = {};
 
-    vk::AccelerationStructureGeometryKHR geometry;
+    vks::AccelerationStructureGeometryKHR geometry;
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geometry.geometry.triangles = triangles;
 
-    vk::AccelerationStructureBuildGeometryInfoKHR geometry_info;
+    vks::AccelerationStructureBuildGeometryInfoKHR geometry_info;
     geometry_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     geometry_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     geometry_info.geometryCount = 1;
     geometry_info.pGeometries = &geometry;
 
     const uint32_t max_primitives = model.num_indices / 3;
-    vk::AccelerationStructureBuildSizesInfoKHR build_size_info;
+    vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
     vkGetAccelerationStructureBuildSizesKHR(renderer->dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &geometry_info, &max_primitives, &build_size_info);
 
     Buffer buffer_blas{ "blas_buffer", build_size_info.accelerationStructureSize,
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    vk::AccelerationStructureCreateInfoKHR blas_info;
+    vks::AccelerationStructureCreateInfoKHR blas_info;
     blas_info.buffer = buffer_blas.buffer;
     blas_info.size = build_size_info.accelerationStructureSize;
     blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
@@ -74,7 +74,7 @@ static void build_blas(Model& model) {
     Buffer buffer_scratch{ "scratch_buffer", build_size_info.buildScratchSize,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    vk::AccelerationStructureBuildGeometryInfoKHR build_info;
+    vks::AccelerationStructureBuildGeometryInfoKHR build_info;
     build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     build_info.geometryCount = 1;
@@ -83,23 +83,23 @@ static void build_blas(Model& model) {
     build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     build_info.scratchData.deviceAddress = buffer_scratch.bda;
 
-    vk::AccelerationStructureBuildRangeInfoKHR offset;
+    vks::AccelerationStructureBuildRangeInfoKHR offset;
     offset.firstVertex = 0;
     offset.primitiveCount = max_primitives;
     offset.primitiveOffset = 0;
     offset.transformOffset = 0;
 
-    vk::CommandBufferBeginInfo begin_info;
+    vks::CommandBufferBeginInfo begin_info;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(renderer->cmd, &begin_info);
     VkAccelerationStructureBuildRangeInfoKHR* offsets[]{ &offset };
     vkCmdBuildAccelerationStructuresKHR(renderer->cmd, 1, &build_info, offsets);
     vkEndCommandBuffer(renderer->cmd);
 
-    vk::CommandBufferSubmitInfo cmd_submit_info;
+    vks::CommandBufferSubmitInfo cmd_submit_info;
     cmd_submit_info.commandBuffer = renderer->cmd;
 
-    vk::SubmitInfo2 submit_info;
+    vks::SubmitInfo2 submit_info;
     submit_info.commandBufferInfoCount = 1;
     submit_info.pCommandBufferInfos = &cmd_submit_info;
     vkQueueSubmit2(renderer->gq, 1, &submit_info, nullptr);
@@ -120,7 +120,7 @@ static void build_tlas(Model& model) {
     };
     // clang-format on
 
-    vk::AccelerationStructureInstanceKHR instance;
+    vks::AccelerationStructureInstanceKHR instance;
     instance.transform = transform;
     instance.instanceCustomIndex = 0;
     instance.mask = 0xFF;
@@ -142,27 +142,27 @@ static void build_tlas(Model& model) {
     instance.transform = transform2;
     memcpy((std::byte*)buffer_instance.mapped + sizeof(instance), &instance, sizeof(instance));
 
-    vk::AccelerationStructureGeometryKHR geometry;
+    vks::AccelerationStructureGeometryKHR geometry;
     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     geometry.geometry.instances.arrayOfPointers = false;
     geometry.geometry.instances.data.deviceAddress = buffer_instance.bda;
 
-    vk::AccelerationStructureBuildGeometryInfoKHR build_info;
+    vks::AccelerationStructureBuildGeometryInfoKHR build_info;
     build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     build_info.geometryCount = 1;
     build_info.pGeometries = &geometry;
 
-    vk::AccelerationStructureBuildSizesInfoKHR build_size;
+    vks::AccelerationStructureBuildSizesInfoKHR build_size;
     const uint32_t max_primitives = 2;
     vkGetAccelerationStructureBuildSizesKHR(renderer->dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitives, &build_size);
 
     Buffer buffer_tlas{ "tlas_buffer", build_size.accelerationStructureSize,
                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false };
 
-    vk::AccelerationStructureCreateInfoKHR acc_info;
+    vks::AccelerationStructureCreateInfoKHR acc_info;
     acc_info.buffer = buffer_tlas.buffer;
     acc_info.size = build_size.accelerationStructureSize;
     acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
@@ -172,7 +172,7 @@ static void build_tlas(Model& model) {
     Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    vk::AccelerationStructureBuildGeometryInfoKHR build_tlas;
+    vks::AccelerationStructureBuildGeometryInfoKHR build_tlas;
     build_tlas.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     build_tlas.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     build_tlas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
@@ -181,23 +181,23 @@ static void build_tlas(Model& model) {
     build_tlas.pGeometries = &geometry;
     build_tlas.scratchData.deviceAddress = buffer_scratch.bda;
 
-    vk::AccelerationStructureBuildRangeInfoKHR build_range;
+    vks::AccelerationStructureBuildRangeInfoKHR build_range;
     build_range.primitiveCount = 2;
     build_range.primitiveOffset = 0;
     build_range.firstVertex = 0;
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    vk::CommandBufferBeginInfo begin_info;
+    vks::CommandBufferBeginInfo begin_info;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(renderer->cmd, &begin_info);
     vkCmdBuildAccelerationStructuresKHR(renderer->cmd, 1, &build_tlas, build_ranges);
     vkEndCommandBuffer(renderer->cmd);
 
-    vk::CommandBufferSubmitInfo cmd_submit_info;
+    vks::CommandBufferSubmitInfo cmd_submit_info;
     cmd_submit_info.commandBuffer = renderer->cmd;
 
-    vk::SubmitInfo2 submit_info;
+    vks::SubmitInfo2 submit_info;
     submit_info.commandBufferInfoCount = 1;
     submit_info.pCommandBufferInfos = &cmd_submit_info;
     vkQueueSubmit2(renderer->gq, 1, &submit_info, nullptr);
@@ -240,7 +240,7 @@ static void compile_shaders() {
 
         compiled_modules.emplace_back(res.begin(), res.end());
 
-        vk::ShaderModuleCreateInfo module_info;
+        vks::ShaderModuleCreateInfo module_info;
         module_info.codeSize = compiled_modules.back().size() * sizeof(compiled_modules.back()[0]);
         module_info.pCode = compiled_modules.back().data();
         vkCreateShaderModule(renderer->dev, &module_info, nullptr, &modules.emplace_back());
@@ -294,7 +294,7 @@ static void build_rtpp() {
 
     // Ray generation group
     {
-        vk::PipelineShaderStageCreateInfo stage;
+        vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
         stage.module = renderer->shader_modules.at(3);
         stage.pName = "main";
@@ -311,7 +311,7 @@ static void build_rtpp() {
 
     // Miss group
     {
-        vk::PipelineShaderStageCreateInfo stage;
+        vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
         stage.module = renderer->shader_modules.at(1);
         stage.pName = "main";
@@ -328,7 +328,7 @@ static void build_rtpp() {
 
     // Miss group
     {
-        vk::PipelineShaderStageCreateInfo stage;
+        vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
         stage.module = renderer->shader_modules.at(2);
         stage.pName = "main";
@@ -345,7 +345,7 @@ static void build_rtpp() {
 
     // Closest hit group
     {
-        vk::PipelineShaderStageCreateInfo stage;
+        vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
         stage.module = renderer->shader_modules.at(0);
         stage.pName = "main";
@@ -407,7 +407,7 @@ static void build_descriptor_sets() {
     std::vector<VkDescriptorPoolSize> poolSizes = { { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2 },
                                                     { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
                                                     { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 } };
-    vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo;
+    vks::DescriptorPoolCreateInfo descriptorPoolCreateInfo;
     descriptorPoolCreateInfo.poolSizeCount = 3;
     descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
     descriptorPoolCreateInfo.maxSets = 2;
@@ -415,18 +415,18 @@ static void build_descriptor_sets() {
     vkCreateDescriptorPool(renderer->dev, &descriptorPoolCreateInfo, nullptr, &descriptorPool);
 
     VkDescriptorSetLayout descriptorSetLayout;
-    vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo;
+    vks::DescriptorSetAllocateInfo descriptorSetAllocateInfo;
     descriptorSetAllocateInfo.descriptorPool = descriptorPool;
     descriptorSetAllocateInfo.descriptorSetCount = 1;
     descriptorSetAllocateInfo.pSetLayouts = &renderer->raytracing_set_layout;
     VkDescriptorSet descriptorSet;
     vkAllocateDescriptorSets(renderer->dev, &descriptorSetAllocateInfo, &descriptorSet);
 
-    vk::WriteDescriptorSetAccelerationStructureKHR descriptorAccelerationStructureInfo{};
+    vks::WriteDescriptorSetAccelerationStructureKHR descriptorAccelerationStructureInfo{};
     descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
     descriptorAccelerationStructureInfo.pAccelerationStructures = &renderer->tlas;
 
-    vk::WriteDescriptorSet accelerationStructureWrite{};
+    vks::WriteDescriptorSet accelerationStructureWrite{};
     // The specialized acceleration structure descriptor has to be chained
     accelerationStructureWrite.pNext = &descriptorAccelerationStructureInfo;
     accelerationStructureWrite.dstSet = descriptorSet;
@@ -443,7 +443,7 @@ static void build_descriptor_sets() {
     ubo_descriptor.offset = 0;
     ubo_descriptor.range = 128;
 
-    vk::WriteDescriptorSet resultImageWrite;
+    vks::WriteDescriptorSet resultImageWrite;
     resultImageWrite.dstSet = descriptorSet;
     resultImageWrite.dstBinding = 1;
     resultImageWrite.dstArrayElement = 0;
@@ -451,7 +451,7 @@ static void build_descriptor_sets() {
     resultImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     resultImageWrite.pImageInfo = &storageImageDescriptor;
 
-    vk::WriteDescriptorSet uniformBufferWrite;
+    vks::WriteDescriptorSet uniformBufferWrite;
     uniformBufferWrite.dstSet = descriptorSet;
     uniformBufferWrite.dstBinding = 2;
     uniformBufferWrite.dstArrayElement = 0;
@@ -467,7 +467,7 @@ static void build_descriptor_sets() {
 
 static void create_swapchain() {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-    vk::SwapchainCreateInfoKHR sinfo;
+    vks::SwapchainCreateInfoKHR sinfo;
     sinfo.surface = window.surface;
     sinfo.minImageCount = 2;
     sinfo.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -527,7 +527,7 @@ static void init_vulkan() {
     window.width = 1280;
     window.height = 768;
     window.window = glfwCreateWindow(window.width, window.height, "title", 0, 0);
-    vk::Win32SurfaceCreateInfoKHR surface_info;
+    vks::Win32SurfaceCreateInfoKHR surface_info;
     surface_info.hwnd = glfwGetWin32Window(window.window);
     surface_info.hinstance = GetModuleHandle(nullptr);
     vkCreateWin32SurfaceKHR(vkb_inst.instance, &surface_info, nullptr, &window.surface);
@@ -544,16 +544,16 @@ static void init_vulkan() {
 
     vkb::DeviceBuilder device_builder{ phys_ret.value() };
 
-    vk::PhysicalDeviceSynchronization2Features synch2_features;
+    vks::PhysicalDeviceSynchronization2Features synch2_features;
     synch2_features.synchronization2 = true;
 
-    vk::PhysicalDeviceHostQueryResetFeatures query_reset_features;
+    vks::PhysicalDeviceHostQueryResetFeatures query_reset_features;
     query_reset_features.hostQueryReset = true;
 
-    vk::PhysicalDeviceDynamicRenderingFeatures dyn_features;
+    vks::PhysicalDeviceDynamicRenderingFeatures dyn_features;
     dyn_features.dynamicRendering = true;
 
-    vk::PhysicalDeviceDescriptorIndexingFeatures desc_features;
+    vks::PhysicalDeviceDescriptorIndexingFeatures desc_features;
     desc_features.descriptorBindingVariableDescriptorCount = true;
     desc_features.descriptorBindingPartiallyBound = true;
     desc_features.shaderSampledImageArrayNonUniformIndexing = true;
@@ -564,20 +564,20 @@ static void init_vulkan() {
     desc_features.descriptorBindingStorageBufferUpdateAfterBind = true;
     desc_features.runtimeDescriptorArray = true;
 
-    vk::PhysicalDeviceFeatures2 dev_2_features;
+    vks::PhysicalDeviceFeatures2 dev_2_features;
     dev_2_features.features = {
         .geometryShader = true,
         .multiDrawIndirect = true,
         .fragmentStoresAndAtomics = true,
     };
 
-    vk::PhysicalDeviceBufferDeviceAddressFeatures bda_features;
+    vks::PhysicalDeviceBufferDeviceAddressFeatures bda_features;
     bda_features.bufferDeviceAddress = true;
 
-    vk::PhysicalDeviceAccelerationStructureFeaturesKHR acc_features;
+    vks::PhysicalDeviceAccelerationStructureFeaturesKHR acc_features;
     acc_features.accelerationStructure = true;
 
-    vk::PhysicalDeviceRayTracingPipelineFeaturesKHR rtpp_features;
+    vks::PhysicalDeviceRayTracingPipelineFeaturesKHR rtpp_features;
     rtpp_features.rayTracingPipeline = true;
     rtpp_features.rayTraversalPrimitiveCulling = true;
 
@@ -658,14 +658,14 @@ static void init_vulkan() {
 
     renderer->vma = allocator;
 
-    vk::CommandPoolCreateInfo cmdpi;
+    vks::CommandPoolCreateInfo cmdpi;
     cmdpi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmdpi.queueFamilyIndex = renderer->gqi;
 
     VkCommandPool pool;
     if(vkCreateCommandPool(device, &cmdpi, nullptr, &pool) != VK_SUCCESS) { throw std::runtime_error{ "Could not create command pool" }; }
 
-    vk::CommandBufferAllocateInfo cmdi;
+    vks::CommandBufferAllocateInfo cmdi;
     cmdi.commandPool = pool;
     cmdi.commandBufferCount = 1;
     cmdi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -677,18 +677,18 @@ static void init_vulkan() {
     renderer->cmd = cmd;
     renderer->ubo = Buffer{ "ubo", 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
 
-    vk::SemaphoreCreateInfo sem_swapchain_info;
+    vks::SemaphoreCreateInfo sem_swapchain_info;
     vkCreateSemaphore(renderer->dev, &sem_swapchain_info, nullptr, &renderer->primitives.sem_swapchain_image);
     vkCreateSemaphore(renderer->dev, &sem_swapchain_info, nullptr, &renderer->primitives.sem_tracing_done);
 }
 
 static void render() {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-    vk::AcquireNextImageInfoKHR acq_info;
+    vks::AcquireNextImageInfoKHR acq_info;
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(renderer->dev, renderer->swapchain, -1ULL, renderer->primitives.sem_swapchain_image, nullptr, &sw_img_idx);
 
-    vk::CommandBufferBeginInfo binfo;
+    vks::CommandBufferBeginInfo binfo;
     binfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(renderer->cmd, &binfo);
 
@@ -697,22 +697,22 @@ static void render() {
 
     const uint32_t handle_size_aligned = align_up(renderer->rt_props.shaderGroupHandleSize, renderer->rt_props.shaderGroupHandleAlignment);
 
-    vk::StridedDeviceAddressRegionKHR raygen_sbt;
+    vks::StridedDeviceAddressRegionKHR raygen_sbt;
     raygen_sbt.deviceAddress = renderer->sbt.bda;
     raygen_sbt.size = handle_size_aligned * 1;
     raygen_sbt.stride = handle_size_aligned;
 
-    vk::StridedDeviceAddressRegionKHR miss_sbt;
+    vks::StridedDeviceAddressRegionKHR miss_sbt;
     miss_sbt.deviceAddress = renderer->sbt.bda;
     miss_sbt.size = handle_size_aligned * 2;
     miss_sbt.stride = handle_size_aligned;
 
-    vk::StridedDeviceAddressRegionKHR hit_sbt;
+    vks::StridedDeviceAddressRegionKHR hit_sbt;
     hit_sbt.deviceAddress = renderer->sbt.bda;
     hit_sbt.size = handle_size_aligned * 1;
     hit_sbt.stride = handle_size_aligned;
 
-    vk::StridedDeviceAddressRegionKHR callable_sbt;
+    vks::StridedDeviceAddressRegionKHR callable_sbt;
 
     VkClearColorValue clear_value{ 0.0f, 0.0f, 0.0f, 1.0f };
     VkImageSubresourceRange clear_range{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
@@ -720,14 +720,14 @@ static void render() {
 
     vkEndCommandBuffer(renderer->cmd);
 
-    vk::CommandBufferSubmitInfo cmd_info;
+    vks::CommandBufferSubmitInfo cmd_info;
     cmd_info.commandBuffer = renderer->cmd;
 
-    vk::SemaphoreSubmitInfo sem_info;
+    vks::SemaphoreSubmitInfo sem_info;
     sem_info.stageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
     sem_info.semaphore = renderer->primitives.sem_tracing_done;
 
-    vk::SubmitInfo2 sinfo;
+    vks::SubmitInfo2 sinfo;
     sinfo.commandBufferInfoCount = 1;
     sinfo.pCommandBufferInfos = &cmd_info;
     // sinfo.signalSemaphoreInfoCount = 1;
@@ -736,7 +736,7 @@ static void render() {
     vkDeviceWaitIdle(renderer->dev);
 
     vkBeginCommandBuffer(renderer->cmd, &binfo);
-    vk::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
+    vks::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
     sw_to_dst.image = renderer->swapchain_images.at(sw_img_idx);
     sw_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     sw_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -753,12 +753,12 @@ static void render() {
     sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     sw_to_pres.dstAccessMask = VK_ACCESS_2_NONE;
 
-    vk::DependencyInfo sw_dep_info;
+    vks::DependencyInfo sw_dep_info;
     sw_dep_info.imageMemoryBarrierCount = 1;
     sw_dep_info.pImageMemoryBarriers = &sw_to_dst;
     vkCmdPipelineBarrier2(renderer->cmd, &sw_dep_info);
 
-    vk::ImageCopy img_copy;
+    vks::ImageCopy img_copy;
     img_copy.srcOffset = {};
     img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     img_copy.dstOffset = {};
@@ -778,7 +778,7 @@ static void render() {
     vkQueueSubmit2(renderer->gq, 1, &sinfo, nullptr);
     vkDeviceWaitIdle(renderer->dev);
 
-    vk::PresentInfoKHR pinfo;
+    vks::PresentInfoKHR pinfo;
     pinfo.swapchainCount = 1;
     pinfo.pSwapchains = &renderer->swapchain;
     pinfo.pImageIndices = &sw_img_idx;
