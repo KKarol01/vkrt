@@ -16,6 +16,7 @@ struct Buffer {
 };
 
 struct Image {
+    constexpr Image() = default;
     Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
           VkSampleCountFlagBits samples, VkImageUsageFlags usage);
 

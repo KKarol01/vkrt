@@ -15,5 +15,5 @@ template <typename VkStruct> inline void set_debug_name(VkStruct object, const s
         .objectHandle = reinterpret_cast<uint64_t>(object),
         .pObjectName = name.c_str(),
     };
-    vkSetDebugUtilsObjectNameEXT(Engine::renderer()->dev, &obj_name);
+    vkSetDebugUtilsObjectNameEXT(static_cast<RendererVulkan*>(Engine::renderer())->dev, &obj_name);
 }

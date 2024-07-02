@@ -3,7 +3,7 @@
 #include <vulkan/vulkan.h>
 
 // clang-format off
-namespace vk {
+namespace vks {
 	#define INIT_VK_STRUCT(name, type) struct name : public Vk##name { name() : Vk##name({type}) {} }
 
 	INIT_VK_STRUCT(Win32SurfaceCreateInfoKHR, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
