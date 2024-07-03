@@ -6,6 +6,8 @@
 #define ENG_RTERROR(message)                                                                                                               \
     throw std::runtime_error { message }
 
+#define ENG_WARN(format, ...) std::printf("[WARN][%s : %d]: " format "\n", __FILE__, __LINE__, __VA_ARGS__)
+
 struct GLFWindow;
 
 struct Window {

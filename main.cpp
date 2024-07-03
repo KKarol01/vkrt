@@ -456,36 +456,7 @@ static Camera camera;
 //     renderer->raytracing_set = descriptorSet;
 // }
 //
-// static void create_swapchain() {
-//     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-//     vks::SwapchainCreateInfoKHR sinfo;
-//     sinfo.surface = window.surface;
-//     sinfo.minImageCount = 2;
-//     sinfo.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-//     sinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-//     sinfo.imageExtent = VkExtent2D{ window.width, window.height };
-//     sinfo.imageArrayLayers = 1;
-//     sinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-//     sinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-//     sinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-//     sinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-//     sinfo.clipped = true;
-//
-//     VkSwapchainKHR swapchain;
-//     if(const auto error = vkCreateSwapchainKHR(renderer->dev, &sinfo, nullptr, &swapchain); error != VK_SUCCESS) {
-//         throw std::runtime_error{ "Could not create swapchain" };
-//     }
-//
-//     uint32_t num_images;
-//     vkGetSwapchainImagesKHR(renderer->dev, swapchain, &num_images, nullptr);
-//
-//     std::vector<VkImage> images(num_images);
-//     vkGetSwapchainImagesKHR(renderer->dev, swapchain, &num_images, images.data());
-//
-//     renderer->swapchain = swapchain;
-//     renderer->swapchain_images = images;
-//     renderer->swapchain_format = sinfo.imageFormat;
-// }
+ static void create_swapchain() { }
 //
 // static void create_rt_output_image() {
 //     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -495,8 +466,6 @@ static Camera camera;
 //     renderer->rt_image.transition_layout(VK_IMAGE_LAYOUT_GENERAL, true);
 // }
 //
-static void init_vulkan() {
-}
 //
 // static void render() {
 //     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -608,13 +577,16 @@ static void init_vulkan() {
 int main() {
     try {
         Engine::init();
-        init_vulkan();
         //create_swapchain();
         //create_rt_output_image();
         //compile_shaders();
         //build_rtpp();
 
-        ImportedModel model = ModelImporter::import_model("cornell/cornell.glb");
+        ImportedModel model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
+
+        Engine::renderer()->batch_model(model);
+
+        auto handle = Engine::renderer()->build_blas();
 
         // build_blas(model);
         // build_tlas(model);
