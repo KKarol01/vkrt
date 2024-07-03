@@ -1,9 +1,9 @@
 #pragma once
 
-#include "model_loader.hpp"
+#include "model_importer.hpp"
 
 class Renderer {
   public:
     virtual ~Renderer() = default;
-    virtual void render_model(Model& model) = 0;
+    virtual void render_model(ImportedModel& model) = 0;
 };

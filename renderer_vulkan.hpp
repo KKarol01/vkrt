@@ -32,12 +32,14 @@ struct Image {
 
 class RendererVulkan : public Renderer {
   public:
-    void render_model(Model& model) override;
+    explicit RendererVulkan();
+    void render_model(ImportedModel& model) override;
 
     VkInstance instance;
     VkDevice dev;
     VkPhysicalDevice pdev;
     VmaAllocator vma;
+    VkSurfaceKHR window_surface;
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
 
