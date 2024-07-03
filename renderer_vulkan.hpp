@@ -1,14 +1,19 @@
 #pragma once
 
+#include <span>
 #include <vulkan/vulkan.hpp>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
 
-struct Buffer {
+class Buffer {
+  public:
     constexpr Buffer() = default;
+    Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
 
-    Buffer(const std::string& name, uint64_t size, VkBufferUsageFlags usage, bool map);
+    size_t push_data(std::span<const std::byte> data);
+    constexpr size_t get_free_space() const { return capacity - size; }
 
+    size_t size{ 0 }, capacity{ 0 };
     VkBuffer buffer{};
     VmaAllocation alloc{};
     void* mapped{};
@@ -30,10 +35,43 @@ struct Image {
     uint32_t mips, layers;
 };
 
+struct Vertex {
+    glm::vec3 pos;
+    glm::vec3 nor;
+    glm::vec2 uv;
+};
+
+struct RenderMaterial {
+    Image color_texture;
+    Image normal_texture;
+};
+
+struct RenderMesh {
+    uint32_t vertex_offset{ 0 };
+    uint32_t index_offset{ 0 };
+    uint32_t vertex_count{ 0 };
+    uint32_t index_count{ 0 };
+    uint32_t material{ 0 };
+};
+
+struct RenderModel {
+    uint32_t first_mesh{ 0 };
+    uint32_t mesh_count{ 0 };
+};
+
+struct ModelInstance {
+    uint32_t render_model;
+};
+
 class RendererVulkan : public Renderer {
   public:
-    explicit RendererVulkan();
-    void render_model(ImportedModel& model) override;
+    void init() override;
+
+    void initialize_vulkan();
+    void create_swapchain();
+
+    void batch_model(ImportedModel& model) override;
+    Handle<A> build_blas() override;
 
     VkInstance instance;
     VkDevice dev;
@@ -69,6 +107,11 @@ class RendererVulkan : public Renderer {
 
     Image rt_image;
     Buffer ubo;
+
+    std::vector<RenderMaterial> materials;
+    std::vector<RenderModel> models;
+    std::vector<RenderMesh> meshes;
+    std::vector<ModelInstance> instances;
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;

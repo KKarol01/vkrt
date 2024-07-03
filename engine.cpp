@@ -26,6 +26,7 @@ void Engine::init() {
 
     _this->_window = std::make_unique<Window>(1280, 768);
     _this->_renderer = std::make_unique<RendererVulkan>();
+    _this->_renderer->init();
 }
 
 void Engine::destroy() { _this.reset(); }
