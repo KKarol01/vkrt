@@ -52,7 +52,7 @@ set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_USE_STD_MODULE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fastgltf)
 
-add_executable(vkrt main.cpp "model_loader.cpp" "engine.cpp"  "renderer_vulkan.cpp")
+add_executable(vkrt main.cpp "model_importer.cpp" "engine.cpp"  "renderer_vulkan.cpp")
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_20)
