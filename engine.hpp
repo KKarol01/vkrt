@@ -8,6 +8,8 @@
 
 #define ENG_WARN(format, ...) std::printf("[WARN][%s : %d]: " format "\n", __FILE__, __LINE__, __VA_ARGS__)
 
+#define ENG_LOG(format, ...) std::printf("[LOG][%s : %d]: " format "\n", __FILE__, __LINE__, __VA_ARGS__)
+
 struct GLFWindow;
 
 struct Window {

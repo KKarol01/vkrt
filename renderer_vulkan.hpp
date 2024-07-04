@@ -74,6 +74,7 @@ class RendererVulkan : public Renderer {
 
     void batch_model(ImportedModel& model, BatchSettings settings) override;
     void build_blas(RenderModel rm);
+    void build_tlas();
 
     VkInstance instance;
     VkDevice dev;

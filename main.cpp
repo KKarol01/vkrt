@@ -25,106 +25,10 @@ static Camera camera;
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 
- //static void build_blas(Model& model) {
- //}
-//
-// static void build_tlas(Model& model) {
-//     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-//
-//     // clang-format off
-//     VkTransformMatrixKHR transform{
-//         1.0f, 0.0f, 0.0f, 0.0f,
-//         0.0f, 0.5f, 0.0f, 0.5f,
-//         0.0f, 0.0f, 1.0f, 0.0f,
-//     };
-//     // clang-format on
-//
-//     vks::AccelerationStructureInstanceKHR instance;
-//     instance.transform = transform;
-//     instance.instanceCustomIndex = 0;
-//     instance.mask = 0xFF;
-//     instance.instanceShaderBindingTableRecordOffset = 0;
-//     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-//     instance.accelerationStructureReference = renderer->blas_buffer.bda;
-//
-//     Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instance) * 2,
-//                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true };
-//     memcpy(buffer_instance.mapped, &instance, sizeof(instance));
-//
-//     // clang-format off
-//     VkTransformMatrixKHR transform2{
-//         1.0f, 0.0f, 0.0f, 0.0f,
-//         0.0f, 0.5f, 0.0f, -0.5f,
-//         0.0f, 0.0f, 1.0f, 0.0f,
-//     };
-//     // clang-format on
-//     instance.transform = transform2;
-//     memcpy((std::byte*)buffer_instance.mapped + sizeof(instance), &instance, sizeof(instance));
-//
-//     vks::AccelerationStructureGeometryKHR geometry;
-//     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-//     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-//     geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-//     geometry.geometry.instances.arrayOfPointers = false;
-//     geometry.geometry.instances.data.deviceAddress = buffer_instance.bda;
-//
-//     vks::AccelerationStructureBuildGeometryInfoKHR build_info;
-//     build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-//     build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-//     build_info.geometryCount = 1;
-//     build_info.pGeometries = &geometry;
-//
-//     vks::AccelerationStructureBuildSizesInfoKHR build_size;
-//     const uint32_t max_primitives = 2;
-//     vkGetAccelerationStructureBuildSizesKHR(renderer->dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitives, &build_size);
-//
-//     Buffer buffer_tlas{ "tlas_buffer", build_size.accelerationStructureSize,
-//                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false };
-//
-//     vks::AccelerationStructureCreateInfoKHR acc_info;
-//     acc_info.buffer = buffer_tlas.buffer;
-//     acc_info.size = build_size.accelerationStructureSize;
-//     acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-//     VkAccelerationStructureKHR tlas;
-//     vkCreateAccelerationStructureKHR(renderer->dev, &acc_info, nullptr, &tlas);
-//
-//     Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize,
-//                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-//
-//     vks::AccelerationStructureBuildGeometryInfoKHR build_tlas;
-//     build_tlas.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-//     build_tlas.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-//     build_tlas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-//     build_tlas.dstAccelerationStructure = tlas;
-//     build_tlas.geometryCount = 1;
-//     build_tlas.pGeometries = &geometry;
-//     build_tlas.scratchData.deviceAddress = buffer_scratch.bda;
-//
-//     vks::AccelerationStructureBuildRangeInfoKHR build_range;
-//     build_range.primitiveCount = 2;
-//     build_range.primitiveOffset = 0;
-//     build_range.firstVertex = 0;
-//     build_range.transformOffset = 0;
-//     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
-//
-//     vks::CommandBufferBeginInfo begin_info;
-//     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-//     vkBeginCommandBuffer(renderer->cmd, &begin_info);
-//     vkCmdBuildAccelerationStructuresKHR(renderer->cmd, 1, &build_tlas, build_ranges);
-//     vkEndCommandBuffer(renderer->cmd);
-//
-//     vks::CommandBufferSubmitInfo cmd_submit_info;
-//     cmd_submit_info.commandBuffer = renderer->cmd;
-//
-//     vks::SubmitInfo2 submit_info;
-//     submit_info.commandBufferInfoCount = 1;
-//     submit_info.pCommandBufferInfos = &cmd_submit_info;
-//     vkQueueSubmit2(renderer->gq, 1, &submit_info, nullptr);
-//     vkDeviceWaitIdle(renderer->dev);
-//
-//     renderer->tlas = tlas;
-//     renderer->tlas_buffer = Buffer{ buffer_tlas };
+// static void build_blas(Model& model) {
 // }
+//
+// static void build_tlas(Model& model) { }
 //
 // static void compile_shaders() {
 //     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -502,6 +406,9 @@ static void create_swapchain() {}
 //     vkDeviceWaitIdle(renderer->dev);
 // }
 
+struct A {};
+struct B {};
+
 int main() {
     try {
         Engine::init();
@@ -512,7 +419,7 @@ int main() {
 
         ImportedModel model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
 
-        Engine::renderer()->batch_model(model, { .flags = ModelBatchFlags::RAY_TRACED });
+        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
 
         int x = 1;
         // auto handle = Engine::renderer()->build_blas();
@@ -530,10 +437,9 @@ int main() {
         // memcpy(renderer->ubo.mapped, &inv_view[0][0], sizeof(inv_view));
         // memcpy(static_cast<std::byte*>(renderer->ubo.mapped) + sizeof(inv_view), &inv_projection[0][0], sizeof(inv_projection));
 
-        // while(!glfwWindowShouldClose(window.window)) {
-        //     render();
-        //     glfwPollEvents();
-        // }
+        while(!glfwWindowShouldClose(Engine::window()->window)) {
+            glfwPollEvents();
+        }
 
     } catch(const std::exception& err) {
         std::cerr << err.what();

@@ -23,12 +23,12 @@ template <typename T> struct Flags {
 template <typename T> inline constexpr Flags<T> operator|(Flags<T> a, T b) { return a.flags | static_cast<Flags<T>::U>(b); }
 template <typename T> inline constexpr Flags<T> operator&(Flags<T> a, T b) { return a.flags & static_cast<Flags<T>::U>(b); }
 
-enum class ModelBatchFlags : uint32_t { RAY_TRACED = 1 << 0 };
+enum class BatchFlags : uint32_t { RAY_TRACED_BIT = 0x1 };
 
-inline Flags<ModelBatchFlags> operator|(ModelBatchFlags a, ModelBatchFlags b) { return Flags{ a } | b; }
+inline Flags<BatchFlags> operator|(BatchFlags a, BatchFlags b) { return Flags{ a } | b; }
 
 struct BatchSettings {
-    Flags<ModelBatchFlags> flags;
+    Flags<BatchFlags> flags;
     struct RayTracing {
 
     } rt;
