@@ -584,9 +584,10 @@ int main() {
 
         ImportedModel model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
 
-        Engine::renderer()->batch_model(model);
+        Engine::renderer()->batch_model(model, ModelBatchFlags::BUILD_BLAS | ModelBatchFlags::BUILD_TLAS);
 
-        auto handle = Engine::renderer()->build_blas();
+        int x = 1;
+        //auto handle = Engine::renderer()->build_blas();
 
         // build_blas(model);
         // build_tlas(model);
@@ -606,7 +607,6 @@ int main() {
         //     glfwPollEvents();
         // }
 
-        int x = 1;
     } catch(const std::exception& err) {
         std::cerr << err.what();
         return -1;

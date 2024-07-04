@@ -367,7 +367,7 @@ void RendererVulkan::create_swapchain() {
     swapchain_format = sinfo.imageFormat;
 }
 
-void RendererVulkan::batch_model(ImportedModel& model) {
+void RendererVulkan::batch_model(ImportedModel& model, Flags<ModelBatchFlags> flags) {
     for(const auto& tex : model.textures) {
         ENG_WARN("REMEMBER TO LOAD TEXTURES");
     }
@@ -400,7 +400,4 @@ void RendererVulkan::batch_model(ImportedModel& model) {
     index_buffer.push_data(std::as_bytes(std::span{ indices }));
 }
 
-Handle<A> RendererVulkan::build_blas() { 
-    static A a{"asdf"};
-    return Handle{ &a };
-}
+//Handle<A> RendererVulkan::build_blas() { }
