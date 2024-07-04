@@ -70,8 +70,8 @@ class RendererVulkan : public Renderer {
     void initialize_vulkan();
     void create_swapchain();
 
-    void batch_model(ImportedModel& model) override;
-    Handle<A> build_blas() override;
+    void batch_model(ImportedModel& model, Flags<ModelBatchFlags> flags) override;
+    //Handle<A> build_blas() override;
 
     VkInstance instance;
     VkDevice dev;
