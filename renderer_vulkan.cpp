@@ -304,7 +304,7 @@ void RendererVulkan::initialize_vulkan() {
     allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
 
     VmaAllocator allocator;
-    if(vmaCreateAllocator(&allocatorCreateInfo, &allocator) != VK_SUCCESS) { throw std::runtime_error{ "Could not create vma" }; }
+    VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &allocator));
 
     vma = allocator;
 
@@ -313,7 +313,7 @@ void RendererVulkan::initialize_vulkan() {
     cmdpi.queueFamilyIndex = gqi;
 
     VkCommandPool pool;
-    if(vkCreateCommandPool(device, &cmdpi, nullptr, &pool) != VK_SUCCESS) { throw std::runtime_error{ "Could not create command pool" }; }
+    VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &pool));
 
     vks::CommandBufferAllocateInfo cmdi;
     cmdi.commandPool = pool;
@@ -321,10 +321,10 @@ void RendererVulkan::initialize_vulkan() {
     cmdi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
     VkCommandBuffer cmd;
-    if(vkAllocateCommandBuffers(device, &cmdi, &cmd) != VK_SUCCESS) { throw std::runtime_error{ "Could not allocate command buffer" }; }
+    VK_CHECK(vkAllocateCommandBuffers(device, &cmdi, &cmd));
 
     cmdpool = pool;
-    cmd = cmd;
+    this->cmd = cmd;
     // ubo = Buffer{ "ubo", 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
     constexpr size_t ONE_MB = 1024 * 1024;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
@@ -409,7 +409,13 @@ void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
     vertex_buffer.push_data(std::as_bytes(std::span{ vertices }));
     index_buffer.push_data(std::as_bytes(std::span{ indices }));
 
-    if(settings.flags & ModelBatchFlags::RAY_TRACED) { build_blas(models.back()); }
+    ENG_LOG("Batching model: [VXS: %.2f KB, IXS: %.2f KB]", static_cast<float>(vertices.size() * sizeof(vertices[0])) / 1000.0f,
+            static_cast<float>(indices.size() * sizeof(indices[0]) / 1000.0f));
+
+    if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
+        build_blas(models.back());
+        build_tlas();
+    }
 }
 
 void RendererVulkan::build_blas(RenderModel rm) {
@@ -427,15 +433,16 @@ void RendererVulkan::build_blas(RenderModel rm) {
     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geometry.geometry.triangles = triangles;
 
-    vks::AccelerationStructureBuildGeometryInfoKHR geometry_info;
-    geometry_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    geometry_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    geometry_info.geometryCount = 1;
-    geometry_info.pGeometries = &geometry;
+    vks::AccelerationStructureBuildGeometryInfoKHR blas_geo;
+    blas_geo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    blas_geo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    blas_geo.geometryCount = 1;
+    blas_geo.pGeometries = &geometry;
+    blas_geo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
 
     const uint32_t max_primitives = rm.index_count / 3;
     vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
-    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &geometry_info, &max_primitives, &build_size_info);
+    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &blas_geo, &max_primitives, &build_size_info);
 
     Buffer buffer_blas{ "blas_buffer", build_size_info.accelerationStructureSize,
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
@@ -444,20 +451,13 @@ void RendererVulkan::build_blas(RenderModel rm) {
     blas_info.buffer = buffer_blas.buffer;
     blas_info.size = build_size_info.accelerationStructureSize;
     blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    VkAccelerationStructureKHR blas;
     VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &blas));
 
     Buffer buffer_scratch{ "scratch_buffer", build_size_info.buildScratchSize,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    vks::AccelerationStructureBuildGeometryInfoKHR build_info;
-    build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    build_info.geometryCount = 1;
-    build_info.pGeometries = &geometry;
-    build_info.dstAccelerationStructure = blas;
-    build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    build_info.scratchData.deviceAddress = buffer_scratch.bda;
+    blas_geo.dstAccelerationStructure = blas;
+    blas_geo.scratchData.deviceAddress = buffer_scratch.bda;
 
     vks::AccelerationStructureBuildRangeInfoKHR offset;
     offset.firstVertex = 0;
@@ -469,7 +469,7 @@ void RendererVulkan::build_blas(RenderModel rm) {
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &begin_info);
     VkAccelerationStructureBuildRangeInfoKHR* offsets[]{ &offset };
-    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, offsets);
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &blas_geo, offsets);
     vkEndCommandBuffer(cmd);
 
     vks::CommandBufferSubmitInfo cmd_submit_info;
@@ -481,6 +481,99 @@ void RendererVulkan::build_blas(RenderModel rm) {
     vkQueueSubmit2(gq, 1, &submit_info, nullptr);
     vkDeviceWaitIdle(dev);
 
-    blas = blas;
     blas_buffer = Buffer{ buffer_blas };
+}
+
+void RendererVulkan::build_tlas() {
+    // clang-format off
+     VkTransformMatrixKHR transform{
+         1.0f, 0.0f, 0.0f, 0.0f,
+         0.0f, 0.5f, 0.0f, 0.5f,
+         0.0f, 0.0f, 1.0f, 0.0f,
+     };
+    // clang-format on
+
+    vks::AccelerationStructureInstanceKHR instance;
+    instance.transform = transform;
+    instance.instanceCustomIndex = 0;
+    instance.mask = 0xFF;
+    instance.instanceShaderBindingTableRecordOffset = 0;
+    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    instance.accelerationStructureReference = blas_buffer.bda;
+
+    Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instance) * 2,
+                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true };
+    memcpy(buffer_instance.mapped, &instance, sizeof(instance));
+
+    // clang-format off
+     VkTransformMatrixKHR transform2{
+         1.0f, 0.0f, 0.0f, 0.0f,
+         0.0f, 0.5f, 0.0f, -0.5f,
+         0.0f, 0.0f, 1.0f, 0.0f,
+     };
+    // clang-format on
+    instance.transform = transform2;
+    memcpy((std::byte*)buffer_instance.mapped + sizeof(instance), &instance, sizeof(instance));
+
+    vks::AccelerationStructureGeometryKHR geometry;
+    geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    geometry.geometry.instances.arrayOfPointers = false;
+    geometry.geometry.instances.data.deviceAddress = buffer_instance.bda;
+
+    vks::AccelerationStructureBuildGeometryInfoKHR build_info;
+    build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build_info.geometryCount = 1;
+    build_info.pGeometries = &geometry;
+
+    vks::AccelerationStructureBuildSizesInfoKHR build_size;
+    const uint32_t max_primitives = 2;
+    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitives, &build_size);
+
+    Buffer buffer_tlas{ "tlas_buffer", build_size.accelerationStructureSize,
+                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false };
+
+    vks::AccelerationStructureCreateInfoKHR acc_info;
+    acc_info.buffer = buffer_tlas.buffer;
+    acc_info.size = build_size.accelerationStructureSize;
+    acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    vkCreateAccelerationStructureKHR(dev, &acc_info, nullptr, &tlas);
+
+    Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+
+    vks::AccelerationStructureBuildGeometryInfoKHR build_tlas;
+    build_tlas.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    build_tlas.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build_tlas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build_tlas.dstAccelerationStructure = tlas;
+    build_tlas.geometryCount = 1;
+    build_tlas.pGeometries = &geometry;
+    build_tlas.scratchData.deviceAddress = buffer_scratch.bda;
+
+    vks::AccelerationStructureBuildRangeInfoKHR build_range;
+    build_range.primitiveCount = 2;
+    build_range.primitiveOffset = 0;
+    build_range.firstVertex = 0;
+    build_range.transformOffset = 0;
+    VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
+
+    vks::CommandBufferBeginInfo begin_info;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin_info);
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_tlas, build_ranges);
+    vkEndCommandBuffer(cmd);
+
+    vks::CommandBufferSubmitInfo cmd_submit_info;
+    cmd_submit_info.commandBuffer = cmd;
+
+    vks::SubmitInfo2 submit_info;
+    submit_info.commandBufferInfoCount = 1;
+    submit_info.pCommandBufferInfos = &cmd_submit_info;
+    vkQueueSubmit2(gq, 1, &submit_info, nullptr);
+    vkDeviceWaitIdle(dev);
+
+    tlas_buffer = Buffer{ buffer_tlas };
 }
