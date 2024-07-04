@@ -55,8 +55,10 @@ struct RenderMesh {
 };
 
 struct RenderModel {
-    uint32_t first_mesh{ 0 };
-    uint32_t mesh_count{ 0 };
+    size_t first_mesh{ 0 };
+    size_t mesh_count{ 0 };
+    size_t vertex_count{ 0 };
+    size_t index_count{ 0 };
 };
 
 struct ModelInstance {
@@ -70,8 +72,8 @@ class RendererVulkan : public Renderer {
     void initialize_vulkan();
     void create_swapchain();
 
-    void batch_model(ImportedModel& model, Flags<ModelBatchFlags> flags) override;
-    //Handle<A> build_blas() override;
+    void batch_model(ImportedModel& model, BatchSettings settings) override;
+    void build_blas(RenderModel rm);
 
     VkInstance instance;
     VkDevice dev;

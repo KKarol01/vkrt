@@ -25,80 +25,8 @@ static Camera camera;
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 
-// static void build_blas(Model& model) {
-//     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-//
-//     vks::AccelerationStructureGeometryTrianglesDataKHR triangles;
-//     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-//     triangles.vertexData.deviceAddress = renderer->vertex_buffer.bda;
-//     triangles.vertexStride = sizeof(Vertex);
-//     triangles.indexType = VK_INDEX_TYPE_UINT32;
-//     triangles.indexData.deviceAddress = renderer->index_buffer.bda;
-//     triangles.maxVertex = model.num_vertices - 1;
-//     triangles.transformData = {};
-//
-//     vks::AccelerationStructureGeometryKHR geometry;
-//     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-//     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-//     geometry.geometry.triangles = triangles;
-//
-//     vks::AccelerationStructureBuildGeometryInfoKHR geometry_info;
-//     geometry_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-//     geometry_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-//     geometry_info.geometryCount = 1;
-//     geometry_info.pGeometries = &geometry;
-//
-//     const uint32_t max_primitives = model.num_indices / 3;
-//     vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
-//     vkGetAccelerationStructureBuildSizesKHR(renderer->dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &geometry_info, &max_primitives, &build_size_info);
-//
-//     Buffer buffer_blas{ "blas_buffer", build_size_info.accelerationStructureSize,
-//                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-//
-//     vks::AccelerationStructureCreateInfoKHR blas_info;
-//     blas_info.buffer = buffer_blas.buffer;
-//     blas_info.size = build_size_info.accelerationStructureSize;
-//     blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-//     VkAccelerationStructureKHR blas;
-//     vkCreateAccelerationStructureKHR(renderer->dev, &blas_info, nullptr, &blas);
-//
-//     Buffer buffer_scratch{ "scratch_buffer", build_size_info.buildScratchSize,
-//                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-//
-//     vks::AccelerationStructureBuildGeometryInfoKHR build_info;
-//     build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-//     build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-//     build_info.geometryCount = 1;
-//     build_info.pGeometries = &geometry;
-//     build_info.dstAccelerationStructure = blas;
-//     build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-//     build_info.scratchData.deviceAddress = buffer_scratch.bda;
-//
-//     vks::AccelerationStructureBuildRangeInfoKHR offset;
-//     offset.firstVertex = 0;
-//     offset.primitiveCount = max_primitives;
-//     offset.primitiveOffset = 0;
-//     offset.transformOffset = 0;
-//
-//     vks::CommandBufferBeginInfo begin_info;
-//     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-//     vkBeginCommandBuffer(renderer->cmd, &begin_info);
-//     VkAccelerationStructureBuildRangeInfoKHR* offsets[]{ &offset };
-//     vkCmdBuildAccelerationStructuresKHR(renderer->cmd, 1, &build_info, offsets);
-//     vkEndCommandBuffer(renderer->cmd);
-//
-//     vks::CommandBufferSubmitInfo cmd_submit_info;
-//     cmd_submit_info.commandBuffer = renderer->cmd;
-//
-//     vks::SubmitInfo2 submit_info;
-//     submit_info.commandBufferInfoCount = 1;
-//     submit_info.pCommandBufferInfos = &cmd_submit_info;
-//     vkQueueSubmit2(renderer->gq, 1, &submit_info, nullptr);
-//     vkDeviceWaitIdle(renderer->dev);
-//
-//     renderer->blas = blas;
-//     renderer->blas_buffer = Buffer{ buffer_blas };
-// }
+ //static void build_blas(Model& model) {
+ //}
 //
 // static void build_tlas(Model& model) {
 //     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -456,7 +384,7 @@ static Camera camera;
 //     renderer->raytracing_set = descriptorSet;
 // }
 //
- static void create_swapchain() { }
+static void create_swapchain() {}
 //
 // static void create_rt_output_image() {
 //     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -577,17 +505,17 @@ static Camera camera;
 int main() {
     try {
         Engine::init();
-        //create_swapchain();
-        //create_rt_output_image();
-        //compile_shaders();
-        //build_rtpp();
+        // create_swapchain();
+        // create_rt_output_image();
+        // compile_shaders();
+        // build_rtpp();
 
         ImportedModel model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
 
-        Engine::renderer()->batch_model(model, ModelBatchFlags::BUILD_BLAS | ModelBatchFlags::BUILD_TLAS);
+        Engine::renderer()->batch_model(model, { .flags = ModelBatchFlags::RAY_TRACED });
 
         int x = 1;
-        //auto handle = Engine::renderer()->build_blas();
+        // auto handle = Engine::renderer()->build_blas();
 
         // build_blas(model);
         // build_tlas(model);
