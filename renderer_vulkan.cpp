@@ -1,10 +1,14 @@
 #include <volk/volk.h>
+#include <vulkan/vulkan.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
+
+#define VK_CHECK(func)                                                                                                                     \
+    if(const auto res = func; res != VK_SUCCESS) { ENG_RTERROR(std::format("[VK][ERROR][{} : {}] ({})", __FILE__, __LINE__, #func)); }
 
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -367,7 +371,7 @@ void RendererVulkan::create_swapchain() {
     swapchain_format = sinfo.imageFormat;
 }
 
-void RendererVulkan::batch_model(ImportedModel& model, Flags<ModelBatchFlags> flags) {
+void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
     for(const auto& tex : model.textures) {
         ENG_WARN("REMEMBER TO LOAD TEXTURES");
     }
@@ -388,16 +392,95 @@ void RendererVulkan::batch_model(ImportedModel& model, Flags<ModelBatchFlags> fl
         };
     }
 
+    models.push_back(RenderModel{
+        .first_mesh = meshes.size(), .mesh_count = model.meshes.size(), .vertex_count = model.vertices.size(), .index_count = model.indices.size() });
+
     for(size_t i = 0, offset = 0; i < model.meshes.size(); ++i) {
         const auto& m = model.meshes.at(i);
         for(size_t j = 0; j < m.index_count; ++j) {
             indices.at(j + offset) = model.indices.at(j + m.index_offset) + m.vertex_offset;
         }
         offset += m.index_count;
+
+        meshes.push_back(RenderMesh{
+            .vertex_offset = m.vertex_offset, .index_offset = m.index_offset, .vertex_count = m.vertex_count, .index_count = m.index_count, .material = 0 });
     }
 
     vertex_buffer.push_data(std::as_bytes(std::span{ vertices }));
     index_buffer.push_data(std::as_bytes(std::span{ indices }));
+
+    if(settings.flags & ModelBatchFlags::RAY_TRACED) { build_blas(models.back()); }
 }
 
-//Handle<A> RendererVulkan::build_blas() { }
+void RendererVulkan::build_blas(RenderModel rm) {
+    vks::AccelerationStructureGeometryTrianglesDataKHR triangles;
+    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    triangles.vertexData.deviceAddress = vertex_buffer.bda;
+    triangles.vertexStride = sizeof(Vertex);
+    triangles.indexType = VK_INDEX_TYPE_UINT32;
+    triangles.indexData.deviceAddress = index_buffer.bda;
+    triangles.maxVertex = rm.vertex_count - 1;
+    triangles.transformData = {};
+
+    vks::AccelerationStructureGeometryKHR geometry;
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geometry.geometry.triangles = triangles;
+
+    vks::AccelerationStructureBuildGeometryInfoKHR geometry_info;
+    geometry_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    geometry_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    geometry_info.geometryCount = 1;
+    geometry_info.pGeometries = &geometry;
+
+    const uint32_t max_primitives = rm.index_count / 3;
+    vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
+    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &geometry_info, &max_primitives, &build_size_info);
+
+    Buffer buffer_blas{ "blas_buffer", build_size_info.accelerationStructureSize,
+                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+
+    vks::AccelerationStructureCreateInfoKHR blas_info;
+    blas_info.buffer = buffer_blas.buffer;
+    blas_info.size = build_size_info.accelerationStructureSize;
+    blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    VkAccelerationStructureKHR blas;
+    VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &blas));
+
+    Buffer buffer_scratch{ "scratch_buffer", build_size_info.buildScratchSize,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+
+    vks::AccelerationStructureBuildGeometryInfoKHR build_info;
+    build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build_info.geometryCount = 1;
+    build_info.pGeometries = &geometry;
+    build_info.dstAccelerationStructure = blas;
+    build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build_info.scratchData.deviceAddress = buffer_scratch.bda;
+
+    vks::AccelerationStructureBuildRangeInfoKHR offset;
+    offset.firstVertex = 0;
+    offset.primitiveCount = max_primitives;
+    offset.primitiveOffset = 0;
+    offset.transformOffset = 0;
+
+    vks::CommandBufferBeginInfo begin_info;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin_info);
+    VkAccelerationStructureBuildRangeInfoKHR* offsets[]{ &offset };
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, offsets);
+    vkEndCommandBuffer(cmd);
+
+    vks::CommandBufferSubmitInfo cmd_submit_info;
+    cmd_submit_info.commandBuffer = cmd;
+
+    vks::SubmitInfo2 submit_info;
+    submit_info.commandBufferInfoCount = 1;
+    submit_info.pCommandBufferInfos = &cmd_submit_info;
+    vkQueueSubmit2(gq, 1, &submit_info, nullptr);
+    vkDeviceWaitIdle(dev);
+
+    blas = blas;
+    blas_buffer = Buffer{ buffer_blas };
+}
