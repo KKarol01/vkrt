@@ -1,8 +1,11 @@
 #include <volk/volk.h>
-#include <vulkan/vulkan.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
+#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+#include <vk-bootstrap/src/VkBootstrap.h>
+#include <shaderc/shaderc.hpp>
+#include <stb/stb_include.h>
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
@@ -63,100 +66,12 @@ size_t Buffer::push_data(std::span<const std::byte> data) {
     return size_to_copy;
 }
 
-// Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
-//              VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-//     : format(format), mips(mips), layers(layers) {
-//     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-//     vks::ImageCreateInfo iinfo;
-//
-//     int dims = -1;
-//     if(width > 1) { ++dims; }
-//     if(height > 1) { ++dims; }
-//     if(depth > 1) { ++dims; }
-//     VkImageType types[]{ VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
-//
-//     iinfo.imageType = types[dims];
-//     iinfo.format = format;
-//     iinfo.extent = { width, height, depth };
-//     iinfo.mipLevels = mips;
-//     iinfo.arrayLayers = layers;
-//     iinfo.samples = samples;
-//     iinfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-//     iinfo.usage = usage;
-//     iinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-//     iinfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-//
-//     VmaAllocationCreateInfo vmainfo{};
-//     vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
-//
-//     if(vmaCreateImage(vma, &iinfo, &vmainfo, &image, &alloc, nullptr) != VK_SUCCESS) {
-//         throw std::runtime_error{ "Could not create image" };
-//     }
-//
-//     VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
-//
-//     VkImageAspectFlags view_aspect{ VK_IMAGE_ASPECT_COLOR_BIT };
-//     if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) { view_aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; }
-//
-//     vks::ImageViewCreateInfo ivinfo;
-//     ivinfo.image = image;
-//     ivinfo.viewType = view_types[dims];
-//     ivinfo.components = {};
-//     ivinfo.format = format;
-//     ivinfo.subresourceRange = { .aspectMask = view_aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
-//
-//     if(vkCreateImageView(dev, &ivinfo, nullptr, &view) != VK_SUCCESS) {
-//         throw std::runtime_error{ "Could not create image default view" };
-//     }
-//
-//     set_debug_name(image, name);
-//     set_debug_name(view, std::format("{}_default_view", name));
-// }
-//
-// void Image::transition_layout(VkImageLayout dst, bool from_undefined) {
-//     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-//     vks::ImageMemoryBarrier2 imgb;
-//     imgb.image = image;
-//     imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
-//     imgb.newLayout = dst;
-//     imgb.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-//     imgb.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-//     imgb.srcAccessMask = VK_ACCESS_NONE;
-//     imgb.dstAccessMask = VK_ACCESS_NONE;
-//     imgb.subresourceRange = {
-//         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-//         .baseMipLevel = 0,
-//         .levelCount = mips,
-//         .baseArrayLayer = 0,
-//         .layerCount = layers,
-//     };
-//
-//     vks::CommandBufferBeginInfo cmdbi;
-//     cmdbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-//     vkBeginCommandBuffer(cmd, &cmdbi);
-//
-//     vks::DependencyInfo dep;
-//     dep.pImageMemoryBarriers = &imgb;
-//     dep.imageMemoryBarrierCount = 1;
-//     vkCmdPipelineBarrier2(cmd, &dep);
-//
-//     vkEndCommandBuffer(cmd);
-//
-//     vks::CommandBufferSubmitInfo cmdsinfo;
-//     cmdsinfo.commandBuffer = cmd;
-//
-//     vks::SubmitInfo2 sinfo;
-//     sinfo.commandBufferInfoCount = 1;
-//     sinfo.pCommandBufferInfos = &cmdsinfo;
-//     vkQueueSubmit2(gq, 1, &sinfo, nullptr);
-//     vkQueueWaitIdle(gq);
-//
-//     current_layout = dst;
-// }
-
 void RendererVulkan::init() {
     initialize_vulkan();
     create_swapchain();
+    create_rt_output_image();
+    compile_shaders();
+    build_rtpp();
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -305,7 +220,6 @@ void RendererVulkan::initialize_vulkan() {
 
     VmaAllocator allocator;
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &allocator));
-
     vma = allocator;
 
     vks::CommandPoolCreateInfo cmdpi;
@@ -320,12 +234,10 @@ void RendererVulkan::initialize_vulkan() {
     cmdi.commandBufferCount = 1;
     cmdi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
-    VkCommandBuffer cmd;
     VK_CHECK(vkAllocateCommandBuffers(device, &cmdi, &cmd));
 
     cmdpool = pool;
-    this->cmd = cmd;
-    // ubo = Buffer{ "ubo", 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
+    ubo = Buffer{ "ubo", 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
     constexpr size_t ONE_MB = 1024 * 1024;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -369,6 +281,114 @@ void RendererVulkan::create_swapchain() {
     swapchain = swapchain;
     swapchain_images = images;
     swapchain_format = sinfo.imageFormat;
+}
+
+template <typename T> static T align_up(T a, T b) { return (a + b - 1) & -b; }
+
+void RendererVulkan::render() {
+    vks::AcquireNextImageInfoKHR acq_info;
+    uint32_t sw_img_idx;
+    vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
+
+    vks::CommandBufferBeginInfo binfo;
+    binfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &binfo);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
+
+    const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
+
+    vks::StridedDeviceAddressRegionKHR raygen_sbt;
+    raygen_sbt.deviceAddress = sbt.bda;
+    raygen_sbt.size = handle_size_aligned * 1;
+    raygen_sbt.stride = handle_size_aligned;
+
+    vks::StridedDeviceAddressRegionKHR miss_sbt;
+    miss_sbt.deviceAddress = sbt.bda;
+    miss_sbt.size = handle_size_aligned * 2;
+    miss_sbt.stride = handle_size_aligned;
+
+    vks::StridedDeviceAddressRegionKHR hit_sbt;
+    hit_sbt.deviceAddress = sbt.bda;
+    hit_sbt.size = handle_size_aligned * 1;
+    hit_sbt.stride = handle_size_aligned;
+
+    vks::StridedDeviceAddressRegionKHR callable_sbt;
+
+    VkClearColorValue clear_value{ 0.0f, 0.0f, 0.0f, 1.0f };
+    VkImageSubresourceRange clear_range{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
+    const auto* window = Engine::window();
+    vkCmdTraceRaysKHR(cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+
+    vkEndCommandBuffer(cmd);
+
+    vks::CommandBufferSubmitInfo cmd_info;
+    cmd_info.commandBuffer = cmd;
+
+    vks::SemaphoreSubmitInfo sem_info;
+    sem_info.stageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+    sem_info.semaphore = primitives.sem_tracing_done;
+
+    vks::SubmitInfo2 sinfo;
+    sinfo.commandBufferInfoCount = 1;
+    sinfo.pCommandBufferInfos = &cmd_info;
+    // sinfo.signalSemaphoreInfoCount = 1;
+    // sinfo.pSignalSemaphoreInfos = &sem_info;
+    vkQueueSubmit2(gq, 1, &sinfo, nullptr);
+    vkDeviceWaitIdle(dev);
+
+    vkBeginCommandBuffer(cmd, &binfo);
+    vks::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
+    sw_to_dst.image = swapchain_images.at(sw_img_idx);
+    sw_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    sw_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    sw_to_dst.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    sw_to_dst.dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    sw_to_dst.srcAccessMask = VK_ACCESS_NONE;
+    sw_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    sw_to_dst.subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
+    sw_to_pres = sw_to_dst;
+    sw_to_pres.oldLayout = sw_to_dst.newLayout;
+    sw_to_pres.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    sw_to_pres.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    sw_to_pres.dstAccessMask = VK_ACCESS_2_NONE;
+
+    vks::DependencyInfo sw_dep_info;
+    sw_dep_info.imageMemoryBarrierCount = 1;
+    sw_dep_info.pImageMemoryBarriers = &sw_to_dst;
+    vkCmdPipelineBarrier2(cmd, &sw_dep_info);
+
+    vks::ImageCopy img_copy;
+    img_copy.srcOffset = {};
+    img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    img_copy.dstOffset = {};
+    img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    img_copy.extent = { window->size[0], window->size[1], 1 };
+    vkCmdCopyImage(cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, sw_to_dst.image, sw_to_dst.newLayout, 1, &img_copy);
+
+    sw_dep_info.pImageMemoryBarriers = &sw_to_pres;
+    vkCmdPipelineBarrier2(cmd, &sw_dep_info);
+
+    vkEndCommandBuffer(cmd);
+
+    sinfo.commandBufferInfoCount = 1;
+    sinfo.pCommandBufferInfos = &cmd_info;
+    // sinfo.signalSemaphoreInfoCount = 1;
+    // sinfo.pSignalSemaphoreInfos = &sem_info;
+    vkQueueSubmit2(gq, 1, &sinfo, nullptr);
+    vkDeviceWaitIdle(dev);
+
+    vks::PresentInfoKHR pinfo;
+    pinfo.swapchainCount = 1;
+    pinfo.pSwapchains = &swapchain;
+    pinfo.pImageIndices = &sw_img_idx;
+    pinfo.waitSemaphoreCount = 1;
+    pinfo.pWaitSemaphores = &primitives.sem_swapchain_image;
+    vkQueuePresentKHR(gq, &pinfo);
+    vkDeviceWaitIdle(dev);
 }
 
 void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
@@ -418,6 +438,264 @@ void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
     }
 }
 
+void RendererVulkan::compile_shaders() {
+    shaderc::Compiler c;
+
+    static const auto read_file = [](const std::filesystem::path& path) {
+        std::ifstream file{ path };
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    };
+
+    std::filesystem::path files[]{
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss2.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.glsl",
+    };
+    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_miss_shader, shaderc_raygen_shader };
+    std::vector<std::vector<uint32_t>> compiled_modules;
+    std::vector<VkShaderModule> modules;
+
+    shaderc::CompileOptions options;
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+    options.SetTargetSpirv(shaderc_spirv_version_1_6);
+    for(int i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
+        auto res = c.CompileGlslToSpv(read_file(files[i]), kinds[i], files[i].filename().string().c_str(), options);
+
+        if(res.GetCompilationStatus() != shaderc_compilation_status_success) {
+            throw std::runtime_error{ std::format("Could not compile shader: {}, because: \"{}\"", files[i].string(), res.GetErrorMessage()) };
+        }
+
+        compiled_modules.emplace_back(res.begin(), res.end());
+
+        vks::ShaderModuleCreateInfo module_info;
+        module_info.codeSize = compiled_modules.back().size() * sizeof(compiled_modules.back()[0]);
+        module_info.pCode = compiled_modules.back().data();
+        vkCreateShaderModule(dev, &module_info, nullptr, &modules.emplace_back());
+    }
+
+    shader_modules = modules;
+}
+
+void RendererVulkan::build_rtpp() {
+    VkDescriptorSetLayoutBinding accelerationStructureLayoutBinding{};
+    accelerationStructureLayoutBinding.binding = 0;
+    accelerationStructureLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    accelerationStructureLayoutBinding.descriptorCount = 1;
+    accelerationStructureLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    VkDescriptorSetLayoutBinding resultImageLayoutBinding{};
+    resultImageLayoutBinding.binding = 1;
+    resultImageLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    resultImageLayoutBinding.descriptorCount = 1;
+    resultImageLayoutBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    VkDescriptorSetLayoutBinding uniformBufferBinding{};
+    uniformBufferBinding.binding = 2;
+    uniformBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformBufferBinding.descriptorCount = 1;
+    uniformBufferBinding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding, uniformBufferBinding });
+
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkPipelineLayout pipelineLayout;
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetlayoutCI{};
+    descriptorSetlayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetlayoutCI.bindingCount = static_cast<uint32_t>(bindings.size());
+    descriptorSetlayoutCI.pBindings = bindings.data();
+    vkCreateDescriptorSetLayout(dev, &descriptorSetlayoutCI, nullptr, &descriptorSetLayout);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
+    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCI.setLayoutCount = 1;
+    pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
+    vkCreatePipelineLayout(dev, &pipelineLayoutCI, nullptr, &pipelineLayout);
+
+    /*
+            Setup ray tracing shader groups
+    */
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+    std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups;
+
+    // Ray generation group
+    {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+        stage.module = shader_modules.at(3);
+        stage.pName = "main";
+        shaderStages.push_back(stage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+    }
+
+    // Miss group
+    {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+        stage.module = shader_modules.at(1);
+        stage.pName = "main";
+        shaderStages.push_back(stage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+    }
+
+    // Miss group
+    {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+        stage.module = shader_modules.at(2);
+        stage.pName = "main";
+        shaderStages.push_back(stage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+    }
+
+    // Closest hit group
+    {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+        stage.module = shader_modules.at(0);
+        stage.pName = "main";
+        shaderStages.push_back(stage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+        shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+    }
+
+    /*
+            Create the ray tracing pipeline
+    */
+    VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
+    rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+    rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+    rayTracingPipelineCI.pStages = shaderStages.data();
+    rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
+    rayTracingPipelineCI.pGroups = shaderGroups.data();
+    rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;
+    rayTracingPipelineCI.layout = pipelineLayout;
+    VkPipeline pipeline;
+    vkCreateRayTracingPipelinesKHR(dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI, nullptr, &pipeline);
+
+    raytracing_pipeline = pipeline;
+    raytracing_layout = pipelineLayout;
+    shaderGroups = shaderGroups;
+    raytracing_set_layout = descriptorSetLayout;
+}
+
+void RendererVulkan::build_sbt() {
+    const uint32_t handleSize = rt_props.shaderGroupHandleSize;
+    const uint32_t handleSizeAligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
+    const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
+    const uint32_t sbtSize = groupCount * handleSizeAligned;
+
+    std::vector<uint8_t> shaderHandleStorage(sbtSize);
+    vkGetRayTracingShaderGroupHandlesKHR(dev, raytracing_pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
+
+    const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    Buffer raygenShaderBindingTable = Buffer{ "buffer_sbt", handleSize * 4, bufferUsageFlags, true };
+
+    // Copy handles
+    memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize * 4);
+
+    sbt = Buffer{ raygenShaderBindingTable };
+}
+
+void RendererVulkan::build_desc_sets() {
+
+    std::vector<VkDescriptorPoolSize> poolSizes = { { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2 },
+                                                    { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
+                                                    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 } };
+    vks::DescriptorPoolCreateInfo descriptorPoolCreateInfo;
+    descriptorPoolCreateInfo.poolSizeCount = 3;
+    descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
+    descriptorPoolCreateInfo.maxSets = 2;
+    VkDescriptorPool descriptorPool;
+    vkCreateDescriptorPool(dev, &descriptorPoolCreateInfo, nullptr, &descriptorPool);
+
+    VkDescriptorSetLayout descriptorSetLayout;
+    vks::DescriptorSetAllocateInfo descriptorSetAllocateInfo;
+    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+    descriptorSetAllocateInfo.descriptorSetCount = 1;
+    descriptorSetAllocateInfo.pSetLayouts = &raytracing_set_layout;
+    VkDescriptorSet descriptorSet;
+    vkAllocateDescriptorSets(dev, &descriptorSetAllocateInfo, &descriptorSet);
+
+    vks::WriteDescriptorSetAccelerationStructureKHR descriptorAccelerationStructureInfo{};
+    descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
+    descriptorAccelerationStructureInfo.pAccelerationStructures = &tlas;
+
+    vks::WriteDescriptorSet accelerationStructureWrite{};
+    // The specialized acceleration structure descriptor has to be chained
+    accelerationStructureWrite.pNext = &descriptorAccelerationStructureInfo;
+    accelerationStructureWrite.dstSet = descriptorSet;
+    accelerationStructureWrite.dstBinding = 0;
+    accelerationStructureWrite.descriptorCount = 1;
+    accelerationStructureWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+
+    VkDescriptorImageInfo storageImageDescriptor{};
+    storageImageDescriptor.imageView = rt_image.view;
+    storageImageDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorBufferInfo ubo_descriptor{};
+    ubo_descriptor.buffer = ubo.buffer;
+    ubo_descriptor.offset = 0;
+    ubo_descriptor.range = 128;
+
+    vks::WriteDescriptorSet resultImageWrite;
+    resultImageWrite.dstSet = descriptorSet;
+    resultImageWrite.dstBinding = 1;
+    resultImageWrite.dstArrayElement = 0;
+    resultImageWrite.descriptorCount = 1;
+    resultImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    resultImageWrite.pImageInfo = &storageImageDescriptor;
+
+    vks::WriteDescriptorSet uniformBufferWrite;
+    uniformBufferWrite.dstSet = descriptorSet;
+    uniformBufferWrite.dstBinding = 2;
+    uniformBufferWrite.dstArrayElement = 0;
+    uniformBufferWrite.descriptorCount = 1;
+    uniformBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformBufferWrite.pBufferInfo = &ubo_descriptor;
+
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets = { accelerationStructureWrite, resultImageWrite, uniformBufferWrite };
+    vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, VK_NULL_HANDLE);
+
+    raytracing_set = descriptorSet;
+}
+
+void RendererVulkan::create_rt_output_image() {
+    const auto* window = Engine::window();
+    rt_image = Image{ "rt_image", window->size[0], window->size[1], 1, 1, 1, swapchain_format, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
+    rt_image.transition_layout(VK_IMAGE_LAYOUT_GENERAL, true);
+}
+
 void RendererVulkan::build_blas(RenderModel rm) {
     vks::AccelerationStructureGeometryTrianglesDataKHR triangles;
     triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -453,7 +731,7 @@ void RendererVulkan::build_blas(RenderModel rm) {
     blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &blas));
 
-    Buffer buffer_scratch{ "scratch_buffer", build_size_info.buildScratchSize,
+    Buffer buffer_scratch{ "blas_scratch_buffer", build_size_info.buildScratchSize,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     blas_geo.dstAccelerationStructure = blas;
@@ -576,4 +854,95 @@ void RendererVulkan::build_tlas() {
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = Buffer{ buffer_tlas };
+}
+
+Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
+             VkSampleCountFlagBits samples, VkImageUsageFlags usage)
+    : format(format), mips(mips), layers(layers) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+    vks::ImageCreateInfo iinfo;
+
+    int dims = -1;
+    if(width > 1) { ++dims; }
+    if(height > 1) { ++dims; }
+    if(depth > 1) { ++dims; }
+    VkImageType types[]{ VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
+
+    iinfo.imageType = types[dims];
+    iinfo.format = format;
+    iinfo.extent = { width, height, depth };
+    iinfo.mipLevels = mips;
+    iinfo.arrayLayers = layers;
+    iinfo.samples = samples;
+    iinfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    iinfo.usage = usage;
+    iinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    iinfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo vmainfo{};
+    vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if(vmaCreateImage(renderer->vma, &iinfo, &vmainfo, &image, &alloc, nullptr) != VK_SUCCESS) {
+        throw std::runtime_error{ "Could not create image" };
+    }
+
+    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
+
+    VkImageAspectFlags view_aspect{ VK_IMAGE_ASPECT_COLOR_BIT };
+    if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) { view_aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; }
+
+    vks::ImageViewCreateInfo ivinfo;
+    ivinfo.image = image;
+    ivinfo.viewType = view_types[dims];
+    ivinfo.components = {};
+    ivinfo.format = format;
+    ivinfo.subresourceRange = { .aspectMask = view_aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
+
+    if(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view) != VK_SUCCESS) {
+        throw std::runtime_error{ "Could not create image default view" };
+    }
+
+    set_debug_name(image, name);
+    set_debug_name(view, std::format("{}_default_view", name));
+}
+
+void Image::transition_layout(VkImageLayout dst, bool from_undefined) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+    vks::ImageMemoryBarrier2 imgb;
+    imgb.image = image;
+    imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
+    imgb.newLayout = dst;
+    imgb.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    imgb.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    imgb.srcAccessMask = VK_ACCESS_NONE;
+    imgb.dstAccessMask = VK_ACCESS_NONE;
+    imgb.subresourceRange = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = mips,
+        .baseArrayLayer = 0,
+        .layerCount = layers,
+    };
+
+    vks::CommandBufferBeginInfo cmdbi;
+    cmdbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(renderer->cmd, &cmdbi);
+
+    vks::DependencyInfo dep;
+    dep.pImageMemoryBarriers = &imgb;
+    dep.imageMemoryBarrierCount = 1;
+    vkCmdPipelineBarrier2(renderer->cmd, &dep);
+
+    vkEndCommandBuffer(renderer->cmd);
+
+    vks::CommandBufferSubmitInfo cmdsinfo;
+    cmdsinfo.commandBuffer = renderer->cmd;
+
+    vks::SubmitInfo2 sinfo;
+    sinfo.commandBufferInfoCount = 1;
+    sinfo.pCommandBufferInfos = &cmdsinfo;
+    vkQueueSubmit2(renderer->gq, 1, &sinfo, nullptr);
+    vkQueueWaitIdle(renderer->gq);
+
+    current_layout = dst;
 }

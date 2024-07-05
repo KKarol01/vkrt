@@ -72,7 +72,13 @@ class RendererVulkan : public Renderer {
     void initialize_vulkan();
     void create_swapchain();
 
+    void render() override;
     void batch_model(ImportedModel& model, BatchSettings settings) override;
+    void compile_shaders();
+    void build_rtpp();
+    void build_sbt();
+    void build_desc_sets();
+    void create_rt_output_image();
     void build_blas(RenderModel rm);
     void build_tlas();
 
