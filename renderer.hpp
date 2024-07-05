@@ -38,6 +38,7 @@ class Renderer {
   public:
     virtual ~Renderer() = default;
     virtual void init() = 0;
+    virtual void render() = 0;
     virtual void batch_model(ImportedModel& model, BatchSettings settings) = 0;
     // virtual Handle<A> build_blas() { return {}; }
 };
