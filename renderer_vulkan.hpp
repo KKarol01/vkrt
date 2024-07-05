@@ -9,6 +9,7 @@ class Buffer {
   public:
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
+    Buffer(const std::string& name, size_t size, size_t alignment, VkBufferUsageFlags usage, bool map);
 
     size_t push_data(std::span<const std::byte> data);
     constexpr size_t get_free_space() const { return capacity - size; }
@@ -88,7 +89,8 @@ class RendererVulkan : public Renderer {
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
+    vks::PhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
+    vks::PhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
     uint32_t gqi, pqi;
     VkQueue gq, pq;
