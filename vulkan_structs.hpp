@@ -50,5 +50,7 @@ namespace vks {
 	INIT_VK_STRUCT(PresentInfoKHR, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR);
 	INIT_VK_STRUCT(AccelerationStructureInstanceKHR);
     INIT_VK_STRUCT(StridedDeviceAddressRegionKHR);
+    INIT_VK_STRUCT(PhysicalDeviceRayTracingPipelinePropertiesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR);
+    INIT_VK_STRUCT(PhysicalDeviceAccelerationStructurePropertiesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR);
 }
 // clang-format on

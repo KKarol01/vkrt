@@ -45,6 +45,38 @@ Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, b
     ENG_WARN("ALLOCATING BUFFER %s OF SIZE %.2f KB", name.c_str(), static_cast<float>(size) / 1024.0f);
 }
 
+Buffer::Buffer(const std::string& name, size_t size, size_t alignment, VkBufferUsageFlags usage, bool map) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+    vks::BufferCreateInfo binfo;
+    VmaAllocationCreateInfo vinfo{};
+    const auto use_bda = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) > 0;
+
+    binfo.size = size;
+    binfo.usage = usage;
+
+    vinfo.usage = VMA_MEMORY_USAGE_AUTO;
+    if(map) { vinfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT; }
+    if(use_bda) { vinfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT; }
+
+    VmaAllocationInfo vainfo{};
+    if(vmaCreateBufferWithAlignment(renderer->vma, &binfo, &vinfo, alignment, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
+        throw std::runtime_error{ "Could not create buffer" };
+    }
+
+    mapped = vainfo.pMappedData;
+
+    if(use_bda) {
+        vks::BufferDeviceAddressInfo bdainfo;
+        bdainfo.buffer = buffer;
+        bda = vkGetBufferDeviceAddress(renderer->dev, &bdainfo);
+    }
+
+    capacity = size;
+    set_debug_name(buffer, name);
+
+    ENG_WARN("ALLOCATING BUFFER %s OF SIZE %.2f KB", name.c_str(), static_cast<float>(size) / 1024.0f);
+}
+
 size_t Buffer::push_data(std::span<const std::byte> data) {
     if(!mapped) {
         ENG_WARN("Trying to push to an unmapped buffer");
@@ -168,9 +200,8 @@ void RendererVulkan::initialize_vulkan() {
 
     VkPhysicalDeviceProperties2 pdev_props{};
     pdev_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR pdev_rtpp_props{};
-    pdev_rtpp_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    pdev_props.pNext = &pdev_rtpp_props;
+    pdev_props.pNext = &rt_props;
+    rt_props.pNext = &rt_acc_props;
     vkGetPhysicalDeviceProperties2(phys_ret->physical_device, &pdev_props);
 
     instance = vkb_inst.instance;
@@ -180,7 +211,6 @@ void RendererVulkan::initialize_vulkan() {
     gq = vkb_device.get_queue(vkb::QueueType::graphics).value();
     pqi = vkb_device.get_queue_index(vkb::QueueType::present).value();
     pq = vkb_device.get_queue(vkb::QueueType::present).value();
-    rt_props = pdev_rtpp_props;
 
     VmaVulkanFunctions vulkanFunctions = {};
     vulkanFunctions.vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr;
@@ -731,11 +761,12 @@ void RendererVulkan::build_blas(RenderModel rm) {
     blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &blas));
 
-    Buffer buffer_scratch{ "blas_scratch_buffer", build_size_info.buildScratchSize,
+    Buffer buffer_scratch{ "blas_scratch_buffer", build_size_info.buildScratchSize, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     blas_geo.dstAccelerationStructure = blas;
-    blas_geo.scratchData.deviceAddress = buffer_scratch.bda;
+    blas_geo.scratchData.deviceAddress =
+        align_up(buffer_scratch.bda, static_cast<VkDeviceAddress>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
 
     vks::AccelerationStructureBuildRangeInfoKHR offset;
     offset.firstVertex = 0;
@@ -819,7 +850,7 @@ void RendererVulkan::build_tlas() {
     acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     vkCreateAccelerationStructureKHR(dev, &acc_info, nullptr, &tlas);
 
-    Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize,
+    Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     vks::AccelerationStructureBuildGeometryInfoKHR build_tlas;
@@ -829,7 +860,8 @@ void RendererVulkan::build_tlas() {
     build_tlas.dstAccelerationStructure = tlas;
     build_tlas.geometryCount = 1;
     build_tlas.pGeometries = &geometry;
-    build_tlas.scratchData.deviceAddress = buffer_scratch.bda;
+    build_tlas.scratchData.deviceAddress =
+        align_up(buffer_scratch.bda, static_cast<VkDeviceAddress>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
 
     vks::AccelerationStructureBuildRangeInfoKHR build_range;
     build_range.primitiveCount = 2;
