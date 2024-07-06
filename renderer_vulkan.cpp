@@ -104,6 +104,7 @@ void RendererVulkan::init() {
     create_rt_output_image();
     compile_shaders();
     build_rtpp();
+    build_sbt();
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -279,8 +280,8 @@ void RendererVulkan::initialize_vulkan() {
                            true };
 
     vks::SemaphoreCreateInfo sem_swapchain_info;
-    vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image);
-    vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_tracing_done);
+    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
+    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_tracing_done));
 }
 
 void RendererVulkan::create_swapchain() {
@@ -297,18 +298,13 @@ void RendererVulkan::create_swapchain() {
     sinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     sinfo.clipped = true;
 
-    VkSwapchainKHR swapchain;
-    if(const auto error = vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain); error != VK_SUCCESS) {
-        throw std::runtime_error{ "Could not create swapchain" };
-    }
-
+	VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
     uint32_t num_images;
     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, nullptr);
 
     std::vector<VkImage> images(num_images);
     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, images.data());
 
-    swapchain = swapchain;
     swapchain_images = images;
     swapchain_format = sinfo.imageFormat;
 }
@@ -384,7 +380,7 @@ void RendererVulkan::render() {
     sw_to_pres.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
     sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    sw_to_pres.dstAccessMask = VK_ACCESS_2_NONE;
+    sw_to_pres.dstAccessMask = VK_ACCESS_NONE;
 
     vks::DependencyInfo sw_dep_info;
     sw_dep_info.imageMemoryBarrierCount = 1;
@@ -465,6 +461,7 @@ void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
     if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
         build_blas(models.back());
         build_tlas();
+        build_desc_sets();
     }
 }
 
@@ -549,7 +546,6 @@ void RendererVulkan::build_rtpp() {
             Setup ray tracing shader groups
     */
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups;
 
     // Ray generation group
     {

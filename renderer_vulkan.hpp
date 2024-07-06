@@ -33,7 +33,7 @@ struct Image {
     VkImageView view{};
     VkFormat format{};
     VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
-    uint32_t mips, layers;
+    uint32_t mips{}, layers{};
 };
 
 struct Vertex {

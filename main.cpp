@@ -28,7 +28,7 @@ int main() {
 
         Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
         const auto* window = Engine::window();
-        const auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
+        auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
         const glm::mat4 projection = glm::perspectiveFov(glm::radians(90.0f), (float)window->size[0], (float)window->size[1], 0.01f, 1000.0f);
         const glm::mat4 view = camera.get_view();
@@ -38,6 +38,7 @@ int main() {
         memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(inv_view), &inv_projection[0][0], sizeof(inv_projection));
 
         while(!glfwWindowShouldClose(Engine::window()->window)) {
+            vk_renderer->render();
             glfwPollEvents();
         }
 
