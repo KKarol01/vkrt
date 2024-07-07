@@ -89,6 +89,8 @@ class RendererVulkan : public Renderer {
     void create_rt_output_image();
     void build_blas(RenderModel rm);
     void build_tlas();
+    void build_descriptor_pool();
+    void allocate_rtpp_descriptor_set();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
     void submit_recording(VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems = {},
@@ -130,7 +132,9 @@ class RendererVulkan : public Renderer {
     VkPipelineLayout raytracing_layout;
     VkDescriptorSetLayout raytracing_set_layout;
     VkDescriptorSet raytracing_set;
+    VkDescriptorPool raytracing_pool;
     Buffer sbt;
+    Buffer per_triangle_mesh_id_buffer;
 
     Image rt_image;
     Buffer ubo;

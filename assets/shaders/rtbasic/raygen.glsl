@@ -1,13 +1,14 @@
 #version 460
-#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : require
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 1, set = 0, rgba8) uniform image2D image;
 layout(binding = 2, set = 0) uniform CameraProperties {
     mat4 viewInverse;
     mat4 projInverse;
-}
-cam;
+} cam;
+layout(binding = 3, set = 0) uniform sampler2D textures[];
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
