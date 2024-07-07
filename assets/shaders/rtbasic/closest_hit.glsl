@@ -15,5 +15,5 @@ void main()
   );
 
   const float t = float(gl_RayTmaxEXT) / 5.0;
-  hitValue = mix(colors[gl_InstanceID], colors[gl_InstanceID + 1], t);
+  hitValue = colors[0] * t;
 }

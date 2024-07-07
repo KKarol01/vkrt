@@ -40,6 +40,7 @@ int main() {
         while(!glfwWindowShouldClose(Engine::window()->window)) {
             vk_renderer->render();
             glfwPollEvents();
+
         }
 
     } catch(const std::exception& err) {

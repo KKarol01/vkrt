@@ -28,7 +28,8 @@ static void load_image_load_buffer_view(ImportedModel& model, const fastgltf::As
                                   } },
                buffer.data);
 
-    model.textures.push_back(ImportedModel::Texture{ .name = image.name.c_str(), .rgba_data = { loaded_image, loaded_image + width * height * channels } });
+    model.textures.push_back(ImportedModel::Texture{
+        .name = image.name.c_str(), .size = { width, height }, .rgba_data = { loaded_image, loaded_image + width * height * channels } });
     stbi_image_free(loaded_image);
 }
 

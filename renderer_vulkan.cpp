@@ -9,6 +9,7 @@
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
+#include <numeric>
 
 #define VK_CHECK(func)                                                                                                                     \
     if(const auto res = func; res != VK_SUCCESS) { ENG_RTERROR(std::format("[VK][ERROR][{} : {}] ({})", __FILE__, __LINE__, #func)); }
@@ -91,7 +92,7 @@ size_t Buffer::push_data(std::span<const std::byte> data) {
         return 0;
     }
 
-    std::memcpy(mapped, data.data(), size_to_copy);
+    std::memcpy(static_cast<std::byte*>(mapped) + size, data.data(), size_to_copy);
 
     size += size_to_copy;
 
@@ -254,7 +255,6 @@ void RendererVulkan::initialize_vulkan() {
     vma = allocator;
 
     vks::CommandPoolCreateInfo cmdpi;
-    cmdpi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmdpi.queueFamilyIndex = gqi;
 
     VkCommandPool pool;
@@ -298,7 +298,7 @@ void RendererVulkan::create_swapchain() {
     sinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     sinfo.clipped = true;
 
-	VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
+    VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
     uint32_t num_images;
     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, nullptr);
 
@@ -312,6 +312,8 @@ void RendererVulkan::create_swapchain() {
 template <typename T> static T align_up(T a, T b) { return (a + b - 1) & -b; }
 
 void RendererVulkan::render() {
+    reset_command_pool(cmdpool);
+
     vks::AcquireNextImageInfoKHR acq_info;
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
@@ -418,13 +420,64 @@ void RendererVulkan::render() {
 }
 
 void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
-    for(const auto& tex : model.textures) {
-        ENG_WARN("REMEMBER TO LOAD TEXTURES");
+    for(const auto& mat : model.materials) {
+        auto& rmat = materials.emplace_back();
+        if(mat.color_texture) { rmat.color_texture = textures.size() + *mat.color_texture; }
+        if(mat.normal_texture) { rmat.normal_texture = textures.size() + *mat.normal_texture; }
     }
 
-    for(const auto& mat : model.materials) {
-        ENG_WARN("REMEMBER TO LOAD MATERIALS");
+    const auto total_tex_size =
+        std::accumulate(begin(model.textures), end(model.textures), 0ull,
+                        [](uint64_t sum, const ImportedModel::Texture& tex) { return sum + tex.size.first * tex.size.second * 4ull; });
+
+    Buffer texture_staging_buffer{ "texture staging buffer", total_tex_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true };
+
+    std::vector<Image> dst_textures;
+    std::vector<vks::CopyBufferToImageInfo2> texture_copy_datas;
+    std::vector<vks::BufferImageCopy2> buffer_copies;
+    dst_textures.reserve(model.textures.size());
+    texture_copy_datas.reserve(model.textures.size());
+    buffer_copies.reserve(model.textures.size());
+    uint64_t texture_byte_offset = 0;
+    for(const auto& tex : model.textures) {
+        auto& texture = dst_textures.emplace_back(std::format("{}_{}", model.name, tex.name), tex.size.first, tex.size.second, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
+                                                  VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        vks::BufferImageCopy2& region = buffer_copies.emplace_back();
+        region.bufferOffset = texture_byte_offset;
+        region.imageExtent = { .width = tex.size.first, .height = tex.size.second, .depth = 1 };
+        region.imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+
+        vks::CopyBufferToImageInfo2& copy = texture_copy_datas.emplace_back();
+        copy.srcBuffer = texture_staging_buffer.buffer;
+        copy.dstImage = texture.image;
+        copy.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        copy.regionCount = 1;
+        copy.pRegions = &region;
+
+        texture_staging_buffer.push_data(std::as_bytes(std::span{ tex.rgba_data }));
+        texture_byte_offset += tex.size.first * tex.size.second * 4ull;
     }
+
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    for(uint32_t i = 0; i < texture_copy_datas.size(); ++i) {
+        auto& copy = texture_copy_datas.at(i);
+        auto& texture = dst_textures.at(i);
+
+        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                  VK_ACCESS_2_TRANSFER_WRITE_BIT, true, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        vkCmdCopyBufferToImage2(cmd, &copy);
+        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT, false, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    }
+    submit_recording(gq, cmd);
+    vkQueueWaitIdle(gq);
+    textures.insert(textures.end(), std::make_move_iterator(dst_textures.begin()), std::make_move_iterator(dst_textures.end()));
 
     std::vector<Vertex> vertices(model.vertices.size());
     std::vector<uint32_t> indices(model.indices.size());
@@ -719,7 +772,11 @@ void RendererVulkan::build_desc_sets() {
 void RendererVulkan::create_rt_output_image() {
     const auto* window = Engine::window();
     rt_image = Image{ "rt_image", window->size[0], window->size[1], 1, 1, 1, swapchain_format, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
-    rt_image.transition_layout(VK_IMAGE_LAYOUT_GENERAL, true);
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                               VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    submit_recording(gq, cmd);
+    vkQueueWaitIdle(gq);
 }
 
 void RendererVulkan::build_blas(RenderModel rm) {
@@ -793,7 +850,7 @@ void RendererVulkan::build_tlas() {
     // clang-format off
      VkTransformMatrixKHR transform{
          1.0f, 0.0f, 0.0f, 0.0f,
-         0.0f, 0.5f, 0.0f, 0.5f,
+         0.0f, 1.0f, 0.0f, 0.0f,
          0.0f, 0.0f, 1.0f, 0.0f,
      };
     // clang-format on
@@ -860,7 +917,7 @@ void RendererVulkan::build_tlas() {
         align_up(buffer_scratch.bda, static_cast<VkDeviceAddress>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
 
     vks::AccelerationStructureBuildRangeInfoKHR build_range;
-    build_range.primitiveCount = 2;
+    build_range.primitiveCount = 1;
     build_range.primitiveOffset = 0;
     build_range.firstVertex = 0;
     build_range.transformOffset = 0;
@@ -884,6 +941,51 @@ void RendererVulkan::build_tlas() {
     tlas_buffer = Buffer{ buffer_tlas };
 }
 
+VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
+    VkCommandBuffer cmd = get_or_allocate_free_command_buffer(pool);
+
+    vks::CommandBufferBeginInfo info;
+    info.flags = usage;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &info));
+
+    return cmd;
+}
+
+void RendererVulkan::submit_recording(VkQueue queue, VkCommandBuffer buffer) {
+    VK_CHECK(vkEndCommandBuffer(buffer));
+
+    vks::CommandBufferSubmitInfo buffer_info;
+    buffer_info.commandBuffer = buffer;
+
+    vks::SubmitInfo2 submit_info;
+    submit_info.commandBufferInfoCount = 1;
+    submit_info.pCommandBufferInfos = &buffer_info;
+
+    VK_CHECK(vkQueueSubmit2(queue, 1, &submit_info, {}));
+}
+
+void RendererVulkan::reset_command_pool(VkCommandPool pool) {
+    VK_CHECK(vkResetCommandPool(dev, pool, {}));
+    free_pool_buffers[pool] = std::move(used_pool_buffers[pool]);
+}
+
+VkCommandBuffer RendererVulkan::get_or_allocate_free_command_buffer(VkCommandPool pool) {
+    if(free_pool_buffers[pool].empty()) {
+        vks::CommandBufferAllocateInfo info;
+        info.commandPool = pool;
+        info.commandBufferCount = 1;
+        info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+        auto& buffer = used_pool_buffers[pool].emplace_back(nullptr);
+        VK_CHECK(vkAllocateCommandBuffers(dev, &info, &buffer));
+        return buffer;
+    } else {
+        used_pool_buffers[pool].push_back(free_pool_buffers[pool].back());
+        free_pool_buffers[pool].erase(free_pool_buffers[pool].end() - 1);
+        return used_pool_buffers[pool].back();
+    }
+}
+
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
              VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : format(format), mips(mips), layers(layers) {
@@ -894,6 +996,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     if(width > 1) { ++dims; }
     if(height > 1) { ++dims; }
     if(depth > 1) { ++dims; }
+    if(dims == -1) { dims = 1; }
     VkImageType types[]{ VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
 
     iinfo.imageType = types[dims];
@@ -910,9 +1013,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     VmaAllocationCreateInfo vmainfo{};
     vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if(vmaCreateImage(renderer->vma, &iinfo, &vmainfo, &image, &alloc, nullptr) != VK_SUCCESS) {
-        throw std::runtime_error{ "Could not create image" };
-    }
+    VK_CHECK(vmaCreateImage(renderer->vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
 
     VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
 
@@ -926,24 +1027,23 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     ivinfo.format = format;
     ivinfo.subresourceRange = { .aspectMask = view_aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
 
-    if(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view) != VK_SUCCESS) {
-        throw std::runtime_error{ "Could not create image default view" };
-    }
+    VK_CHECK(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view));
 
     set_debug_name(image, name);
     set_debug_name(view, std::format("{}_default_view", name));
 }
 
-void Image::transition_layout(VkImageLayout dst, bool from_undefined) {
+void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                              VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
     vks::ImageMemoryBarrier2 imgb;
     imgb.image = image;
     imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
-    imgb.newLayout = dst;
-    imgb.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    imgb.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    imgb.srcAccessMask = VK_ACCESS_NONE;
-    imgb.dstAccessMask = VK_ACCESS_NONE;
+    imgb.newLayout = dst_layout;
+    imgb.srcStageMask = src_stage;
+    imgb.srcAccessMask = src_access;
+    imgb.dstStageMask = dst_stage;
+    imgb.dstAccessMask = dst_access;
     imgb.subresourceRange = {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel = 0,
@@ -952,25 +1052,10 @@ void Image::transition_layout(VkImageLayout dst, bool from_undefined) {
         .layerCount = layers,
     };
 
-    vks::CommandBufferBeginInfo cmdbi;
-    cmdbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(renderer->cmd, &cmdbi);
-
     vks::DependencyInfo dep;
     dep.pImageMemoryBarriers = &imgb;
     dep.imageMemoryBarrierCount = 1;
-    vkCmdPipelineBarrier2(renderer->cmd, &dep);
+    vkCmdPipelineBarrier2(cmd, &dep);
 
-    vkEndCommandBuffer(renderer->cmd);
-
-    vks::CommandBufferSubmitInfo cmdsinfo;
-    cmdsinfo.commandBuffer = renderer->cmd;
-
-    vks::SubmitInfo2 sinfo;
-    sinfo.commandBufferInfoCount = 1;
-    sinfo.pCommandBufferInfos = &cmdsinfo;
-    vkQueueSubmit2(renderer->gq, 1, &sinfo, nullptr);
-    vkQueueWaitIdle(renderer->gq);
-
-    current_layout = dst;
+    current_layout = dst_layout;
 }
