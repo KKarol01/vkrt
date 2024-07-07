@@ -2,6 +2,7 @@
 
 #include <span>
 #include <vulkan/vulkan.hpp>
+#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
 

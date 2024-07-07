@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <format>
+#include <cstdint>
 #include "renderer.hpp"
 
 #define ENG_RTERROR(message)                                                                                                               \
@@ -11,13 +12,13 @@
 
 #define ENG_LOG(fmt, ...) std::printf("%s", std::format("[LOG][{} : {}]: " fmt "\n", __FILE__, __LINE__, __VA_ARGS__).c_str())
 
-struct GLFWindow;
+struct GLFWwindow;
 
 struct Window {
     Window(uint32_t width, uint32_t height);
     ~Window();
     uint32_t size[2]{};
-    GLFWwindow* window{};
+    GLFWwindow* window{ nullptr };
 };
 
 class Engine {
