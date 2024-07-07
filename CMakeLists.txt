@@ -65,7 +65,8 @@ target_link_libraries(vkrt
     vma
     volk
     stb
-    shaderc_combinedd
+    $<$<CONFIG:Debug>:shaderc_combinedd>
+    $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
 )
 target_compile_definitions(vkrt

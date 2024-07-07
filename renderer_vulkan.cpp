@@ -10,6 +10,7 @@
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
 #include <numeric>
+#include <fstream>
 
 #define VK_CHECK(func)                                                                                                                     \
     if(const auto res = func; res != VK_SUCCESS) { ENG_RTERROR(std::format("[VK][ERROR][{} : {}] ({})", __FILE__, __LINE__, #func)); }

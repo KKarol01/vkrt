@@ -2,6 +2,9 @@
 
 #include <string>
 #include <utility>
+#include <optional>
+#include <filesystem>
+#include <glm/glm.hpp>
 
 struct ImportedModel {
 	struct Vertex {
