@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 
 struct ImportedModel {
 	struct Vertex {
@@ -11,6 +12,7 @@ struct ImportedModel {
 
     struct Texture {
         std::string name;
+        std::pair<uint32_t, uint32_t> size;
         std::vector<std::byte> rgba_data;
     };
 

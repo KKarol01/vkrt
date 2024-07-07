@@ -26,7 +26,10 @@ struct Image {
     Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
           VkSampleCountFlagBits samples, VkImageUsageFlags usage);
 
-    void transition_layout(VkImageLayout dst, bool from_undefined);
+    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
+                           VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout
+
+    );
 
     VkImage image{};
     VmaAllocation alloc{};
@@ -43,8 +46,8 @@ struct Vertex {
 };
 
 struct RenderMaterial {
-    Image color_texture;
-    Image normal_texture;
+    std::optional<uint32_t> color_texture;
+    std::optional<uint32_t> normal_texture;
 };
 
 struct RenderMesh {
@@ -83,6 +86,11 @@ class RendererVulkan : public Renderer {
     void build_blas(RenderModel rm);
     void build_tlas();
 
+    VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
+    void submit_recording(VkQueue queue, VkCommandBuffer buffer);
+    void reset_command_pool(VkCommandPool pool);
+    VkCommandBuffer get_or_allocate_free_command_buffer(VkCommandPool pool);
+
     VkInstance instance;
     VkDevice dev;
     VkPhysicalDevice pdev;
@@ -101,6 +109,8 @@ class RendererVulkan : public Renderer {
 
     VkCommandPool cmdpool;
     VkCommandBuffer cmd;
+    std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
+    std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> used_pool_buffers;
 
     VkAccelerationStructureKHR tlas, blas;
     Buffer blas_buffer;
@@ -119,6 +129,7 @@ class RendererVulkan : public Renderer {
     Image rt_image;
     Buffer ubo;
 
+    std::vector<Image> textures;
     std::vector<RenderMaterial> materials;
     std::vector<RenderModel> models;
     std::vector<RenderMesh> meshes;
