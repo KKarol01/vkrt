@@ -257,17 +257,8 @@ void RendererVulkan::initialize_vulkan() {
     vks::CommandPoolCreateInfo cmdpi;
     cmdpi.queueFamilyIndex = gqi;
 
-    VkCommandPool pool;
-    VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &pool));
+    VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
-    vks::CommandBufferAllocateInfo cmdi;
-    cmdi.commandPool = pool;
-    cmdi.commandBufferCount = 1;
-    cmdi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
-    VK_CHECK(vkAllocateCommandBuffers(device, &cmdi, &cmd));
-
-    cmdpool = pool;
     ubo = Buffer{ "ubo", 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
     constexpr size_t ONE_MB = 1024 * 1024;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
@@ -282,6 +273,7 @@ void RendererVulkan::initialize_vulkan() {
     vks::SemaphoreCreateInfo sem_swapchain_info;
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_tracing_done));
+    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
 }
 
 void RendererVulkan::create_swapchain() {
@@ -318,12 +310,10 @@ void RendererVulkan::render() {
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
 
-    vks::CommandBufferBeginInfo binfo;
-    binfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &binfo);
+    auto raytrace_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
+    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_pipeline);
+    vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
 
     const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
@@ -347,47 +337,32 @@ void RendererVulkan::render() {
     VkClearColorValue clear_value{ 0.0f, 0.0f, 0.0f, 1.0f };
     VkImageSubresourceRange clear_range{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
     const auto* window = Engine::window();
-    vkCmdTraceRaysKHR(cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
 
-    vkEndCommandBuffer(cmd);
+    end_recording(raytrace_cmd);
+    auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-    vks::CommandBufferSubmitInfo cmd_info;
-    cmd_info.commandBuffer = cmd;
-
-    vks::SemaphoreSubmitInfo sem_info;
-    sem_info.stageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-    sem_info.semaphore = primitives.sem_tracing_done;
-
-    vks::SubmitInfo2 sinfo;
-    sinfo.commandBufferInfoCount = 1;
-    sinfo.pCommandBufferInfos = &cmd_info;
-    // sinfo.signalSemaphoreInfoCount = 1;
-    // sinfo.pSignalSemaphoreInfos = &sem_info;
-    vkQueueSubmit2(gq, 1, &sinfo, nullptr);
-    vkDeviceWaitIdle(dev);
-
-    vkBeginCommandBuffer(cmd, &binfo);
     vks::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
     sw_to_dst.image = swapchain_images.at(sw_img_idx);
     sw_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     sw_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     sw_to_dst.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    sw_to_dst.dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
     sw_to_dst.srcAccessMask = VK_ACCESS_NONE;
+    sw_to_dst.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
     sw_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     sw_to_dst.subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
     sw_to_pres = sw_to_dst;
     sw_to_pres.oldLayout = sw_to_dst.newLayout;
     sw_to_pres.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     sw_to_pres.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     sw_to_pres.dstAccessMask = VK_ACCESS_NONE;
 
     vks::DependencyInfo sw_dep_info;
     sw_dep_info.imageMemoryBarrierCount = 1;
     sw_dep_info.pImageMemoryBarriers = &sw_to_dst;
-    vkCmdPipelineBarrier2(cmd, &sw_dep_info);
+    vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
 
     vks::ImageCopy img_copy;
     img_copy.srcOffset = {};
@@ -395,28 +370,27 @@ void RendererVulkan::render() {
     img_copy.dstOffset = {};
     img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     img_copy.extent = { window->size[0], window->size[1], 1 };
-    vkCmdCopyImage(cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, sw_to_dst.image, sw_to_dst.newLayout, 1, &img_copy);
+    vkCmdCopyImage(present_cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, sw_to_dst.image, sw_to_dst.newLayout, 1, &img_copy);
 
     sw_dep_info.pImageMemoryBarriers = &sw_to_pres;
-    vkCmdPipelineBarrier2(cmd, &sw_dep_info);
+    vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
+    end_recording(present_cmd);
 
-    vkEndCommandBuffer(cmd);
-
-    sinfo.commandBufferInfoCount = 1;
-    sinfo.pCommandBufferInfos = &cmd_info;
-    // sinfo.signalSemaphoreInfoCount = 1;
-    // sinfo.pSignalSemaphoreInfos = &sem_info;
-    vkQueueSubmit2(gq, 1, &sinfo, nullptr);
-    vkDeviceWaitIdle(dev);
+    submit_recordings(gq, { RecordingSubmitInfo{ .buffers = { raytrace_cmd },
+                                                 .signals = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR } } },
+                            RecordingSubmitInfo{ .buffers = { present_cmd },
+                                                 .waits = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_TRANSFER_BIT },
+                                                            { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TRANSFER_BIT } },
+                                                 .signals = { { primitives.sem_copy_to_sw_img_done, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } } } });
 
     vks::PresentInfoKHR pinfo;
     pinfo.swapchainCount = 1;
     pinfo.pSwapchains = &swapchain;
     pinfo.pImageIndices = &sw_img_idx;
     pinfo.waitSemaphoreCount = 1;
-    pinfo.pWaitSemaphores = &primitives.sem_swapchain_image;
+    pinfo.pWaitSemaphores = &primitives.sem_copy_to_sw_img_done;
     vkQueuePresentKHR(gq, &pinfo);
-    vkDeviceWaitIdle(dev);
+    vkQueueWaitIdle(gq);
 }
 
 void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
@@ -707,7 +681,6 @@ void RendererVulkan::build_sbt() {
 }
 
 void RendererVulkan::build_desc_sets() {
-
     std::vector<VkDescriptorPoolSize> poolSizes = { { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2 },
                                                     { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
                                                     { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 } };
@@ -827,20 +800,10 @@ void RendererVulkan::build_blas(RenderModel rm) {
     offset.primitiveOffset = 0;
     offset.transformOffset = 0;
 
-    vks::CommandBufferBeginInfo begin_info;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &begin_info);
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VkAccelerationStructureBuildRangeInfoKHR* offsets[]{ &offset };
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &blas_geo, offsets);
-    vkEndCommandBuffer(cmd);
-
-    vks::CommandBufferSubmitInfo cmd_submit_info;
-    cmd_submit_info.commandBuffer = cmd;
-
-    vks::SubmitInfo2 submit_info;
-    submit_info.commandBufferInfoCount = 1;
-    submit_info.pCommandBufferInfos = &cmd_submit_info;
-    vkQueueSubmit2(gq, 1, &submit_info, nullptr);
+    submit_recording(gq, cmd);
     vkDeviceWaitIdle(dev);
 
     blas_buffer = Buffer{ buffer_blas };
@@ -923,19 +886,9 @@ void RendererVulkan::build_tlas() {
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    vks::CommandBufferBeginInfo begin_info;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &begin_info);
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_tlas, build_ranges);
-    vkEndCommandBuffer(cmd);
-
-    vks::CommandBufferSubmitInfo cmd_submit_info;
-    cmd_submit_info.commandBuffer = cmd;
-
-    vks::SubmitInfo2 submit_info;
-    submit_info.commandBufferInfoCount = 1;
-    submit_info.pCommandBufferInfos = &cmd_submit_info;
-    vkQueueSubmit2(gq, 1, &submit_info, nullptr);
+    submit_recording(gq, cmd);
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = Buffer{ buffer_tlas };
@@ -951,18 +904,76 @@ VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBuf
     return cmd;
 }
 
-void RendererVulkan::submit_recording(VkQueue queue, VkCommandBuffer buffer) {
+void RendererVulkan::submit_recording(VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems,
+                                      const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& signal_sems, VkFence fence) {
     VK_CHECK(vkEndCommandBuffer(buffer));
 
     vks::CommandBufferSubmitInfo buffer_info;
     buffer_info.commandBuffer = buffer;
 
+    std::vector<vks::SemaphoreSubmitInfo> waits(wait_sems.size());
+    for(uint32_t i = 0; i < wait_sems.size(); ++i) {
+        waits.at(i).semaphore = wait_sems.at(i).first;
+        waits.at(i).stageMask = wait_sems.at(i).second;
+    }
+
+    std::vector<vks::SemaphoreSubmitInfo> signals(signal_sems.size());
+    for(uint32_t i = 0; i < signal_sems.size(); ++i) {
+        signals.at(i).semaphore = signal_sems.at(i).first;
+        signals.at(i).stageMask = signal_sems.at(i).second;
+    }
+
     vks::SubmitInfo2 submit_info;
     submit_info.commandBufferInfoCount = 1;
     submit_info.pCommandBufferInfos = &buffer_info;
+    submit_info.waitSemaphoreInfoCount = waits.size();
+    submit_info.pWaitSemaphoreInfos = waits.data();
+    submit_info.signalSemaphoreInfoCount = signals.size();
+    submit_info.pSignalSemaphoreInfos = signals.data();
 
-    VK_CHECK(vkQueueSubmit2(queue, 1, &submit_info, {}));
+    VK_CHECK(vkQueueSubmit2(queue, 1, &submit_info, fence));
 }
+
+void RendererVulkan::submit_recordings(VkQueue queue, const std::vector<RecordingSubmitInfo>& submits, VkFence fence) {
+    std::vector<vks::SubmitInfo2> infos(submits.size());
+    std::vector<std::vector<vks::CommandBufferSubmitInfo>> buffer_submits(submits.size());
+    std::vector<std::vector<vks::SemaphoreSubmitInfo>> wait_submits(submits.size());
+    std::vector<std::vector<vks::SemaphoreSubmitInfo>> signal_submits(submits.size());
+
+    for(uint32_t i = 0; i < submits.size(); ++i) {
+        const auto& buffers = submits.at(i).buffers;
+        const auto& waits = submits.at(i).waits;
+        const auto& signals = submits.at(i).signals;
+
+        buffer_submits.at(i).resize(buffers.size());
+        for(uint32_t j = 0; j < buffers.size(); ++j) {
+            buffer_submits.at(i).at(j).commandBuffer = buffers.at(j);
+        }
+
+        wait_submits.at(i).resize(waits.size());
+        for(uint32_t j = 0; j < waits.size(); ++j) {
+            wait_submits.at(i).at(j).semaphore = waits.at(j).first;
+            wait_submits.at(i).at(j).stageMask = waits.at(j).second;
+        }
+
+        signal_submits.at(i).resize(signals.size());
+        for(uint32_t j = 0; j < signals.size(); ++j) {
+            signal_submits.at(i).at(j).semaphore = signals.at(j).first;
+            signal_submits.at(i).at(j).stageMask = signals.at(j).second;
+        }
+
+        infos.at(i).commandBufferInfoCount = buffer_submits.at(i).size();
+        infos.at(i).pCommandBufferInfos = buffer_submits.at(i).data();
+        infos.at(i).waitSemaphoreInfoCount = wait_submits.at(i).size();
+        infos.at(i).pWaitSemaphoreInfos = wait_submits.at(i).data();
+        infos.at(i).signalSemaphoreInfoCount = signal_submits.at(i).size();
+        infos.at(i).pSignalSemaphoreInfos = signal_submits.at(i).data();
+    }
+
+    VK_CHECK(vkQueueSubmit2(queue, infos.size(), infos.data(), fence));
+}
+
+void RendererVulkan::end_recording(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
 
 void RendererVulkan::reset_command_pool(VkCommandPool pool) {
     VK_CHECK(vkResetCommandPool(dev, pool, {}));

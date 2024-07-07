@@ -27,9 +27,7 @@ struct Image {
           VkSampleCountFlagBits samples, VkImageUsageFlags usage);
 
     void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                           VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout
-
-    );
+                           VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout);
 
     VkImage image{};
     VmaAllocation alloc{};
@@ -69,6 +67,12 @@ struct ModelInstance {
     uint32_t render_model;
 };
 
+struct RecordingSubmitInfo {
+    std::vector<VkCommandBuffer> buffers;
+    std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> waits;
+    std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
+};
+
 class RendererVulkan : public Renderer {
   public:
     void init() override;
@@ -87,7 +91,10 @@ class RendererVulkan : public Renderer {
     void build_tlas();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
-    void submit_recording(VkQueue queue, VkCommandBuffer buffer);
+    void submit_recording(VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems = {},
+                          const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& signal_sems = {}, VkFence fence = nullptr);
+    void submit_recordings(VkQueue queue, const std::vector<RecordingSubmitInfo>& submits, VkFence fence = nullptr);
+    void end_recording(VkCommandBuffer buffer);
     void reset_command_pool(VkCommandPool pool);
     VkCommandBuffer get_or_allocate_free_command_buffer(VkCommandPool pool);
 
@@ -108,7 +115,6 @@ class RendererVulkan : public Renderer {
     VkFormat swapchain_format;
 
     VkCommandPool cmdpool;
-    VkCommandBuffer cmd;
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> used_pool_buffers;
 
@@ -138,5 +144,6 @@ class RendererVulkan : public Renderer {
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;
         VkSemaphore sem_tracing_done;
+        VkSemaphore sem_copy_to_sw_img_done;
     } primitives;
 };
