@@ -55,7 +55,7 @@ add_subdirectory(third_party/fastgltf)
 add_executable(vkrt main.cpp "model_importer.cpp" "engine.cpp"  "renderer_vulkan.cpp" )
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
-target_compile_features(vkrt PRIVATE cxx_std_20)
+target_compile_features(vkrt PRIVATE cxx_std_23)
 target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_link_libraries(vkrt
     PRIVATE
