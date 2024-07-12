@@ -5,6 +5,11 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
+#include "handle_vector.hpp"
+
+enum class VkRendererFlags : uint32_t { DIRTY_INSTANCES = 0x1, DIRTY_MODELS = 0x2, DIRTY_TEXTURES = 0x4, DIRTY_UPLOADS = 0x8 };
+inline Flags<VkRendererFlags> operator|(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } | b; }
+inline Flags<VkRendererFlags> operator&(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } & b; }
 
 class Buffer {
   public:
@@ -60,12 +65,23 @@ struct RenderMesh {
 struct RenderModel {
     size_t first_mesh{ 0 };
     size_t mesh_count{ 0 };
+    size_t first_vertex{ 0 };
     size_t vertex_count{ 0 };
+    size_t first_index{ 0 };
     size_t index_count{ 0 };
+    size_t first_material{ 0 };
+    size_t material_count{ 0 };
+    size_t first_texture{ 0 };
+    size_t texture_count{ 0 };
 };
 
 struct ModelInstance {
-    uint32_t render_model;
+    Handle<RenderModel> render_model;
+};
+
+struct RenderInstanceBatch {
+    uint32_t instance_offset{ 0 };
+    uint32_t count{ 0 };
 };
 
 struct RecordingSubmitInfo {
@@ -82,7 +98,12 @@ class RendererVulkan : public Renderer {
     void create_swapchain();
 
     void render() override;
-    void batch_model(ImportedModel& model, BatchSettings settings) override;
+
+    HandleBatchedModel batch_model(ImportedModel& model, BatchSettings settings) final;
+    HandleInstancedModel instance_model(HandleBatchedModel model) final;
+    void upload_model_textures();
+    void upload_staged_models();
+
     void compile_shaders();
     void build_rtpp();
     void build_sbt();
@@ -125,6 +146,7 @@ class RendererVulkan : public Renderer {
     Buffer blas_buffer;
     Buffer tlas_buffer;
     Buffer vertex_buffer, index_buffer;
+    Buffer instance_data_buffer;
 
     std::vector<VkShaderModule> shader_modules;
 
@@ -142,9 +164,25 @@ class RendererVulkan : public Renderer {
 
     std::vector<Image> textures;
     std::vector<RenderMaterial> materials;
-    std::vector<RenderModel> models;
     std::vector<RenderMesh> meshes;
-    std::vector<ModelInstance> instances;
+    HandleVector<RenderModel> models;
+    std::vector<RenderInstanceBatch> instances;
+
+    Flags<VkRendererFlags> flags;
+
+    struct UploadData {
+        struct TextureUpload {
+            std::string name;
+            uint32_t width, height;
+            std::vector<std::byte> rgba_data;
+        };
+        std::vector<TextureUpload> textures;
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        std::vector<RenderModel> models;
+        std::vector<RenderMesh> meshes;
+        std::vector<RenderMaterial> materials;
+    } upload_data;
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;

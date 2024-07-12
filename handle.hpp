@@ -2,9 +2,10 @@
 
 #include <cstdint>
 
-template<typename T> struct Handle {
-	constexpr Handle() = default;
-	constexpr explicit Handle(const T* ptr) noexcept : _handle(reinterpret_cast<std::uintptr_t>(ptr)) { } 
-
-	std::uintptr_t _handle;
+template <typename T, typename Storage = std::uint32_t> struct Handle {
+    constexpr Handle() = default;
+    constexpr explicit Handle(Storage handle) : _handle{ handle } {}
+    constexpr Storage operator*() const { return _handle; }
+    using StorageType = Storage;
+    Storage _handle{ ~Storage{ 0 } };
 };
