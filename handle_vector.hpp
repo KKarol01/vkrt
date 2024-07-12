@@ -42,6 +42,8 @@ template <typename T, typename HandleStorage = std::uint32_t> struct HandleVecto
     auto& back() { return storage.back(); }
     auto begin() { return storage.begin(); }
     auto end() { return storage.end(); }
+    auto& at(size_t idx) { return storage.at(idx); }
+    auto& at(size_t idx) const { return storage.at(idx); }
 
   private:
     Handle<T, HandleStorage> get_free_handle() {

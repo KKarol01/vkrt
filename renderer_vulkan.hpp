@@ -7,7 +7,7 @@
 #include "vulkan_structs.hpp"
 #include "handle_vector.hpp"
 
-enum class VkRendererFlags : uint32_t { DIRTY_INSTANCES = 0x1, DIRTY_MODELS = 0x2, DIRTY_TEXTURES = 0x4, DIRTY_UPLOADS = 0x8 };
+enum class VkRendererFlags : uint32_t { DIRTY_INSTANCES = 0x1, DIRTY_UPLOADS = 0x2, DIRTY_BLAS = 0x4 };
 inline Flags<VkRendererFlags> operator|(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } | b; }
 inline Flags<VkRendererFlags> operator&(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } & b; }
 
@@ -63,6 +63,7 @@ struct RenderMesh {
 };
 
 struct RenderModel {
+    Flags<VkRendererFlags> flags;
     size_t first_mesh{ 0 };
     size_t mesh_count{ 0 };
     size_t first_vertex{ 0 };
@@ -73,6 +74,11 @@ struct RenderModel {
     size_t material_count{ 0 };
     size_t first_texture{ 0 };
     size_t texture_count{ 0 };
+};
+
+struct RenderModelRTMetadata {
+    VkAccelerationStructureKHR blas;
+    Buffer blas_buffer;
 };
 
 struct ModelInstance {
@@ -109,7 +115,7 @@ class RendererVulkan : public Renderer {
     void build_sbt();
     void build_desc_sets();
     void create_rt_output_image();
-    void build_blas(RenderModel rm);
+    void build_dirty_blases();
     void build_tlas();
     void build_descriptor_pool();
     void allocate_rtpp_descriptor_set();
@@ -142,8 +148,7 @@ class RendererVulkan : public Renderer {
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> used_pool_buffers;
 
-    VkAccelerationStructureKHR tlas, blas;
-    Buffer blas_buffer;
+    VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer instance_data_buffer;
@@ -167,6 +172,7 @@ class RendererVulkan : public Renderer {
     std::vector<RenderMesh> meshes;
     HandleVector<RenderModel> models;
     std::vector<RenderInstanceBatch> instances;
+    std::vector<RenderModelRTMetadata> rt_metadata;
 
     Flags<VkRendererFlags> flags;
     struct UploadImage {
