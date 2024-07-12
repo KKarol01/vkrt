@@ -312,6 +312,10 @@ void RendererVulkan::render() {
         upload_staged_models();
         flags ^= VkRendererFlags::DIRTY_UPLOADS;
     }
+    if(flags & VkRendererFlags::DIRTY_BLAS) {
+        build_dirty_blases();
+        flags ^= VkRendererFlags::DIRTY_BLAS;
+    }
     return;
 
     vks::AcquireNextImageInfoKHR acq_info;
@@ -426,6 +430,11 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
                                              .first_texture = textures.size() + upload_images.size(),
                                              .texture_count = model.textures.size() });
 
+    if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
+        flags |= VkRendererFlags::DIRTY_BLAS;
+        models.get(handle).flags |= VkRendererFlags::DIRTY_BLAS;
+    }
+
     for(auto& mesh : model.meshes) {
         meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
                                      .index_offset = mesh.index_offset,
@@ -447,6 +456,8 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
 
     upload_indices.insert(upload_indices.end(), model.indices.begin(), model.indices.end());
 
+    rt_metadata.emplace_back();
+
     // clang-format off
     ENG_LOG("Batching model {}: [VXS: {:.2f} KB, IXS: {:.2f} KB, Textures: {:.2f} KB]", model.name,
             static_cast<float>(model.vertices.size() * sizeof(model.vertices[0])) / 1000.0f,
@@ -455,66 +466,6 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
     // clang-format on
 
     return HandleBatchedModel{ *handle };
-
-#if 0
-    stage_model_textures(model, settings);
-
-    for(auto& mat : model.materials) {
-        materials.push_back(RenderMaterial{
-            .color_texture = mat.color_texture ? textures.size() - model.textures.size() + *mat.color_texture : 0,
-            .normal_texture = mat.normal_texture ? textures.size() - model.textures.size() + *mat.normal_texture : 0,
-        });
-    }
-
-    std::vector<Vertex> vertices(model.vertices.size());
-    std::vector<uint32_t> indices(model.indices.size());
-    std::vector<uint32_t> per_triangle_material_idx(model.indices.size() / 3u);
-
-    for(size_t i = 0; i < model.vertices.size(); ++i) {
-        const auto& v = model.vertices.at(i);
-        vertices.at(i) = Vertex{
-            .pos = v.pos,
-            .nor = v.nor,
-            .uv = v.uv,
-        };
-    }
-
-    auto model_handle = models.insert(RenderModel{
-        .first_mesh = meshes.size(), .mesh_count = model.meshes.size(), .vertex_count = model.vertices.size(), .index_count = model.indices.size() });
-    instances.push_back(RenderInstanceBatch{
-        .instance_offset = static_cast<uint32_t>(instances.size() + instances.empty() ? 0 : instances.back().count), .count = 0 });
-
-    for(size_t i = 0, offset = 0; i < model.meshes.size(); ++i) {
-        const auto& m = model.meshes.at(i);
-        for(size_t j = 0; j < m.index_count; ++j) {
-            indices.at(j + offset) = model.indices.at(j + m.index_offset) + m.vertex_offset;
-
-            if(j % 3 == 0) {
-                per_triangle_material_idx.at((offset + j) / 3) =
-                    m.material ? static_cast<uint32_t>(materials.size() - model.materials.size() + *m.material) : 0u;
-            }
-        }
-        offset += m.index_count;
-
-        meshes.push_back(RenderMesh{ .vertex_offset = m.vertex_offset,
-                                     .index_offset = m.index_offset,
-                                     .vertex_count = m.vertex_count,
-                                     .index_count = m.index_count,
-                                     .material = m.material ? static_cast<uint32_t>(materials.size() - model.materials.size() + *m.material) : 0u });
-    }
-
-    vertex_buffer.push_data(std::as_bytes(std::span{ vertices }));
-    index_buffer.push_data(std::as_bytes(std::span{ indices }));
-
-    per_triangle_mesh_id_buffer = Buffer{ "per triangle mesh ids", per_triangle_material_idx.size() * sizeof(per_triangle_material_idx[0]),
-                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
-    per_triangle_mesh_id_buffer.push_data(std::as_bytes(std::span{ per_triangle_material_idx }));
-
-    ENG_LOG("Batching model {}: [VXS: {:.2f} KB, IXS: {:.2f} KB]", model.name, static_cast<float>(vertices.size() * sizeof(vertices[0])) / 1000.0f,
-            static_cast<float>(indices.size() * sizeof(indices[0]) / 1000.0f));
-
-    return HandleBatchedModel{ *model_handle };
-#endif
 }
 
 HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model) {
@@ -903,146 +854,175 @@ void RendererVulkan::create_rt_output_image() {
     vkQueueWaitIdle(gq);
 }
 
-void RendererVulkan::build_blas(RenderModel rm) {
-    vks::AccelerationStructureGeometryTrianglesDataKHR triangles;
-    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    triangles.vertexData.deviceAddress = vertex_buffer.bda;
-    triangles.vertexStride = sizeof(Vertex);
-    triangles.indexType = VK_INDEX_TYPE_UINT32;
-    triangles.indexData.deviceAddress = index_buffer.bda;
-    triangles.maxVertex = rm.vertex_count - 1;
-    triangles.transformData = {};
+void RendererVulkan::build_dirty_blases() {
+    std::vector<uint32_t> dirty;
+    for(uint32_t i = 0; i < models.size(); ++i) {
+        if(models.at(i).flags & VkRendererFlags::DIRTY_BLAS) {
+            dirty.push_back(i);
+            models.at(i).flags ^= VkRendererFlags::DIRTY_BLAS;
+        }
+    }
 
-    vks::AccelerationStructureGeometryKHR geometry;
-    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-    geometry.geometry.triangles = triangles;
+    std::vector<vks::AccelerationStructureGeometryTrianglesDataKHR> triangles(dirty.size());
+    std::vector<vks::AccelerationStructureGeometryKHR> geometries(dirty.size());
+    std::vector<vks::AccelerationStructureBuildGeometryInfoKHR> build_geometries(dirty.size());
+    std::vector<uint32_t> scratch_sizes(dirty.size());
+    std::vector<vks::AccelerationStructureBuildRangeInfoKHR> offsets(dirty.size());
+    Buffer scratch_buffer;
 
-    vks::AccelerationStructureBuildGeometryInfoKHR blas_geo;
-    blas_geo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    blas_geo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    blas_geo.geometryCount = 1;
-    blas_geo.pGeometries = &geometry;
-    blas_geo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    for(uint32_t i = 0; i < dirty.size(); ++i) {
+        const RenderModel& model = models.at(dirty.at(i));
+        RenderModelRTMetadata& meta = rt_metadata.at(dirty.at(i));
 
-    const uint32_t max_primitives = rm.index_count / 3;
-    vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
-    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &blas_geo, &max_primitives, &build_size_info);
+        triangles.at(i).vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        triangles.at(i).vertexData.deviceAddress = vertex_buffer.bda;
+        triangles.at(i).vertexStride = sizeof(Vertex);
+        triangles.at(i).indexType = VK_INDEX_TYPE_UINT32;
+        triangles.at(i).indexData.deviceAddress = index_buffer.bda;
+        triangles.at(i).maxVertex = model.vertex_count - 1u;
+        triangles.at(i).transformData = {};
 
-    Buffer buffer_blas{ "blas_buffer", build_size_info.accelerationStructureSize,
-                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        geometries.at(i).geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geometries.at(i).flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        geometries.at(i).geometry.triangles = triangles.at(i);
 
-    vks::AccelerationStructureCreateInfoKHR blas_info;
-    blas_info.buffer = buffer_blas.buffer;
-    blas_info.size = build_size_info.accelerationStructureSize;
-    blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &blas));
+        build_geometries.at(i).type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        build_geometries.at(i).flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        build_geometries.at(i).geometryCount = 1;
+        build_geometries.at(i).pGeometries = &geometries.at(i);
+        build_geometries.at(i).mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
 
-    Buffer buffer_scratch{ "blas_scratch_buffer", build_size_info.buildScratchSize, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        const uint32_t max_primitives = model.index_count / 3u;
+        vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
+        vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_geometries.at(i),
+                                                &max_primitives, &build_size_info);
 
-    blas_geo.dstAccelerationStructure = blas;
-    blas_geo.scratchData.deviceAddress =
-        align_up(buffer_scratch.bda, static_cast<VkDeviceAddress>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
+        meta.blas_buffer = Buffer{ "blas_buffer", build_size_info.accelerationStructureSize,
+                                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        scratch_sizes.at(i) = build_size_info.buildScratchSize;
 
-    vks::AccelerationStructureBuildRangeInfoKHR offset;
-    offset.firstVertex = 0;
-    offset.primitiveCount = max_primitives;
-    offset.primitiveOffset = 0;
-    offset.transformOffset = 0;
+        vks::AccelerationStructureCreateInfoKHR blas_info;
+        blas_info.buffer = meta.blas_buffer.buffer;
+        blas_info.size = build_size_info.accelerationStructureSize;
+        blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &meta.blas));
+    }
+
+    const auto total_scratch_size = std::accumulate(scratch_sizes.begin(), scratch_sizes.end(), 0ul);
+    scratch_buffer = { "blas_scratch_buffer", total_scratch_size, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+
+    for(uint32_t i = 0, offset = 0; i < dirty.size(); ++i) {
+        const RenderModel& model = models.at(dirty.at(i));
+        RenderModelRTMetadata& meta = rt_metadata.at(dirty.at(i));
+
+        build_geometries.at(i).scratchData.deviceAddress = scratch_buffer.bda + offset;
+        build_geometries.at(i).dstAccelerationStructure = meta.blas;
+
+        const uint32_t max_primitives = model.index_count / 3u;
+        offsets.at(i).firstVertex = model.first_vertex;
+        offsets.at(i).primitiveCount = max_primitives;
+        offsets.at(i).primitiveOffset = 0;
+        offsets.at(i).transformOffset = 0;
+
+        offset += scratch_sizes.at(i);
+    }
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    VkAccelerationStructureBuildRangeInfoKHR* offsets[]{ &offset };
-    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &blas_geo, offsets);
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR*> poffsets(dirty.size());
+    for(uint32_t i = 0; i < dirty.size(); ++i) {
+        poffsets.at(i) = &offsets.at(i);
+    }
+    vkCmdBuildAccelerationStructuresKHR(cmd, build_geometries.size(), build_geometries.data(), poffsets.data());
     submit_recording(gq, cmd);
     vkDeviceWaitIdle(dev);
-
-    blas_buffer = Buffer{ buffer_blas };
 }
 
 void RendererVulkan::build_tlas() {
-    // clang-format off
-     VkTransformMatrixKHR transform{
-         1.0f, 0.0f, 0.0f, 0.0f,
-         0.0f, 1.0f, 0.0f, 0.0f,
-         0.0f, 0.0f, 1.0f, 0.0f,
-     };
-    // clang-format on
+    // TODO: IMPLEMENT
 
-    vks::AccelerationStructureInstanceKHR instance;
-    instance.transform = transform;
-    instance.instanceCustomIndex = 0;
-    instance.mask = 0xFF;
-    instance.instanceShaderBindingTableRecordOffset = 0;
-    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    instance.accelerationStructureReference = blas_buffer.bda;
+    //// clang-format off
+    // VkTransformMatrixKHR transform{
+    //     1.0f, 0.0f, 0.0f, 0.0f,
+    //     0.0f, 1.0f, 0.0f, 0.0f,
+    //     0.0f, 0.0f, 1.0f, 0.0f,
+    // };
+    //// clang-format on
 
-    Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instance) * 2,
-                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true };
-    memcpy(buffer_instance.mapped, &instance, sizeof(instance));
+    // vks::AccelerationStructureInstanceKHR instance;
+    // instance.transform = transform;
+    // instance.instanceCustomIndex = 0;
+    // instance.mask = 0xFF;
+    // instance.instanceShaderBindingTableRecordOffset = 0;
+    // instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    // instance.accelerationStructureReference = blas_buffer.bda;
 
-    // clang-format off
-     VkTransformMatrixKHR transform2{
-         1.0f, 0.0f, 0.0f, 0.0f,
-         0.0f, 0.5f, 0.0f, -0.5f,
-         0.0f, 0.0f, 1.0f, 0.0f,
-     };
-    // clang-format on
-    instance.transform = transform2;
-    memcpy((std::byte*)buffer_instance.mapped + sizeof(instance), &instance, sizeof(instance));
+    // Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instance) * 2,
+    //                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true };
+    // memcpy(buffer_instance.mapped, &instance, sizeof(instance));
 
-    vks::AccelerationStructureGeometryKHR geometry;
-    geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-    geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    geometry.geometry.instances.arrayOfPointers = false;
-    geometry.geometry.instances.data.deviceAddress = buffer_instance.bda;
+    //// clang-format off
+    // VkTransformMatrixKHR transform2{
+    //     1.0f, 0.0f, 0.0f, 0.0f,
+    //     0.0f, 0.5f, 0.0f, -0.5f,
+    //     0.0f, 0.0f, 1.0f, 0.0f,
+    // };
+    //// clang-format on
+    // instance.transform = transform2;
+    // memcpy((std::byte*)buffer_instance.mapped + sizeof(instance), &instance, sizeof(instance));
 
-    vks::AccelerationStructureBuildGeometryInfoKHR build_info;
-    build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    build_info.geometryCount = 1;
-    build_info.pGeometries = &geometry;
+    // vks::AccelerationStructureGeometryKHR geometry;
+    // geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    // geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    // geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    // geometry.geometry.instances.arrayOfPointers = false;
+    // geometry.geometry.instances.data.deviceAddress = buffer_instance.bda;
 
-    vks::AccelerationStructureBuildSizesInfoKHR build_size;
-    const uint32_t max_primitives = 2;
-    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitives, &build_size);
+    // vks::AccelerationStructureBuildGeometryInfoKHR build_info;
+    // build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    // build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    // build_info.geometryCount = 1;
+    // build_info.pGeometries = &geometry;
 
-    Buffer buffer_tlas{ "tlas_buffer", build_size.accelerationStructureSize,
-                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false };
+    // vks::AccelerationStructureBuildSizesInfoKHR build_size;
+    // const uint32_t max_primitives = 2;
+    // vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &max_primitives, &build_size);
 
-    vks::AccelerationStructureCreateInfoKHR acc_info;
-    acc_info.buffer = buffer_tlas.buffer;
-    acc_info.size = build_size.accelerationStructureSize;
-    acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR(dev, &acc_info, nullptr, &tlas);
+    // Buffer buffer_tlas{ "tlas_buffer", build_size.accelerationStructureSize,
+    //                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false };
 
-    Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+    // vks::AccelerationStructureCreateInfoKHR acc_info;
+    // acc_info.buffer = buffer_tlas.buffer;
+    // acc_info.size = build_size.accelerationStructureSize;
+    // acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    // vkCreateAccelerationStructureKHR(dev, &acc_info, nullptr, &tlas);
 
-    vks::AccelerationStructureBuildGeometryInfoKHR build_tlas;
-    build_tlas.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    build_tlas.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    build_tlas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    build_tlas.dstAccelerationStructure = tlas;
-    build_tlas.geometryCount = 1;
-    build_tlas.pGeometries = &geometry;
-    build_tlas.scratchData.deviceAddress =
-        align_up(buffer_scratch.bda, static_cast<VkDeviceAddress>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
+    // Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
+    //                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    vks::AccelerationStructureBuildRangeInfoKHR build_range;
-    build_range.primitiveCount = 1;
-    build_range.primitiveOffset = 0;
-    build_range.firstVertex = 0;
-    build_range.transformOffset = 0;
-    VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
+    // vks::AccelerationStructureBuildGeometryInfoKHR build_tlas;
+    // build_tlas.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    // build_tlas.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    // build_tlas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    // build_tlas.dstAccelerationStructure = tlas;
+    // build_tlas.geometryCount = 1;
+    // build_tlas.pGeometries = &geometry;
+    // build_tlas.scratchData.deviceAddress =
+    //     align_up(buffer_scratch.bda, static_cast<VkDeviceAddress>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_tlas, build_ranges);
-    submit_recording(gq, cmd);
-    vkDeviceWaitIdle(dev);
+    // vks::AccelerationStructureBuildRangeInfoKHR build_range;
+    // build_range.primitiveCount = 1;
+    // build_range.primitiveOffset = 0;
+    // build_range.firstVertex = 0;
+    // build_range.transformOffset = 0;
+    // VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    tlas_buffer = Buffer{ buffer_tlas };
+    // auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    // vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_tlas, build_ranges);
+    // submit_recording(gq, cmd);
+    // vkDeviceWaitIdle(dev);
+
+    // tlas_buffer = Buffer{ buffer_tlas };
 }
 
 void RendererVulkan::build_descriptor_pool() {}

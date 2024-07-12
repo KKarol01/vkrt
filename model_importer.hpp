@@ -7,11 +7,11 @@
 #include <glm/glm.hpp>
 
 struct ImportedModel {
-	struct Vertex {
-		glm::vec3 pos{};
-		glm::vec3 nor{};
-		glm::vec2 uv{};
-	};
+    struct Vertex {
+        glm::vec3 pos{};
+        glm::vec3 nor{};
+        glm::vec2 uv{};
+    };
 
     struct Texture {
         std::string name;
@@ -25,14 +25,13 @@ struct ImportedModel {
         std::optional<uint32_t> normal_texture;
     };
 
-	struct Mesh {
+    struct Mesh {
         uint32_t vertex_offset{ 0 };
-		uint32_t index_offset{ 0 };
+        uint32_t index_offset{ 0 };
         uint32_t vertex_count{ 0 };
         uint32_t index_count{ 0 };
-        
         std::optional<uint32_t> material;
-	};
+    };
 
     std::string name;
     std::vector<Vertex> vertices;

@@ -2,12 +2,10 @@
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
-#include <glm/glm.hpp>
+#include <glm/vec3.hpp>
+#include <glm/mat4x4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
-#include <format>
-#include <print>
-#include <bit>
 #include "vulkan_structs.hpp"
 #include "model_importer.hpp"
 #include "engine.hpp"
@@ -22,18 +20,6 @@ struct Camera {
 
 static Camera camera;
 
-template <> struct std::formatter<glm::vec3> {
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-    auto format(const glm::vec3& v, std::format_context& ctx) const { return std::format_to(ctx.out(), "[{} {} {}]", v.x, v.y, v.z); }
-};
-
-template <> struct std::formatter<glm::uvec3> {
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-    auto format(const glm::uvec3& v, std::format_context& ctx) const { return std::format_to(ctx.out(), "[{} {} {}]", v.x, v.y, v.z); }
-};
-
-#include "handle_vector.hpp"
-
 int main() {
     try {
         Engine::init();
@@ -42,15 +28,15 @@ int main() {
         ImportedModel sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
 
         Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-		Engine::renderer()->render();
-		Engine::renderer()->render();
+        Engine::renderer()->render();
+        Engine::renderer()->render();
         Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
         Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-		Engine::renderer()->render();
+        Engine::renderer()->render();
         Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-		Engine::renderer()->render();
+        Engine::renderer()->render();
         return 0;
-        //Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
+        // Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
         const auto* window = Engine::window();
         auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
