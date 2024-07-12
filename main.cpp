@@ -42,7 +42,15 @@ int main() {
         ImportedModel sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
 
         Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-        Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
+		Engine::renderer()->render();
+		Engine::renderer()->render();
+        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
+        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
+		Engine::renderer()->render();
+        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
+		Engine::renderer()->render();
+        return 0;
+        //Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
         const auto* window = Engine::window();
         auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
 

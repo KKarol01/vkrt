@@ -169,20 +169,14 @@ class RendererVulkan : public Renderer {
     std::vector<RenderInstanceBatch> instances;
 
     Flags<VkRendererFlags> flags;
-
-    struct UploadData {
-        struct TextureUpload {
-            std::string name;
-            uint32_t width, height;
-            std::vector<std::byte> rgba_data;
-        };
-        std::vector<TextureUpload> textures;
-        std::vector<Vertex> vertices;
-        std::vector<uint32_t> indices;
-        std::vector<RenderModel> models;
-        std::vector<RenderMesh> meshes;
-        std::vector<RenderMaterial> materials;
-    } upload_data;
+    struct UploadImage {
+        std::string name;
+        uint32_t width, height;
+        std::vector<std::byte> rgba_data;
+    };
+    std::vector<Vertex> upload_vertices;
+    std::vector<uint32_t> upload_indices;
+    std::vector<UploadImage> upload_images;
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;

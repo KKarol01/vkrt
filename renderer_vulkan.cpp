@@ -308,11 +308,11 @@ template <typename T> static T align_up(T a, T b) { return (a + b - 1) & -b; }
 
 void RendererVulkan::render() {
     reset_command_pool(cmdpool);
-
     if(flags & VkRendererFlags::DIRTY_UPLOADS) {
         upload_staged_models();
         flags ^= VkRendererFlags::DIRTY_UPLOADS;
     }
+    return;
 
     vks::AcquireNextImageInfoKHR acq_info;
     uint32_t sw_img_idx;
@@ -408,42 +408,53 @@ void RendererVulkan::render() {
 }
 
 HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
-    upload_data.models.push_back(RenderModel{ .first_mesh = upload_data.meshes.size(),
-                                              .mesh_count = model.meshes.size(),
-                                              .first_vertex = upload_data.vertices.size(),
-                                              .vertex_count = model.vertices.size(),
-                                              .first_index = upload_data.indices.size(),
-                                              .index_count = model.indices.size(),
-                                              .first_material = upload_data.materials.size(),
-                                              .material_count = model.materials.size(),
-                                              .first_texture = upload_data.textures.size(),
-                                              .texture_count = model.textures.size() });
+    flags |= VkRendererFlags::DIRTY_UPLOADS;
+
+    const auto total_vertices =
+        std::accumulate(models.begin(), models.end(), 0ull, [](uint64_t sum, const RenderModel& m) { return sum + m.vertex_count; });
+    const auto total_indices =
+        std::accumulate(models.begin(), models.end(), 0ull, [](uint64_t sum, const RenderModel& m) { return sum + m.index_count; });
+
+    auto handle = models.insert(RenderModel{ .first_mesh = meshes.size(),
+                                             .mesh_count = model.meshes.size(),
+                                             .first_vertex = total_vertices,
+                                             .vertex_count = model.vertices.size(),
+                                             .first_index = total_indices,
+                                             .index_count = model.indices.size(),
+                                             .first_material = materials.size(),
+                                             .material_count = model.materials.size(),
+                                             .first_texture = textures.size() + upload_images.size(),
+                                             .texture_count = model.textures.size() });
 
     for(auto& mesh : model.meshes) {
-        upload_data.meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
-                                                 .index_offset = mesh.index_offset,
-                                                 .index_count = mesh.index_count,
-                                                 .material = mesh.material ? *mesh.material : 0 });
+        meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
+                                     .index_offset = mesh.index_offset,
+                                     .index_count = mesh.index_count,
+                                     .material = mesh.material ? *mesh.material : 0 });
     }
 
     for(auto& mat : model.materials) {
-        upload_data.materials.push_back(RenderMaterial{ .color_texture = mat.color_texture, .normal_texture = mat.normal_texture });
+        materials.push_back(RenderMaterial{ .color_texture = mat.color_texture, .normal_texture = mat.normal_texture });
     }
 
     for(auto& tex : model.textures) {
-        upload_data.textures.push_back(UploadData::TextureUpload{
-            .name = tex.name, .width = tex.size.first, .height = tex.size.second, .rgba_data = tex.rgba_data });
+        upload_images.push_back(UploadImage{ .name = tex.name, .width = tex.size.first, .height = tex.size.second, .rgba_data = tex.rgba_data });
     }
 
-    upload_data.vertices.resize(upload_data.vertices.size() + model.vertices.size());
-    std::transform(model.vertices.begin(), model.vertices.end(), upload_data.vertices.begin() + upload_data.vertices.size(),
+    upload_vertices.resize(upload_vertices.size() + model.vertices.size());
+    std::transform(model.vertices.begin(), model.vertices.end(), upload_vertices.end() - model.vertices.size(),
                    [](const ImportedModel::Vertex& v) { return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv }; });
 
-    upload_data.indices.insert(upload_data.indices.end(), model.indices.begin(), model.indices.end());
+    upload_indices.insert(upload_indices.end(), model.indices.begin(), model.indices.end());
 
-    flags |= VkRendererFlags::DIRTY_MODELS | VkRendererFlags::DIRTY_TEXTURES;
+    // clang-format off
+    ENG_LOG("Batching model {}: [VXS: {:.2f} KB, IXS: {:.2f} KB, Textures: {:.2f} KB]", model.name,
+            static_cast<float>(model.vertices.size() * sizeof(model.vertices[0])) / 1000.0f,
+            static_cast<float>(model.indices.size() * sizeof(model.indices[0]) / 1000.0f),
+            static_cast<float>(std::accumulate(model.textures.begin(), model.textures.end(), 0ull, [](uint64_t sum, const ImportedModel::Texture& tex) { return sum + tex.size.first * tex.size.second * 4u; })) / 1000.0f);
+    // clang-format on
 
-    return HandleBatchedModel{ static_cast<HandleBatchedModel::StorageType>(models.size() + upload_data.models.size() - 1) };
+    return HandleBatchedModel{ *handle };
 
 #if 0
     stage_model_textures(model, settings);
@@ -515,9 +526,8 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model) {
 }
 
 void RendererVulkan::upload_model_textures() {
-    const auto total_tex_size =
-        std::accumulate(upload_data.textures.begin(), upload_data.textures.end(), 0ull,
-                        [](uint64_t sum, const UploadData::TextureUpload& tex) { return sum + tex.width * tex.height * 4ull; });
+    const auto total_tex_size = std::accumulate(upload_images.begin(), upload_images.end(), 0ull,
+                                                [](uint64_t sum, const UploadImage& tex) { return sum + tex.width * tex.height * 4ull; });
 
     Buffer texture_staging_buffer{ "texture staging buffer", total_tex_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true };
 
@@ -525,12 +535,12 @@ void RendererVulkan::upload_model_textures() {
     std::vector<vks::CopyBufferToImageInfo2> texture_copy_datas;
     std::vector<vks::BufferImageCopy2> buffer_copies;
 
-    dst_textures.reserve(upload_data.textures.size());
-    texture_copy_datas.reserve(upload_data.textures.size());
-    buffer_copies.reserve(upload_data.textures.size());
+    dst_textures.reserve(upload_images.size());
+    texture_copy_datas.reserve(upload_images.size());
+    buffer_copies.reserve(upload_images.size());
 
     uint64_t texture_byte_offset = 0;
-    for(const auto& tex : upload_data.textures) {
+    for(const auto& tex : upload_images) {
         auto& texture = dst_textures.emplace_back(std::format("{}", tex.name), tex.width, tex.height, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
                                                   VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
@@ -572,52 +582,14 @@ void RendererVulkan::upload_model_textures() {
     textures.insert(textures.end(), std::make_move_iterator(dst_textures.begin()), std::make_move_iterator(dst_textures.end()));
 }
 void RendererVulkan::upload_staged_models() {
-    // TODO: remove duplicates
-    const uint32_t buffer_num_meshes = meshes.size();
-    const uint32_t buffer_num_vertices = vertex_buffer.size / sizeof(Vertex);
-    const uint32_t buffer_num_indices = index_buffer.size / sizeof(uint32_t);
-    const uint32_t buffer_material_offset = materials.size();
-    const uint32_t buffer_texture_offset = textures.size();
-    uint32_t mesh_offset = buffer_num_meshes;
-    uint32_t material_offset = buffer_material_offset;
-    uint32_t texture_offset = buffer_texture_offset;
-    uint32_t vertex_offset = buffer_num_vertices;
-    uint32_t index_offset = buffer_num_indices;
-    for(uint32_t i = 0; i < upload_data.models.size(); ++i) {
-        for(uint32_t j = 0; j < upload_data.models.at(i).material_count; ++j) {
-            auto& color_tex = upload_data.materials.at(upload_data.models.at(i).first_material + j).color_texture;
-            auto& norm_tex = upload_data.materials.at(upload_data.models.at(i).first_material + j).normal_texture;
-            if(color_tex) { *color_tex += texture_offset; }
-            if(norm_tex) { *norm_tex += texture_offset; }
-        }
-
-        auto& model = upload_data.models.at(i);
-        model.first_mesh += mesh_offset;
-        model.first_material += buffer_material_offset;
-        model.first_texture += buffer_texture_offset;
-        model.first_vertex += vertex_offset;
-        model.first_index += index_offset;
-        mesh_offset += model.mesh_count;
-        material_offset += model.material_count;
-        texture_offset += model.texture_count;
-        vertex_offset += model.vertex_count;
-        index_offset += model.index_count;
-    }
-
     upload_model_textures();
 
-    vertex_buffer.push_data(std::as_bytes(std::span{ upload_data.vertices }));
-    index_buffer.push_data(std::as_bytes(std::span{ upload_data.indices }));
-    models.insert(models.end(), std::make_move_iterator(upload_data.models.begin()), std::make_move_iterator(upload_data.models.end()));
-    meshes.insert(meshes.end(), std::make_move_iterator(upload_data.meshes.begin()), std::make_move_iterator(upload_data.meshes.end()));
-    materials.insert(materials.end(), std::make_move_iterator(upload_data.materials.begin()), std::make_move_iterator(upload_data.materials.end()));
+    vertex_buffer.push_data(std::as_bytes(std::span{ upload_vertices }));
+    index_buffer.push_data(std::as_bytes(std::span{ upload_indices }));
 
-    upload_data.textures = {};
-    upload_data.vertices = {};
-    upload_data.indices = {};
-    upload_data.models = {};
-    upload_data.meshes = {};
-    upload_data.materials = {};
+    upload_vertices = {};
+    upload_indices = {};
+    upload_images = {};
 }
 
 void RendererVulkan::compile_shaders() {
