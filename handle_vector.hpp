@@ -36,6 +36,7 @@ template <typename T, typename HandleStorage = std::uint32_t> struct HandleVecto
     T& get(Handle<T, HandleStorage> handle) { return storage.at(handle._handle); }
     const T& get(Handle<T, HandleStorage> handle) const { return storage.at(handle._handle); }
 
+    auto empty() const { return storage.empty(); }
     auto size() const { return storage.size(); }
     auto& front() { return storage.front(); }
     auto& back() { return storage.back(); }
