@@ -42,8 +42,8 @@ void main()
     vertex_buffer.vertices[gl_PrimitiveID + 2]
   );
   const vec2 uvs = verts[0].uv * attribs.x + verts[1].uv * attribs.y + verts[2].uv * barycentricCoords.x;
-  const float t = exp2(1.0 / float(gl_RayTmaxEXT));
-  const vec3 color_value = texture(textures[nonuniformEXT(triangle_materials.ids[gl_PrimitiveID])], uvs).rgb;
+  const float t = exp2(5.0 / float(gl_RayTmaxEXT));
+  const vec3 color_value = texture(textures[nonuniformEXT(triangle_materials.ids[gl_PrimitiveID])], uvs).rgb * (vec3(uvs.xy, 0.3)*0.5+0.5);
   //const vec3 color_value = vec3(uvs.xy * 0.5 + 0.5, 0.0);
   hitValue = pow(color_value * t, vec3(2.2));
 }

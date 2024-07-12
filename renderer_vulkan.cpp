@@ -309,6 +309,11 @@ template <typename T> static T align_up(T a, T b) { return (a + b - 1) & -b; }
 void RendererVulkan::render() {
     reset_command_pool(cmdpool);
 
+    if(flags & VkRendererFlags::DIRTY_UPLOADS) {
+        upload_staged_models();
+        flags ^= VkRendererFlags::DIRTY_UPLOADS;
+    }
+
     vks::AcquireNextImageInfoKHR acq_info;
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
@@ -340,9 +345,12 @@ void RendererVulkan::render() {
     VkClearColorValue clear_value{ 0.0f, 0.0f, 0.0f, 1.0f };
     VkImageSubresourceRange clear_range{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
     const auto* window = Engine::window();
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, 0, sizeof(per_triangle_mesh_id_buffer.bda), &per_triangle_mesh_id_buffer.bda);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, sizeof(VkDeviceAddress[2]), sizeof(VkDeviceAddress), &index_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, 0, sizeof(per_triangle_mesh_id_buffer.bda),
+                       &per_triangle_mesh_id_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, sizeof(VkDeviceAddress), sizeof(VkDeviceAddress),
+                       &vertex_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, sizeof(VkDeviceAddress[2]), sizeof(VkDeviceAddress),
+                       &index_buffer.bda);
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
 
     end_recording(raytrace_cmd);
@@ -399,59 +407,46 @@ void RendererVulkan::render() {
     vkQueueWaitIdle(gq);
 }
 
-void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
-    const auto total_tex_size =
-        std::accumulate(begin(model.textures), end(model.textures), 0ull,
-                        [](uint64_t sum, const ImportedModel::Texture& tex) { return sum + tex.size.first * tex.size.second * 4ull; });
+HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
+    upload_data.models.push_back(RenderModel{ .first_mesh = upload_data.meshes.size(),
+                                              .mesh_count = model.meshes.size(),
+                                              .first_vertex = upload_data.vertices.size(),
+                                              .vertex_count = model.vertices.size(),
+                                              .first_index = upload_data.indices.size(),
+                                              .index_count = model.indices.size(),
+                                              .first_material = upload_data.materials.size(),
+                                              .material_count = model.materials.size(),
+                                              .first_texture = upload_data.textures.size(),
+                                              .texture_count = model.textures.size() });
 
-    Buffer texture_staging_buffer{ "texture staging buffer", total_tex_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true };
-
-    std::vector<Image> dst_textures;
-    std::vector<vks::CopyBufferToImageInfo2> texture_copy_datas;
-    std::vector<vks::BufferImageCopy2> buffer_copies;
-    dst_textures.reserve(model.textures.size());
-    texture_copy_datas.reserve(model.textures.size());
-    buffer_copies.reserve(model.textures.size());
-    uint64_t texture_byte_offset = 0;
-    for(const auto& tex : model.textures) {
-        auto& texture = dst_textures.emplace_back(std::format("{}_{}", model.name, tex.name), tex.size.first, tex.size.second, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
-                                                  VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        vks::BufferImageCopy2& region = buffer_copies.emplace_back();
-        region.bufferOffset = texture_byte_offset;
-        region.imageExtent = { .width = tex.size.first, .height = tex.size.second, .depth = 1 };
-        region.imageSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        };
-
-        vks::CopyBufferToImageInfo2& copy = texture_copy_datas.emplace_back();
-        copy.srcBuffer = texture_staging_buffer.buffer;
-        copy.dstImage = texture.image;
-        copy.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        copy.regionCount = 1;
-        copy.pRegions = &region;
-
-        texture_staging_buffer.push_data(std::as_bytes(std::span{ tex.rgba_data }));
-        texture_byte_offset += tex.size.first * tex.size.second * 4ull;
+    for(auto& mesh : model.meshes) {
+        upload_data.meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
+                                                 .index_offset = mesh.index_offset,
+                                                 .index_count = mesh.index_count,
+                                                 .material = mesh.material ? *mesh.material : 0 });
     }
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    for(uint32_t i = 0; i < texture_copy_datas.size(); ++i) {
-        auto& copy = texture_copy_datas.at(i);
-        auto& texture = dst_textures.at(i);
-
-        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                  VK_ACCESS_2_TRANSFER_WRITE_BIT, true, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        vkCmdCopyBufferToImage2(cmd, &copy);
-        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT, false, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    for(auto& mat : model.materials) {
+        upload_data.materials.push_back(RenderMaterial{ .color_texture = mat.color_texture, .normal_texture = mat.normal_texture });
     }
-    submit_recording(gq, cmd);
-    vkQueueWaitIdle(gq);
-    textures.insert(textures.end(), std::make_move_iterator(dst_textures.begin()), std::make_move_iterator(dst_textures.end()));
+
+    for(auto& tex : model.textures) {
+        upload_data.textures.push_back(UploadData::TextureUpload{
+            .name = tex.name, .width = tex.size.first, .height = tex.size.second, .rgba_data = tex.rgba_data });
+    }
+
+    upload_data.vertices.resize(upload_data.vertices.size() + model.vertices.size());
+    std::transform(model.vertices.begin(), model.vertices.end(), upload_data.vertices.begin() + upload_data.vertices.size(),
+                   [](const ImportedModel::Vertex& v) { return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv }; });
+
+    upload_data.indices.insert(upload_data.indices.end(), model.indices.begin(), model.indices.end());
+
+    flags |= VkRendererFlags::DIRTY_MODELS | VkRendererFlags::DIRTY_TEXTURES;
+
+    return HandleBatchedModel{ static_cast<HandleBatchedModel::StorageType>(models.size() + upload_data.models.size() - 1) };
+
+#if 0
+    stage_model_textures(model, settings);
 
     for(auto& mat : model.materials) {
         materials.push_back(RenderMaterial{
@@ -473,8 +468,10 @@ void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
         };
     }
 
-    models.push_back(RenderModel{
+    auto model_handle = models.insert(RenderModel{
         .first_mesh = meshes.size(), .mesh_count = model.meshes.size(), .vertex_count = model.vertices.size(), .index_count = model.indices.size() });
+    instances.push_back(RenderInstanceBatch{
+        .instance_offset = static_cast<uint32_t>(instances.size() + instances.empty() ? 0 : instances.back().count), .count = 0 });
 
     for(size_t i = 0, offset = 0; i < model.meshes.size(); ++i) {
         const auto& m = model.meshes.at(i);
@@ -505,11 +502,122 @@ void RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
     ENG_LOG("Batching model {}: [VXS: {:.2f} KB, IXS: {:.2f} KB]", model.name, static_cast<float>(vertices.size() * sizeof(vertices[0])) / 1000.0f,
             static_cast<float>(indices.size() * sizeof(indices[0]) / 1000.0f));
 
-    if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
-        build_blas(models.back());
-        build_tlas();
-        build_desc_sets();
+    return HandleBatchedModel{ *model_handle };
+#endif
+}
+
+HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model) {
+    const auto& batched = models.get(Handle<RenderModel>{ *model });
+    auto& instance = instances.at(*model);
+
+    ++instance.count;
+    return HandleInstancedModel{ 0 };
+}
+
+void RendererVulkan::upload_model_textures() {
+    const auto total_tex_size =
+        std::accumulate(upload_data.textures.begin(), upload_data.textures.end(), 0ull,
+                        [](uint64_t sum, const UploadData::TextureUpload& tex) { return sum + tex.width * tex.height * 4ull; });
+
+    Buffer texture_staging_buffer{ "texture staging buffer", total_tex_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true };
+
+    std::vector<Image> dst_textures;
+    std::vector<vks::CopyBufferToImageInfo2> texture_copy_datas;
+    std::vector<vks::BufferImageCopy2> buffer_copies;
+
+    dst_textures.reserve(upload_data.textures.size());
+    texture_copy_datas.reserve(upload_data.textures.size());
+    buffer_copies.reserve(upload_data.textures.size());
+
+    uint64_t texture_byte_offset = 0;
+    for(const auto& tex : upload_data.textures) {
+        auto& texture = dst_textures.emplace_back(std::format("{}", tex.name), tex.width, tex.height, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
+                                                  VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        vks::BufferImageCopy2& region = buffer_copies.emplace_back();
+        region.bufferOffset = texture_byte_offset;
+        region.imageExtent = { .width = tex.width, .height = tex.height, .depth = 1 };
+        region.imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+
+        vks::CopyBufferToImageInfo2& copy = texture_copy_datas.emplace_back();
+        copy.srcBuffer = texture_staging_buffer.buffer;
+        copy.dstImage = texture.image;
+        copy.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        copy.regionCount = 1;
+        copy.pRegions = &region;
+
+        texture_staging_buffer.push_data(std::as_bytes(std::span{ tex.rgba_data }));
+        texture_byte_offset += tex.width * tex.height * 4ull;
     }
+
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    for(uint32_t i = 0; i < texture_copy_datas.size(); ++i) {
+        auto& copy = texture_copy_datas.at(i);
+        auto& texture = dst_textures.at(i);
+
+        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                  VK_ACCESS_2_TRANSFER_WRITE_BIT, true, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        vkCmdCopyBufferToImage2(cmd, &copy);
+        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT, false, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    }
+
+    submit_recording(gq, cmd);
+    vkQueueWaitIdle(gq);
+    textures.insert(textures.end(), std::make_move_iterator(dst_textures.begin()), std::make_move_iterator(dst_textures.end()));
+}
+void RendererVulkan::upload_staged_models() {
+    // TODO: remove duplicates
+    const uint32_t buffer_num_meshes = meshes.size();
+    const uint32_t buffer_num_vertices = vertex_buffer.size / sizeof(Vertex);
+    const uint32_t buffer_num_indices = index_buffer.size / sizeof(uint32_t);
+    const uint32_t buffer_material_offset = materials.size();
+    const uint32_t buffer_texture_offset = textures.size();
+    uint32_t mesh_offset = buffer_num_meshes;
+    uint32_t material_offset = buffer_material_offset;
+    uint32_t texture_offset = buffer_texture_offset;
+    uint32_t vertex_offset = buffer_num_vertices;
+    uint32_t index_offset = buffer_num_indices;
+    for(uint32_t i = 0; i < upload_data.models.size(); ++i) {
+        for(uint32_t j = 0; j < upload_data.models.at(i).material_count; ++j) {
+            auto& color_tex = upload_data.materials.at(upload_data.models.at(i).first_material + j).color_texture;
+            auto& norm_tex = upload_data.materials.at(upload_data.models.at(i).first_material + j).normal_texture;
+            if(color_tex) { *color_tex += texture_offset; }
+            if(norm_tex) { *norm_tex += texture_offset; }
+        }
+
+        auto& model = upload_data.models.at(i);
+        model.first_mesh += mesh_offset;
+        model.first_material += buffer_material_offset;
+        model.first_texture += buffer_texture_offset;
+        model.first_vertex += vertex_offset;
+        model.first_index += index_offset;
+        mesh_offset += model.mesh_count;
+        material_offset += model.material_count;
+        texture_offset += model.texture_count;
+        vertex_offset += model.vertex_count;
+        index_offset += model.index_count;
+    }
+
+    upload_model_textures();
+
+    vertex_buffer.push_data(std::as_bytes(std::span{ upload_data.vertices }));
+    index_buffer.push_data(std::as_bytes(std::span{ upload_data.indices }));
+    models.insert(models.end(), std::make_move_iterator(upload_data.models.begin()), std::make_move_iterator(upload_data.models.end()));
+    meshes.insert(meshes.end(), std::make_move_iterator(upload_data.meshes.begin()), std::make_move_iterator(upload_data.meshes.end()));
+    materials.insert(materials.end(), std::make_move_iterator(upload_data.materials.begin()), std::make_move_iterator(upload_data.materials.end()));
+
+    upload_data.textures = {};
+    upload_data.vertices = {};
+    upload_data.indices = {};
+    upload_data.models = {};
+    upload_data.meshes = {};
+    upload_data.materials = {};
 }
 
 void RendererVulkan::compile_shaders() {
