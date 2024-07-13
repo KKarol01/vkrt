@@ -24,18 +24,20 @@ int main() {
     try {
         Engine::init();
 
-        ImportedModel model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
-        ImportedModel sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
+        HandleBatchedModel cornell, sphere;
+        {
+            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
+            ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
+            cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
+            //sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
+        }
 
-        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-        Engine::renderer()->render();
-        Engine::renderer()->render();
-        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-        Engine::renderer()->render();
-        Engine::renderer()->batch_model(model, { .flags = BatchFlags::RAY_TRACED_BIT });
-        Engine::renderer()->render();
-        return 0;
+        Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        //Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        //Engine::renderer()->render();
+        //return 0;
         // Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
         const auto* window = Engine::window();
         auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -50,6 +52,7 @@ int main() {
         while(!glfwWindowShouldClose(Engine::window()->window)) {
             vk_renderer->render();
             glfwPollEvents();
+            //break;
         }
     } catch(const std::exception& err) {
         std::cerr << err.what();

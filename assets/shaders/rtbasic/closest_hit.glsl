@@ -35,6 +35,8 @@ hitAttributeEXT vec2 attribs;
 
 void main()
 {
+  hitValue = vec3(gl_RayTmaxEXT / 5.0);
+  return;
   const vec3 barycentricCoords = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
   const Vertex verts[3] = Vertex[](
     vertex_buffer.vertices[gl_PrimitiveID + 0],
