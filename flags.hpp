@@ -23,14 +23,6 @@ template <typename T> struct Flags {
         flags = flags ^ static_cast<U>(f);
         return *this;
     }
-    constexpr Flags<T>& operator|=(U f) {
-        flags = flags | f;
-        return *this;
-    }
-    constexpr Flags<T>& operator&=(U f) {
-        flags = flags & f;
-        return *this;
-    }
 
     constexpr operator bool() const { return flags > 0; }
 

@@ -7,7 +7,7 @@
 #include "vulkan_structs.hpp"
 #include "handle_vector.hpp"
 
-enum class VkRendererFlags : uint32_t { DIRTY_INSTANCES = 0x1, DIRTY_UPLOADS = 0x2, DIRTY_BLAS = 0x4 };
+enum class VkRendererFlags : uint32_t { DIRTY_INSTANCES = 0x1, DIRTY_UPLOADS = 0x2, DIRTY_BLAS = 0x4, DIRTY_TLAS = 0x8 };
 inline Flags<VkRendererFlags> operator|(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } | b; }
 inline Flags<VkRendererFlags> operator&(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } & b; }
 
@@ -56,24 +56,24 @@ struct RenderMaterial {
 
 struct RenderMesh {
     uint32_t vertex_offset{ 0 };
-    uint32_t index_offset{ 0 };
     uint32_t vertex_count{ 0 };
+    uint32_t index_offset{ 0 };
     uint32_t index_count{ 0 };
     uint32_t material{ 0 };
 };
 
 struct RenderModel {
     Flags<VkRendererFlags> flags;
-    size_t first_mesh{ 0 };
-    size_t mesh_count{ 0 };
-    size_t first_vertex{ 0 };
-    size_t vertex_count{ 0 };
-    size_t first_index{ 0 };
-    size_t index_count{ 0 };
-    size_t first_material{ 0 };
-    size_t material_count{ 0 };
-    size_t first_texture{ 0 };
-    size_t texture_count{ 0 };
+    uint32_t first_mesh{ 0 };
+    uint32_t mesh_count{ 0 };
+    uint32_t first_vertex{ 0 };
+    uint32_t vertex_count{ 0 };
+    uint32_t first_index{ 0 };
+    uint32_t index_count{ 0 };
+    uint32_t first_material{ 0 };
+    uint32_t material_count{ 0 };
+    uint32_t first_texture{ 0 };
+    uint32_t texture_count{ 0 };
 };
 
 struct RenderModelRTMetadata {
@@ -81,12 +81,15 @@ struct RenderModelRTMetadata {
     Buffer blas_buffer;
 };
 
-struct ModelInstance {
-    Handle<RenderModel> render_model;
+struct RenderModelInstance {
+    Handle<RenderModel> model;
+    Flags<InstanceFlags> flags;
+    uint32_t batch_index{ 0 };
 };
 
 struct RenderInstanceBatch {
-    uint32_t instance_offset{ 0 };
+    Handle<RenderMesh> mesh;
+    uint32_t first_instance{ 0 };
     uint32_t count{ 0 };
 };
 
@@ -98,17 +101,18 @@ struct RecordingSubmitInfo {
 
 class RendererVulkan : public Renderer {
   public:
-    void init() override;
+    void init() final;
 
     void initialize_vulkan();
     void create_swapchain();
 
-    void render() override;
+    void render() final;
 
     HandleBatchedModel batch_model(ImportedModel& model, BatchSettings settings) final;
-    HandleInstancedModel instance_model(HandleBatchedModel model) final;
+    HandleInstancedModel instance_model(HandleBatchedModel model, InstanceSettings settings) final;
     void upload_model_textures();
     void upload_staged_models();
+    void upload_instances();
 
     void compile_shaders();
     void build_rtpp();
@@ -170,9 +174,11 @@ class RendererVulkan : public Renderer {
     std::vector<Image> textures;
     std::vector<RenderMaterial> materials;
     std::vector<RenderMesh> meshes;
-    HandleVector<RenderModel> models;
-    std::vector<RenderInstanceBatch> instances;
     std::vector<RenderModelRTMetadata> rt_metadata;
+    HandleVector<RenderModel> models;
+
+    HandleVector<RenderModelInstance> model_instances;
+    std::vector<RenderInstanceBatch> batches;
 
     Flags<VkRendererFlags> flags;
     struct UploadImage {
@@ -180,9 +186,15 @@ class RendererVulkan : public Renderer {
         uint32_t width, height;
         std::vector<std::byte> rgba_data;
     };
+    struct InstanceUpload {
+        Handle<RenderMesh> batch;
+        glm::vec3 position{ 0.0f };
+    };
+
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
+    std::vector<InstanceUpload> upload_positions;
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;
