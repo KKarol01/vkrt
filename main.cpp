@@ -34,8 +34,18 @@ int main() {
 
         Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
-                                                                     .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }) });
+
+        glm::mat4 transforms[]{
+            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.8f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.4f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 0.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+        };
+
+        for(int i = 0; i < sizeof(transforms) / sizeof(transforms[0]); ++i) {
+            Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT, .transform = transforms[i] });
+        }
         // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         // Engine::renderer()->render();
         // return 0;
