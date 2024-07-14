@@ -119,7 +119,7 @@ class RendererVulkan : public Renderer {
     void build_sbt();
     void build_desc_sets();
     void create_rt_output_image();
-    void build_dirty_blases();
+    void build_blas();
     void build_tlas();
     void build_descriptor_pool();
     void allocate_rtpp_descriptor_set();

@@ -28,13 +28,13 @@ int main() {
         {
             ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
             ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
+            sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
             cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
-            //sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
         }
 
         Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        //Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         //Engine::renderer()->render();
         //return 0;
