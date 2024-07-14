@@ -3,6 +3,7 @@
 #include <span>
 #include <vulkan/vulkan.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+#include <glm/mat4x3.hpp>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
 #include "handle_vector.hpp"
@@ -84,6 +85,7 @@ struct RenderModelRTMetadata {
 struct RenderModelInstance {
     Handle<RenderModel> model;
     Flags<InstanceFlags> flags;
+    glm::mat4x3 transform{ 1.0f };
     uint32_t batch_index{ 0 };
 };
 
@@ -188,13 +190,13 @@ class RendererVulkan : public Renderer {
     };
     struct InstanceUpload {
         Handle<RenderMesh> batch;
-        glm::vec3 position{ 0.0f };
+        glm::mat4x3 transform{ 1.0f };
     };
 
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<InstanceUpload> upload_positions;
+    //std::vector<InstanceUpload> upload_positions;
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;

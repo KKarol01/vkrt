@@ -33,12 +33,13 @@ int main() {
         }
 
         Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        //Engine::renderer()->render();
-        //return 0;
-        // Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
+        // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                                     .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }) });
+        // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        // Engine::renderer()->render();
+        // return 0;
+        //  Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
         const auto* window = Engine::window();
         auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
@@ -52,7 +53,7 @@ int main() {
         while(!glfwWindowShouldClose(Engine::window()->window)) {
             vk_renderer->render();
             glfwPollEvents();
-            //break;
+            // break;
         }
     } catch(const std::exception& err) {
         std::cerr << err.what();

@@ -503,12 +503,14 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
         render_batch_it = batches.begin() + insert_idx;
     }
 
-    RenderModelInstance model_instance{ .model = Handle<RenderModel>{ *model }, .flags = settings.flags, .batch_index = render_batch_it->count };
+    RenderModelInstance model_instance{
+        .model = Handle<RenderModel>{ *model }, .flags = settings.flags, .transform = settings.transform, .batch_index = render_batch_it->count
+    };
 
     for(uint32_t i = 0; i < render_model.mesh_count; ++i) {
         const RenderMesh& render_mesh = meshes.at(render_model.first_mesh + i);
         render_batch_it->count++;
-        upload_positions.push_back(InstanceUpload{ .batch = Handle<RenderMesh>{ render_model.first_mesh + i } });
+        // upload_positions.push_back(InstanceUpload{ .batch = Handle<RenderMesh>{ render_model.first_mesh + i }, .transform = settings.transform });
         render_batch_it++;
     }
 
@@ -592,7 +594,8 @@ void RendererVulkan::upload_instances() {
         offset += batch.count;
     }
 
-    upload_positions = {};
+    // TODO: clear later (after building the TLAS, which uses it)
+    // upload_positions = {};
 }
 
 void RendererVulkan::compile_shaders() {
@@ -992,14 +995,6 @@ void RendererVulkan::build_blas() {
 }
 
 void RendererVulkan::build_tlas() {
-    // clang-format off
-	VkTransformMatrixKHR transform{
-	 1.0f, 0.0f, 0.0f, 0.0f,
-	 0.0f, 1.0f, 0.0f, 0.0f,
-	 0.0f, 0.0f, 1.0f, 0.0f,
-	};
-    // clang-format on
-
     std::vector<const RenderModelInstance*> render_model_instances;
     render_model_instances.reserve(model_instances.size());
 
@@ -1010,7 +1005,7 @@ void RendererVulkan::build_tlas() {
     std::vector<vks::AccelerationStructureInstanceKHR> instances(render_model_instances.size());
     for(uint32_t i = 0; i < instances.size(); ++i) {
         auto& instance = instances.at(i);
-        instance.transform = transform;
+        instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(render_model_instances.at(i)->transform));
         instance.instanceCustomIndex = 0;
         instance.mask = 0xFF;
         instance.instanceShaderBindingTableRecordOffset = 0;
