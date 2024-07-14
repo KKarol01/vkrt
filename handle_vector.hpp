@@ -8,7 +8,7 @@ template <typename T, typename HandleStorage = std::uint32_t> struct HandleVecto
   public:
     template <typename PushedType> Handle<T, HandleStorage> insert(PushedType&& val) {
         auto free_handle = get_free_handle();
-        if(*free_handle >= storage.capacity()) {
+        if(*free_handle >= storage.size()) {
             storage.push_back(std::forward<PushedType>(val));
         } else {
             storage.at(*free_handle) = std::forward<PushedType>(val);
