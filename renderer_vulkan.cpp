@@ -313,7 +313,7 @@ void RendererVulkan::render() {
         flags ^= VkRendererFlags::DIRTY_UPLOADS;
     }
     if(flags & VkRendererFlags::DIRTY_BLAS) {
-        build_dirty_blases();
+        build_blas();
         flags ^= VkRendererFlags::DIRTY_BLAS;
     }
     if(flags & VkRendererFlags::DIRTY_INSTANCES) {
@@ -464,7 +464,7 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
                    [](const ImportedModel::Vertex& v) { return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv }; });
 
     upload_indices.insert(upload_indices.end(), model.indices.begin(), model.indices.end());
-    for(uint32_t i = 0, offset = 0; i < model.meshes.size(); ++i) {
+    for(uint32_t i = 0, offset = models.get(handle).first_index; i < model.meshes.size(); ++i) {
         const auto& mesh = model.meshes.at(i);
         for(uint32_t j = 0; j < mesh.index_count; ++j) {
             upload_indices.at(offset + j) += mesh.vertex_offset;
@@ -906,7 +906,7 @@ void RendererVulkan::create_rt_output_image() {
     vkQueueWaitIdle(gq);
 }
 
-void RendererVulkan::build_dirty_blases() {
+void RendererVulkan::build_blas() {
     std::vector<uint32_t> dirty;
     for(uint32_t i = 0; i < models.size(); ++i) {
         if(models.at(i).flags & VkRendererFlags::DIRTY_BLAS) {
@@ -975,7 +975,7 @@ void RendererVulkan::build_dirty_blases() {
         const uint32_t max_primitives = model.index_count / 3u;
         offsets.at(i).firstVertex = model.first_vertex;
         offsets.at(i).primitiveCount = max_primitives;
-        offsets.at(i).primitiveOffset = 0;
+        offsets.at(i).primitiveOffset = model.first_index * sizeof(model.first_index);
         offsets.at(i).transformOffset = 0;
 
         offset += scratch_sizes.at(i);
