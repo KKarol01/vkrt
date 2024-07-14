@@ -1,5 +1,6 @@
 #pragma once
 
+#include <glm/mat4x3.hpp>
 #include "model_importer.hpp"
 #include "handle.hpp"
 #include "flags.hpp"
@@ -18,6 +19,7 @@ struct BatchSettings {
 
 struct InstanceSettings {
     Flags<InstanceFlags> flags;
+    glm::mat4x3 transform{ 1.0f };
 };
 
 struct BatchedModel;
