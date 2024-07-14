@@ -30,26 +30,22 @@ int main() {
             ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
             sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
             cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
+
+            Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+
+            glm::mat4 transforms[]{
+                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.8f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.4f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 0.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
+            };
+
+            for(int i = 0; i < sizeof(transforms) / sizeof(transforms[0]); ++i) {
+                Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT, .transform = transforms[i] });
+            }
         }
 
-        Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-
-        glm::mat4 transforms[]{
-            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.8f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.4f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 0.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-        };
-
-        for(int i = 0; i < sizeof(transforms) / sizeof(transforms[0]); ++i) {
-            Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT, .transform = transforms[i] });
-        }
-        // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-        // Engine::renderer()->render();
-        // return 0;
-        //  Engine::renderer()->batch_model(sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
         const auto* window = Engine::window();
         auto* vk_renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
@@ -63,7 +59,6 @@ int main() {
         while(!glfwWindowShouldClose(Engine::window()->window)) {
             vk_renderer->render();
             glfwPollEvents();
-            // break;
         }
     } catch(const std::exception& err) {
         std::cerr << err.what();
