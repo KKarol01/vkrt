@@ -20,11 +20,20 @@ struct Camera {
 
 static Camera camera;
 
+struct BoundingBox {
+    glm::vec3 center() const { return (max + min) * 0.5f; }
+    glm::vec3 size() const { return (max - min); }
+    glm::vec3 extent() const { return glm::abs(size() * 0.5f); }
+
+    glm::vec3 min{ FLT_MAX }, max{ -FLT_MAX };
+};
+
 int main() {
     try {
         Engine::init();
 
         HandleBatchedModel cornell, sphere;
+        BoundingBox box;
         {
             ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
             ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
@@ -33,16 +42,32 @@ int main() {
 
             Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
 
-            glm::mat4 transforms[]{
-                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.8f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.4f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 0.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-                glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 1.0f, 0.0f, 0.0f }) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f }),
-            };
+            for(const auto& v : import_model.vertices) {
+                box.min = glm::min(box.min, v.pos);
+                box.max = glm::max(box.max, v.pos);
+            }
+        }
 
-            for(int i = 0; i < sizeof(transforms) / sizeof(transforms[0]); ++i) {
-                Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT, .transform = transforms[i] });
+        box.min *= glm::vec3{ 0.9f, 0.7, 0.9f };
+        box.max *= glm::vec3{ 0.9f, 0.7, 0.9f };
+
+        const float probe_distance = 0.5f;
+
+        glm::uvec3 probe_counts{ box.size() / probe_distance };
+        probe_counts.x = std::bit_ceil(probe_counts.x);
+        probe_counts.y = std::bit_ceil(probe_counts.y);
+        probe_counts.z = std::bit_ceil(probe_counts.z);
+
+        const glm::vec3 probe_walk = box.size() / glm::vec3{ glm::max(probe_counts - 1u, glm::uvec3{ 1 }) };
+        for(int i = 0; i < probe_counts.x; ++i) {
+            for(int j = 0; j < probe_counts.y; ++j) {
+                for(int k = 0; k < probe_counts.z; ++k) {
+                    const glm::vec3 pos = box.min + probe_walk * glm::vec3{ i, j, k };
+
+                    Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                                                 .transform = glm::translate(glm::mat4{ 1.0f }, pos) *
+                                                                                              glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.1f }) });
+                }
             }
         }
 
