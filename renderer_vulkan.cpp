@@ -322,6 +322,7 @@ void RendererVulkan::render() {
     }
     if(flags & VkRendererFlags::DIRTY_TLAS) {
         build_tlas();
+        prepare_ddgi();
         build_desc_sets();
         flags ^= VkRendererFlags::DIRTY_TLAS;
     }
@@ -510,7 +511,6 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
     for(uint32_t i = 0; i < render_model.mesh_count; ++i) {
         const RenderMesh& render_mesh = meshes.at(render_model.first_mesh + i);
         render_batch_it->count++;
-        // upload_positions.push_back(InstanceUpload{ .batch = Handle<RenderMesh>{ render_model.first_mesh + i }, .transform = settings.transform });
         render_batch_it++;
     }
 
@@ -652,20 +652,26 @@ void RendererVulkan::build_rtpp() {
     resultImageLayoutBinding.descriptorCount = 1;
     resultImageLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
+    VkDescriptorSetLayoutBinding resultIrradianceLayoutBinding{};
+    resultIrradianceLayoutBinding.binding = 2;
+    resultIrradianceLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    resultIrradianceLayoutBinding.descriptorCount = 1;
+    resultIrradianceLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
+
     VkDescriptorSetLayoutBinding uniformBufferBinding{};
-    uniformBufferBinding.binding = 2;
+    uniformBufferBinding.binding = 3;
     uniformBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uniformBufferBinding.descriptorCount = 1;
     uniformBufferBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
     VkDescriptorSetLayoutBinding bindlessTexturesBinding{};
-    bindlessTexturesBinding.binding = 3;
+    bindlessTexturesBinding.binding = 4;
     bindlessTexturesBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindlessTexturesBinding.descriptorCount = 1024;
     bindlessTexturesBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
-    std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding, uniformBufferBinding,
-                                                         bindlessTexturesBinding });
+    std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding,
+                                                         resultIrradianceLayoutBinding, uniformBufferBinding, bindlessTexturesBinding });
     std::vector<VkDescriptorBindingFlags> binding_flags(bindings.size());
     for(uint32_t i = 0; i < binding_flags.size(); ++i) {
         binding_flags.at(i) = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
@@ -803,9 +809,9 @@ void RendererVulkan::build_sbt() {
 }
 
 void RendererVulkan::build_desc_sets() {
-    std::vector<VkDescriptorPoolSize> poolSizes = { { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2 },
-                                                    { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
-                                                    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
+    std::vector<VkDescriptorPoolSize> poolSizes = { { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 8 },
+                                                    { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8 },
+                                                    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 8 },
                                                     { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1024 },
                                                     { VK_DESCRIPTOR_TYPE_SAMPLER, 1024 } };
     vks::DescriptorPoolCreateInfo descriptorPoolCreateInfo;
@@ -843,6 +849,10 @@ void RendererVulkan::build_desc_sets() {
     storageImageDescriptor.imageView = rt_image.view;
     storageImageDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
+    VkDescriptorImageInfo ddgiIrradianceDescriptor{};
+    ddgiIrradianceDescriptor.imageView = ddgi.irradiance_texture.view;
+    ddgiIrradianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
     VkDescriptorBufferInfo ubo_descriptor{};
     ubo_descriptor.buffer = ubo.buffer;
     ubo_descriptor.offset = 0;
@@ -871,17 +881,19 @@ void RendererVulkan::build_desc_sets() {
         });
     }
 
+    VkDescriptorImageInfo output_image_infos[]{ storageImageDescriptor, ddgiIrradianceDescriptor };
+
     vks::WriteDescriptorSet resultImageWrite;
     resultImageWrite.dstSet = raytracing_set;
     resultImageWrite.dstBinding = 1;
     resultImageWrite.dstArrayElement = 0;
-    resultImageWrite.descriptorCount = 1;
+    resultImageWrite.descriptorCount = 2;
     resultImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    resultImageWrite.pImageInfo = &storageImageDescriptor;
+    resultImageWrite.pImageInfo = output_image_infos;
 
     vks::WriteDescriptorSet uniformBufferWrite;
     uniformBufferWrite.dstSet = raytracing_set;
-    uniformBufferWrite.dstBinding = 2;
+    uniformBufferWrite.dstBinding = 3;
     uniformBufferWrite.dstArrayElement = 0;
     uniformBufferWrite.descriptorCount = 1;
     uniformBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -889,7 +901,7 @@ void RendererVulkan::build_desc_sets() {
 
     vks::WriteDescriptorSet bindlessTexturesWrite;
     bindlessTexturesWrite.dstSet = raytracing_set;
-    bindlessTexturesWrite.dstBinding = 3;
+    bindlessTexturesWrite.dstBinding = 4;
     bindlessTexturesWrite.dstArrayElement = 0;
     bindlessTexturesWrite.descriptorCount = bindlessImagesDescriptors.size();
     bindlessTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -902,6 +914,7 @@ void RendererVulkan::build_desc_sets() {
 void RendererVulkan::create_rt_output_image() {
     const auto* window = Engine::window();
     rt_image = Image{ "rt_image", window->size[0], window->size[1], 1, 1, 1, swapchain_format, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
+
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
@@ -1065,7 +1078,35 @@ void RendererVulkan::build_tlas() {
     tlas_buffer = Buffer{ buffer_tlas };
 }
 
-void RendererVulkan::build_descriptor_pool() {}
+void RendererVulkan::prepare_ddgi() {
+    for(auto& mi : model_instances) {
+        auto& m = models.get(mi.model);
+
+        for(uint32_t i = 0; i < m.vertex_count; ++i) {
+            scene_bounding_box.min = glm::min(scene_bounding_box.min, ((Vertex*)vertex_buffer.mapped + m.first_vertex + i)->pos);
+            scene_bounding_box.max = glm::max(scene_bounding_box.max, ((Vertex*)vertex_buffer.mapped + m.first_vertex + i)->pos);
+        }
+    }
+
+    ddgi.probe_dims = scene_bounding_box;
+    ddgi.probe_dims.min *= glm::vec3{ 0.9f, 0.7f, 0.9f };
+    ddgi.probe_dims.max *= glm::vec3{ 0.9f, 0.7f, 0.9f };
+
+    ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
+    ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y), std::bit_ceil(ddgi.probe_counts.z) };
+
+    const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y + 2;
+    const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z + 2;
+
+    ddgi.irradiance_texture =
+        Image{ "ddgi_irradiance",     irradiance_texture_width,  irradiance_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+               VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT };
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    ddgi.irradiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    submit_recording(gq, cmd);
+    vkQueueWaitIdle(gq);
+}
 
 VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
     VkCommandBuffer cmd = get_or_allocate_free_command_buffer(pool);
