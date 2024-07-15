@@ -4,11 +4,12 @@
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 1, set = 0, rgba8) uniform image2D image;
-layout(binding = 2, set = 0) uniform CameraProperties {
+layout(binding = 2, set = 0, rgba16f) uniform image2D imageIrradiance;
+layout(binding = 3, set = 0) uniform CameraProperties {
     mat4 viewInverse;
     mat4 projInverse;
 } cam;
-layout(binding = 3, set = 0) uniform sampler2D textures[];
+layout(binding = 4, set = 0) uniform sampler2D textures[];
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
@@ -34,4 +35,5 @@ void main() {
     traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
 
     imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
+    imageStore(imageIrradiance, ivec2(10, 10), vec4(hitValue, 1.0));
 }

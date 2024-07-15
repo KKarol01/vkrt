@@ -102,6 +102,22 @@ struct RecordingSubmitInfo {
 };
 
 class RendererVulkan : public Renderer {
+    struct BoundingBox {
+        glm::vec3 center() const { return (max + min) * 0.5f; }
+        glm::vec3 size() const { return (max - min); }
+        glm::vec3 extent() const { return glm::abs(size() * 0.5f); }
+
+        glm::vec3 min{ FLT_MAX }, max{ -FLT_MAX };
+    };
+
+    struct DDGI_Settings {
+        BoundingBox probe_dims;
+        float probe_distance{ 0.5f };
+        glm::uvec3 probe_counts;
+        uint32_t irradiance_resolution{ 8 };
+        Image irradiance_texture;
+    };
+
   public:
     void init() final;
 
@@ -123,8 +139,7 @@ class RendererVulkan : public Renderer {
     void create_rt_output_image();
     void build_blas();
     void build_tlas();
-    void build_descriptor_pool();
-    void allocate_rtpp_descriptor_set();
+    void prepare_ddgi();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
     void submit_recording(VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems = {},
@@ -154,6 +169,7 @@ class RendererVulkan : public Renderer {
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> used_pool_buffers;
 
+    BoundingBox scene_bounding_box;
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer vertex_buffer, index_buffer;
@@ -170,6 +186,7 @@ class RendererVulkan : public Renderer {
     Buffer sbt;
     Buffer per_triangle_mesh_id_buffer;
 
+    DDGI_Settings ddgi;
     Image rt_image;
     Buffer ubo;
 
@@ -196,7 +213,7 @@ class RendererVulkan : public Renderer {
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    //std::vector<InstanceUpload> upload_positions;
+    // std::vector<InstanceUpload> upload_positions;
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;
