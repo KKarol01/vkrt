@@ -13,6 +13,33 @@ layout(binding = 4, set = 0) uniform sampler2D textures[];
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
+const float PI = 3.1415926535897932;
+
+vec3 sphericalFibonacci(float i, float n) {
+    const float PHI = sqrt(5) * 0.5 + 0.5;
+#   define madfrac(A, B) ((A)*(B)-floor((A)*(B)))
+    float phi = 2.0 * PI * madfrac(i, PHI - 1);
+    float cosTheta = 1.0 - (2.0 * i + 1.0) * (1.0 / n);
+    float sinTheta = sqrt(clamp(1.0 - cosTheta * cosTheta, 0.0, 1.0));
+
+    return vec3(
+        cos(phi) * sinTheta,
+        sin(phi) * sinTheta,
+        cosTheta);
+
+#   undef madfrac
+}
+
+vec3 normalToUvRectOct(vec3 normal){
+    normal /= dot(vec3(1.0), abs(normal));
+    
+    if(normal.z < 0.0) {
+         normal.xy = (1.0 - abs(normal.yx)) * sign(normal.xy);
+    }
+    
+    return normal.xyz;
+}
+
 void main() {
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
@@ -35,5 +62,11 @@ void main() {
     traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
 
     imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
-    imageStore(imageIrradiance, ivec2(10, 10), vec4(hitValue, 1.0));
+
+    for(int i=0; i<64; ++i) {
+        vec3 dir = sphericalFibonacci(float(i), 64.0);
+        vec2 pos = normalToUvRectOct(dir).xy * 0.5 + 0.5;
+        pos *= 8;
+		imageStore(imageIrradiance, ivec2(pos.xy), vec4(1.0));
+    }
 }
