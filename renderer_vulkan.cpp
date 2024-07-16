@@ -358,12 +358,16 @@ void RendererVulkan::render() {
     VkClearColorValue clear_value{ 0.0f, 0.0f, 0.0f, 1.0f };
     VkImageSubresourceRange clear_range{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
     const auto* window = Engine::window();
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, 0, sizeof(per_triangle_mesh_id_buffer.bda),
+    uint32_t push_offset = 0;
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(per_triangle_mesh_id_buffer.bda),
                        &per_triangle_mesh_id_buffer.bda);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, sizeof(VkDeviceAddress), sizeof(VkDeviceAddress),
+    push_offset += sizeof(VkDeviceAddress);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
                        &vertex_buffer.bda);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, sizeof(VkDeviceAddress[2]), sizeof(VkDeviceAddress),
+    push_offset += sizeof(VkDeviceAddress);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
                        &index_buffer.bda);
+    push_offset += sizeof(VkDeviceAddress);
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
 
     end_recording(raytrace_cmd);
@@ -979,7 +983,7 @@ void RendererVulkan::build_blas() {
 
     const auto total_scratch_size = std::accumulate(scratch_sizes.begin(), scratch_sizes.end(), 0ul);
     scratch_buffer = Buffer{ "blas_scratch_buffer", total_scratch_size, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
-                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     for(uint32_t i = 0, offset = 0; i < dirty.size(); ++i) {
         const RenderModel& model = models.at(dirty.at(i));
