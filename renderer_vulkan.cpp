@@ -362,11 +362,9 @@ void RendererVulkan::render() {
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(per_triangle_mesh_id_buffer.bda),
                        &per_triangle_mesh_id_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
-                       &vertex_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &vertex_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
-                       &index_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
 
@@ -596,6 +594,26 @@ void RendererVulkan::upload_instances() {
         RenderInstanceBatch& batch = batches.at(i);
         batch.first_instance = offset;
         offset += batch.count;
+    }
+
+    const auto total_drawn_triangles =
+        std::accumulate(model_instances.begin(), model_instances.end(), 0u,
+                        [this](uint32_t sum, const RenderModelInstance& i) { return sum + models.get(i.model).index_count / 3; });
+
+    per_triangle_mesh_id_buffer = Buffer{ "per_triangle_mesh_ids", total_drawn_triangles * sizeof(uint32_t),
+                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+
+    uint32_t* instance_ids_mapped = static_cast<uint32_t*>(per_triangle_mesh_id_buffer.mapped);
+    for(const auto& mi : model_instances) {
+        const auto& model = models.get(mi.model);
+        for(auto i = 0u; i < model.mesh_count; ++i) {
+            const auto& mesh = meshes.at(i + model.first_mesh);
+            const auto col_tex_id = materials.at(mesh.material + model.first_material).color_texture.value_or(0u);
+            for(auto j = 0u; j < mesh.index_count / 3; ++j) {
+                *instance_ids_mapped = col_tex_id + model.first_texture;
+                instance_ids_mapped++;
+            }
+        }
     }
 
     // TODO: clear later (after building the TLAS, which uses it)
