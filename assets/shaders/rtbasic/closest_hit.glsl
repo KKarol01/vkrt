@@ -28,6 +28,7 @@ layout(scalar, push_constant) uniform Constants {
     PerTriangleMaterialIds triangle_materials;   
     VertexBuffer vertex_buffer;
     IndexBuffer index_buffer;
+    uint32_t mode;
 };
 
 layout(location = 0) rayPayloadInEXT vec3 hitValue;
