@@ -32,11 +32,23 @@ layout(std430, buffer_reference, buffer_reference_align = 8) readonly buffer Ver
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer IndexBuffer {
     uint32_t indices[]; 
 };
+layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
+	vec3 probe_start; float _p1;
+	uvec3 probe_counts; uint _p2;
+	vec3 probe_walk;float _p3;
+	float min_dist;
+	float max_dist;
+	float normal_bias;
+	uint irr_res;
+    uint rays_per_probe;
+    uint irr_tex_idx;
+};
 
 layout(scalar, push_constant) uniform Constants {
     PerTriangleMaterialIds triangle_materials;   
     VertexBuffer vertex_buffer;
     IndexBuffer index_buffer;
+    DDGIBuffer ddgi;
     uint32_t mode;
 };
 
@@ -68,6 +80,21 @@ vec3 normalToUvRectOct(vec3 normal){
     return normal.xyz;
 }
 
+vec3 grid_coord_to_position(ivec3 grid_coords) {
+    return ddgi.probe_start + vec3(grid_coords) * ddgi.probe_walk;
+}
+
+ivec3 probe_index_to_grid_coord(int probe_id) {
+    ivec3 pos;
+    pos.x = probe_id & (int(ddgi.probe_counts.x) - 1);
+    pos.y = (probe_id & (int(ddgi.probe_counts.x) * int(ddgi.probe_counts.y) - 1)) >> findMSB(ddgi.probe_counts.x);
+    pos.z = probe_id >> findMSB(ddgi.probe_counts.x * ddgi.probe_counts.y);
+    return pos;
+}
+
+vec3 get_probe_location(int probe_id) {
+    return grid_coord_to_position(probe_index_to_grid_coord(probe_id));
+}
 
 void main() {
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
@@ -78,8 +105,8 @@ void main() {
     vec4 target = cam.projInverse * vec4(d.x, -d.y, 1, 1);
     vec4 direction = cam.viewInverse * vec4(normalize(target.xyz), 0);
 
-    float tmin = 0.001;
-    float tmax = 10000.0;
+    float tmin = 0.1;
+    float tmax = 5.0;
 
     hitValue = vec3(0.0);
 
@@ -92,11 +119,17 @@ void main() {
     if(mode == 0) {
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
 	} else if (mode == 1) {
-		for(int i=0; i<64; ++i) {
-			vec3 dir = sphericalFibonacci(float(i), 64.0);
-			vec2 pos = normalToUvRectOct(dir).xy * 0.5 + 0.5;
-			pos *= 8;
-			imageStore(imageIrradiance, ivec2(pos.xy), vec4(1.0));
-		}
+        const int probe_id = int(gl_LaunchIDEXT.x);
+        const int ray_id = int(gl_LaunchIDEXT.y);
+
+        vec4 ray_origin = vec4(get_probe_location(probe_id), ddgi.min_dist);
+        vec4 ray_dir = vec4(sphericalFibonacci(float(ray_id), float(ddgi.irr_res)), float(1e10));
+
+		//vec3 dir = sphericalFibonacci(float(i), ddgi.rays_per_probe);
+		//vec2 pos = (normalToUvRectOct(dir).xy * 0.5 + 0.5) * ddgi.irr_res;
+
+
+
+		imageStore(imageIrradiance, ivec2(0, 0), vec4(1.0));
     }
 }

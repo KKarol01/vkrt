@@ -366,8 +366,11 @@ void RendererVulkan::render() {
     push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
-    uint32_t mode = 0;
+    uint32_t mode = 1;
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+    push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(uint32_t), &mode);
+
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
 
     end_recording(raytrace_cmd);
@@ -845,7 +848,7 @@ void RendererVulkan::build_desc_sets() {
     descriptorPoolCreateInfo.maxSets = 1024;
     VK_CHECK(vkCreateDescriptorPool(dev, &descriptorPoolCreateInfo, nullptr, &raytracing_pool));
 
-    std::vector<uint32_t> variable_counts{ static_cast<uint32_t>(textures.size()) };
+    std::vector<uint32_t> variable_counts{ static_cast<uint32_t>(textures.size()) + 8 /*additional space*/ };
     vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_alloc_info;
     variable_alloc_info.descriptorSetCount = variable_counts.size();
     variable_alloc_info.pDescriptorCounts = variable_counts.data();
@@ -1119,6 +1122,8 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y), std::bit_ceil(ddgi.probe_counts.z) };
 
+    ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
+
     const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y + 2;
     const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z + 2;
 
@@ -1129,6 +1134,47 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.irradiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     submit_recording(gq, cmd);
+
+    vks::SamplerCreateInfo sampler_info;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.anisotropyEnable = false;
+    sampler_info.compareEnable = false;
+    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.magFilter = VK_FILTER_LINEAR;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.unnormalizedCoordinates = false;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 1.0f;
+    VkSampler sampler;
+    VK_CHECK(vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
+
+    VkDescriptorImageInfo write_irradiance_info;
+    write_irradiance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    write_irradiance_info.imageView = ddgi.irradiance_texture.view;
+    write_irradiance_info.sampler = sampler;
+
+    vks::WriteDescriptorSet write_irradiance_texture;
+    write_irradiance_texture.dstSet = raytracing_set;
+    write_irradiance_texture.descriptorCount = 1;
+    write_irradiance_texture.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write_irradiance_texture.dstBinding = 4;
+    write_irradiance_texture.dstArrayElement = textures.size();
+    write_irradiance_texture.pImageInfo = &write_irradiance_info;
+
+    ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    DDGI_Buffer* ddgi_buffer_mapped = static_cast<DDGI_Buffer*>(ddgi_buffer.mapped);
+    ddgi_buffer_mapped->probe_start = ddgi.probe_dims.min;
+    ddgi_buffer_mapped->probe_counts = ddgi.probe_counts;
+    ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
+    ddgi_buffer_mapped->min_dist = 0.08;
+    ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.1f;
+    ddgi_buffer_mapped->normal_bias = 0.25f;
+    ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
+    ddgi_buffer_mapped->rays_per_probe = 64;
+    ddgi_buffer_mapped->irr_tex_idx = textures.size();
+
     vkQueueWaitIdle(gq);
 }
 
