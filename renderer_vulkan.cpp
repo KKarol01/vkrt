@@ -183,6 +183,9 @@ void RendererVulkan::initialize_vulkan() {
     rtpp_features.rayTracingPipeline = true;
     rtpp_features.rayTraversalPrimitiveCulling = true;
 
+    vks::PhysicalDeviceScalarBlockLayoutFeatures scalar_features;
+    scalar_features.scalarBlockLayout = true;
+
     auto dev_ret = device_builder.add_pNext(&dev_2_features)
                        .add_pNext(&desc_features)
                        .add_pNext(&dyn_features)
@@ -191,6 +194,7 @@ void RendererVulkan::initialize_vulkan() {
                        .add_pNext(&bda_features)
                        .add_pNext(&acc_features)
                        .add_pNext(&rtpp_features)
+                       .add_pNext(&scalar_features)
                        .build();
     if(!dev_ret) { throw std::runtime_error{ "Failed to create Vulkan device. Error: " }; }
     vkb::Device vkb_device = dev_ret.value();

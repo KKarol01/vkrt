@@ -33,9 +33,9 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Ind
     uint32_t indices[]; 
 };
 layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
-	vec3 probe_start; float _p1;
-	uvec3 probe_counts; uint _p2;
-	vec3 probe_walk;float _p3;
+	vec3 probe_start;
+	uvec3 probe_counts;
+	vec3 probe_walk;
 	float min_dist;
 	float max_dist;
 	float normal_bias;
