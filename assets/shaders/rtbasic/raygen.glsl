@@ -14,6 +14,7 @@ layout(binding = 2, set = 0, rgba16f) uniform image2D imageIrradiance;
 layout(binding = 3, set = 0) uniform CameraProperties {
     mat4 viewInverse;
     mat4 projInverse;
+    mat3 randomRotation;
 } cam;
 layout(binding = 4, set = 0) uniform sampler2D textures[];
 
@@ -70,14 +71,14 @@ vec3 sphericalFibonacci(float i, float n) {
 #   undef madfrac
 }
 
-vec3 normalToUvRectOct(vec3 normal){
-    normal /= dot(vec3(1.0), abs(normal));
+vec2 normalToUvRectOct(vec3 normal){
+    vec2 p = normal.xy / dot(vec3(1.0), abs(normal));
     
     if(normal.z < 0.0) {
-         normal.xy = (1.0 - abs(normal.yx)) * sign(normal.xy);
+         p.xy = (1.0 - abs(p.yx)) * vec2(normal.x <= 0.0 ? -1 : 1, normal.y <= 0.0 ? -1 : 1);
     }
     
-    return normal.xyz;
+    return clamp(p.xy, vec2(-1.0), vec2(1.0));
 }
 
 vec3 grid_coord_to_position(ivec3 grid_coords) {
@@ -94,6 +95,10 @@ ivec3 probe_index_to_grid_coord(int probe_id) {
 
 vec3 get_probe_location(int probe_id) {
     return grid_coord_to_position(probe_index_to_grid_coord(probe_id));
+}
+
+uint get_probe_id(uvec3 launchid) {
+    return launchid.x + launchid.y * ddgi.probe_counts.x + launchid.z * ddgi.probe_counts.x * ddgi.probe_counts.y; 
 }
 
 void main() {
@@ -114,22 +119,27 @@ void main() {
     const uint sbtOffset = 3;
     const uint sbtStride = 1;
     const uint missIndex = 1;
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
 
     if(mode == 0) {
+		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
 	} else if (mode == 1) {
-        const int probe_id = int(gl_LaunchIDEXT.x);
-        const int ray_id = int(gl_LaunchIDEXT.y);
+        const uint probe_id = get_probe_id(gl_LaunchIDEXT.xyz);
+        const vec3 ray_origin = get_probe_location(int(probe_id));
+        const uint irs = ddgi.irr_res + 2;
 
-        vec4 ray_origin = vec4(get_probe_location(probe_id), ddgi.min_dist);
-        vec4 ray_dir = vec4(sphericalFibonacci(float(ray_id), float(ddgi.irr_res)), float(1e10));
+        for(uint i=0; i<ddgi.rays_per_probe; ++i) {
+			vec4 ray_dir = vec4(sphericalFibonacci(float(i), float(ddgi.irr_res)), float(1e10));
+            ray_dir.xyz = normalize(cam.randomRotation * ray_dir.xyz);
+			//traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, ray_origin.xyz, ddgi.min_dist, ray_dir.xyz, ddgi.max_dist, 0);
 
-		//vec3 dir = sphericalFibonacci(float(i), ddgi.rays_per_probe);
-		//vec2 pos = (normalToUvRectOct(dir).xy * 0.5 + 0.5) * ddgi.irr_res;
+			vec2 pos = (normalToUvRectOct(ray_dir.xyz).xy * 0.5 + 0.5) * ddgi.irr_res;
 
+			ivec3 grid_coord = probe_index_to_grid_coord(int(probe_id));
+            vec2 grid_pos_offset = vec2(grid_coord.x * irs + ddgi.probe_counts.x*grid_coord.y*irs, grid_coord.z*ddgi.probe_counts.x*ddgi.probe_counts.y);
+			//imageStore(imageIrradiance, ivec2(grid_pos_offset + vec2(1.0, 1.0) + pos), vec4(1.0));
+			imageStore(imageIrradiance, ivec2(pos), vec4(1.0));
+        }
 
-
-		imageStore(imageIrradiance, ivec2(0, 0), vec4(1.0));
     }
 }

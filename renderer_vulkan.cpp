@@ -266,7 +266,7 @@ void RendererVulkan::initialize_vulkan() {
 
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
-    ubo = Buffer{ "ubo", 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
+    ubo = Buffer{ "ubo", sizeof(glm::mat4[4]), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
     constexpr size_t ONE_MB = 1024 * 1024;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -375,7 +375,8 @@ void RendererVulkan::render() {
     push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(uint32_t), &mode);
 
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+    //vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.probe_counts.x, ddgi.probe_counts.y, ddgi.probe_counts.z);
 
     end_recording(raytrace_cmd);
     auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -652,6 +653,7 @@ void RendererVulkan::compile_shaders() {
     shaderc::CompileOptions options;
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
     options.SetTargetSpirv(shaderc_spirv_version_1_6);
+    options.SetGenerateDebugInfo();
     for(int i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
         auto res = c.CompileGlslToSpv(read_file(files[i]), kinds[i], files[i].filename().string().c_str(), options);
 
