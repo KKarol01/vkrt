@@ -1,11 +1,15 @@
 #include <volk/volk.h>
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define GLM_ENABLE_EXPERIMENTAL
 #include <GLFW/glfw3native.h>
 #include <glm/vec3.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/mat3x3.hpp>
+#include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <random>
 #include "vulkan_structs.hpp"
 #include "model_importer.hpp"
 #include "engine.hpp"
@@ -44,8 +48,17 @@ int main() {
         memcpy(vk_renderer->ubo.mapped, &inv_view[0][0], sizeof(inv_view));
         memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(inv_view), &inv_projection[0][0], sizeof(inv_projection));
 
+        std::mt19937 eng;
+        std::uniform_real_distribution<float> dist{ 0.0f, 1.0f };
+
         while(!glfwWindowShouldClose(Engine::window()->window)) {
+			glm::vec3 rand{ dist(eng) * 2.0f, dist(eng) * 2.0f, dist(eng) * 2.0f };
+			rand = glm::normalize(rand);
+			const auto rand_mat = glm::mat3{ glm::eulerAngleXYZ(rand.x, rand.y, rand.z) };
+			memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(glm::mat4[2]), &rand_mat[0][0], sizeof(rand_mat));
+
             vk_renderer->render();
+
             glfwPollEvents();
         }
     } catch(const std::exception& err) {
