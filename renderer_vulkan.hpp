@@ -114,8 +114,20 @@ class RendererVulkan : public Renderer {
         BoundingBox probe_dims;
         float probe_distance{ 0.5f };
         glm::uvec3 probe_counts;
+        glm::vec3 probe_walk;
         uint32_t irradiance_resolution{ 8 };
         Image irradiance_texture;
+    };
+    struct DDGI_Buffer {
+        alignas(16) glm::vec3 probe_start;
+        alignas(16) glm::uvec3 probe_counts;
+        alignas(16) glm::vec3 probe_walk;
+        alignas(16) float min_dist;
+        float max_dist;
+        float normal_bias;
+        uint32_t irradiance_resolution;
+        uint32_t rays_per_probe;
+        uint32_t irr_tex_idx;
     };
 
   public:
@@ -189,6 +201,7 @@ class RendererVulkan : public Renderer {
     DDGI_Settings ddgi;
     Image rt_image;
     Buffer ubo;
+    Buffer ddgi_buffer;
 
     std::vector<Image> textures;
     std::vector<RenderMaterial> materials;
