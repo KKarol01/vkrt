@@ -119,10 +119,10 @@ class RendererVulkan : public Renderer {
         Image irradiance_texture;
     };
     struct DDGI_Buffer {
-        alignas(16) glm::vec3 probe_start;
-        alignas(16) glm::uvec3 probe_counts;
-        alignas(16) glm::vec3 probe_walk;
-        alignas(16) float min_dist;
+        glm::vec3 probe_start;
+        glm::uvec3 probe_counts;
+        glm::vec3 probe_walk;
+        float min_dist;
         float max_dist;
         float normal_bias;
         uint32_t irradiance_resolution;
