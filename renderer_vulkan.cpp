@@ -5,6 +5,9 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
 #include <shaderc/shaderc.hpp>
+// TODO: This shouldn't be here
+#define STB_INCLUDE_IMPLEMENTATION
+#define STB_INCLUDE_LINE_GLSL
 #include <stb/stb_include.h>
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
@@ -363,20 +366,20 @@ void RendererVulkan::render() {
     VkImageSubresourceRange clear_range{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 };
     const auto* window = Engine::window();
     uint32_t push_offset = 0;
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(per_triangle_mesh_id_buffer.bda),
-                       &per_triangle_mesh_id_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset,
+                       sizeof(per_tlas_instance_mesh_data_and_offset_buffer.bda), &per_tlas_instance_mesh_data_and_offset_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &vertex_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
-    uint32_t mode = 1;
+    uint32_t mode = 0;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &ddgi_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(uint32_t), &mode);
 
-    //vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.probe_counts.x, ddgi.probe_counts.y, ddgi.probe_counts.z);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+    // vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rt_result.width, ddgi.rt_result.height, 1u);
 
     end_recording(raytrace_cmd);
     auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -477,7 +480,7 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
                    [](const ImportedModel::Vertex& v) { return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv }; });
 
     upload_indices.insert(upload_indices.end(), model.indices.begin(), model.indices.end());
-    for(uint32_t i = 0, offset = models.get(handle).first_index; i < model.meshes.size(); ++i) {
+    for(uint32_t i = 0, offset = upload_indices.size() - model.indices.size(); i < model.meshes.size(); ++i) {
         const auto& mesh = model.meshes.at(i);
         for(uint32_t j = 0; j < mesh.index_count; ++j) {
             upload_indices.at(offset + j) += mesh.vertex_offset;
@@ -606,24 +609,63 @@ void RendererVulkan::upload_instances() {
         offset += batch.count;
     }
 
-    const auto total_drawn_triangles =
-        std::accumulate(model_instances.begin(), model_instances.end(), 0u,
-                        [this](uint32_t sum, const RenderModelInstance& i) { return sum + models.get(i.model).index_count / 3; });
+    uint32_t total_drawn_triangles = 0;
+    std::vector<RenderModelInstanceMeshData> per_instance_mesh_datas;
+    per_instance_mesh_datas.reserve(meshes.size() * model_instances.size());
+    for(auto& model : models) {
+        for(auto i = 0u; i < model.mesh_count; ++i) {
+            auto& mesh = meshes.at(model.first_mesh + i);
+            auto& material = materials.at(model.first_material + mesh.material);
+
+            RenderModelInstanceMeshData& imd = per_instance_mesh_datas.emplace_back();
+            imd = { .index_offset = model.first_index + mesh.index_offset,
+                    .vertex_offset = model.first_vertex + mesh.vertex_offset,
+                    .color_texture_idx = model.first_texture + material.color_texture.value_or(0u) };
+        }
+
+        total_drawn_triangles += model.index_count / 3u;
+    }
 
     per_triangle_mesh_id_buffer = Buffer{ "per_triangle_mesh_ids", total_drawn_triangles * sizeof(uint32_t),
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    per_model_instance_mesh_data_buffer =
+        Buffer{ "per tlas instance mesh data", per_instance_mesh_datas.size() * sizeof(per_instance_mesh_datas[0]),
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    per_tlas_instance_mesh_data_offset_buffer = Buffer{ "per tlas instance mesh data offsets", model_instances.size() * sizeof(uint32_t),
+                                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    per_tlas_instance_mesh_data_and_offset_buffer = Buffer{ "per tlas instance mesh data and offsets", sizeof(VkDeviceAddress[3]),
+                                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
 
-    uint32_t* instance_ids_mapped = static_cast<uint32_t*>(per_triangle_mesh_id_buffer.mapped);
+    memcpy((VkDeviceAddress*)per_tlas_instance_mesh_data_and_offset_buffer.mapped + 0, &per_triangle_mesh_id_buffer.bda, sizeof(VkDeviceAddress));
+    memcpy((VkDeviceAddress*)per_tlas_instance_mesh_data_and_offset_buffer.mapped + 1, &per_model_instance_mesh_data_buffer.bda, sizeof(VkDeviceAddress));
+    memcpy((VkDeviceAddress*)per_tlas_instance_mesh_data_and_offset_buffer.mapped + 2, &per_tlas_instance_mesh_data_offset_buffer.bda,
+           sizeof(VkDeviceAddress));
+
+    per_model_instance_mesh_data_buffer.push_data(std::as_bytes(std::span{ per_instance_mesh_datas }));
+
+    uint32_t* per_tlas_instance_mesh_data_offset_mapped = static_cast<uint32_t*>(per_tlas_instance_mesh_data_offset_buffer.mapped);
+    uint32_t* per_triangle_mesh_id_mapped = static_cast<uint32_t*>(per_triangle_mesh_id_buffer.mapped);
+
+    uint32_t instance_offset = 0;
+    std::unordered_map<Handle<RenderModel>, uint32_t> instance_offsets;
+
     for(const auto& mi : model_instances) {
         const auto& model = models.get(mi.model);
         for(auto i = 0u; i < model.mesh_count; ++i) {
             const auto& mesh = meshes.at(i + model.first_mesh);
-            const auto col_tex_id = materials.at(mesh.material + model.first_material).color_texture.value_or(0u);
             for(auto j = 0u; j < mesh.index_count / 3; ++j) {
-                *instance_ids_mapped = col_tex_id + model.first_texture;
-                instance_ids_mapped++;
+                *per_triangle_mesh_id_mapped = model.first_mesh + i;
+                per_triangle_mesh_id_mapped++;
             }
         }
+
+        if(!instance_offsets.contains(mi.model)) {
+            instance_offsets[mi.model] = instance_offset;
+            instance_offset += models.get(mi.model).index_count / 3u;
+        }
+
+        *per_tlas_instance_mesh_data_offset_mapped = instance_offsets.at(mi.model);
+        per_tlas_instance_mesh_data_offset_mapped++;
     }
 
     // TODO: clear later (after building the TLAS, which uses it)
@@ -634,17 +676,22 @@ void RendererVulkan::compile_shaders() {
     shaderc::Compiler c;
 
     static const auto read_file = [](const std::filesystem::path& path) {
-        std::ifstream file{ path };
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        return buffer.str();
+        std::string path_str = path.string();
+        std::string path_to_includes = path.parent_path().string();
+
+        char error[256];
+
+        char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
+        std::string parsed_file_str{ parsed_file };
+        free(parsed_file);
+        return parsed_file_str;
     };
 
     std::filesystem::path files[]{
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.rchit",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.glsl",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss2.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
     };
     shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_miss_shader, shaderc_raygen_shader };
     std::vector<std::vector<uint32_t>> compiled_modules;
@@ -655,7 +702,8 @@ void RendererVulkan::compile_shaders() {
     options.SetTargetSpirv(shaderc_spirv_version_1_6);
     options.SetGenerateDebugInfo();
     for(int i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
-        auto res = c.CompileGlslToSpv(read_file(files[i]), kinds[i], files[i].filename().string().c_str(), options);
+        std::string file_str = read_file(files[i]);
+        auto res = c.CompileGlslToSpv(file_str, kinds[i], files[i].filename().string().c_str(), options);
 
         if(res.GetCompilationStatus() != shaderc_compilation_status_success) {
             throw std::runtime_error{ std::format("Could not compile shader: {}, because: \"{}\"", files[i].string(), res.GetErrorMessage()) };
@@ -883,7 +931,7 @@ void RendererVulkan::build_desc_sets() {
     storageImageDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkDescriptorImageInfo ddgiIrradianceDescriptor{};
-    ddgiIrradianceDescriptor.imageView = ddgi.irradiance_texture.view;
+    ddgiIrradianceDescriptor.imageView = ddgi.rt_result.view;
     ddgiIrradianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkDescriptorBufferInfo ubo_descriptor{};
@@ -1133,12 +1181,12 @@ void RendererVulkan::prepare_ddgi() {
     const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y + 2;
     const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z + 2;
 
-    ddgi.irradiance_texture =
-        Image{ "ddgi_irradiance",     irradiance_texture_width,  irradiance_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
-               VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT };
+    ddgi.rt_result = Image{
+        "rt_result", ddgi.rays_per_probe, ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT
+    };
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    ddgi.irradiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.rt_result.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     submit_recording(gq, cmd);
 
     vks::SamplerCreateInfo sampler_info;
@@ -1157,7 +1205,7 @@ void RendererVulkan::prepare_ddgi() {
 
     VkDescriptorImageInfo write_irradiance_info;
     write_irradiance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    write_irradiance_info.imageView = ddgi.irradiance_texture.view;
+    write_irradiance_info.imageView = ddgi.rt_result.view;
     write_irradiance_info.sampler = sampler;
 
     vks::WriteDescriptorSet write_irradiance_texture;
@@ -1178,7 +1226,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.1f;
     ddgi_buffer_mapped->normal_bias = 0.25f;
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
-    ddgi_buffer_mapped->rays_per_probe = 64;
+    ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
     ddgi_buffer_mapped->irr_tex_idx = textures.size();
 
     vkQueueWaitIdle(gq);
@@ -1289,7 +1337,7 @@ VkCommandBuffer RendererVulkan::get_or_allocate_free_command_buffer(VkCommandPoo
 
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
              VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : format(format), mips(mips), layers(layers) {
+    : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
     vks::ImageCreateInfo iinfo;
 

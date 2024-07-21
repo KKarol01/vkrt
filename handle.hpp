@@ -11,3 +11,10 @@ template <typename T, typename Storage = std::uint32_t> struct Handle {
     using StorageType = Storage;
     Storage _handle{ ~Storage{ 0 } };
 };
+
+namespace std {
+template <typename T> class hash<Handle<T>> {
+  public:
+    size_t operator()(const Handle<T>& h) const { return *h; }
+};
+} // namespace std

@@ -41,6 +41,7 @@ struct Image {
     VkImageView view{};
     VkFormat format{};
     VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
+    uint32_t width{ 0 }, height{ 0 }, depth{ 0 };
     uint32_t mips{}, layers{};
 };
 
@@ -101,6 +102,17 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
 
+struct RenderModelInstanceMeshData {
+    uint32_t index_offset;
+    uint32_t vertex_offset;
+    uint32_t color_texture_idx;
+};
+
+struct RenderModelInstanceMeshDataAndOffsets{
+    VkDeviceAddress render_model_instance_mesh_data_buffer;
+    VkDeviceAddress render_model_isntance_mesh_offsets_buffer;
+};
+
 class RendererVulkan : public Renderer {
     struct BoundingBox {
         glm::vec3 center() const { return (max + min) * 0.5f; }
@@ -116,7 +128,8 @@ class RendererVulkan : public Renderer {
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
         uint32_t irradiance_resolution{ 8 };
-        Image irradiance_texture;
+        uint32_t rays_per_probe{ 64 };
+        Image rt_result;
     };
     struct DDGI_Buffer {
         glm::vec3 probe_start;
@@ -185,7 +198,6 @@ class RendererVulkan : public Renderer {
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer vertex_buffer, index_buffer;
-    Buffer instance_data_buffer;
 
     std::vector<VkShaderModule> shader_modules;
 
@@ -197,6 +209,9 @@ class RendererVulkan : public Renderer {
     VkDescriptorPool raytracing_pool;
     Buffer sbt;
     Buffer per_triangle_mesh_id_buffer;
+    Buffer per_model_instance_mesh_data_buffer;
+    Buffer per_tlas_instance_mesh_data_offset_buffer;
+    Buffer per_tlas_instance_mesh_data_and_offset_buffer;
 
     DDGI_Settings ddgi;
     Image rt_image;
