@@ -1,6 +1,6 @@
 #include <volk/volk.h>
-#include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3.h>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <GLFW/glfw3native.h>
 #include <glm/vec3.hpp>
@@ -35,7 +35,16 @@ int main() {
             sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
             cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
 
-            Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+            Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                                          .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -1.0, 0.0, 0.0 }) *
+                                                                                       glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.1f }) });
+            //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
+            //                                                              .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 1.0, 0.0, 0.0 }) *
+            //                                                                           glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) });
+            Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                                          .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -1.0, 0.0, 0.0 }) *
+                                                                                       glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) });
+
         }
 
         const auto* window = Engine::window();
@@ -52,10 +61,10 @@ int main() {
         std::uniform_real_distribution<float> dist{ 0.0f, 1.0f };
 
         while(!glfwWindowShouldClose(Engine::window()->window)) {
-			glm::vec3 rand{ dist(eng) * 2.0f, dist(eng) * 2.0f, dist(eng) * 2.0f };
-			rand = glm::normalize(rand);
-			const auto rand_mat = glm::mat3{ glm::eulerAngleXYZ(rand.x, rand.y, rand.z) };
-			memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(glm::mat4[2]), &rand_mat[0][0], sizeof(rand_mat));
+            glm::vec3 rand{ dist(eng) * 2.0f, dist(eng) * 2.0f, dist(eng) * 2.0f };
+            rand = glm::normalize(rand);
+            const auto rand_mat = glm::mat3{ glm::eulerAngleXYZ(rand.x, rand.y, rand.z) };
+            memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(glm::mat4[2]), &rand_mat[0][0], sizeof(rand_mat));
 
             vk_renderer->render();
 
