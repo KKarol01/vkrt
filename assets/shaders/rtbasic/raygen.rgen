@@ -68,7 +68,7 @@ void main() {
     vec2 d = inUV * 2.0 - 1.0;
 
     vec4 origin = cam.viewInverse * vec4(0, 0, 0, 1);
-    vec4 target = cam.projInverse * vec4(d.x, -d.y, 1, 1);
+    vec4 target = cam.projInverse * vec4(vec3(vec4(d.x, -d.y, 1, 1).xyz), 1.0);
     vec4 direction = cam.viewInverse * vec4(normalize(target.xyz), 0);
 
     float tmin = 0.00001;
@@ -83,7 +83,7 @@ void main() {
     const uint missIndex = 1;
 
     if(mode == 0) {
-		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, (direction.xyz), tmax, 0);
+		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.radiance, 1.0));
 	} else if (mode == 1) {
         const ivec2 pixel_coord = ivec2(gl_LaunchIDEXT.xy); 
@@ -92,10 +92,10 @@ void main() {
 
         ivec3 probe_grid_coords = get_probe_grid_coords(probe_idx);
         vec3 ray_origin = grid_coord_to_position(probe_grid_coords);
-        vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe - 1));
+        vec3 ray_dir = /*cam.randomRotation **/ sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe - 1));
 
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, ray_origin, ddgi.min_dist, ray_dir, ddgi.max_dist, 0);
 
-        imageStore(image_rt_result, pixel_coord, vec4(payload.radiance, payload.distance));
+        imageStore(image, pixel_coord, vec4(payload.radiance, payload.distance));
     }
 }

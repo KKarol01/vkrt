@@ -35,10 +35,11 @@ int main() {
             cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
             sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
 
+            // TODO: because of sorting, the isntanced model handle is invalid
             Engine::renderer()->instance_model(
                 cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
                                            .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 0.0, 0.0, 0.0 }) *
-                                                        glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) });
+                                                        glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 1.0f }) });
         }
 
         const auto* window = Engine::window();
@@ -56,8 +57,8 @@ int main() {
         std::uniform_real_distribution<float> dist{ 0.0f, 1.0f };
 
         while(!glfwWindowShouldClose(Engine::window()->window)) {
-            glm::vec3 rand{ dist(eng) * 0.0f, dist(eng) * 0.0f, dist(eng) * 2.0f };
-            const auto rand_mat = glm::transpose(glm::mat3_cast(glm::angleAxis(rand.x, glm::vec3{ 1.0f, 0.0f, 0.0f }) *
+            glm::vec3 rand{ dist(eng) * 2.0f * glm::pi<float>(), dist(eng) * 2.0f * glm::pi<float>(), dist(eng) * 2.0f };
+            const auto rand_mat = (glm::mat3_cast(glm::angleAxis(rand.x, glm::vec3{ 1.0f, 0.0f, 0.0f }) *
                                                                 glm::angleAxis(rand.y, glm::vec3{ 0.0f, 1.0f, 0.0f })));
             memcpy((glm::mat4*)vk_renderer->ubo.mapped + 2, &rand_mat[0][0], sizeof(rand_mat));
 
