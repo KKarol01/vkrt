@@ -15,13 +15,14 @@ const float PI = 3.1415926535897932;
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 1, set = 0, rgba8) uniform image2D image;
-layout(binding = 2, set = 0, rgba16f) uniform image2D image_rt_result;
-layout(binding = 3, set = 0) uniform CameraProperties {
+layout(binding = 2, set = 0, rgba8) uniform image2D ddgi_radiance_image;
+layout(binding = 3, set = 0, rgba8) uniform image2D ddgi_irradiance_image;
+layout(binding = 14, set = 0) uniform CameraProperties {
     mat4 viewInverse;
     mat4 projInverse;
     mat3 randomRotation;
 } cam;
-layout(binding = 4, set = 0) uniform sampler2D textures[];
+layout(binding = 15, set = 0) uniform sampler2D textures[];
 
 #include "push_constants.inc"
 
@@ -96,6 +97,6 @@ void main() {
 
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, ray_origin, ddgi.min_dist, ray_dir, ddgi.max_dist, 0);
 
-        imageStore(image, pixel_coord, vec4(payload.radiance, payload.distance));
+        imageStore(ddgi_radiance_image, pixel_coord, vec4(payload.radiance, payload.distance));
     }
 }

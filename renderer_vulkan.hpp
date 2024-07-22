@@ -131,9 +131,10 @@ class RendererVulkan : public Renderer {
         float probe_distance{ 0.5f };
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
-        uint32_t irradiance_resolution{ 8 };
+        uint32_t irradiance_resolution{ 6 };
         uint32_t rays_per_probe{ 64 };
-        Image rt_result;
+        Image radiance_texture;
+        Image irradiance_texture;
     };
     struct DDGI_Buffer {
         glm::vec3 probe_start;
@@ -144,7 +145,7 @@ class RendererVulkan : public Renderer {
         float normal_bias;
         uint32_t irradiance_resolution;
         uint32_t rays_per_probe;
-        uint32_t irr_tex_idx;
+        uint32_t radiance_tex_idx;
     };
 
   public:

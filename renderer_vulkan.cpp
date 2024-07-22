@@ -389,14 +389,14 @@ void RendererVulkan::render() {
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
                        &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
-    uint32_t mode = 0;
+    uint32_t mode = 1;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
                        &ddgi_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(uint32_t), &mode);
 
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
-     //vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rt_result.width, ddgi.rt_result.height, 1u);
+    // vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rt_result.width, ddgi.rt_result.height, 1u);
 
     end_recording(raytrace_cmd);
     auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -699,7 +699,7 @@ void RendererVulkan::compile_shaders() {
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
     options.SetTargetSpirv(shaderc_spirv_version_1_6);
     options.SetGenerateDebugInfo();
-    //options.AddMacroDefinition("ASDF");
+    // options.AddMacroDefinition("ASDF");
     for(int i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
         std::string file_str = read_file(files[i]);
         auto res = c.CompileGlslToSpv(file_str, kinds[i], files[i].filename().string().c_str(), options);
@@ -733,25 +733,32 @@ void RendererVulkan::build_rtpp() {
     resultImageLayoutBinding.descriptorCount = 1;
     resultImageLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
+    VkDescriptorSetLayoutBinding resultRadianceLayoutBinding{};
+    resultRadianceLayoutBinding.binding = 2;
+    resultRadianceLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    resultRadianceLayoutBinding.descriptorCount = 1;
+    resultRadianceLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
+
     VkDescriptorSetLayoutBinding resultIrradianceLayoutBinding{};
-    resultIrradianceLayoutBinding.binding = 2;
+    resultIrradianceLayoutBinding.binding = 3;
     resultIrradianceLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     resultIrradianceLayoutBinding.descriptorCount = 1;
     resultIrradianceLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
     VkDescriptorSetLayoutBinding uniformBufferBinding{};
-    uniformBufferBinding.binding = 3;
+    uniformBufferBinding.binding = 14;
     uniformBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uniformBufferBinding.descriptorCount = 1;
     uniformBufferBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
     VkDescriptorSetLayoutBinding bindlessTexturesBinding{};
-    bindlessTexturesBinding.binding = 4;
+    bindlessTexturesBinding.binding = 15;
     bindlessTexturesBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindlessTexturesBinding.descriptorCount = 1024;
     bindlessTexturesBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
-    std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding, resultIrradianceLayoutBinding,
+    std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding,
+                                                         resultRadianceLayoutBinding, resultIrradianceLayoutBinding,
                                                          uniformBufferBinding, bindlessTexturesBinding });
     std::vector<VkDescriptorBindingFlags> binding_flags(bindings.size());
     for(uint32_t i = 0; i < binding_flags.size(); ++i) {
@@ -932,8 +939,12 @@ void RendererVulkan::build_desc_sets() {
     storageImageDescriptor.imageView = rt_image.view;
     storageImageDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
+    VkDescriptorImageInfo ddgiRadianceDescriptor{};
+    ddgiRadianceDescriptor.imageView = ddgi.radiance_texture.view;
+    ddgiRadianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
     VkDescriptorImageInfo ddgiIrradianceDescriptor{};
-    ddgiIrradianceDescriptor.imageView = ddgi.rt_result.view;
+    ddgiIrradianceDescriptor.imageView = ddgi.irradiance_texture.view;
     ddgiIrradianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkDescriptorBufferInfo ubo_descriptor{};
@@ -964,19 +975,35 @@ void RendererVulkan::build_desc_sets() {
         });
     }
 
-    VkDescriptorImageInfo output_image_infos[]{ storageImageDescriptor, ddgiIrradianceDescriptor };
+    VkDescriptorImageInfo output_image_infos[]{ storageImageDescriptor };
 
     vks::WriteDescriptorSet resultImageWrite;
     resultImageWrite.dstSet = raytracing_set;
     resultImageWrite.dstBinding = 1;
     resultImageWrite.dstArrayElement = 0;
-    resultImageWrite.descriptorCount = 2;
+    resultImageWrite.descriptorCount = 1;
     resultImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     resultImageWrite.pImageInfo = output_image_infos;
 
+    vks::WriteDescriptorSet ddgiRadianceImageWrite;
+    ddgiRadianceImageWrite.dstSet = raytracing_set;
+    ddgiRadianceImageWrite.dstBinding = 2;
+    ddgiRadianceImageWrite.dstArrayElement = 0;
+    ddgiRadianceImageWrite.descriptorCount = 1;
+    ddgiRadianceImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ddgiRadianceImageWrite.pImageInfo = &ddgiRadianceDescriptor;
+
+    vks::WriteDescriptorSet ddgiIrradianceWrite;
+    ddgiIrradianceWrite.dstSet = raytracing_set;
+    ddgiIrradianceWrite.dstBinding = 3;
+    ddgiIrradianceWrite.dstArrayElement = 0;
+    ddgiIrradianceWrite.descriptorCount = 1;
+    ddgiIrradianceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ddgiIrradianceWrite.pImageInfo = &ddgiIrradianceDescriptor;
+
     vks::WriteDescriptorSet uniformBufferWrite;
     uniformBufferWrite.dstSet = raytracing_set;
-    uniformBufferWrite.dstBinding = 3;
+    uniformBufferWrite.dstBinding = 14;
     uniformBufferWrite.dstArrayElement = 0;
     uniformBufferWrite.descriptorCount = 1;
     uniformBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -984,14 +1011,15 @@ void RendererVulkan::build_desc_sets() {
 
     vks::WriteDescriptorSet bindlessTexturesWrite;
     bindlessTexturesWrite.dstSet = raytracing_set;
-    bindlessTexturesWrite.dstBinding = 4;
+    bindlessTexturesWrite.dstBinding = 15;
     bindlessTexturesWrite.dstArrayElement = 0;
     bindlessTexturesWrite.descriptorCount = bindlessImagesDescriptors.size();
     bindlessTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindlessTexturesWrite.pImageInfo = bindlessImagesDescriptors.data();
 
     std::vector<VkWriteDescriptorSet> writeDescriptorSets = { accelerationStructureWrite, resultImageWrite,
-                                                              uniformBufferWrite, bindlessTexturesWrite };
+                                                              ddgiRadianceImageWrite,     ddgiIrradianceWrite,
+                                                              uniformBufferWrite,         bindlessTexturesWrite };
     vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, VK_NULL_HANDLE);
 }
 
@@ -1190,16 +1218,35 @@ void RendererVulkan::prepare_ddgi() {
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 
-    const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y + 2;
-    const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z + 2;
+    const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
+    const uint32_t irradiance_texture_height = ddgi.probe_counts.z;
 
-    ddgi.rt_result = Image{
-        "rt_result", ddgi.rays_per_probe, ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT
-    };
+    ddgi.radiance_texture = Image{ "ddgi radiance",
+                                   ddgi.rays_per_probe,
+                                   ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z,
+                                   1,
+                                   1,
+                                   1,
+                                   VK_FORMAT_R16G16B16A16_SFLOAT,
+                                   VK_SAMPLE_COUNT_1_BIT,
+                                   VK_IMAGE_USAGE_STORAGE_BIT };
+    ddgi.irradiance_texture = Image{ "ddgi irradiance",
+                                     irradiance_texture_width,
+                                     irradiance_texture_height,
+                                     1,
+                                     1,
+                                     1,
+                                     VK_FORMAT_R16G16B16A16_SFLOAT,
+                                     VK_SAMPLE_COUNT_1_BIT,
+                                     VK_IMAGE_USAGE_STORAGE_BIT };
+
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    ddgi.rt_result.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
-                                     VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.radiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                            VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.irradiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     submit_recording(gq, cmd);
 
     vks::SamplerCreateInfo sampler_info;
@@ -1216,18 +1263,25 @@ void RendererVulkan::prepare_ddgi() {
     VkSampler sampler;
     VK_CHECK(vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
 
+    VkDescriptorImageInfo write_radiance_info;
+    write_radiance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    write_radiance_info.imageView = ddgi.radiance_texture.view;
+    write_radiance_info.sampler = sampler;
+
     VkDescriptorImageInfo write_irradiance_info;
     write_irradiance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    write_irradiance_info.imageView = ddgi.rt_result.view;
+    write_irradiance_info.imageView = ddgi.irradiance_texture.view;
     write_irradiance_info.sampler = sampler;
+
+    VkDescriptorImageInfo image_infos[]{ write_radiance_info, write_irradiance_info };
 
     vks::WriteDescriptorSet write_irradiance_texture;
     write_irradiance_texture.dstSet = raytracing_set;
-    write_irradiance_texture.descriptorCount = 1;
+    write_irradiance_texture.descriptorCount = sizeof(image_infos) / sizeof(image_infos[0]);
     write_irradiance_texture.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write_irradiance_texture.dstBinding = 4;
     write_irradiance_texture.dstArrayElement = textures.size();
-    write_irradiance_texture.pImageInfo = &write_irradiance_info;
+    write_irradiance_texture.pImageInfo = image_infos;
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
@@ -1240,7 +1294,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->normal_bias = 0.25f;
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
-    ddgi_buffer_mapped->irr_tex_idx = textures.size();
+    ddgi_buffer_mapped->radiance_tex_idx = textures.size();
 
     vkQueueWaitIdle(gq);
 #endif
