@@ -10,7 +10,7 @@
 #include "push_constants.inc"
 #include "light.inc"
 
-layout(binding = 4, set = 0) uniform sampler2D textures[];
+layout(binding = 15, set = 0) uniform sampler2D textures[];
 
 hitAttributeEXT vec2 barycentric_weights;
 

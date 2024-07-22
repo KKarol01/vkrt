@@ -40,7 +40,7 @@ layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDG
 	float normal_bias;
 	uint irr_res;
     uint rays_per_probe;
-    uint irr_tex_idx;
+    uint radiance_tex_idx;
 };
 
 layout(scalar, push_constant) uniform Constants {
