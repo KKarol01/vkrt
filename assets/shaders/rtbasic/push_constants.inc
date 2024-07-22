@@ -5,12 +5,12 @@ struct Vertex {
 };
 
 struct MeshData {
-    uint32_t index_offset;
-    uint32_t vertex_offset;
+    //uint32_t index_offset;
+    //uint32_t vertex_offset;
     uint32_t color_texture;
 };
 
-layout(std430, buffer_reference, buffer_reference_align = 8) readonly buffer VertexBuffer {
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer VertexBuffer {
     Vertex vertices[]; 
 };
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer IndexBuffer {
@@ -22,13 +22,13 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Per
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer MeshDatasBuffer {
     MeshData mesh_datas[];
 };
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasMeshDataOffset {
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTriangleOffsets {
     uint32_t offsets[];
 };
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasInstanceTriangleMeshData {
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
     PerTriangleMeshId mesh_ids;
+    PerTlasTriangleOffsets offsets;
     MeshDatasBuffer meshes;
-    PerTlasMeshDataOffset offsets;
 };
 
 layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
@@ -44,7 +44,7 @@ layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDG
 };
 
 layout(scalar, push_constant) uniform Constants {
-    PerTlasInstanceTriangleMeshData mesh_datas;
+    CombinedRTBuffers combined_rt_buffs;
     VertexBuffer vertex_buffer;
     IndexBuffer index_buffer;
     DDGIBuffer ddgi;
