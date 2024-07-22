@@ -8,7 +8,12 @@
 #include "vulkan_structs.hpp"
 #include "handle_vector.hpp"
 
-enum class VkRendererFlags : uint32_t { DIRTY_INSTANCES = 0x1, DIRTY_UPLOADS = 0x2, DIRTY_BLAS = 0x4, DIRTY_TLAS = 0x8 };
+enum class VkRendererFlags : uint32_t {
+    DIRTY_INSTANCES = 0x1,
+    DIRTY_UPLOADS = 0x2,
+    DIRTY_BLAS = 0x4,
+    DIRTY_TLAS = 0x8
+};
 inline Flags<VkRendererFlags> operator|(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } | b; }
 inline Flags<VkRendererFlags> operator&(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } & b; }
 
@@ -30,11 +35,11 @@ class Buffer {
 
 struct Image {
     constexpr Image() = default;
-    Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
-          VkSampleCountFlagBits samples, VkImageUsageFlags usage);
+    Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
+          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
 
-    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                           VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout);
+    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout);
 
     VkImage image{};
     VmaAllocation alloc{};
@@ -66,12 +71,12 @@ struct RenderMesh {
 
 struct RenderModel {
     Flags<VkRendererFlags> flags;
-    uint32_t first_mesh{ 0 };
-    uint32_t mesh_count{ 0 };
     uint32_t first_vertex{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t first_index{ 0 };
     uint32_t index_count{ 0 };
+    uint32_t first_mesh{ 0 };
+    uint32_t mesh_count{ 0 };
     uint32_t first_material{ 0 };
     uint32_t material_count{ 0 };
     uint32_t first_texture{ 0 };
@@ -87,7 +92,6 @@ struct RenderModelInstance {
     Handle<RenderModel> model;
     Flags<InstanceFlags> flags;
     glm::mat4x3 transform{ 1.0f };
-    uint32_t batch_index{ 0 };
 };
 
 struct RenderInstanceBatch {
@@ -102,13 +106,13 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
 
-struct RenderModelInstanceMeshData {
-    uint32_t index_offset;
-    uint32_t vertex_offset;
+struct GPURenderMeshData {
+    //uint32_t index_offset;
+    //uint32_t vertex_offset;
     uint32_t color_texture_idx;
 };
 
-struct RenderModelInstanceMeshDataAndOffsets{
+struct RenderModelInstanceMeshDataAndOffsets {
     VkDeviceAddress render_model_instance_mesh_data_buffer;
     VkDeviceAddress render_model_isntance_mesh_offsets_buffer;
 };
@@ -167,12 +171,22 @@ class RendererVulkan : public Renderer {
     void prepare_ddgi();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
-    void submit_recording(VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems = {},
-                          const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& signal_sems = {}, VkFence fence = nullptr);
+    void submit_recording(VkQueue queue, VkCommandBuffer buffer,
+                          const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems = {},
+                          const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& signal_sems = {},
+                          VkFence fence = nullptr);
     void submit_recordings(VkQueue queue, const std::vector<RecordingSubmitInfo>& submits, VkFence fence = nullptr);
     void end_recording(VkCommandBuffer buffer);
     void reset_command_pool(VkCommandPool pool);
     VkCommandBuffer get_or_allocate_free_command_buffer(VkCommandPool pool);
+
+    uint32_t get_total_vertices() const {
+        return models.empty() ? 0u : models.back().first_vertex + models.back().vertex_count;
+    }
+    uint32_t get_total_indices() const {
+        return models.empty() ? 0u : models.back().first_index + models.back().index_count;
+    }
+    uint32_t get_total_triangles() const { return get_total_indices() / 3u; }
 
     VkInstance instance;
     VkDevice dev;
@@ -208,10 +222,11 @@ class RendererVulkan : public Renderer {
     VkDescriptorSet raytracing_set;
     VkDescriptorPool raytracing_pool;
     Buffer sbt;
+
     Buffer per_triangle_mesh_id_buffer;
-    Buffer per_model_instance_mesh_data_buffer;
-    Buffer per_tlas_instance_mesh_data_offset_buffer;
-    Buffer per_tlas_instance_mesh_data_and_offset_buffer;
+    Buffer per_tlas_triangle_offsets_buffer;
+    Buffer render_mesh_data_buffer;
+    Buffer combined_rt_buffers_buffer;
 
     DDGI_Settings ddgi;
     Image rt_image;
@@ -222,10 +237,9 @@ class RendererVulkan : public Renderer {
     std::vector<RenderMaterial> materials;
     std::vector<RenderMesh> meshes;
     std::vector<RenderModelRTMetadata> rt_metadata;
-    HandleVector<RenderModel> models;
+    std::vector<RenderModel> models;
 
-    HandleVector<RenderModelInstance> model_instances;
-    std::vector<RenderInstanceBatch> batches;
+    std::vector<RenderModelInstance> model_instances;
 
     Flags<VkRendererFlags> flags;
     struct UploadImage {

@@ -83,7 +83,7 @@ void main() {
     const uint missIndex = 1;
 
     if(mode == 0) {
-		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
+		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, (direction.xyz), tmax, 0);
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.radiance, 1.0));
 	} else if (mode == 1) {
         const ivec2 pixel_coord = ivec2(gl_LaunchIDEXT.xy); 
