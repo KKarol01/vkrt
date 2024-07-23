@@ -8,9 +8,8 @@
 
 #include "ray_payload.inc"
 #include "push_constants.inc"
+#include "descriptor_layout.inc"
 #include "light.inc"
-
-layout(binding = 15, set = 0) uniform sampler2D textures[];
 
 hitAttributeEXT vec2 barycentric_weights;
 

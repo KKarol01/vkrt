@@ -107,14 +107,27 @@ struct RecordingSubmitInfo {
 };
 
 struct GPURenderMeshData {
-    //uint32_t index_offset;
-    //uint32_t vertex_offset;
+    // uint32_t index_offset;
+    // uint32_t vertex_offset;
     uint32_t color_texture_idx;
 };
 
 struct RenderModelInstanceMeshDataAndOffsets {
     VkDeviceAddress render_model_instance_mesh_data_buffer;
     VkDeviceAddress render_model_isntance_mesh_offsets_buffer;
+};
+
+enum class ShaderModuleType {
+    RT_BASIC_CLOSEST_HIT,
+    RT_BASIC_MISS,
+    RT_BASIC_MISS2,
+    RT_BASIC_RAYGEN,
+    RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
+};
+
+struct ShaderModuleWrapper {
+    VkShaderModule module;
+    VkShaderStageFlagBits stage;
 };
 
 class RendererVulkan : public Renderer {
@@ -214,7 +227,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_buffer;
     Buffer vertex_buffer, index_buffer;
 
-    std::vector<VkShaderModule> shader_modules;
+    std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups;
     VkPipeline raytracing_pipeline;
@@ -228,6 +241,8 @@ class RendererVulkan : public Renderer {
     Buffer per_tlas_triangle_offsets_buffer;
     Buffer render_mesh_data_buffer;
     Buffer combined_rt_buffers_buffer;
+
+    VkPipeline ddgi_compute_pipeline;
 
     DDGI_Settings ddgi;
     Image rt_image;

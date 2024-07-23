@@ -148,7 +148,7 @@ void RendererVulkan::initialize_vulkan() {
                         .add_required_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
-                        .add_required_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
+                        //.add_required_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
                         .select();
     if(!phys_ret) { throw std::runtime_error{ "Failed to select Vulkan Physical Device. Error: " }; }
 
@@ -208,7 +208,7 @@ void RendererVulkan::initialize_vulkan() {
                        .add_pNext(&acc_features)
                        .add_pNext(&rtpp_features)
                        .add_pNext(&scalar_features)
-                       .add_pNext(&maint5_features)
+                       //.add_pNext(&maint5_features)
                        .build();
     if(!dev_ret) { throw std::runtime_error{ "Failed to create Vulkan device. Error: " }; }
     vkb::Device vkb_device = dev_ret.value();
@@ -396,6 +396,29 @@ void RendererVulkan::render() {
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(uint32_t), &mode);
 
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+
+    vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
+    rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
+    rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+    rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+    rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    rt_to_comp_img_barrier.subresourceRange = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+    };
+
+    vks::DependencyInfo rt_to_comp_dep_info;
+    rt_to_comp_dep_info.imageMemoryBarrierCount = 1;
+    rt_to_comp_dep_info.pImageMemoryBarriers = &rt_to_comp_img_barrier;
+
+    vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
+
+    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ddgi_compute_pipeline);
+    vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
+
+    vkCmdDispatch(raytrace_cmd, ddgi.irradiance_texture.width / 8u, ddgi.irradiance_texture.height / 8u, 1u);
     // vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rt_result.width, ddgi.rt_result.height, 1u);
 
     end_recording(raytrace_cmd);
@@ -690,10 +713,15 @@ void RendererVulkan::compile_shaders() {
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.glsl",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss2.glsl",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
     };
-    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_miss_shader, shaderc_raygen_shader };
+    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_miss_shader,
+                                 shaderc_raygen_shader, shaderc_compute_shader };
+    VkShaderStageFlagBits stages[]{ VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
+                                    VK_SHADER_STAGE_MISS_BIT_KHR, VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_COMPUTE_BIT };
+    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT, ShaderModuleType::RT_BASIC_MISS, ShaderModuleType::RT_BASIC_MISS2,
+                              ShaderModuleType::RT_BASIC_RAYGEN, ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE };
     std::vector<std::vector<uint32_t>> compiled_modules;
-    std::vector<VkShaderModule> modules;
 
     shaderc::CompileOptions options;
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
@@ -714,10 +742,9 @@ void RendererVulkan::compile_shaders() {
         vks::ShaderModuleCreateInfo module_info;
         module_info.codeSize = compiled_modules.back().size() * sizeof(compiled_modules.back()[0]);
         module_info.pCode = compiled_modules.back().data();
-        vkCreateShaderModule(dev, &module_info, nullptr, &modules.emplace_back());
+        vkCreateShaderModule(dev, &module_info, nullptr, &shader_modules[types[i]].module);
+        shader_modules[types[i]].stage = stages[i];
     }
-
-    shader_modules = modules;
 }
 
 void RendererVulkan::build_rtpp() {
@@ -802,7 +829,7 @@ void RendererVulkan::build_rtpp() {
     {
         vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-        stage.module = shader_modules.at(3);
+        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_RAYGEN).module;
         stage.pName = "main";
         shaderStages.push_back(stage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
@@ -819,7 +846,7 @@ void RendererVulkan::build_rtpp() {
     {
         vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-        stage.module = shader_modules.at(1);
+        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_MISS).module;
         stage.pName = "main";
         shaderStages.push_back(stage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
@@ -836,7 +863,7 @@ void RendererVulkan::build_rtpp() {
     {
         vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-        stage.module = shader_modules.at(2);
+        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_MISS2).module;
         stage.pName = "main";
         shaderStages.push_back(stage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
@@ -853,7 +880,7 @@ void RendererVulkan::build_rtpp() {
     {
         vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-        stage.module = shader_modules.at(0);
+        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_CLOSEST_HIT).module;
         stage.pName = "main";
         shaderStages.push_back(stage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
@@ -1219,7 +1246,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 
     const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
-    const uint32_t irradiance_texture_height = ddgi.probe_counts.z;
+    const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z;
 
     ddgi.radiance_texture = Image{ "ddgi radiance",
                                    ddgi.rays_per_probe,
@@ -1295,6 +1322,14 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
     ddgi_buffer_mapped->radiance_tex_idx = textures.size();
+
+    vks::ComputePipelineCreateInfo compute_info;
+    compute_info.layout = raytracing_layout;
+    compute_info.stage = vks::PipelineShaderStageCreateInfo{};
+    compute_info.stage.pName = "main";
+    compute_info.stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE).module;
+    compute_info.stage.stage = shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE).stage;
+    VK_CHECK(vkCreateComputePipelines(dev, nullptr, 1, &compute_info, nullptr, &ddgi_compute_pipeline));
 
     vkQueueWaitIdle(gq);
 #endif
