@@ -13,17 +13,7 @@ layout(location = 0) rayPayloadEXT struct RayPayload {
 
 const float PI = 3.1415926535897932;
 
-layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0, rgba8) uniform image2D image;
-layout(binding = 2, set = 0, rgba8) uniform image2D ddgi_radiance_image;
-layout(binding = 3, set = 0, rgba8) uniform image2D ddgi_irradiance_image;
-layout(binding = 14, set = 0) uniform CameraProperties {
-    mat4 viewInverse;
-    mat4 projInverse;
-    mat3 randomRotation;
-} cam;
-layout(binding = 15, set = 0) uniform sampler2D textures[];
-
+#include "descriptor_layout.inc"
 #include "push_constants.inc"
 
 vec3 sphericalFibonacci(float i, float n) {
@@ -48,7 +38,8 @@ vec2 normalToUvRectOct(vec3 normal){
          p.xy = (1.0 - abs(p.yx)) * vec2(normal.x <= 0.0 ? -1 : 1, normal.y <= 0.0 ? -1 : 1);
     }
     
-    return clamp(p.xy, vec2(-1.0), vec2(1.0));
+    p = clamp(p, vec2(-1.0), vec2(1.0));
+	return (p * 0.5 + 0.5) * float(ddgi.irr_res);
 }
 
 vec3 grid_coord_to_position(ivec3 grid_coords) {
@@ -93,7 +84,7 @@ void main() {
 
         ivec3 probe_grid_coords = get_probe_grid_coords(probe_idx);
         vec3 ray_origin = grid_coord_to_position(probe_grid_coords);
-        vec3 ray_dir = /*cam.randomRotation **/ sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe - 1));
+        vec3 ray_dir = /*cam.randomRotation **/ sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
 
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, ray_origin, ddgi.min_dist, ray_dir, ddgi.max_dist, 0);
 
