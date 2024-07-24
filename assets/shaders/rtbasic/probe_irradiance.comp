@@ -155,7 +155,7 @@ void main() {
 	return;
 #endif
 	
-	ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
+	const ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
 	const int probe_with_border = int(ddgi.irr_res) + 2;
 	const int probe_last_pixel = int(ddgi.irr_res) + 1;
 	const int probe_id = get_probe_index_from_coords(coords, probe_with_border);
@@ -186,6 +186,7 @@ void main() {
 
 		if(result.w > EPSILON) { result /= result.w; }
 		imageStore(ddgi_irradiance_image, coords, result);
+		return;
 	}
      
     groupMemoryBarrier();
@@ -197,7 +198,7 @@ void main() {
            (probe_pixel_x == 0 || probe_pixel_x == probe_last_pixel)
         && (probe_pixel_y == 0 || probe_pixel_y == probe_last_pixel)
     );
-    bool is_row_pixel = (probe_pixel_x > 0 && probe_pixel_x < probe_last_pixel);
+    bool is_row_pixel = (probe_pixel_x > 0 && probe_pixel_x < probe_last_pixel && probe_pixel_y == 0);
     ivec2 source_pixel_coord = coords;
 
     if(is_corner_pixel) {
@@ -206,6 +207,7 @@ void main() {
     } else if(is_row_pixel) {
         source_pixel_coord.x += k_read_table[probe_pixel_x - 1];
         source_pixel_coord.y += (probe_pixel_y > 0) ? -1 : 1;
+		vec4 copied_data = imageLoad(ddgi_irradiance_image, source_pixel_coord);
     } else {
         source_pixel_coord.x += (probe_pixel_x > 0) ? -1 : 1;
         source_pixel_coord.y += k_read_table[probe_pixel_y - 1];
@@ -213,20 +215,4 @@ void main() {
 
     vec4 copied_data = imageLoad(ddgi_irradiance_image, source_pixel_coord);
     imageStore(ddgi_irradiance_image, coords, copied_data);
-
-#if 0
-    vec4 col = imageLoad(ddgi_radiance_image, ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y));
-
-    vec3 dir = sphericalFibonacci(float(gl_GlobalInvocationID.x), float(ddgi.rays_per_probe));
-    ivec2 uv_dir = ivec2((normalToUvRectOct(dir) * 0.5 + 0.5) * float(ddgi.irr_res));
-    ivec3 probe_grid_coords = get_probe_grid_coords(probe_id);
-    ivec2 out_coords = ivec2(
-        probe_grid_coords.x * probe_grid_coords.y * (ddgi.irr_res + 2),
-        probe_grid_coords.z * (ddgi.irr_res + 2)
-    ) + uv_dir;
-#endif
-
-
-    //imageStore(ddgi_irradiance_image, coords, vec4(float(gl_GlobalInvocationID.x) / 64.0, float(gl_GlobalInvocationID.y)/32.0, 0.0, 1.0));
-    //imageStore(image, out_coords, col);
 }
