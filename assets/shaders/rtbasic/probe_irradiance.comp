@@ -198,7 +198,7 @@ void main() {
            (probe_pixel_x == 0 || probe_pixel_x == probe_last_pixel)
         && (probe_pixel_y == 0 || probe_pixel_y == probe_last_pixel)
     );
-    bool is_row_pixel = (probe_pixel_x > 0 && probe_pixel_x < probe_last_pixel && probe_pixel_y == 0);
+    bool is_row_pixel = (probe_pixel_x > 0 && probe_pixel_x < probe_last_pixel);
     ivec2 source_pixel_coord = coords;
 
     if(is_corner_pixel) {
@@ -207,7 +207,6 @@ void main() {
     } else if(is_row_pixel) {
         source_pixel_coord.x += k_read_table[probe_pixel_x - 1];
         source_pixel_coord.y += (probe_pixel_y > 0) ? -1 : 1;
-		vec4 copied_data = imageLoad(ddgi_irradiance_image, source_pixel_coord);
     } else {
         source_pixel_coord.x += (probe_pixel_x > 0) ? -1 : 1;
         source_pixel_coord.y += k_read_table[probe_pixel_y - 1];
