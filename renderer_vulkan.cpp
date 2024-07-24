@@ -390,12 +390,12 @@ void RendererVulkan::render() {
                        &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     uint32_t mode = 1;
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
-                       &ddgi_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &ddgi_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(uint32_t), &mode);
+    const auto push_constant_mode_offset = push_offset;
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
 
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe, ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
     vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
     rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
@@ -419,7 +419,24 @@ void RendererVulkan::render() {
     vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
 
     vkCmdDispatch(raytrace_cmd, ddgi.irradiance_texture.width / 8u, ddgi.irradiance_texture.height / 8u, 1u);
-    // vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rt_result.width, ddgi.rt_result.height, 1u);
+
+    rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
+    rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT;
+    rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+    rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    rt_to_comp_img_barrier.subresourceRange = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+    };
+
+    vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
+
+    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_pipeline);
+    mode = 0;
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
 
     end_recording(raytrace_cmd);
     auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
