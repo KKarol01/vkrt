@@ -420,7 +420,7 @@ void RendererVulkan::render() {
     vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ddgi_compute_pipeline);
     vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
 
-    vkCmdDispatch(raytrace_cmd, ddgi.irradiance_texture.width / 8u, ddgi.irradiance_texture.height / 8u, 1u);
+    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u), std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
     rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
     rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -1279,8 +1279,8 @@ void RendererVulkan::prepare_ddgi() {
     }
 
     ddgi.probe_dims = scene_bounding_box;
-    ddgi.probe_dims.min *= glm::vec3{ 0.9f, 0.7f, 0.9f };
-    ddgi.probe_dims.max *= glm::vec3{ 0.9f, 0.7f, 0.9f };
+    ddgi.probe_dims.min *= glm::vec3{ 0.9f, 0.9f, 0.9f };
+    ddgi.probe_dims.max *= glm::vec3{ 0.9f, 0.9f, 0.9f };
 
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
@@ -1467,7 +1467,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     if(height > 1) { ++dims; }
     if(depth > 1) { ++dims; }
     if(dims == -1) { dims = 1; }
-    VkImageType types[]{ VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
+    VkImageType types[]{ VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
 
     iinfo.imageType = types[dims];
     iinfo.format = format;
@@ -1485,7 +1485,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
 
     VK_CHECK(vmaCreateImage(renderer->vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
 
-    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
+    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
 
     VkImageAspectFlags view_aspect{ VK_IMAGE_ASPECT_COLOR_BIT };
     if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
