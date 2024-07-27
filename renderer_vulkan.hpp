@@ -141,7 +141,7 @@ class RendererVulkan : public Renderer {
 
     struct DDGI_Settings {
         BoundingBox probe_dims;
-        float probe_distance{ 0.5f };
+        float probe_distance{ 0.9f };
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
         uint32_t irradiance_resolution{ 6 };
