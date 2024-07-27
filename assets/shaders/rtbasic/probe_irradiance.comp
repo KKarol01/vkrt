@@ -160,14 +160,13 @@ vec2 normalizedOctCoord(ivec2 coords) {
 	int probe_with_border = int(ddgi.irr_res) + 2;
 
 #if 1
-	coords = ivec2(4, 1);
 	float x = float((coords.x - 1) % probe_with_border);
 	float y = float((coords.y - 1) % probe_with_border);
 	return (vec2(x, y) / float(ddgi.irr_res)) * 2.0 - 1.0;
 #else 
 	
 	vec2 octFragCoord = ivec2( (coords - ivec2(1)) % probe_with_border );
-	return (vec2(octFragCoord) + vec2(0.5)) * (2.0 / float(ddgi.irr_res)) - vec2(1.0, 1.0);
+	return (vec2(octFragCoord) + vec2(0.5)) * (2.0 / float(ddgi.irr_res )) - vec2(1.0, 1.0);
 #endif
 }
 
@@ -241,6 +240,7 @@ void main() {
 			vec2 uv_coord = normalToUvRectOct(ray_dir);
 #if 1
 			vec3 texel_dir = octDecode(normalizedOctCoord(coords));
+			//texel_dir = vec3(normalizedOctCoord(coords), 1.0);
 #else
 			//vec3 texel_dir = uvRectOctToNormal(normalizedOctCoord(coords, probe_with_border));
 			vec3 texel_dir = vec3((normalizedOctCoord(coords, probe_with_border)), 0.0);
@@ -248,7 +248,7 @@ void main() {
 #endif
 
 			float weight = max(0.0, dot(texel_dir, ray_dir));
-			weight = 1.0;
+			//weight = 1.0;
 
 			if(weight >= EPSILON) {
 				vec3 radiance = imageLoad(ddgi_radiance_image, sample_pos).rgb;
