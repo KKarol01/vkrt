@@ -1279,8 +1279,8 @@ void RendererVulkan::prepare_ddgi() {
     }
 
     ddgi.probe_dims = scene_bounding_box;
-    ddgi.probe_dims.min *= glm::vec3{ 0.9f, 0.9f, 0.9f };
-    ddgi.probe_dims.max *= glm::vec3{ 0.9f, 0.9f, 0.9f };
+    ddgi.probe_dims.min *= glm::vec3{ 0.9f, 0.7f, 0.9f };
+    ddgi.probe_dims.max *= glm::vec3{ 0.9f, 0.7f, 0.9f };
 
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
