@@ -162,7 +162,7 @@ vec2 normalizedOctCoord(ivec2 coords) {
 #if 1
 	float x = float((coords.x - 1) % probe_with_border);
 	float y = float((coords.y - 1) % probe_with_border);
-	return (vec2(x, y) / float(ddgi.irr_res)) * 2.0 - 1.0;
+	return (vec2(x, y) / float(ddgi.irr_res - 1)) * 2.0 - 1.0;
 #else 
 	
 	vec2 octFragCoord = ivec2( (coords - ivec2(1)) % probe_with_border );
