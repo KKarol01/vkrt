@@ -34,9 +34,10 @@ void main() {
 #endif
 	
 	const ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
-	const int probe_with_border = int(ddgi.irr_res) + 2;
-	const int probe_last_pixel = int(ddgi.irr_res) + 1;
-	const int probe_id = get_probe_index_from_coords(coords);
+	const int probe_res = (mode == MODE_IRRADIANCE) ? ddgi.irr_res : ddgi.vis_res;
+	const int probe_with_border = probe_res + 2;
+	const int probe_last_pixel = probe_res + 1;
+	const int probe_id = get_probe_index_from_coords(coords, probe_res);
 
 	if(any(greaterThanEqual(coords, ivec2(ddgi.probe_counts.x * ddgi.probe_counts.y * probe_with_border, ddgi.probe_counts.z * probe_with_border)))) { return; }
 
@@ -55,8 +56,8 @@ void main() {
 		for(int ray_idx = 0; ray_idx < ddgi.rays_per_probe; ++ray_idx) {
 			ivec2 sample_pos = ivec2(ray_idx, probe_id);
 			vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
-			vec2 uv_coord = normalToUvRectOct(ray_dir);
-			vec3 texel_dir = octDecode(normalizedOctCoord(coords));
+			vec2 uv_coord = normalToUvRectOct(ray_dir, probe_res);
+			vec3 texel_dir = octDecode(normalizedOctCoord(coords, probe_res));
 			float weight = max(0.0, dot(texel_dir, ray_dir));
 			vec4 read_radiance_distance = imageLoad(ddgi_radiance_image, sample_pos);
 			vec3 radiance = read_radiance_distance.rgb;
@@ -112,8 +113,8 @@ void main() {
     ivec2 source_pixel_coord = coords;
 
     if(is_corner_pixel) {
-        source_pixel_coord.x += probe_pixel_x == 0 ? int(ddgi.irr_res) : -int(ddgi.irr_res);
-        source_pixel_coord.y += probe_pixel_y == 0 ? int(ddgi.irr_res) : -int(ddgi.irr_res);
+        source_pixel_coord.x += probe_pixel_x == 0 ? probe_res : -probe_res;
+        source_pixel_coord.y += probe_pixel_y == 0 ? probe_res : -probe_res;
     } else if(is_row_pixel) {
         source_pixel_coord.x += k_read_table[probe_pixel_x - 1];
         source_pixel_coord.y += (probe_pixel_y > 0) ? -1 : 1;

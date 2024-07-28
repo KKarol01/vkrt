@@ -56,7 +56,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 #if 0
 		vec3 probe_irr = colors[probe_idx].xyz;
 #else
-		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_coord), 0).rgb;
+		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_coord, ddgi.irr_res), 0).rgb;
 		//probe_irr = vec3(get_probe_uv(normal, probe_coord), 0.0);
 #endif
 		irr += weight * probe_irr;
