@@ -422,6 +422,10 @@ void RendererVulkan::render() {
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
     vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u), std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
+    mode = 1;
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
+    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u), std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
+
     rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
     rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -433,7 +437,16 @@ void RendererVulkan::render() {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
     };
 
+    vks::ImageMemoryBarrier2 ddgi_visibility_comp_to_rt_barrier = rt_to_comp_img_barrier;
+    ddgi_visibility_comp_to_rt_barrier.image = ddgi.visibility_texture.image;
+
+    vks::ImageMemoryBarrier2 ddgi_barriers[] {
+        rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier
+    };
+    rt_to_comp_dep_info.imageMemoryBarrierCount = sizeof(ddgi_barriers) / sizeof(ddgi_barriers[0]);
+    rt_to_comp_dep_info.pImageMemoryBarriers = ddgi_barriers;
     vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
+    rt_to_comp_dep_info.imageMemoryBarrierCount = 1; // just to be safe and i'm too lazy to check if i'm reusing this variable anywhere later
 
     vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_pipeline);
     mode = 0;
@@ -791,11 +804,11 @@ void RendererVulkan::build_rtpp() {
     resultIrradianceLayoutBinding.descriptorCount = 1;
     resultIrradianceLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
-    VkDescriptorSetLayoutBinding ddgiSamplerLayoutBinding{};
-    ddgiSamplerLayoutBinding.binding = 4;
-    ddgiSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    ddgiSamplerLayoutBinding.descriptorCount = 1;
-    ddgiSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
+    VkDescriptorSetLayoutBinding ddgiVisibilityLayoutBinding{};
+    ddgiVisibilityLayoutBinding.binding = 4;
+    ddgiVisibilityLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ddgiVisibilityLayoutBinding.descriptorCount = 1;
+    ddgiVisibilityLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
     VkDescriptorSetLayoutBinding uniformBufferBinding{};
     uniformBufferBinding.binding = 14;
@@ -811,7 +824,7 @@ void RendererVulkan::build_rtpp() {
 
     std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding,
                                                          resultRadianceLayoutBinding, resultIrradianceLayoutBinding,
-                                                         ddgiSamplerLayoutBinding, uniformBufferBinding, bindlessTexturesBinding });
+                                                         ddgiVisibilityLayoutBinding, uniformBufferBinding, bindlessTexturesBinding });
     std::vector<VkDescriptorBindingFlags> binding_flags(bindings.size());
     for(uint32_t i = 0; i < binding_flags.size(); ++i) {
         binding_flags.at(i) = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
