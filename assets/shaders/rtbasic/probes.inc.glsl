@@ -83,7 +83,7 @@ vec2 normalizedOctCoord(ivec2 coords, int probe_res) {
 	// i.e. (x, y) == (1, 1) means bottom left texel that is non-border, so
 	// -1 is applied to make it (0, 0)
 
-	int probe_with_border = int(probe_res) + 2;
+	int probe_with_border = probe_res + 2;
 
 #if 0
 	float x = float((coords.x - 1) % probe_with_border) + 0.5;
