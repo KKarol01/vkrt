@@ -1,5 +1,11 @@
+layout(location = 0) 
+#ifdef SHADER_TYPE_RAYGEN
+rayPayloadEXT
+#else
+rayPayloadInEXT 
+#endif
 
-layout(location = 0) rayPayloadInEXT struct RayPayload {
+struct RayPayload {
     vec3 radiance;
     float distance;
 } payload;

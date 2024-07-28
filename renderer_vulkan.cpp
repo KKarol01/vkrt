@@ -390,14 +390,12 @@ void RendererVulkan::render() {
                        &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     uint32_t mode = 1;
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
-                       &ddgi_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &ddgi_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     const auto push_constant_mode_offset = push_offset;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
 
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
-                      ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe, ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
     vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
     rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
@@ -420,6 +418,8 @@ void RendererVulkan::render() {
     vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ddgi_compute_pipeline);
     vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
 
+    mode = 0;
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
     vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u), std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
     rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
@@ -999,6 +999,10 @@ void RendererVulkan::build_desc_sets() {
     ddgiIrradianceDescriptor.imageView = ddgi.irradiance_texture.view;
     ddgiIrradianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
+    VkDescriptorImageInfo ddgiVisibilityDescriptor{};
+    ddgiVisibilityDescriptor.imageView = ddgi.visibility_texture.view;
+    ddgiVisibilityDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
     VkDescriptorBufferInfo ubo_descriptor{};
     ubo_descriptor.buffer = ubo.buffer;
     ubo_descriptor.offset = 0;
@@ -1018,9 +1022,6 @@ void RendererVulkan::build_desc_sets() {
     VkSampler sampler;
     VK_CHECK(vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
 
-    VkDescriptorImageInfo ddgiSamplerDescriptor;
-    ddgiSamplerDescriptor.sampler = sampler;
-
     std::vector<VkDescriptorImageInfo> bindlessImagesDescriptors;
     for(const auto& tex : textures) {
         bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
@@ -1035,6 +1036,9 @@ void RendererVulkan::build_desc_sets() {
 
     bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
         .sampler = sampler, .imageView = ddgi.irradiance_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
+
+    bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
+        .sampler = sampler, .imageView = ddgi.visibility_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
 
     VkDescriptorImageInfo output_image_infos[]{ storageImageDescriptor };
 
@@ -1062,13 +1066,13 @@ void RendererVulkan::build_desc_sets() {
     ddgiIrradianceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     ddgiIrradianceWrite.pImageInfo = &ddgiIrradianceDescriptor;
 
-    vks::WriteDescriptorSet ddgiSamplerWrite;
-    ddgiSamplerWrite.dstSet = raytracing_set;
-    ddgiSamplerWrite.dstBinding = 4;
-    ddgiSamplerWrite.dstArrayElement = 0;
-    ddgiSamplerWrite.descriptorCount = 1;
-    ddgiSamplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    ddgiSamplerWrite.pImageInfo = &ddgiSamplerDescriptor;
+    vks::WriteDescriptorSet ddgiVisibilityWrite;
+    ddgiVisibilityWrite.dstSet = raytracing_set;
+    ddgiVisibilityWrite.dstBinding = 4;
+    ddgiVisibilityWrite.dstArrayElement = 0;
+    ddgiVisibilityWrite.descriptorCount = 1;
+    ddgiVisibilityWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ddgiVisibilityWrite.pImageInfo = &ddgiVisibilityDescriptor;
 
     vks::WriteDescriptorSet uniformBufferWrite;
     uniformBufferWrite.dstSet = raytracing_set;
@@ -1088,7 +1092,7 @@ void RendererVulkan::build_desc_sets() {
 
     std::vector<VkWriteDescriptorSet> writeDescriptorSets = { accelerationStructureWrite, resultImageWrite,
                                                               ddgiRadianceImageWrite,     ddgiIrradianceWrite,
-                                                              ddgiSamplerWrite,           uniformBufferWrite,
+                                                              ddgiVisibilityWrite,           uniformBufferWrite,
                                                               bindlessTexturesWrite };
     vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, VK_NULL_HANDLE);
 }
@@ -1290,6 +1294,8 @@ void RendererVulkan::prepare_ddgi() {
 
     const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
     const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z;
+    const uint32_t visibility_texture_width = (ddgi.visibility_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
+    const uint32_t visibility_texture_height = (ddgi.visibility_resolution + 2) * ddgi.probe_counts.z;
 
     ddgi.radiance_texture = Image{ "ddgi radiance",
                                    ddgi.rays_per_probe,
@@ -1303,12 +1309,18 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.irradiance_texture = Image{
         "ddgi irradiance", irradiance_texture_width, irradiance_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
+    ddgi.visibility_texture = Image{
+        "ddgi visibility", visibility_texture_width, visibility_texture_height, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+    };
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ddgi.radiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                             VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     ddgi.irradiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.visibility_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                               VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     submit_recording(gq, cmd);
@@ -1336,7 +1348,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->min_dist = 0.08;
     ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.1f;
     ddgi_buffer_mapped->normal_bias = 0.25f;
-    ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
+    ddgi_buffer_mapped->probe_resolution = ddgi.irradiance_resolution;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
     ddgi_buffer_mapped->radiance_tex_idx = textures.size();
 

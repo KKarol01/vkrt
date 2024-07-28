@@ -15,6 +15,12 @@ hitAttributeEXT vec2 barycentric_weights;
 
 void main()
 {
+  if(gl_HitKindEXT == gl_HitKindBackFacingTriangleEXT) {
+    payload.radiance = vec3(0.0);
+    payload.distance = gl_RayTmaxEXT * -0.2;
+    return;
+  }
+
   uint32_t triangle_offset = combined_rt_buffs.offsets.offsets[gl_InstanceID];
   uint32_t mesh_id = combined_rt_buffs.mesh_ids.ids[triangle_offset + gl_PrimitiveID];
   MeshData mesh_data = combined_rt_buffs.meshes.mesh_datas[mesh_id];
