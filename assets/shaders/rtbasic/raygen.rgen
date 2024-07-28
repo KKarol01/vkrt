@@ -6,78 +6,12 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
-layout(location = 0) rayPayloadEXT struct RayPayload {
-    vec3 radiance;
-    float distance;
-} payload;
-
-const float PI = 3.1415926535897932;
-
-layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0, rgba8) uniform image2D image;
-layout(binding = 2, set = 0, rgba8) uniform image2D ddgi_radiance_image;
-layout(binding = 3, set = 0, rgba8) uniform image2D ddgi_irradiance_image;
-layout(binding = 4, set = 0) uniform sampler ddgi_irradiance_sampler;
-layout(binding = 14, set = 0) uniform CameraProperties {
-    mat4 viewInverse;
-    mat4 projInverse;
-    mat3 randomRotation;
-} cam;
-layout(binding = 15, set = 0) uniform sampler2D textures[];
-
-struct Vertex {
-    vec3 pos;
-    vec3 nor;
-    vec2 uv;
-};
-
-struct MeshData {
-    //uint32_t index_offset;
-    //uint32_t vertex_offset;
-    uint32_t color_texture;
-};
-
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer VertexBuffer {
-    Vertex vertices[]; 
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer IndexBuffer {
-    uint32_t indices[]; 
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTriangleMeshId {
-    uint32_t ids[];
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer MeshDatasBuffer {
-    MeshData mesh_datas[];
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTriangleOffsets {
-    uint32_t offsets[];
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
-    PerTriangleMeshId mesh_ids;
-    PerTlasTriangleOffsets offsets;
-    MeshDatasBuffer meshes;
-};
-
-layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
-	vec3 probe_start;
-	uvec3 probe_counts;
-	vec3 probe_walk;
-	float min_dist;
-	float max_dist;
-	float normal_bias;
-	uint irr_res;
-    uint rays_per_probe;
-    uint radiance_tex_idx;
-};
-
-layout(scalar, push_constant) uniform Constants {
-    CombinedRTBuffers combined_rt_buffs;
-    VertexBuffer vertex_buffer;
-    IndexBuffer index_buffer;
-    DDGIBuffer ddgi;
-    uint32_t mode;
-};
-
+#define RAYTRACING
+#define SHADER_TYPE_RAYGEN
+#include "common.inc"
+#include "ray_payload.inc"
+#include "descriptor_layout.inc"
+#include "push_constants.inc"
 #include "probes.inc.glsl"
 
 #if 1
@@ -127,16 +61,6 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 #endif
 		irr += weight * probe_irr;
 		sum_weight += weight;
-
-#if 0
-		vec3 probe_pos = grid_coord_to_position(probe_coord);
-		vec2 uv = get_probe_uv(normal, grid_indices);
-		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], uv, 0).rgb;
-        probe_irr = colors[probe_idx].xyz;
-		weight *= dot(trilinear, vec3(1.0)) + 0.001;
-		irr += weight * probe_irr;
-		sum_weight += weight;
-#endif
 	}
 #endif
 
@@ -167,9 +91,7 @@ void main() {
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
 		vec3 hit_pos = origin.xyz + direction.xyz * payload.distance;
 		vec3 irradiance = sample_irradiance(hit_pos, hit_pos, hit_pos);
-		//imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.radiancebnbbnmmmmmmm 1.0));
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.radiance + irradiance, 1.0)); 
-		//imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(irradiance, 1.0)); 
 	} else if (mode == 1) {
         const ivec2 pixel_coord = ivec2(gl_LaunchIDEXT.xy); 
         const int probe_idx = pixel_coord.y;

@@ -7,73 +7,9 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(binding = 1, set = 0, rgba8) uniform image2D image;
-layout(binding = 2, set = 0, rgba8) uniform image2D ddgi_radiance_image;
-layout(binding = 3, set = 0, rgba8) uniform image2D ddgi_irradiance_image;
-layout(binding = 14, set = 0) uniform CameraProperties {
-    mat4 viewInverse;
-    mat4 projInverse;
-    mat3 randomRotation;
-} cam;
-layout(binding = 15, set = 0) uniform sampler2D textures[];
-
-struct Vertex {
-    vec3 pos;
-    vec3 nor;
-    vec2 uv;
-};
-
-struct MeshData {
-    //uint32_t index_offset;
-    //uint32_t vertex_offset;
-    uint32_t color_texture;
-};
-
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer VertexBuffer {
-    Vertex vertices[]; 
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer IndexBuffer {
-    uint32_t indices[]; 
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTriangleMeshId {
-    uint32_t ids[];
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer MeshDatasBuffer {
-    MeshData mesh_datas[];
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTriangleOffsets {
-    uint32_t offsets[];
-};
-layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
-    PerTriangleMeshId mesh_ids;
-    PerTlasTriangleOffsets offsets;
-    MeshDatasBuffer meshes;
-};
-
-layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
-	vec3 probe_start;
-	uvec3 probe_counts;
-	vec3 probe_walk;
-	float min_dist;
-	float max_dist;
-	float normal_bias;
-	uint irr_res;
-    uint rays_per_probe;
-    uint radiance_tex_idx;
-};
-
-layout(scalar, push_constant) uniform Constants {
-    CombinedRTBuffers combined_rt_buffs;
-    VertexBuffer vertex_buffer;
-    IndexBuffer index_buffer;
-    DDGIBuffer ddgi;
-    uint32_t mode;
-};
-
-
-const float PI = 3.1415926535897932;
-const float EPSILON = 0.00001;
-
+#include "common.inc"
+#include "descriptor_layout.inc"
+#include "push_constants.inc"
 #include "probes.inc.glsl"
 
 const int k_read_table[] = int[](
@@ -118,34 +54,43 @@ void main() {
 
 		for(int ray_idx = 0; ray_idx < ddgi.rays_per_probe; ++ray_idx) {
 			ivec2 sample_pos = ivec2(ray_idx, probe_id);
-#if 1
 			vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
-#else 
-			vec3 ray_dir = dirs[probe_id];
-#endif
 			vec2 uv_coord = normalToUvRectOct(ray_dir);
-#if 1
 			vec3 texel_dir = octDecode(normalizedOctCoord(coords));
-			//texel_dir = vec3(normalizedOctCoord(coords), 1.0);
-#else
-			//vec3 texel_dir = uvRectOctToNormal(normalizedOctCoord(coords, probe_with_border));
-			vec3 texel_dir = vec3((normalizedOctCoord(coords, probe_with_border)), 0.0);
-			//texel_dir = uvRectOctToNormal(texel_dir.xy);
-#endif
-
 			float weight = max(0.0, dot(texel_dir, ray_dir));
-			//weight = 1.0;
+			vec4 read_radiance_distance = imageLoad(ddgi_radiance_image, sample_pos);
+			vec3 radiance = read_radiance_distance.rgb;
+			float dist = read_radiance_distance.w;
 
-			if(weight >= EPSILON) {
-				vec3 radiance = imageLoad(ddgi_radiance_image, sample_pos).rgb;
-				//radiance = vec3(texel_dir);
-				//radiance = vec3(uv_coord, 0.0);
-				result += vec4(radiance * weight, weight); // TODO RADIANCE * ENERGY_CONSERVATION
+			if(dist < 0.0) {
+				++num_backfaces;
+				if(num_backfaces >= max_backfaces) { return; }
+				continue;
+			}
+
+			if(mode == MODE_IRRADIANCE) {
+				if(weight >= EPSILON) {
+					radiance *= 0.95;
+					result += vec4(radiance * weight, weight); 
+				}
+			} else if (mode == MODE_VISIBILITY) {
+				weight = pow(weight, 2.5);
+
+				if(weight >= EPSILON) {
+					dist = min(abs(dist), ddgi.max_dist);
+					result += vec4(dist * weight, dist * dist * weight, 0.0, weight);
+				}
 			}
 		}
 
 		if(result.w > EPSILON) { result /= result.w; }
-		imageStore(ddgi_irradiance_image, coords, vec4(result));
+
+		if(mode == MODE_IRRADIANCE) {
+			imageStore(ddgi_irradiance_image, coords, result);
+		} else if(mode == MODE_VISIBILITY) {
+			
+		}
+
 		return;
 	} else { 
 #if 0
