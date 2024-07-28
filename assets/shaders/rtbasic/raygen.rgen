@@ -29,7 +29,7 @@ const vec4 colors[] = vec4[](
 
 vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	vec3 V = normalize(cam_pos - world_pos);
-	vec3 bias_vec = (normal * 0.2 + V * 0.8) * 0.75;
+	vec3 bias_vec = (normal * 0.2 + V * 0.8) * (0.75 * float(ddgi.min_dist)) * ddgi.normal_bias;
 	vec3 biased_world_pos = world_pos + bias_vec;
 	ivec3 grid_indices = world_to_grid_coords(biased_world_pos);
 	vec3 grid_pos = grid_coord_to_position(grid_indices);
@@ -73,19 +73,15 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 
 			chebyshev = max(0.05, chebyshev);
 			weight *= chebyshev;
-			weight = max(0.000001, weight);
+			weight = max(0.00001, weight);
 		
 			const float crush_threshold = 0.2;
 			if(weight < crush_threshold) {
 				weight *= (weight * weight) * (1.0 / (crush_threshold * crush_threshold));
 			}
-
-			irr = vec3(visibility.xy, 0.0);
-			sum_weight = 1.0;
 		}
 #endif
 		
-		weight = 1.0;
 		weight *= trilinear;
 
 #if 0
@@ -94,8 +90,8 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_coord, ddgi.irr_res), 0).rgb;
 		//probe_irr = vec3(get_probe_uv(normal, probe_coord), 0.0);
 #endif
-		//irr += weight * probe_irr;
-		//sum_weight += weight;
+		irr += weight * probe_irr;
+		sum_weight += weight;
 	}
 #endif
 
