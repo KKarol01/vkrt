@@ -43,10 +43,10 @@ vec3 sphericalFibonacci(float i, float n) {
 }
 
 // Maps the result of octahedral encoding from [-1, +1] to [0, probe_resolution-1]
-vec2 normalToUvRectOct(vec3 normal){
+vec2 normalToUvRectOct(vec3 normal, int probe_res){
 #if 1
     vec2 p = octEncode(normal);
-	return (p * 0.5 + 0.5) * float(ddgi.irr_res);
+	return (p * 0.5 + 0.5) * float(probe_res);
 #else
 	float l1norm = abs(normal.x) + abs(normal.y) + abs(normal.z); 
 	vec2 res = normal.xy * (1.0 / l1norm);
@@ -58,7 +58,7 @@ vec2 normalToUvRectOct(vec3 normal){
 }
 
 // Unmaps from [0, probe_resolution-1] into [-1, +1] spherical direction vector
-vec3 uvRectOctToNormal(vec2 normal) {
+vec3 uvRectOctToNormal(vec2 normal, int probe_res) {
 #if 0
 	vec2 orig = normal.xy;
     float sum = dot(vec2(1.0), abs(normal.xy));
@@ -70,28 +70,28 @@ vec3 uvRectOctToNormal(vec2 normal) {
     
     return normalize(vec3(normal.xy, z));
 #else 
-    normal = (normal / ddgi.irr_res) * 2.0 - 1.0;
+    normal = (normal / probe_res) * 2.0 - 1.0;
     vec3 p = octDecode(normal);
 	return p;
 #endif
 }
 
 // Transforms texel ivec2 coords into [-1, +1] octahedral coords
-vec2 normalizedOctCoord(ivec2 coords) {	
+vec2 normalizedOctCoord(ivec2 coords, int probe_res) {	
 	// this function should be called only when coords are not representing
 	// border texels, and it assumes one texel border width around probe data
 	// i.e. (x, y) == (1, 1) means bottom left texel that is non-border, so
 	// -1 is applied to make it (0, 0)
 
-	int probe_with_border = int(ddgi.irr_res) + 2;
+	int probe_with_border = int(probe_res) + 2;
 
 #if 0
 	float x = float((coords.x - 1) % probe_with_border) + 0.5;
 	float y = float((coords.y - 1) % probe_with_border) + 0.5;
-	return (vec2(x, y) / float(ddgi.irr_res - 1)) * 2.0 - 1.0;
+	return (vec2(x, y) / float(probe_res - 1)) * 2.0 - 1.0;
 #else 
 	vec2 octFragCoord = ivec2( (coords - ivec2(1)) % probe_with_border );
-	return (vec2(octFragCoord) + vec2(0.5)) * (2.0 / float(ddgi.irr_res)) - vec2(1.0, 1.0);
+	return (vec2(octFragCoord) + vec2(0.5)) * (2.0 / float(probe_res)) - vec2(1.0, 1.0);
 #endif
 }
 
@@ -110,8 +110,8 @@ ivec3 get_probe_grid_coords(int probe_id) {
 }
 
 // Transforms texel coord into probe id (for irradiance texture)
-int get_probe_index_from_coords(ivec2 coords) {
-	const int probe_with_border = int(ddgi.irr_res + 2);
+int get_probe_index_from_coords(ivec2 coords, int probe_res) {
+	const int probe_with_border = probe_res + 2;
 	const ivec3 pc = ivec3(ddgi.probe_counts.xyz);
 	const int x = (coords.x / probe_with_border) % pc.x;
 	const int y = (coords.x / (probe_with_border * pc.x)) % pc.y;
@@ -134,8 +134,8 @@ ivec3 world_to_grid_coords(vec3 world_pos) {
 }
 
 // Gets probe texel vec for irradiance texture from normal spherical vector and probe grid coords
-vec2 get_probe_uv(vec3 normal, ivec3 probe_coords) {
-	const int probe_with_border = int(ddgi.irr_res) + 2;
+vec2 get_probe_uv(vec3 normal, ivec3 probe_coords, int probe_res) {
+	const int probe_with_border = int(probe_res) + 2;
 	const float irr_width = float(ddgi.probe_counts.x * ddgi.probe_counts.y * probe_with_border);
 	const float irr_height = float(ddgi.probe_counts.z * probe_with_border);
 	
@@ -144,6 +144,6 @@ vec2 get_probe_uv(vec3 normal, ivec3 probe_coords) {
 		probe_coords.z * probe_with_border
 	);
 
-	return (normalToUvRectOct(normal) + offset + vec2(1.0)) / vec2(irr_width, irr_height);
+	return (normalToUvRectOct(normal, probe_res) + offset + vec2(1.0)) / vec2(irr_width, irr_height);
 }
 
