@@ -1,8 +1,9 @@
-const vec3 light = vec3(0.0, 0.0, 1.0);
+const vec3 light = vec3(0.0, 0.0, -0.7);
 
 float calc_direct_lighting(vec3 p, vec3 n) {
 	const vec3 pl = normalize(light - p);
-	const float dist2 = pow(distance(p, light), 2.0);
+	float inv_dist2 = 1.0 / distance(p, light);
+	inv_dist2 *= inv_dist2;
 
-	return max(0.0, dot(pl, n)) / dist2;
+	return max(0.0, dot(pl, n)) * inv_dist2 * 0.6 /* hardcoded strength */;
 }

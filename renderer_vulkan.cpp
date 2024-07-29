@@ -1358,13 +1358,17 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->probe_start = ddgi.probe_dims.min;
     ddgi_buffer_mapped->probe_counts = ddgi.probe_counts;
     ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
-    ddgi_buffer_mapped->min_dist = 0.08;
-    ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.1f;
-    ddgi_buffer_mapped->normal_bias = 0.25f;
+    ddgi_buffer_mapped->min_dist = 0.01f;//glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
+    ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.5f;
+    ddgi_buffer_mapped->normal_bias = 0.08f;
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
     ddgi_buffer_mapped->visibility_resolution = ddgi.visibility_resolution;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
     ddgi_buffer_mapped->radiance_tex_idx = textures.size();
+
+    if(ddgi.probe_counts.y == 1) {
+        ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f;
+    }
 
     vks::ComputePipelineCreateInfo compute_info;
     compute_info.layout = raytracing_layout;
