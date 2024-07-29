@@ -91,7 +91,7 @@ vec2 normalizedOctCoord(ivec2 coords, int probe_res) {
 	return (vec2(x, y) / float(probe_res - 1)) * 2.0 - 1.0;
 #else 
 	vec2 octFragCoord = ivec2( (coords - ivec2(1)) % probe_with_border );
-	return (vec2(octFragCoord) + vec2(0.5)) * (2.0 / float(probe_res)) - vec2(1.0, 1.0);
+	return (vec2(octFragCoord) + vec2(0.5)) * (2.0 / float(probe_res)) - vec2(1.0);
 #endif
 }
 
@@ -102,11 +102,19 @@ vec3 grid_coord_to_position(ivec3 grid_coords) {
 
 // Transforms probe id from [0, total_num_probes] into grid coords [0, num_probes]
 ivec3 get_probe_grid_coords(int probe_id) {
+#if 0
     ivec3 pos;
     pos.x = probe_id & (int(ddgi.probe_counts.x) - 1);
     pos.y = (probe_id & (int(ddgi.probe_counts.x) * int(ddgi.probe_counts.y) - 1)) >> findMSB(ddgi.probe_counts.x);
     pos.z = probe_id >> findMSB(ddgi.probe_counts.x * ddgi.probe_counts.y);
     return pos;
+#else 
+	ivec3 pos;
+	pos.x = probe_id % int(ddgi.probe_counts.x);
+	pos.y = (probe_id % int(ddgi.probe_counts.x*ddgi.probe_counts.y)) / int(ddgi.probe_counts.x);
+	pos.z = probe_id / int(ddgi.probe_counts.x*ddgi.probe_counts.y);
+	return pos;
+#endif
 }
 
 // Transforms texel coord into probe id (for irradiance texture)
@@ -135,6 +143,7 @@ ivec3 world_to_grid_coords(vec3 world_pos) {
 
 // Gets probe texel vec for irradiance texture from normal spherical vector and probe grid coords
 vec2 get_probe_uv(vec3 normal, ivec3 probe_coords, int probe_res) {
+#if 0
 	const int probe_with_border = int(probe_res) + 2;
 	const float irr_width = float(ddgi.probe_counts.x * ddgi.probe_counts.y * probe_with_border);
 	const float irr_height = float(ddgi.probe_counts.z * probe_with_border);
@@ -145,5 +154,16 @@ vec2 get_probe_uv(vec3 normal, ivec3 probe_coords, int probe_res) {
 	);
 
 	return (normalToUvRectOct(normal, probe_res) + offset + vec2(1.0)) / vec2(irr_width, irr_height);
+#else 
+	const int probe_with_border = probe_res + 2;
+	const float tex_width = float(ddgi.probe_counts.x * ddgi.probe_counts.y * probe_with_border);
+	const float tex_height = float(ddgi.probe_counts.z * probe_with_border);
+	const vec2 oct_coords = octEncode(normalize(normal));
+	vec2 uv = vec2((probe_coords.x + probe_coords.y * ddgi.probe_counts.x) * probe_with_border, probe_coords.z * probe_with_border);
+	uv += vec2(1.0);
+	uv += vec2(probe_res * 0.5);
+	uv += oct_coords * (probe_res * 0.5);
+	return uv / vec2(tex_width, tex_height);
+#endif
 }
 
