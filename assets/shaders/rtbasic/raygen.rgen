@@ -130,7 +130,7 @@ void main() {
 
         ivec3 probe_grid_coords = get_probe_grid_coords(probe_idx);
         vec3 ray_origin = grid_coord_to_position(probe_grid_coords);
-        vec3 ray_dir = /*cam.randomRotation **/ sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
+        vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
 
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, ray_origin, ddgi.min_dist, ray_dir, ddgi.max_dist, 0);
 
