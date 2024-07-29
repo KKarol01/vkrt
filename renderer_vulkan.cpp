@@ -54,7 +54,7 @@ Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, b
     ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
 }
 
-Buffer::Buffer(const std::string& name, size_t size, size_t alignment, VkBufferUsageFlags usage, bool map) {
+Buffer::Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
     vks::BufferCreateInfo binfo;
     VmaAllocationCreateInfo vinfo{};
@@ -1170,7 +1170,7 @@ void RendererVulkan::build_blas() {
         meta.blas_buffer =
             Buffer{ "blas_buffer", build_size_info.accelerationStructureSize,
                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-        scratch_sizes.at(i) = build_size_info.buildScratchSize;
+        scratch_sizes.at(i) = align_up(build_size_info.buildScratchSize, static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
 
         vks::AccelerationStructureCreateInfoKHR blas_info;
         blas_info.buffer = meta.blas_buffer.buffer;
@@ -1228,7 +1228,7 @@ void RendererVulkan::build_tlas() {
         instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
     }
 
-    Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instances[0]) * instances.size(),
+    Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instances[0]) * instances.size(), 16u,
                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
                             true };
     memcpy(buffer_instance.mapped, instances.data(), sizeof(instances[0]) * instances.size());

@@ -21,7 +21,7 @@ class Buffer {
   public:
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, size_t size, size_t alignment, VkBufferUsageFlags usage, bool map);
+    Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
 
     size_t push_data(std::span<const std::byte> data);
     constexpr size_t get_free_space() const { return capacity - size; }
