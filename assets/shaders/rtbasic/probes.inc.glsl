@@ -119,12 +119,19 @@ ivec3 get_probe_grid_coords(int probe_id) {
 
 // Transforms texel coord into probe id (for irradiance texture)
 int get_probe_index_from_coords(ivec2 coords, int probe_res) {
+#if 0
 	const int probe_with_border = probe_res + 2;
 	const ivec3 pc = ivec3(ddgi.probe_counts.xyz);
 	const int x = (coords.x / probe_with_border) % pc.x;
 	const int y = (coords.x / (probe_with_border * pc.x)) % pc.y;
 	const int z = (coords.y / probe_with_border) % pc.z;
 	return x + y*pc.x + z*pc.x*pc.y;
+#else 
+	const int probe_with_border = probe_res + 2;
+	const int tex_width = int(ddgi.probe_counts.x * ddgi.probe_counts.y) * probe_with_border;
+	const int probes_per_side = tex_width / probe_with_border;
+	return int(coords.x / probe_with_border) + probes_per_side * int(coords.y / probe_with_border);
+#endif
 } 
 
 // Transforms grid coords into 1d index

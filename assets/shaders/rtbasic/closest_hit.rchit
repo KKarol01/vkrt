@@ -116,11 +116,11 @@ void main()
  
   payload.radiance = color_value * calc_direct_lighting(pos, nor);
 
-#if 1
-	 payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.95;
+#if GLOBAL_ILLUMINATION
+	 payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
 #endif
-
-  payload.distance = gl_RayTmaxEXT;
+  payload.albedo = color_value;
+  payload.distance = gl_RayTminEXT + gl_HitTEXT;
 }
 
 /*
