@@ -60,7 +60,7 @@ void main() {
 
 		for(int ray_idx = 0; ray_idx < ddgi.rays_per_probe; ++ray_idx) {
 			ivec2 sample_pos = ivec2(ray_idx, probe_id);
-#ifdef RANDOM_ROTATION
+#if RANDOM_ROTATION
 			vec3 ray_dir = normalize(cam.randomRotation * sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe)));
 #else
 			vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
@@ -84,7 +84,7 @@ void main() {
 					result += vec4(radiance * weight, weight); 
 				}
 			} else if (mode == MODE_VISIBILITY) {
-				//weight = pow(weight, 2.5);
+				weight = pow(weight, 0.5);
 
 				if(weight >= EPSILON) {
 					dist = min(abs(dist), ddgi.max_dist);
@@ -93,7 +93,7 @@ void main() {
 			}
 		}
 
-		if(result.w > EPSILON) { result.xyz /= result.w; result.w = 1.0; }
+		if(result.w > EPSILON) { result.xyzw /= result.w; }
 
 		if(mode == MODE_IRRADIANCE) {
 #ifdef HYSTERESIS
@@ -101,12 +101,12 @@ void main() {
 			vec3 diff = abs(result.rgb - prev_result.rgb);
 			float change_magnitude = max(max(diff.x, diff.y), diff.z);
 			float h = HYSTERESIS;
-#if 0
+#if 0 // Was supposed to reduce flickering, but doesn't work. Other implementations have 0.95 hysteresis, but it is too low to eliminate it
 			if(change_magnitude > SIGNIFICANT_CHANGE_THRESHOLD) {
 				h = max(0.0, h - 0.15);
 			}
-			if(change_magnitude > 0.1) {
-				h = 1.0;
+			if(change_magnitude > 0.8) {
+				h = 0.0;
 			}
 #endif
 			result.rgb = mix(result.rgb, prev_result.rgb, h);

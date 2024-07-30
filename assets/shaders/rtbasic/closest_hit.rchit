@@ -116,7 +116,7 @@ void main()
  
   payload.radiance = color_value * calc_direct_lighting(pos, nor);
 
-#if GLOBAL_ILLUMINATION
+#if GLOBAL_ILLUMINATION && TEMPORAL_ACCUMULATION
 	 payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
 #endif
   payload.albedo = color_value;
