@@ -65,7 +65,6 @@ void main() {
 #else
 			vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
 #endif
-			vec2 uv_coord = normalToUvRectOct(ray_dir, probe_res);
 			vec3 texel_dir = octDecode(normalizedOctCoord(coords, probe_res));
 			float weight = max(0.0, dot(texel_dir, ray_dir));
 			vec4 read_radiance_distance = imageLoad(ddgi_radiance_image, sample_pos);
@@ -84,7 +83,7 @@ void main() {
 					result += vec4(radiance * weight, weight); 
 				}
 			} else if (mode == MODE_VISIBILITY) {
-				weight = pow(weight, 0.5);
+				//weight = pow(weight, 2.5);
 
 				if(weight >= EPSILON) {
 					dist = min(abs(dist), ddgi.max_dist);
@@ -101,7 +100,7 @@ void main() {
 			vec3 diff = abs(result.rgb - prev_result.rgb);
 			float change_magnitude = max(max(diff.x, diff.y), diff.z);
 			float h = HYSTERESIS;
-#if 0 // Was supposed to reduce flickering, but doesn't work. Other implementations have 0.95 hysteresis, but it is too low to eliminate it
+#if 1 // Was supposed to reduce flickering, but doesn't work. Other implementations have 0.95 hysteresis, but it is too low to eliminate it
 			if(change_magnitude > SIGNIFICANT_CHANGE_THRESHOLD) {
 				h = max(0.0, h - 0.15);
 			}
