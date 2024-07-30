@@ -250,6 +250,7 @@ class RendererVulkan : public Renderer {
     Buffer combined_rt_buffers_buffer;
 
     VkPipeline ddgi_compute_pipeline;
+    VkPipeline ddgi_probe_offset_compute_pipeline;
 
     DDGI_Settings ddgi;
     Image rt_image;
