@@ -1355,7 +1355,7 @@ void RendererVulkan::prepare_ddgi() {
         "ddgi irradiance", irradiance_texture_width, irradiance_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
     ddgi.visibility_texture = Image{
-        "ddgi visibility", visibility_texture_width, visibility_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+        "ddgi visibility", visibility_texture_width, visibility_texture_height, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
     ddgi.probe_offsets_texture = Image{ "ddgi probe offsets",
                                         ddgi.probe_counts.x * ddgi.probe_counts.y,
@@ -1420,6 +1420,10 @@ void RendererVulkan::prepare_ddgi() {
     compute_info.stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE).module;
     compute_info.stage.stage = shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE).stage;
     VK_CHECK(vkCreateComputePipelines(dev, nullptr, 1, &compute_info, nullptr, &ddgi_compute_pipeline));
+
+    compute_info.stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE).module;
+    compute_info.stage.stage = shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE).stage;
+    VK_CHECK(vkCreateComputePipelines(dev, nullptr, 1, &compute_info, nullptr, &ddgi_probe_offset_compute_pipeline));
 
     vkQueueWaitIdle(gq);
 #endif
