@@ -134,7 +134,7 @@ void main() {
 
         ivec3 probe_grid_coords = get_probe_grid_coords(probe_idx);
         vec3 ray_origin = grid_coord_to_position(probe_grid_coords);
-#ifdef RANDOM_ROTATION
+#if RANDOM_ROTATION
         vec3 ray_dir = normalize(cam.randomRotation * sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe)));
 #else
         vec3 ray_dir = sphericalFibonacci(float(ray_idx), float(ddgi.rays_per_probe));
