@@ -146,7 +146,7 @@ class RendererVulkan : public Renderer {
         glm::vec3 probe_walk;
         int32_t irradiance_resolution{ 6 };
         int32_t visibility_resolution{ 14 };
-        uint32_t rays_per_probe{ 64 };
+        uint32_t rays_per_probe{ 128 };
         Image radiance_texture;
         Image irradiance_texture;
         Image visibility_texture;

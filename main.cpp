@@ -51,7 +51,7 @@ int main() {
         memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(inv_view), &inv_projection[0][0], sizeof(inv_projection));
 
         std::mt19937 eng;
-        std::uniform_real_distribution<float> dist{ -glm::pi<float>() * 0.1f, glm::pi<float>()* 0.1f };
+        std::uniform_real_distribution<float> dist{ -0.01f, 0.01f };
 
         while(!glfwWindowShouldClose(Engine::window()->window)) {
             glm::mat3 rand_mat = glm::rotate(glm::mat4{ 1.0f }, dist(eng), glm::vec3{ 1.0f, 0.0f, 0.0f }) *
