@@ -123,6 +123,7 @@ enum class ShaderModuleType {
     RT_BASIC_MISS2,
     RT_BASIC_RAYGEN,
     RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
+    RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE,
 };
 
 struct ShaderModuleWrapper {
@@ -150,6 +151,7 @@ class RendererVulkan : public Renderer {
         Image radiance_texture;
         Image irradiance_texture;
         Image visibility_texture;
+        Image probe_offsets_texture;
     };
 
     struct DDGI_Buffer {
@@ -159,10 +161,11 @@ class RendererVulkan : public Renderer {
         float min_dist;
         float max_dist;
         float normal_bias;
+        float max_probe_offset;
         int32_t irradiance_resolution;
         int32_t visibility_resolution;
         uint32_t rays_per_probe;
-        uint32_t radiance_tex_idx; // +1 for irradiance_tex, +2 for visibility_tex
+        uint32_t radiance_tex_idx; // +1 for irradiance_tex, +2 for visibility_tex, +3 for probe offsets
     };
 
   public:

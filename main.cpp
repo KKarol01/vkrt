@@ -67,11 +67,12 @@ int main() {
         int num_frame = 0;
 
         while(!glfwWindowShouldClose(Engine::window()->window)) {
-            float hx = (halton(num_frame, 2) * 2.0 - 1.0) / float(window->size[0]);
-            float hy = (halton(num_frame, 3) * 2.0 - 1.0) / float(window->size[1]);
+            float hx = halton(num_frame, 2) * 2.0 - 1.0;
+            float hy = halton(num_frame, 3) * 2.0 - 1.0;
             num_frame = (num_frame + 1) % 4;
-            glm::mat3 rand_mat = glm::rotate(glm::mat4{ 1.0f }, hy, glm::vec3{ 1.0f, 0.0f, 0.0f }) *
-                                 glm::rotate(glm::mat4{ 1.0f }, hx, glm::vec3{ 0.0f, 1.0f, 0.0f });
+            glm::mat3 rand_mat =
+                glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
+
             memcpy((glm::mat4*)vk_renderer->ubo.mapped + 2, &rand_mat[0][0], sizeof(rand_mat));
 
             vk_renderer->render();

@@ -41,7 +41,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 		
 		float weight = 1.0;
 
-#if 1 // USE VISIBILITY
+#if CHEBYSHEV
 		{
 			vec3 probe_to_biased_point_dir = biased_world_pos - probe_pos;
 			float dist_to_biased_point = length(probe_to_biased_point_dir);

@@ -390,12 +390,14 @@ void RendererVulkan::render() {
                        &index_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     uint32_t mode = 1;
-    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+    vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_offset, sizeof(VkDeviceAddress),
+                       &ddgi_buffer.bda);
     push_offset += sizeof(VkDeviceAddress);
     const auto push_constant_mode_offset = push_offset;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
 
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe, ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
+    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
+                      ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
     vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
     rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
@@ -420,11 +422,13 @@ void RendererVulkan::render() {
 
     mode = 0;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
-    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u), std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
+    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
+                  std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
     mode = 1;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
-    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u), std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
+    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
+                  std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
 
     rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
     rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -440,13 +444,12 @@ void RendererVulkan::render() {
     vks::ImageMemoryBarrier2 ddgi_visibility_comp_to_rt_barrier = rt_to_comp_img_barrier;
     ddgi_visibility_comp_to_rt_barrier.image = ddgi.visibility_texture.image;
 
-    vks::ImageMemoryBarrier2 ddgi_barriers[] {
-        rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier
-    };
+    vks::ImageMemoryBarrier2 ddgi_barriers[]{ rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier };
     rt_to_comp_dep_info.imageMemoryBarrierCount = sizeof(ddgi_barriers) / sizeof(ddgi_barriers[0]);
     rt_to_comp_dep_info.pImageMemoryBarriers = ddgi_barriers;
     vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
-    rt_to_comp_dep_info.imageMemoryBarrierCount = 1; // just to be safe and i'm too lazy to check if i'm reusing this variable anywhere later
+    rt_to_comp_dep_info.imageMemoryBarrierCount =
+        1; // just to be safe and i'm too lazy to check if i'm reusing this variable anywhere later
 
     vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, raytracing_pipeline);
     mode = 0;
@@ -746,13 +749,19 @@ void RendererVulkan::compile_shaders() {
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss2.glsl",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_offset.comp",
     };
-    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_miss_shader,
-                                 shaderc_raygen_shader, shaderc_compute_shader };
+    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader,    shaderc_miss_shader,
+                                 shaderc_raygen_shader,     shaderc_compute_shader, shaderc_compute_shader };
     VkShaderStageFlagBits stages[]{ VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
-                                    VK_SHADER_STAGE_MISS_BIT_KHR, VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_COMPUTE_BIT };
-    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT, ShaderModuleType::RT_BASIC_MISS, ShaderModuleType::RT_BASIC_MISS2,
-                              ShaderModuleType::RT_BASIC_RAYGEN, ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE };
+                                    VK_SHADER_STAGE_MISS_BIT_KHR,        VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+                                    VK_SHADER_STAGE_COMPUTE_BIT,         VK_SHADER_STAGE_COMPUTE_BIT };
+    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT,
+                              ShaderModuleType::RT_BASIC_MISS,
+                              ShaderModuleType::RT_BASIC_MISS2,
+                              ShaderModuleType::RT_BASIC_RAYGEN,
+                              ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
+                              ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE };
     std::vector<std::vector<uint32_t>> compiled_modules;
 
     shaderc::CompileOptions options;
@@ -810,6 +819,12 @@ void RendererVulkan::build_rtpp() {
     ddgiVisibilityLayoutBinding.descriptorCount = 1;
     ddgiVisibilityLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
 
+    VkDescriptorSetLayoutBinding ddgiProbeOffsetLayoutBinding{};
+    ddgiProbeOffsetLayoutBinding.binding = 5;
+    ddgiProbeOffsetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ddgiProbeOffsetLayoutBinding.descriptorCount = 1;
+    ddgiProbeOffsetLayoutBinding.stageFlags = VK_SHADER_STAGE_ALL;
+
     VkDescriptorSetLayoutBinding uniformBufferBinding{};
     uniformBufferBinding.binding = 14;
     uniformBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -824,7 +839,8 @@ void RendererVulkan::build_rtpp() {
 
     std::vector<VkDescriptorSetLayoutBinding> bindings({ accelerationStructureLayoutBinding, resultImageLayoutBinding,
                                                          resultRadianceLayoutBinding, resultIrradianceLayoutBinding,
-                                                         ddgiVisibilityLayoutBinding, uniformBufferBinding, bindlessTexturesBinding });
+                                                         ddgiVisibilityLayoutBinding, ddgiProbeOffsetLayoutBinding,
+                                                         uniformBufferBinding, bindlessTexturesBinding });
     std::vector<VkDescriptorBindingFlags> binding_flags(bindings.size());
     for(uint32_t i = 0; i < binding_flags.size(); ++i) {
         binding_flags.at(i) = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
@@ -1016,6 +1032,10 @@ void RendererVulkan::build_desc_sets() {
     ddgiVisibilityDescriptor.imageView = ddgi.visibility_texture.view;
     ddgiVisibilityDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
+    VkDescriptorImageInfo ddgiProbeOffsetDescriptor{};
+    ddgiProbeOffsetDescriptor.imageView = ddgi.probe_offsets_texture.view;
+    ddgiProbeOffsetDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
     VkDescriptorBufferInfo ubo_descriptor{};
     ubo_descriptor.buffer = ubo.buffer;
     ubo_descriptor.offset = 0;
@@ -1053,6 +1073,9 @@ void RendererVulkan::build_desc_sets() {
     bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
         .sampler = sampler, .imageView = ddgi.visibility_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
 
+    bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
+        .sampler = sampler, .imageView = ddgi.probe_offsets_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
+
     VkDescriptorImageInfo output_image_infos[]{ storageImageDescriptor };
 
     vks::WriteDescriptorSet resultImageWrite;
@@ -1087,6 +1110,14 @@ void RendererVulkan::build_desc_sets() {
     ddgiVisibilityWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     ddgiVisibilityWrite.pImageInfo = &ddgiVisibilityDescriptor;
 
+    vks::WriteDescriptorSet ddgiProbeOffsetWrite;
+    ddgiProbeOffsetWrite.dstSet = raytracing_set;
+    ddgiProbeOffsetWrite.dstBinding = 5;
+    ddgiProbeOffsetWrite.dstArrayElement = 0;
+    ddgiProbeOffsetWrite.descriptorCount = 1;
+    ddgiProbeOffsetWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    ddgiProbeOffsetWrite.pImageInfo = &ddgiProbeOffsetDescriptor;
+
     vks::WriteDescriptorSet uniformBufferWrite;
     uniformBufferWrite.dstSet = raytracing_set;
     uniformBufferWrite.dstBinding = 14;
@@ -1105,8 +1136,8 @@ void RendererVulkan::build_desc_sets() {
 
     std::vector<VkWriteDescriptorSet> writeDescriptorSets = { accelerationStructureWrite, resultImageWrite,
                                                               ddgiRadianceImageWrite,     ddgiIrradianceWrite,
-                                                              ddgiVisibilityWrite,           uniformBufferWrite,
-                                                              bindlessTexturesWrite };
+                                                              ddgiVisibilityWrite,        ddgiProbeOffsetWrite,
+                                                              uniformBufferWrite,         bindlessTexturesWrite };
     vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, VK_NULL_HANDLE);
 }
 
@@ -1170,7 +1201,8 @@ void RendererVulkan::build_blas() {
         meta.blas_buffer =
             Buffer{ "blas_buffer", build_size_info.accelerationStructureSize,
                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-        scratch_sizes.at(i) = align_up(build_size_info.buildScratchSize, static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
+        scratch_sizes.at(i) = align_up(build_size_info.buildScratchSize,
+                                       static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
 
         vks::AccelerationStructureCreateInfoKHR blas_info;
         blas_info.buffer = meta.blas_buffer.buffer;
@@ -1325,6 +1357,15 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.visibility_texture = Image{
         "ddgi visibility", visibility_texture_width, visibility_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
+    ddgi.probe_offsets_texture = Image{ "ddgi probe offsets",
+                                        ddgi.probe_counts.x * ddgi.probe_counts.y,
+                                        ddgi.probe_counts.z,
+                                        1,
+                                        1,
+                                        1,
+                                        VK_FORMAT_R16G16B16A16_SFLOAT,
+                                        VK_SAMPLE_COUNT_1_BIT,
+                                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ddgi.radiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
@@ -1336,6 +1377,9 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.visibility_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                               VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.probe_offsets_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                                 VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     submit_recording(gq, cmd);
 
     vks::SamplerCreateInfo sampler_info;
@@ -1358,17 +1402,16 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->probe_start = ddgi.probe_dims.min;
     ddgi_buffer_mapped->probe_counts = ddgi.probe_counts;
     ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
-    ddgi_buffer_mapped->min_dist = 0.01f;//glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
+    ddgi_buffer_mapped->min_dist = 0.01f; // glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
     ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.5f;
+    ddgi_buffer_mapped->max_probe_offset = 0.5f;
     ddgi_buffer_mapped->normal_bias = 0.08f;
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
     ddgi_buffer_mapped->visibility_resolution = ddgi.visibility_resolution;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
     ddgi_buffer_mapped->radiance_tex_idx = textures.size();
 
-    if(ddgi.probe_counts.y == 1) {
-        ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f;
-    }
+    if(ddgi.probe_counts.y == 1) { ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f; }
 
     vks::ComputePipelineCreateInfo compute_info;
     compute_info.layout = raytracing_layout;
