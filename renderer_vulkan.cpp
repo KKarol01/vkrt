@@ -1344,7 +1344,7 @@ void RendererVulkan::prepare_ddgi() {
     }
 
     ddgi.probe_dims = scene_bounding_box;
-    ddgi.probe_distance = 0.4f;
+    ddgi.probe_distance = 0.5f;
     ddgi.probe_dims.min *= glm::vec3{ 0.9, 0.7, 0.9 };
     ddgi.probe_dims.max *= glm::vec3{ 0.9, 0.7, 0.9 };
 
