@@ -37,7 +37,9 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 
 		ivec3 probe_coord = clamp(grid_indices + offset, ivec3(0), ivec3(ddgi.probe_counts) - 1);
 		int probe_idx = get_probe_index_from_grid_coords(probe_coord);
-		vec3 probe_pos = grid_coord_to_position(probe_coord);
+
+		// TODO: make no offset variant
+		vec3 probe_pos = grid_coord_to_position_offset(probe_coord, probe_idx);
 		
 		float weight = 1.0;
 

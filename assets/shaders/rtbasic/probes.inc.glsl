@@ -100,6 +100,13 @@ vec3 grid_coord_to_position(ivec3 grid_coords) {
     return ddgi.probe_start + vec3(grid_coords) * ddgi.probe_walk;
 }
 
+// Transforms grid coord [0, num_probes] into world space position with dynamic offsets
+vec3 grid_coord_to_position_offset(ivec3 grid_coords, int probe_idx) {
+	const int probe_counts_xy = int(ddgi.probe_counts.x * ddgi.probe_counts.y);
+	const ivec2 offset_coords = ivec2(probe_idx % probe_counts_xy, probe_idx / probe_counts_xy);
+	return grid_coord_to_position(grid_coords) + imageLoad(ddgi_probe_offset_image, offset_coords).xyz;
+}
+
 // Transforms probe id from [0, total_num_probes] into grid coords [0, num_probes]
 ivec3 get_probe_grid_coords(int probe_id) {
 #if 0
