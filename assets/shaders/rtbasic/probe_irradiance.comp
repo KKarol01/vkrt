@@ -40,8 +40,8 @@ void main() {
 	//return;
 #endif
 	const ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
-	const int probe_texture_width = (mode = MODE_IRRADIANCE) ? ddgi.irradiance_tex_size.x : ddgi.visibility_tex_size.x;
-	const int probe_texture_height = (mode = MODE_IRRADIANCE) ? ddgi.irradiance_tex_size.y : ddgi.visibility_tex_size.y;
+	const int probe_texture_width = (mode == MODE_IRRADIANCE) ? ddgi.irradiance_tex_size.x : ddgi.visibility_tex_size.x;
+	const int probe_texture_height = (mode == MODE_IRRADIANCE) ? ddgi.irradiance_tex_size.y : ddgi.visibility_tex_size.y;
 	const int probe_res = (mode == MODE_IRRADIANCE) ? ddgi.irr_res : ddgi.vis_res;
 	const int probe_with_border = probe_res + 2;
 	const int probe_last_pixel = probe_res + 1;
@@ -83,7 +83,7 @@ void main() {
 
 			if(mode == MODE_IRRADIANCE) {
 				if(weight > EPSILON) {
-					radiance *= 0.95;
+					radiance *= energy_conservation;
 					result += vec4(radiance * weight, weight); 
 				}
 			} else if (mode == MODE_VISIBILITY) {
