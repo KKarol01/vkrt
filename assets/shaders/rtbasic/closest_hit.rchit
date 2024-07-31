@@ -17,31 +17,30 @@ hitAttributeEXT vec2 barycentric_weights;
 
 vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	vec3 V = normalize(cam_pos - world_pos);
-	vec3 bias_vec = (normal * 0.2 + V * 0.8) * (0.75 * float(ddgi.min_dist)) * ddgi.normal_bias;
+	vec3 bias_vec = (normal * 0.2 + V * 0.8) * (0.75 * 1.0) * ddgi.normal_bias;
 	vec3 biased_world_pos = world_pos + bias_vec;
-	ivec3 grid_indices = world_to_grid_coords(biased_world_pos);
-	vec3 grid_pos = grid_coord_to_position(grid_indices);
-	vec3 alpha = clamp((biased_world_pos - grid_pos) / ddgi.probe_walk, vec3(0.0), vec3(1.0));
+	ivec3 base_grid_indices = world_to_grid_indices(biased_world_pos);
+	vec3 base_probe_world_pos = grid_indices_to_world_no_offsets(base_grid_indices);
+	vec3 alpha = clamp((biased_world_pos - base_probe_world_pos) / ddgi.probe_walk, vec3(0.0), vec3(1.0));
 
 	vec3 irr = vec3(0.0);
 	float sum_weight = 0.0;
-
-	//return irr;
 
 #if 1
 	for(int i=0; i<8; ++i) {
 		ivec3 offset = ivec3(i, i>>1, i>>2) & ivec3(1);
 
-		vec3 trilinear3 = max(vec3(0.001), mix(1.0 - alpha, alpha, vec3(offset)));
+		vec3 trilinear3 = mix(1.0 - alpha, alpha, vec3(offset));
 		float trilinear = trilinear3.x * trilinear3.y * trilinear3.z + 0.0001;
 
-		ivec3 probe_coord = clamp(grid_indices + offset, ivec3(0), ivec3(ddgi.probe_counts) - 1);
-		int probe_idx = get_probe_index_from_grid_coords(probe_coord);
+		ivec3 probe_grid_coord = clamp(base_grid_indices + offset, ivec3(0), ivec3(ddgi.probe_counts) - ivec3(1));
+		int probe_idx = probe_indices_to_index(probe_grid_coord);
 
-		// TODO: make no offset variant
-		vec3 probe_pos = grid_coord_to_position_offset(probe_coord, probe_idx);
+		vec3 probe_pos = grid_indices_to_world(probe_grid_coord, probe_idx);
 		
 		float weight = 1.0;
+
+		// TODO: Use smooth backfaces (?)
 
 #if CHEBYSHEV
 		{
@@ -49,7 +48,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 			float dist_to_biased_point = length(probe_to_biased_point_dir);
 			probe_to_biased_point_dir *= 1.0 / dist_to_biased_point;
 
-			vec2 uv = get_probe_uv(probe_to_biased_point_dir, probe_coord, ddgi.vis_res);
+			vec2 uv = get_probe_uv(probe_to_biased_point_dir, probe_idx, ddgi.visibility_tex_size.x, ddgi.visibility_tex_size.y, int(ddgi.vis_res));
 			vec2 visibility = textureLod(textures[ddgi.radiance_tex_idx + 2], uv, 0).rg;
 			float mean_dist = visibility.x;
 			float chebyshev = 1.0;
@@ -63,21 +62,19 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 
 			chebyshev = max(0.05, chebyshev);
 			weight *= chebyshev;
-			weight = max(0.00001, weight);
-		
-			const float crush_threshold = 0.2;
-			if(weight < crush_threshold) {
-				weight *= (weight * weight) * (1.0 / (crush_threshold * crush_threshold));
-			}
 		}
 #endif
-		
+		const float crush_threshold = 0.2;
+		if(weight < crush_threshold) {
+			weight *= (weight * weight) * (1.0 / (crush_threshold * crush_threshold));
+		}
+
 		weight *= trilinear;
 
 #if 0
 		vec3 probe_irr = colors[probe_idx].xyz;
 #else
-		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_coord, ddgi.irr_res), 0).rgb;
+		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_idx, ddgi.irradiance_tex_size.x, ddgi.irradiance_tex_size.y, ddgi.irr_res), 0).rgb;
 		//probe_irr = vec3(get_probe_uv(normal, probe_coord), 0.0);
 #endif
 		irr += weight * probe_irr;

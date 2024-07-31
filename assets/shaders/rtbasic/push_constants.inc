@@ -32,11 +32,17 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Com
 };
 
 layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
+    ivec2 radiance_tex_size;
+    ivec2 irradiance_tex_size;
+    ivec2 visibility_tex_size;
+    ivec2 probe_offset_tex_size;
 	vec3 probe_start;
 	uvec3 probe_counts;
 	vec3 probe_walk;
-	float min_dist;
-	float max_dist;
+    float min_probe_distance;
+    float max_probe_distance;
+	float min_dist; // min tracing dist
+	float max_dist; // max tracing dist TODO: rename the actual vars
 	float normal_bias;
     float max_probe_offset;
     uint frame_num;
