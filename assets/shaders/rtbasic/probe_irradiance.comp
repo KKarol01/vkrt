@@ -101,9 +101,9 @@ void main() {
 		if(mode == MODE_IRRADIANCE) {
 #ifdef HYSTERESIS
 			vec4 prev_result = imageLoad(ddgi_irradiance_image, coords);
-			//vec3 diff = abs(result.rgb - prev_result.rgb);
-			//float change_magnitude = max(max(diff.x, diff.y), diff.z);
-			//float h = HYSTERESIS;
+			vec3 diff = abs(result.rgb - prev_result.rgb);
+			float change_magnitude = max(max(diff.x, diff.y), diff.z);
+			float h = HYSTERESIS;
 			result.rgb = mix(result.rgb, prev_result.rgb, HYSTERESIS);
 #endif
 			imageStore(ddgi_irradiance_image, coords, vec4(result.xyz, 1.0));
