@@ -454,7 +454,11 @@ void RendererVulkan::render() {
     vks::ImageMemoryBarrier2 ddgi_visibility_comp_to_rt_barrier = rt_to_comp_img_barrier;
     ddgi_visibility_comp_to_rt_barrier.image = ddgi.visibility_texture.image;
 
-    vks::ImageMemoryBarrier2 ddgi_barriers[]{ rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier };
+    vks::ImageMemoryBarrier2 ddgi_probe_offsets_comp_to_rt_barrier = rt_to_comp_img_barrier;
+    ddgi_probe_offsets_comp_to_rt_barrier.image = ddgi.probe_offsets_texture.image;
+
+    vks::ImageMemoryBarrier2 ddgi_barriers[]{ rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier,
+                                              ddgi_probe_offsets_comp_to_rt_barrier };
     rt_to_comp_dep_info.imageMemoryBarrierCount = sizeof(ddgi_barriers) / sizeof(ddgi_barriers[0]);
     rt_to_comp_dep_info.pImageMemoryBarriers = ddgi_barriers;
     vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
@@ -1340,12 +1344,13 @@ void RendererVulkan::prepare_ddgi() {
     }
 
     ddgi.probe_dims = scene_bounding_box;
-    ddgi.probe_dims.min *= glm::vec3{ 0.9 };
-    ddgi.probe_dims.max *= glm::vec3{ 0.9 };
+    ddgi.probe_dims.min *= glm::vec3{ 1.0 };
+    ddgi.probe_dims.max *= glm::vec3{ 1.0 };
 
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
+    ddgi.probe_counts = { 10, 5, 10 };
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 
@@ -1414,9 +1419,9 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->probe_start = ddgi.probe_dims.min;
     ddgi_buffer_mapped->probe_counts = ddgi.probe_counts;
     ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
-    ddgi_buffer_mapped->min_dist = 0.01f; // glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
+    ddgi_buffer_mapped->min_dist = 0.1f; // glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
     ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.5f;
-    ddgi_buffer_mapped->normal_bias = 0.08f;
+    ddgi_buffer_mapped->normal_bias = 0.18f;
     ddgi_buffer_mapped->max_probe_offset = 0.5f;
     ddgi_buffer_mapped->frame_num = 0;
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;

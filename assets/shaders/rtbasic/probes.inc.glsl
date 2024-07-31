@@ -1,3 +1,4 @@
+#if 0
 float signNotZero(float k) {
     return k >= 0.0 ? 1.0 : -1.0;
 }
@@ -180,4 +181,145 @@ vec2 get_probe_uv(vec3 normal, ivec3 probe_coords, int probe_res) {
 	return uv / vec2(tex_width, tex_height);
 #endif
 }
+#else 
+// Utility methods ///////////////////////////////////////////////////////
+vec3 spherical_fibonacci(float i, float n) {
+    const float PHI = sqrt(5.0f) * 0.5 + 0.5;
+#define madfrac(A, B) ((A) * (B)-floor((A) * (B)))
+    float phi       = 2.0 * PI * madfrac(i, PHI - 1);
+    float cos_theta = 1.0 - (2.0 * i + 1.0) * (1.0 / n);
+    float sin_theta = sqrt(clamp(1.0 - cos_theta * cos_theta, 0.0f, 1.0f));
 
+    return vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
+
+#undef madfrac
+}
+
+
+float sign_not_zero(in float k) {
+    return (k >= 0.0) ? 1.0 : -1.0;
+}
+
+vec2 sign_not_zero2(in vec2 v) {
+    return vec2(sign_not_zero(v.x), sign_not_zero(v.y));
+}
+
+// Assumes that v is a unit vector. The result is an octahedral vector on the [-1, +1] square.
+vec2 oct_encode(in vec3 v) {
+    float l1norm = abs(v.x) + abs(v.y) + abs(v.z);
+    vec2 result = v.xy * (1.0 / l1norm);
+    if (v.z < 0.0) {
+        result = (1.0 - abs(result.yx)) * sign_not_zero2(result.xy);
+    }
+    return result;
+}
+
+
+// Returns a unit vector. Argument o is an octahedral vector packed via oct_encode,
+// on the [-1, +1] square
+vec3 oct_decode(vec2 o) {
+    vec3 v = vec3(o.x, o.y, 1.0 - abs(o.x) - abs(o.y));
+    if (v.z < 0.0) {
+        v.xy = (1.0 - abs(v.yx)) * sign_not_zero2(v.xy);
+    }
+    return normalize(v);
+}
+
+// Compute normalized oct coord, mapping top left of top left pixel to (-1,-1) and bottom right to (1,1)
+vec2 normalized_oct_coord(ivec2 fragCoord, int probe_side_length) {
+
+    int probe_with_border_side = probe_side_length + 2;
+    vec2 octahedral_texel_coordinates = ivec2((fragCoord.x - 1) % probe_with_border_side, (fragCoord.y - 1) % probe_with_border_side);
+
+    octahedral_texel_coordinates += vec2(0.5f);
+    octahedral_texel_coordinates *= (2.0f / float(probe_side_length));
+    octahedral_texel_coordinates -= vec2(1.0f);
+
+    return octahedral_texel_coordinates;
+}
+
+vec2 get_probe_uv(vec3 direction, int probe_index, int full_texture_width, int full_texture_height, int probe_side_length) {
+
+    // Get octahedral coordinates (-1,1)
+    const vec2 octahedral_coordinates = oct_encode(normalize(direction));
+    // TODO: use probe index for this.
+    const float probe_with_border_side = float(probe_side_length) + 2.0f;
+    const int probes_per_row = (full_texture_width) / int(probe_with_border_side);
+    // Get probe indices in the atlas
+    ivec2 probe_indices = ivec2((probe_index % probes_per_row), 
+                               (probe_index / probes_per_row));
+    
+    // Get top left atlas texels
+    vec2 atlas_texels = vec2( probe_indices.x * probe_with_border_side, probe_indices.y * probe_with_border_side );
+    // Account for 1 pixel border
+    atlas_texels += vec2(1.0f);
+    // Move to center of the probe area
+    atlas_texels += vec2(probe_side_length * 0.5f);
+    // Use octahedral coordinates (-1,1) to move between internal pixels, no border
+    atlas_texels += octahedral_coordinates * (probe_side_length * 0.5f);
+    // Calculate final uvs
+    const vec2 uv = atlas_texels / vec2(float(full_texture_width), float(full_texture_height));
+    return uv;
+}
+
+vec2 texture_coord_from_direction(vec3 dir, int probe_index, int full_texture_width, int full_texture_height, int probe_side_length) {
+    // Get encoded [-1,1] octahedral coordinate
+    vec2 normalized_oct_coord = oct_encode(normalize(dir));
+    // Map it to [0,1]
+    vec2 normalized_oct_coord_zero_one = (normalized_oct_coord * 0.5) + 0.5f;
+
+    // Length of a probe side, plus one pixel on each edge for the border
+    float probe_with_border_side = float(probe_side_length) + 2.0f;
+
+    vec2 oct_coord_normalized_to_texture_dimensions = (normalized_oct_coord_zero_one * float(probe_side_length)) 
+                                                    / vec2(float(full_texture_width), float(full_texture_height));
+
+    int probes_per_row = (full_texture_width) / int(probe_with_border_side);
+
+    // Add (1,1) back to texCoord within larger texture. Compensates for 1 pix border around top left probe.
+    vec2 probe_top_left_position = vec2((probe_index % probes_per_row) * probe_with_border_side,
+        (probe_index / probes_per_row) * probe_with_border_side) + vec2(1.0f, 1.0f);
+
+    vec2 normalized_probe_top_left_position = vec2(probe_top_left_position) / vec2(float(full_texture_width), float(full_texture_height));
+
+    return vec2(normalized_probe_top_left_position + oct_coord_normalized_to_texture_dimensions);
+}
+
+// Probe coordinate system ///////////////////////////////////////////////
+ivec3 probe_index_to_grid_indices( int probe_index ) {
+    const int probe_x = probe_index % int(ddgi.probe_counts.x);
+    const int probe_counts_xy = int(ddgi.probe_counts.x * ddgi.probe_counts.y);
+
+    const int probe_y = (probe_index % probe_counts_xy) / int(ddgi.probe_counts.x);
+    const int probe_z = probe_index / probe_counts_xy;
+
+    return ivec3( probe_x, probe_y, probe_z );
+}
+
+int probe_indices_to_index(in ivec3 probe_coords) {
+    return int(probe_coords.x + probe_coords.y * ddgi.probe_counts.x + probe_coords.z * ddgi.probe_counts.x * ddgi.probe_counts.y);
+}
+
+vec3 grid_indices_to_world_no_offsets( ivec3 grid_indices ) {
+    return grid_indices * ddgi.probe_walk + ddgi.probe_start;
+}
+
+vec3 grid_indices_to_world( ivec3 grid_indices, int probe_index ) {
+    const int probe_counts_xy = int(ddgi.probe_counts.x * ddgi.probe_counts.y);
+    ivec2 probe_offset_sampling_coordinates = ivec2(probe_index % probe_counts_xy, probe_index / probe_counts_xy);
+
+    vec3 probe_offset = imageLoad(ddgi_probe_offset_image, probe_offset_sampling_coordinates).rgb;
+
+    return grid_indices_to_world_no_offsets( grid_indices ) + probe_offset;
+}
+
+ivec3 world_to_grid_indices( vec3 world_position ) {
+    return clamp(ivec3((world_position - ddgi.probe_start) / vec3(ddgi.probe_walk)), ivec3(0), ivec3(ddgi.probe_counts) - ivec3(1));
+}
+
+int get_probe_index_from_pixels(ivec2 pixels, int probe_with_border_side, int full_texture_width) {
+    int probes_per_side = full_texture_width / probe_with_border_side;
+    return int(pixels.x / probe_with_border_side) + probes_per_side * int(pixels.y / probe_with_border_side);
+}
+
+#endif
