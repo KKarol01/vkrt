@@ -145,8 +145,8 @@ class RendererVulkan : public Renderer {
         float probe_distance{ 1.0f };
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
-        int32_t irradiance_resolution{ 6 };
-        int32_t visibility_resolution{ 6 };
+        int32_t irradiance_probe_side{ 6 };
+        int32_t visibility_probe_side{ 6 };
         uint32_t rays_per_probe{ 64 };
         Image radiance_texture;
         Image irradiance_texture;
@@ -155,16 +155,22 @@ class RendererVulkan : public Renderer {
     };
 
     struct DDGI_Buffer {
+        glm::ivec2 radiance_tex_size;
+        glm::ivec2 irradiance_tex_size;
+        glm::ivec2 visibility_tex_size;
+        glm::ivec2 probe_offset_tex_size;
         glm::vec3 probe_start;
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
+        float min_probe_distance;
+        float max_probe_distance;
         float min_dist;
         float max_dist;
         float normal_bias;
         float max_probe_offset;
         uint32_t frame_num;
-        int32_t irradiance_resolution;
-        int32_t visibility_resolution;
+        int32_t irradiance_probe_side;
+        int32_t visibility_probe_side;
         uint32_t rays_per_probe;
         uint32_t radiance_tex_idx; // +1 for irradiance_tex, +2 for visibility_tex, +3 for probe offsets
     };

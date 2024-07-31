@@ -1354,10 +1354,10 @@ void RendererVulkan::prepare_ddgi() {
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 
-    const uint32_t irradiance_texture_width = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
-    const uint32_t irradiance_texture_height = (ddgi.irradiance_resolution + 2) * ddgi.probe_counts.z;
-    const uint32_t visibility_texture_width = (ddgi.visibility_resolution + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
-    const uint32_t visibility_texture_height = (ddgi.visibility_resolution + 2) * ddgi.probe_counts.z;
+    const uint32_t irradiance_texture_width = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
+    const uint32_t irradiance_texture_height = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.z;
+    const uint32_t visibility_texture_width = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
+    const uint32_t visibility_texture_height = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.z;
 
     ddgi.radiance_texture = Image{ "ddgi radiance",
                                    ddgi.rays_per_probe,
@@ -1416,16 +1416,22 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
     DDGI_Buffer* ddgi_buffer_mapped = static_cast<DDGI_Buffer*>(ddgi_buffer.mapped);
+    ddgi_buffer_mapped->radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height };
+    ddgi_buffer_mapped->irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture.width, ddgi.irradiance_texture.height };
+    ddgi_buffer_mapped->visibility_tex_size = glm::ivec2{ ddgi.visibility_texture.width, ddgi.visibility_texture.height };
+    ddgi_buffer_mapped->probe_offset_tex_size = glm::ivec2{ ddgi.probe_offsets_texture.width, ddgi.probe_offsets_texture.height };
     ddgi_buffer_mapped->probe_start = ddgi.probe_dims.min;
     ddgi_buffer_mapped->probe_counts = ddgi.probe_counts;
     ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
-    ddgi_buffer_mapped->min_dist = 0.1f; // glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
+    ddgi_buffer_mapped->min_probe_distance = 0.01f;
+    ddgi_buffer_mapped->max_probe_distance = ddgi.probe_dims.size().length() * 1.5f;
+    ddgi_buffer_mapped->min_dist = 0.1f;
     ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.5f;
     ddgi_buffer_mapped->normal_bias = 0.18f;
     ddgi_buffer_mapped->max_probe_offset = 0.5f;
     ddgi_buffer_mapped->frame_num = 0;
-    ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
-    ddgi_buffer_mapped->visibility_resolution = ddgi.visibility_resolution;
+    ddgi_buffer_mapped->irradiance_probe_side = ddgi.irradiance_probe_side;
+    ddgi_buffer_mapped->visibility_probe_side = ddgi.visibility_probe_side;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
     ddgi_buffer_mapped->radiance_tex_idx = textures.size();
 
