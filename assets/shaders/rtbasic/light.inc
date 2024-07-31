@@ -1,4 +1,4 @@
-const vec3 light = vec3(0.0, 0.0, -0.6);
+const vec3 light = vec3(0.0, 0.6, 0.0);
 
 float calc_direct_lighting(vec3 p, vec3 n) {
 	const vec3 pl = normalize(light - p);
