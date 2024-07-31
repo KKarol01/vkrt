@@ -104,12 +104,12 @@ void main() {
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
 
-    vec4 origin = cam.viewInverse * vec4(0, 0, 0, 1);
+    vec4 origin = cam.viewInverse * vec4(0, 0, 4, 1);
     vec4 target = cam.projInverse * vec4(vec3(vec4(d.x, -d.y, 1, 1).xyz), 1.0);
     vec4 direction = cam.viewInverse * vec4(normalize(target.xyz), 0);
 
     float tmin = 0.00001;
-    float tmax = 5.0;
+    float tmax = 15.0;
 
     payload.radiance = vec3(0.0);
     payload.distance = 0.0;

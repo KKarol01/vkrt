@@ -92,5 +92,5 @@ void main() {
 		current_offset.xyz = offset_limit;
 	}
 
-	imageStore(ddgi_probe_offset_image, offset_coords, current_offset);
+	imageStore(ddgi_probe_offset_image, offset_coords, current_offset * 0.01);
 }
