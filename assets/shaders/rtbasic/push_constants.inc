@@ -39,6 +39,7 @@ layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDG
 	float max_dist;
 	float normal_bias;
     float max_probe_offset;
+    uint frame_num;
 	int irr_res;
 	int vis_res;
     uint rays_per_probe;

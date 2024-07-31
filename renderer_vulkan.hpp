@@ -142,7 +142,7 @@ class RendererVulkan : public Renderer {
 
     struct DDGI_Settings {
         BoundingBox probe_dims;
-        float probe_distance{ 0.6f };
+        float probe_distance{ 0.5f };
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
         int32_t irradiance_resolution{ 6 };
@@ -162,6 +162,7 @@ class RendererVulkan : public Renderer {
         float max_dist;
         float normal_bias;
         float max_probe_offset;
+        uint32_t frame_num;
         int32_t irradiance_resolution;
         int32_t visibility_resolution;
         uint32_t rays_per_probe;
@@ -280,6 +281,8 @@ class RendererVulkan : public Renderer {
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
     // std::vector<InstanceUpload> upload_positions;
+
+    uint32_t num_frame{ 0 };
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;

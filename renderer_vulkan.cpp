@@ -345,6 +345,8 @@ void RendererVulkan::render() {
         flags ^= VkRendererFlags::DIRTY_TLAS;
     }
 
+    static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = num_frame;
+
     vks::AcquireNextImageInfoKHR acq_info;
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
@@ -396,6 +398,7 @@ void RendererVulkan::render() {
     const auto push_constant_mode_offset = push_offset;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
 
+    // radiance pass
     vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
                       ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
@@ -420,15 +423,22 @@ void RendererVulkan::render() {
     vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ddgi_compute_pipeline);
     vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raytracing_layout, 0, 1, &raytracing_set, 0, nullptr);
 
+    // irradiance pass, only need radiance texture
     mode = 0;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
     vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
                   std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
+    // visibility pass, only need radiance texture
     mode = 1;
     vkCmdPushConstants(raytrace_cmd, raytracing_layout, VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
     vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
                   std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
+
+    // probe offset pass, only need radiance texture to complete
+    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ddgi_probe_offset_compute_pipeline);
+    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
+                  std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
 
     rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
     rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -511,6 +521,8 @@ void RendererVulkan::render() {
     pinfo.pWaitSemaphores = &primitives.sem_copy_to_sw_img_done;
     vkQueuePresentKHR(gq, &pinfo);
     vkQueueWaitIdle(gq);
+
+    ++num_frame;
 }
 
 HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
@@ -1404,8 +1416,9 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
     ddgi_buffer_mapped->min_dist = 0.01f; // glm::min(glm::min(ddgi.probe_walk.x, ddgi.probe_walk.y), ddgi.probe_walk.z);
     ddgi_buffer_mapped->max_dist = ddgi.probe_dims.size().length() * 1.5f;
-    ddgi_buffer_mapped->max_probe_offset = 0.5f;
     ddgi_buffer_mapped->normal_bias = 0.08f;
+    ddgi_buffer_mapped->max_probe_offset = 0.5f;
+    ddgi_buffer_mapped->frame_num = 0;
     ddgi_buffer_mapped->irradiance_resolution = ddgi.irradiance_resolution;
     ddgi_buffer_mapped->visibility_resolution = ddgi.visibility_resolution;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
