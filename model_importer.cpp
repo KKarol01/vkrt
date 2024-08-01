@@ -65,11 +65,18 @@ static void load_mesh(ImportedModel& model, fastgltf::Asset& asset, fastgltf::Me
         const auto push_vertex_attrib = [&]<typename GLM>(auto&& it, uint64_t offset) {
             auto& acc = asset.accessors.at(it->accessorIndex);
             auto& index = acc.bufferViewIndex;
-
+            const auto num_comp = fastgltf::getNumComponents(acc.type);
+            
             if(index) {
-                fastgltf::iterateAccessorWithIndex<GLM>(asset, asset.accessors.at(it->accessorIndex), [&](const GLM& p, uint64_t idx) {
-                    memcpy(reinterpret_cast<std::byte*>(&model.vertices.at(imesh.vertex_offset + idx)) + offset, &p, sizeof(GLM));
-                });
+                if(num_comp == 2) {
+					fastgltf::iterateAccessorWithIndex<glm::vec2>(asset, asset.accessors.at(it->accessorIndex), [&](const glm::vec2& p, uint64_t idx) {
+						memcpy(reinterpret_cast<std::byte*>(&model.vertices.at(imesh.vertex_offset + idx)) + offset, &p, sizeof(GLM));
+					});
+                } else if(num_comp == 3) {
+					fastgltf::iterateAccessorWithIndex<glm::vec3>(asset, asset.accessors.at(it->accessorIndex), [&](const glm::vec3& p, uint64_t idx) {
+						memcpy(reinterpret_cast<std::byte*>(&model.vertices.at(imesh.vertex_offset + idx)) + offset, &p, sizeof(GLM));
+					});
+                }
             }
         };
 
