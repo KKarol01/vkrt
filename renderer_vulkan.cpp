@@ -281,7 +281,7 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
     ubo = Buffer{ "ubo", 1024, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
-    constexpr size_t ONE_MB = 1024 * 1024 * 1024;
+    constexpr size_t ONE_MB = 1024 * 1024;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -344,6 +344,12 @@ void RendererVulkan::render() {
         build_desc_sets();
         flags ^= VkRendererFlags::DIRTY_TLAS;
     }
+    if(num_frame == 0) {
+        ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
+        HandleBatchedModel sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
+        Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                                     .tlas_instance_flags = 0x1 });
+    }
 
     static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = num_frame;
 
@@ -366,7 +372,7 @@ void RendererVulkan::render() {
 
     vks::StridedDeviceAddressRegionKHR miss_sbt;
     miss_sbt.deviceAddress = sbt.bda;
-    miss_sbt.size = handle_size_aligned * 2;
+    miss_sbt.size = handle_size_aligned * 1;
     miss_sbt.stride = handle_size_aligned;
 
     vks::StridedDeviceAddressRegionKHR hit_sbt;
@@ -584,9 +590,8 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
     // undoing relative indices - they are now absolute (correctly, without any offsets, index the big vertex buffer with other models)
     for(uint32_t i = 0, idx = 0, offset = upload_indices.size() - model.indices.size(); i < model.meshes.size(); ++i) {
         const auto& mesh = model.meshes.at(i);
-        for(uint32_t j = 0; j < mesh.index_count; ++j) {
-            upload_indices.at(offset + idx) = total_vertices + mesh.vertex_offset + model.indices.at(idx);
-            ++idx;
+        for(uint32_t j = 0; j < mesh.index_count; ++j, ++idx) {
+            upload_indices.at(offset + idx) = model.indices.at(idx) + total_vertices + mesh.vertex_offset;
         }
     }
 
@@ -603,11 +608,10 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
 }
 
 HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, InstanceSettings settings) {
-    model_instances.push_back(RenderModelInstance{
-        .model = Handle<RenderModel>{ *model },
-        .flags = settings.flags,
-        .transform = settings.transform,
-    });
+    model_instances.push_back(RenderModelInstance{ .model = Handle<RenderModel>{ *model },
+                                                   .flags = settings.flags,
+                                                   .transform = settings.transform,
+                                                   .tlas_instance_flags = settings.tlas_instance_flags });
 
     flags |= VkRendererFlags::DIRTY_INSTANCES;
     if(settings.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= VkRendererFlags::DIRTY_TLAS; }
@@ -762,21 +766,16 @@ void RendererVulkan::compile_shaders() {
     std::filesystem::path files[]{
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.rchit",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss2.glsl",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_offset.comp",
     };
-    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader,    shaderc_miss_shader,
-                                 shaderc_raygen_shader,     shaderc_compute_shader, shaderc_compute_shader };
+    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_raygen_shader,
+                                 shaderc_compute_shader, shaderc_compute_shader };
     VkShaderStageFlagBits stages[]{ VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
-                                    VK_SHADER_STAGE_MISS_BIT_KHR,        VK_SHADER_STAGE_RAYGEN_BIT_KHR,
-                                    VK_SHADER_STAGE_COMPUTE_BIT,         VK_SHADER_STAGE_COMPUTE_BIT };
-    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT,
-                              ShaderModuleType::RT_BASIC_MISS,
-                              ShaderModuleType::RT_BASIC_MISS2,
-                              ShaderModuleType::RT_BASIC_RAYGEN,
-                              ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
+                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_COMPUTE_BIT, VK_SHADER_STAGE_COMPUTE_BIT };
+    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT, ShaderModuleType::RT_BASIC_MISS,
+                              ShaderModuleType::RT_BASIC_RAYGEN, ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
                               ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE };
     std::vector<std::vector<uint32_t>> compiled_modules;
 
@@ -917,23 +916,6 @@ void RendererVulkan::build_rtpp() {
         vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
         stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_MISS).module;
-        stage.pName = "main";
-        shaderStages.push_back(stage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
-    }
-
-    // Miss group
-    {
-        vks::PipelineShaderStageCreateInfo stage;
-        stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_MISS2).module;
         stage.pName = "main";
         shaderStages.push_back(stage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
@@ -1270,7 +1252,7 @@ void RendererVulkan::build_tlas() {
         auto& instance = instances.at(i);
         instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(render_model_instances.at(i)->transform));
         instance.instanceCustomIndex = 0;
-        instance.mask = 0xFF;
+        instance.mask = render_model_instances.at(i)->tlas_instance_flags;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
         instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
@@ -1351,7 +1333,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
-    //ddgi.probe_counts = { 16, 4, 16 };
+    // ddgi.probe_counts = { 16, 4, 16 };
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 
