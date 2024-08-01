@@ -9,8 +9,8 @@ namespace vks {
 	#define INIT_VK_STRUCT_2(name, type, ...) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
 	#define INIT_VK_STRUCT_NAME(ARG1, ARG2, NAME, ...) NAME
 	#define INIT_VK_STRUCT(...) INIT_VK_STRUCT_NAME(__VA_ARGS__, INIT_VK_STRUCT_2, INIT_VK_STRUCT_1)(__VA_ARGS__)
-#elif defined(_MSC_VER_)
-	#define INIT_VK_STRUCT(...) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
+#elif defined(_MSC_VER)
+	#define INIT_VK_STRUCT(name, type) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
 #endif
 
 	INIT_VK_STRUCT(Win32SurfaceCreateInfoKHR, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
