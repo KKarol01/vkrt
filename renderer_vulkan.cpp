@@ -638,7 +638,7 @@ void RendererVulkan::upload_model_textures() {
     for(const auto& tex : upload_images) {
         auto& texture = dst_textures.emplace_back(std::format("{}", tex.name), tex.width, tex.height, 1, 1, 1,
                                                   VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
-                                                  VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                                                  VK_IMAGE_USAGE_SAMPLED_BIT);
 
         vks::BufferImageCopy2& region = buffer_copies.emplace_back();
         region.bufferOffset = texture_byte_offset;

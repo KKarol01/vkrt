@@ -26,7 +26,6 @@ template <typename T> struct Flags {
 
     constexpr operator bool() const { return flags > 0; }
 
-  private:
     U flags{ 0 };
 };
 

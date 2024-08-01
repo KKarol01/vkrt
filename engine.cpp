@@ -21,6 +21,8 @@ Window::~Window() {
     if(!Engine::window()) { glfwTerminate(); }
 }
 
+Engine::~Engine() = default;
+
 void Engine::init() {
     _this = std::make_unique<Engine>();
 
@@ -30,3 +32,5 @@ void Engine::init() {
 }
 
 void Engine::destroy() { _this.reset(); }
+
+std::unique_ptr<Engine> Engine::_this = {};
