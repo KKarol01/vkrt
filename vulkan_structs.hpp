@@ -4,10 +4,14 @@
 
 // clang-format off
 namespace vks {
-	#define INIT_VK_STRUCT_1(name) struct name : public Vk##name {}
-	#define INIT_VK_STRUCT_2(name, type) struct name : public Vk##name { name() : Vk##name({type}) {} }
+#ifdef __clang__
+	#define INIT_VK_STRUCT_1(name, ...) struct name : public Vk##name { constexpr name(): Vk##name() {} }
+	#define INIT_VK_STRUCT_2(name, type, ...) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
 	#define INIT_VK_STRUCT_NAME(ARG1, ARG2, NAME, ...) NAME
 	#define INIT_VK_STRUCT(...) INIT_VK_STRUCT_NAME(__VA_ARGS__, INIT_VK_STRUCT_2, INIT_VK_STRUCT_1)(__VA_ARGS__)
+#elif defined(_MSC_VER_)
+	#define INIT_VK_STRUCT(...) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
+#endif
 
 	INIT_VK_STRUCT(Win32SurfaceCreateInfoKHR, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
 	INIT_VK_STRUCT(PhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES);
@@ -36,7 +40,7 @@ namespace vks {
 	INIT_VK_STRUCT(AccelerationStructureBuildGeometryInfoKHR, VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR);
 	INIT_VK_STRUCT(AccelerationStructureBuildSizesInfoKHR, VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR);
 	INIT_VK_STRUCT(AccelerationStructureCreateInfoKHR, VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR);
-	INIT_VK_STRUCT(AccelerationStructureBuildRangeInfoKHR, VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR);
+	INIT_VK_STRUCT(AccelerationStructureBuildRangeInfoKHR);
 	INIT_VK_STRUCT(PhysicalDeviceBufferDeviceAddressFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES);
 	INIT_VK_STRUCT(PhysicalDeviceAccelerationStructureFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR);
 	INIT_VK_STRUCT(PhysicalDeviceRayTracingPipelineFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR);
