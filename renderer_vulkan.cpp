@@ -697,9 +697,11 @@ void RendererVulkan::upload_instances() {
     std::vector<uint32_t> per_triangle_mesh_ids;
     std::vector<uint32_t> per_tlas_instance_triangle_offsets;
     std::vector<GPURenderMeshData> render_mesh_data;
+    std::vector<glm::mat4x3> per_tlas_transforms;
     per_triangle_mesh_ids.reserve(total_triangles);
     per_tlas_instance_triangle_offsets.reserve(model_instances.size());
     render_mesh_data.reserve(model_instances.size() * meshes.size());
+    per_tlas_transforms.reserve(model_instances.size());
 
     for(const RenderModel& model : models) {
         for(uint32_t i = 0u; i < model.mesh_count; ++i) {
@@ -718,19 +720,22 @@ void RendererVulkan::upload_instances() {
     for(const RenderModelInstance& instance : model_instances) {
         const RenderModel& model = models.at(*instance.model);
         per_tlas_instance_triangle_offsets.push_back(model.first_index / 3u);
+        per_tlas_transforms.push_back(instance.transform);
     }
 
     // clang-format off
     per_triangle_mesh_id_buffer = Buffer{"per triangle mesh id", per_triangle_mesh_ids.size() * sizeof(per_triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     per_tlas_triangle_offsets_buffer = Buffer{"per tlas triangle offsets", per_tlas_instance_triangle_offsets.size() * sizeof(per_tlas_instance_triangle_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     render_mesh_data_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    combined_rt_buffers_buffer = Buffer{"combined rt buffers", sizeof(VkDeviceAddress[3]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    per_tlas_transform_buffer = Buffer{"per tlas transforms", model_instances.size() * sizeof(glm::mat4x3), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
 
     per_triangle_mesh_id_buffer.push_data(std::as_bytes(std::span{per_triangle_mesh_ids}));
     per_tlas_triangle_offsets_buffer.push_data(std::as_bytes(std::span{per_tlas_instance_triangle_offsets}));
     render_mesh_data_buffer.push_data(std::as_bytes(std::span{render_mesh_data}));
+    per_tlas_transform_buffer.push_data(std::as_bytes(std::span{per_tlas_transforms}));
 
-    std::vector<VkDeviceAddress> combined_rt_buffers{ per_triangle_mesh_id_buffer.bda, per_tlas_triangle_offsets_buffer.bda, render_mesh_data_buffer.bda };
+    VkDeviceAddress combined_rt_buffers[] { per_triangle_mesh_id_buffer.bda, per_tlas_triangle_offsets_buffer.bda, render_mesh_data_buffer.bda, per_tlas_transform_buffer.bda };
+    combined_rt_buffers_buffer = Buffer{"combined rt buffers", sizeof(combined_rt_buffers), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     combined_rt_buffers_buffer.push_data(std::as_bytes(std::span{combined_rt_buffers}));
     // clang-format on
 
@@ -1258,21 +1263,22 @@ void RendererVulkan::build_tlas() {
         instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
     }
 
-    Buffer buffer_instance{ "tlas_instance_buffer", sizeof(instances[0]) * instances.size(), 16u,
-                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                            true };
-    memcpy(buffer_instance.mapped, instances.data(), sizeof(instances[0]) * instances.size());
+    tlas_instance_buffer =
+        Buffer{ "tlas_instance_buffer", sizeof(instances[0]) * instances.size(), 16u,
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                true };
+    memcpy(tlas_instance_buffer.mapped, instances.data(), sizeof(instances[0]) * instances.size());
 
     vks::AccelerationStructureGeometryKHR geometry;
     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     geometry.geometry.instances.arrayOfPointers = false;
-    geometry.geometry.instances.data.deviceAddress = buffer_instance.bda;
+    geometry.geometry.instances.data.deviceAddress = tlas_instance_buffer.bda;
 
     vks::AccelerationStructureBuildGeometryInfoKHR tlas_info;
     tlas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlas_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    tlas_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
     tlas_info.geometryCount = 1; // must be 1 for TLAS
     tlas_info.pGeometries = &geometry;
     tlas_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
@@ -1291,11 +1297,12 @@ void RendererVulkan::build_tlas() {
     acc_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     vkCreateAccelerationStructureKHR(dev, &acc_info, nullptr, &tlas);
 
-    Buffer buffer_scratch{ "tlas_scratch_buffer", build_size.buildScratchSize, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+    tlas_scratch_buffer = Buffer{ "tlas_scratch_buffer", build_size.buildScratchSize,
+                                  rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     tlas_info.dstAccelerationStructure = tlas;
-    tlas_info.scratchData.deviceAddress = buffer_scratch.bda;
+    tlas_info.scratchData.deviceAddress = tlas_scratch_buffer.bda;
 
     vks::AccelerationStructureBuildRangeInfoKHR build_range;
     build_range.primitiveCount = max_primitives;
@@ -1310,6 +1317,67 @@ void RendererVulkan::build_tlas() {
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = Buffer{ buffer_tlas };
+
+    refit_tlas();
+}
+
+void RendererVulkan::refit_tlas() {
+    std::vector<const RenderModelInstance*> render_model_instances;
+    render_model_instances.reserve(model_instances.size());
+
+    for(auto& i : model_instances) {
+        if(i.flags & InstanceFlags::RAY_TRACED_BIT) { render_model_instances.push_back(&i); }
+    }
+
+    std::vector<vks::AccelerationStructureInstanceKHR> instances(render_model_instances.size());
+    for(uint32_t i = 0; i < instances.size(); ++i) {
+        auto& instance = instances.at(i);
+        instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(render_model_instances.at(i)->transform));
+        instance.instanceCustomIndex = 0;
+        instance.mask = render_model_instances.at(i)->tlas_instance_flags;
+        instance.instanceShaderBindingTableRecordOffset = 0;
+        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+        instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
+    }
+
+    if(tlas_instance_buffer.capacity != instances.size() * sizeof(instances[0])) {
+        ENG_WARN("Tlas instance buffer size differs from the instance vector in tlas update. That's probably an error: "
+                 "{} != {}",
+                 tlas_instance_buffer.capacity, render_model_instances.size() * sizeof(render_model_instances[0]));
+    }
+
+    memcpy(tlas_instance_buffer.mapped, render_model_instances.data(), tlas_instance_buffer.size);
+
+    vks::AccelerationStructureGeometryKHR geometry;
+    geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    geometry.geometry.instances.arrayOfPointers = false;
+    geometry.geometry.instances.data.deviceAddress = tlas_instance_buffer.bda;
+
+    vks::AccelerationStructureBuildGeometryInfoKHR tlas_info;
+    tlas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    tlas_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    tlas_info.geometryCount = 1;
+    tlas_info.pGeometries = &geometry;
+    tlas_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    tlas_info.srcAccelerationStructure = tlas;
+    tlas_info.dstAccelerationStructure = tlas;
+    tlas_info.scratchData.deviceAddress = tlas_scratch_buffer.bda;
+
+    const uint32_t max_primitives = instances.size();
+
+    vks::AccelerationStructureBuildRangeInfoKHR build_range;
+    build_range.primitiveCount = max_primitives;
+    build_range.primitiveOffset = 0;
+    build_range.firstVertex = 0;
+    build_range.transformOffset = 0;
+    VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
+
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
+    submit_recording(gq, cmd);
+    vkDeviceWaitIdle(dev);
 }
 
 void RendererVulkan::prepare_ddgi() {

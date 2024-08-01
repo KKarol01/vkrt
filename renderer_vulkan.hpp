@@ -196,6 +196,7 @@ class RendererVulkan : public Renderer {
     void create_rt_output_image();
     void build_blas();
     void build_tlas();
+    void refit_tlas();
     void prepare_ddgi();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
@@ -239,6 +240,8 @@ class RendererVulkan : public Renderer {
     BoundingBox scene_bounding_box;
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
+    Buffer tlas_instance_buffer;
+    Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
@@ -254,6 +257,7 @@ class RendererVulkan : public Renderer {
     Buffer per_triangle_mesh_id_buffer;
     Buffer per_tlas_triangle_offsets_buffer;
     Buffer render_mesh_data_buffer;
+    Buffer per_tlas_transform_buffer;
     Buffer combined_rt_buffers_buffer;
 
     VkPipeline ddgi_compute_pipeline;
@@ -286,7 +290,6 @@ class RendererVulkan : public Renderer {
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    // std::vector<InstanceUpload> upload_positions;
 
     uint32_t num_frame{ 0 };
 
