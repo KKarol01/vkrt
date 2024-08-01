@@ -24,6 +24,7 @@ struct Window {
 class Engine {
   public:
     constexpr Engine() = default;
+    ~Engine();
     static void init();
     static void destroy();
 
@@ -31,7 +32,7 @@ class Engine {
     inline static Renderer* renderer() { return &*_this->_renderer; }
 
   private:
-    inline static std::unique_ptr<Engine> _this;
+    static std::unique_ptr<Engine> _this;
     std::unique_ptr<Window> _window;
     std::unique_ptr<Renderer> _renderer;
 };

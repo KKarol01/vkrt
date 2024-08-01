@@ -6,7 +6,6 @@
 #include <glm/mat4x3.hpp>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
-#include "handle_vector.hpp"
 
 enum class VkRendererFlags : uint32_t {
     DIRTY_INSTANCES = 0x1,
