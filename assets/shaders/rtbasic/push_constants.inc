@@ -25,10 +25,14 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Mes
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTriangleOffsets {
     uint32_t offsets[];
 };
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTransform {
+    mat4x3 transforms[];
+};
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
     PerTriangleMeshId mesh_ids;
     PerTlasTriangleOffsets offsets;
     MeshDatasBuffer meshes;
+    PerTlasTransform transforms;
 };
 
 layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDGIBuffer {
