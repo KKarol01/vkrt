@@ -20,6 +20,7 @@ struct BatchSettings {
 struct InstanceSettings {
     Flags<InstanceFlags> flags;
     glm::mat4x3 transform{ 1.0f };
+    uint32_t tlas_instance_flags : 8 { 0xFF };
 };
 
 struct BatchedModel;
