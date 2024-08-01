@@ -44,7 +44,8 @@ int main() {
 
         HandleBatchedModel cornell, sphere;
         {
-            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
+            //ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
+            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell1.glb");
             ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
             cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
             // sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
