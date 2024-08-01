@@ -9,8 +9,8 @@ template <typename T> struct Flags {
     constexpr Flags(T t) noexcept : flags(static_cast<U>(t)) {}
     constexpr Flags(U t) noexcept : flags(t) {}
 
-    friend constexpr Flags<T> operator| <>(Flags<T>, T);
-    friend constexpr Flags<T> operator& <>(Flags<T>, T);
+    friend constexpr Flags<T> operator|(Flags<T> a, T b) { return Flags<T>{ a.flags | static_cast<U>(b) }; }
+    friend constexpr Flags<T> operator&(Flags<T> a, T b) { return Flags<T>{ a.flags & static_cast<U>(b) }; }
     constexpr Flags<T>& operator|=(T f) {
         flags = flags | static_cast<U>(f);
         return *this;
@@ -28,6 +28,3 @@ template <typename T> struct Flags {
 
     U flags{ 0 };
 };
-
-template <typename T> inline constexpr Flags<T> operator|(Flags<T> a, T b) { return a.flags | static_cast<Flags<T>::U>(b); }
-template <typename T> inline constexpr Flags<T> operator&(Flags<T> a, T b) { return a.flags & static_cast<Flags<T>::U>(b); }

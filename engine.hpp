@@ -5,12 +5,13 @@
 #include <cstdint>
 #include "renderer.hpp"
 
-#define ENG_RTERROR(message)                                                                                                               \
+#define ENG_RTERROR(message)                                                                                           \
     throw std::runtime_error { message }
 
 #define ENG_WARN(format, ...) std::printf("[WARN][%s : %d]: " format "\n", __FILE__, __LINE__, __VA_ARGS__)
 
-#define ENG_LOG(fmt, ...) std::printf("%s", std::format("[LOG][{} : {}]: " fmt "\n", __FILE__, __LINE__, __VA_ARGS__).c_str())
+#define ENG_LOG(fmt, ...)                                                                                              \
+    std::printf("%s", std::format("[LOG][{} : {}]: " fmt "\n", __FILE__, __LINE__, __VA_ARGS__).c_str())
 
 struct GLFWwindow;
 
