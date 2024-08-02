@@ -6,12 +6,14 @@
 #include <glm/mat4x3.hpp>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
+#include "handle_vector.hpp"
 
 enum class VkRendererFlags : uint32_t {
     DIRTY_INSTANCES = 0x1,
     DIRTY_UPLOADS = 0x2,
     DIRTY_BLAS = 0x4,
-    DIRTY_TLAS = 0x8
+    DIRTY_TLAS = 0x8,
+    REFIT_TLAS = 0x10,
 };
 inline Flags<VkRendererFlags> operator|(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } | b; }
 inline Flags<VkRendererFlags> operator&(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } & b; }
@@ -91,7 +93,7 @@ struct RenderModelInstance {
     Handle<RenderModel> model;
     Flags<InstanceFlags> flags;
     glm::mat4x3 transform{ 1.0f };
-    uint32_t tlas_instance_flags : 8 { 0xFF };
+    uint32_t tlas_instance_mask : 8 { 0xFF };
 };
 
 struct RenderInstanceBatch {
@@ -173,6 +175,7 @@ class RendererVulkan : public Renderer {
         int32_t visibility_probe_side;
         uint32_t rays_per_probe;
         uint32_t radiance_tex_idx; // +1 for irradiance_tex, +2 for visibility_tex, +3 for probe offsets
+        VkDeviceAddress debug_probe_offsets_buffer;
     };
 
   public:
@@ -188,6 +191,8 @@ class RendererVulkan : public Renderer {
     void upload_model_textures();
     void upload_staged_models();
     void upload_instances();
+
+    void update_transform(HandleInstancedModel model, glm::mat4x3 transform);
 
     void compile_shaders();
     void build_rtpp();
@@ -267,6 +272,7 @@ class RendererVulkan : public Renderer {
     Image rt_image;
     Buffer ubo;
     Buffer ddgi_buffer;
+    Buffer ddgi_debug_probe_offsets_buffer;
 
     std::vector<Image> textures;
     std::vector<RenderMaterial> materials;
@@ -274,7 +280,7 @@ class RendererVulkan : public Renderer {
     std::vector<RenderModelRTMetadata> rt_metadata;
     std::vector<RenderModel> models;
 
-    std::vector<RenderModelInstance> model_instances;
+    HandleVector<RenderModelInstance> model_instances;
 
     Flags<VkRendererFlags> flags;
     struct UploadImage {

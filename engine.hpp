@@ -25,7 +25,6 @@ struct Window {
 class Engine {
   public:
     constexpr Engine() = default;
-    ~Engine();
     static void init();
     static void destroy();
 
