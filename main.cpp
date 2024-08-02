@@ -43,14 +43,13 @@ int main() {
         Engine::init();
 
         {
-            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
+            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
             ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
             HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
-            HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
+            //HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
 
-            // TODO: because of sorting, the isntanced model handle is invalid
             Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
-            Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+            //Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         }
 
         const auto* window = Engine::window();

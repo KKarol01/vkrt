@@ -28,6 +28,10 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Per
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTransform {
     mat4x3 transforms[];
 };
+layout(scalar, buffer_reference, buffer_reference_align = 8) buffer DDGI_DEBUG_PROBE_OFFSETS {
+    vec3 probe_offsets[];
+};
+
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
     PerTriangleMeshId mesh_ids;
     PerTlasTriangleOffsets offsets;
@@ -54,6 +58,7 @@ layout(scalar, buffer_reference, buffer_reference_align = 4) readonly buffer DDG
 	int vis_res;
     uint rays_per_probe;
     uint radiance_tex_idx;
+    DDGI_DEBUG_PROBE_OFFSETS debug_probe_offsets;
 };
 
 layout(scalar, push_constant) uniform Constants {

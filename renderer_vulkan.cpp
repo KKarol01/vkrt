@@ -5,7 +5,7 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
 #include <shaderc/shaderc.hpp>
-// TODO: This shouldn't be here
+#include <glm/gtc/matrix_transform.hpp>
 #define STB_INCLUDE_IMPLEMENTATION
 #define STB_INCLUDE_LINE_GLSL
 #include <stb/stb_include.h>
@@ -281,7 +281,7 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
     ubo = Buffer{ "ubo", 1024, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
-    constexpr size_t ONE_MB = 1024 * 1024;
+    constexpr size_t ONE_MB = 1024 * 1024 * 10;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -324,7 +324,44 @@ void RendererVulkan::create_swapchain() {
 
 template <typename T> static T align_up(T a, T b) { return (a + b - 1) & -b; }
 
+static std::vector<HandleInstancedModel> probe_visualizers;
+static std::vector<glm::mat4x3> original_transforms;
+static HandleBatchedModel sphere;
+
 void RendererVulkan::render() {
+    if(num_frame == 0) {
+        ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
+        sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
+    }
+    if(num_frame == 1) {
+        const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
+        const auto num_probes_xy = ddgi.probe_counts.x * ddgi.probe_counts.y;
+
+        for(uint32_t i = 0; i < num_probes; ++i) {
+            const auto x = i % ddgi.probe_counts.x;
+            const auto y = (i % num_probes_xy) / ddgi.probe_counts.x;
+            const auto z = i / num_probes_xy;
+            const auto probe_pos = ddgi.probe_dims.min + glm::vec3(x, y, z) * ddgi.probe_walk;
+
+            const auto transform = glm::translate(glm::mat4{ 1.0f }, probe_pos);
+            original_transforms.push_back(transform);
+            probe_visualizers.push_back(instance_model(sphere, InstanceSettings{
+                                                                   .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                                   .transform = transform,
+                                                                   .tlas_instance_mask = 0x1,
+                                                               }));
+        }
+    }
+
+    if(num_frame >= 1 ) {
+        for(uint32_t i = 0; i < probe_visualizers.size(); ++i) {
+            const auto off = static_cast<glm::vec3*>(ddgi_debug_probe_offsets_buffer.mapped)[i];
+            const auto orig = original_transforms.at(i)[3];
+            float interp = glm::clamp(float(num_frame % 1500) / 1500.0f * 3.0f, 0.0f, 1.0f);
+            update_transform(probe_visualizers.at(i), (glm::translate(glm::mat4{ 1.0f }, glm::mix(orig, orig + off, interp))));
+        }
+    }
+
     reset_command_pool(cmdpool);
     if(flags & VkRendererFlags::DIRTY_UPLOADS) {
         upload_staged_models();
@@ -344,11 +381,9 @@ void RendererVulkan::render() {
         build_desc_sets();
         flags ^= VkRendererFlags::DIRTY_TLAS;
     }
-    if(num_frame == 0) {
-        ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
-        HandleBatchedModel sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
-        Engine::renderer()->instance_model(sphere, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT,
-                                                                     .tlas_instance_flags = 0x1 });
+    if(flags & VkRendererFlags::REFIT_TLAS) {
+        refit_tlas();
+        flags ^= VkRendererFlags::REFIT_TLAS;
     }
 
     static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = num_frame;
@@ -608,15 +643,15 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
 }
 
 HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, InstanceSettings settings) {
-    model_instances.push_back(RenderModelInstance{ .model = Handle<RenderModel>{ *model },
-                                                   .flags = settings.flags,
-                                                   .transform = settings.transform,
-                                                   .tlas_instance_flags = settings.tlas_instance_flags });
+    auto handle = model_instances.push_back(RenderModelInstance{ .model = Handle<RenderModel>{ *model },
+                                                                 .flags = settings.flags,
+                                                                 .transform = settings.transform,
+                                                                 .tlas_instance_mask = settings.tlas_instance_mask });
 
     flags |= VkRendererFlags::DIRTY_INSTANCES;
     if(settings.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= VkRendererFlags::DIRTY_TLAS; }
 
-    return HandleInstancedModel{ (uint32_t)model_instances.size() - 1u };
+    return HandleInstancedModel{ *handle };
 }
 
 void RendererVulkan::upload_model_textures() {
@@ -690,8 +725,7 @@ void RendererVulkan::upload_staged_models() {
 }
 
 void RendererVulkan::upload_instances() {
-    std::sort(model_instances.begin(), model_instances.end(),
-              [](const RenderModelInstance& a, const RenderModelInstance& b) { return a.model < b.model; });
+    model_instances.sort([](const RenderModelInstance& a, const RenderModelInstance& b) { return a.model < b.model; });
 
     const auto total_triangles = get_total_triangles();
     std::vector<uint32_t> per_triangle_mesh_ids;
@@ -751,6 +785,17 @@ void RendererVulkan::upload_instances() {
     (triangle_offsets[gl_InstanceID] + gl_PrimitiveID) * 3 + 1
     (triangle_offsets[gl_InstanceID] + gl_PrimitiveID) * 3 + 2
     */
+}
+
+void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 transform) {
+    const auto handle = Handle<RenderModelInstance>{ *model };
+    auto& instance = model_instances.get(handle);
+    instance.transform = transform;
+    //ENG_WARN("FIX THIS METHOD");
+    // TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
+    // memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
+    //       sizeof(transform));
+    if(instance.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= VkRendererFlags::REFIT_TLAS; }
 }
 
 void RendererVulkan::compile_shaders() {
@@ -1257,7 +1302,7 @@ void RendererVulkan::build_tlas() {
         auto& instance = instances.at(i);
         instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(render_model_instances.at(i)->transform));
         instance.instanceCustomIndex = 0;
-        instance.mask = render_model_instances.at(i)->tlas_instance_flags;
+        instance.mask = render_model_instances.at(i)->tlas_instance_mask;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
         instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
@@ -1317,8 +1362,6 @@ void RendererVulkan::build_tlas() {
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = Buffer{ buffer_tlas };
-
-    refit_tlas();
 }
 
 void RendererVulkan::refit_tlas() {
@@ -1334,7 +1377,7 @@ void RendererVulkan::refit_tlas() {
         auto& instance = instances.at(i);
         instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(render_model_instances.at(i)->transform));
         instance.instanceCustomIndex = 0;
-        instance.mask = render_model_instances.at(i)->tlas_instance_flags;
+        instance.mask = render_model_instances.at(i)->tlas_instance_mask;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
         instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
@@ -1346,7 +1389,7 @@ void RendererVulkan::refit_tlas() {
                  tlas_instance_buffer.capacity, render_model_instances.size() * sizeof(render_model_instances[0]));
     }
 
-    memcpy(tlas_instance_buffer.mapped, render_model_instances.data(), tlas_instance_buffer.size);
+    memcpy(tlas_instance_buffer.mapped, instances.data(), instances.size() * sizeof(instances[0]));
 
     vks::AccelerationStructureGeometryKHR geometry;
     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -1381,7 +1424,6 @@ void RendererVulkan::refit_tlas() {
 }
 
 void RendererVulkan::prepare_ddgi() {
-#if 1
     for(auto& mi : model_instances) {
         auto& m = models.at(*mi.model);
 
@@ -1401,6 +1443,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
+    const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
     // ddgi.probe_counts = { 16, 4, 16 };
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
@@ -1466,6 +1509,10 @@ void RendererVulkan::prepare_ddgi() {
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    ddgi_debug_probe_offsets_buffer =
+        Buffer{ "ddgi debug probe offsets buffer", sizeof(glm::vec3) * num_probes,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+
     DDGI_Buffer* ddgi_buffer_mapped = static_cast<DDGI_Buffer*>(ddgi_buffer.mapped);
     ddgi_buffer_mapped->radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height };
     ddgi_buffer_mapped->irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture.width, ddgi.irradiance_texture.height };
@@ -1484,7 +1531,9 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->irradiance_probe_side = ddgi.irradiance_probe_side;
     ddgi_buffer_mapped->visibility_probe_side = ddgi.visibility_probe_side;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
-    ddgi_buffer_mapped->radiance_tex_idx = textures.size();
+    ddgi_buffer_mapped->radiance_tex_idx =
+        textures.size(); // TODO: this is wrong, because as new models get added, their texture ids override the ddgi ones
+    ddgi_buffer_mapped->debug_probe_offsets_buffer = ddgi_debug_probe_offsets_buffer.bda;
 
     if(ddgi.probe_counts.y == 1) { ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f; }
 
@@ -1501,7 +1550,6 @@ void RendererVulkan::prepare_ddgi() {
     VK_CHECK(vkCreateComputePipelines(dev, nullptr, 1, &compute_info, nullptr, &ddgi_probe_offset_compute_pipeline));
 
     vkQueueWaitIdle(gq);
-#endif
 }
 
 VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {

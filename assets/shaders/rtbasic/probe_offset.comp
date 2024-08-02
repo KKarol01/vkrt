@@ -83,14 +83,15 @@ void main() {
 		const vec3 closest_dir = spherical_fibonacci(float(closest_frontface_index), float(ddgi.rays_per_probe));
 #endif
 
-		if(dot(farthest_dir, closest_dir) < 0.5) {
+		if(dot(normalize(farthest_dir), closest_dir) < 0.5) {
 			full_offset = current_offset.xyz + farthest_dir;
 		}
 	}
 
 	if(all(lessThan(abs(full_offset), offset_limit))) {
-		current_offset.xyz = offset_limit;
+		current_offset.xyz = full_offset;
 	}
 
 	imageStore(ddgi_probe_offset_image, offset_coords, current_offset);
+	ddgi.debug_probe_offsets.probe_offsets[probe_idx].xyz = current_offset.xyz;
 }
