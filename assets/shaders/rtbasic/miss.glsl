@@ -7,5 +7,6 @@ void main() {
     const vec2 d = gl_WorldRayDirectionEXT.xy;
 
     payload.radiance = vec3(0.0);
+    payload.normal = vec3(0.0);
     payload.distance = 1000.0;
 }
