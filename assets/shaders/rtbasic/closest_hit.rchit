@@ -118,7 +118,9 @@ void main()
 #if GLOBAL_ILLUMINATION && TEMPORAL_ACCUMULATION
 	 payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
 #endif
+
   payload.albedo = color_value;
+  payload.normal = nor;
   payload.distance = gl_RayTminEXT + gl_HitTEXT;
 }
 
