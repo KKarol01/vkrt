@@ -143,6 +143,7 @@ void main() {
 #endif
 
 		final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * payload.shadow, final_color, clamp(sin(t*6.0*PI) * 2.0, 0.0, 1.0));
+		final_color = pow(final_color, vec3(1.0 / 2.2));
 
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(final_color, 1.0)); 
 	} else if (mode == 1) {
