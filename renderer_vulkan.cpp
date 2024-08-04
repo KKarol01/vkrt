@@ -410,12 +410,12 @@ void RendererVulkan::render() {
 
     vks::StridedDeviceAddressRegionKHR miss_sbt;
     miss_sbt.deviceAddress = sbt.bda;
-    miss_sbt.size = handle_size_aligned * 1;
+    miss_sbt.size = handle_size_aligned * 2;
     miss_sbt.stride = handle_size_aligned;
 
     vks::StridedDeviceAddressRegionKHR hit_sbt;
     hit_sbt.deviceAddress = sbt.bda;
-    hit_sbt.size = handle_size_aligned * 1;
+    hit_sbt.size = handle_size_aligned * 2;
     hit_sbt.stride = handle_size_aligned;
 
     vks::StridedDeviceAddressRegionKHR callable_sbt;
@@ -822,17 +822,26 @@ void RendererVulkan::compile_shaders() {
 
     std::filesystem::path files[]{
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.rchit",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rchit",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rmiss",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_offset.comp",
     };
-    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_miss_shader, shaderc_raygen_shader,
-                                 shaderc_compute_shader, shaderc_compute_shader };
-    VkShaderStageFlagBits stages[]{ VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
-                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_COMPUTE_BIT, VK_SHADER_STAGE_COMPUTE_BIT };
-    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT, ShaderModuleType::RT_BASIC_MISS,
-                              ShaderModuleType::RT_BASIC_RAYGEN, ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
+    shaderc_shader_kind kinds[]{ shaderc_closesthit_shader, shaderc_closesthit_shader, shaderc_miss_shader,
+                                 shaderc_miss_shader,       shaderc_raygen_shader,     shaderc_compute_shader,
+                                 shaderc_compute_shader };
+    VkShaderStageFlagBits stages[]{ VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+                                    VK_SHADER_STAGE_MISS_BIT_KHR,        VK_SHADER_STAGE_MISS_BIT_KHR,
+                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR,      VK_SHADER_STAGE_COMPUTE_BIT,
+                                    VK_SHADER_STAGE_COMPUTE_BIT };
+    ShaderModuleType types[]{ ShaderModuleType::RT_BASIC_CLOSEST_HIT,
+                              ShaderModuleType::RT_BASIC_SHADOW_HIT,
+                              ShaderModuleType::RT_BASIC_MISS,
+                              ShaderModuleType::RT_BASIC_SHADOW_MISS,
+                              ShaderModuleType::RT_BASIC_RAYGEN,
+                              ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
                               ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE };
     std::vector<std::vector<uint32_t>> compiled_modules;
 
@@ -985,11 +994,45 @@ void RendererVulkan::build_rtpp() {
         shaderGroups.push_back(shaderGroup);
     }
 
+    // Shadow Miss group
+    {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_SHADOW_MISS).module;
+        stage.pName = "main";
+        shaderStages.push_back(stage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+    }
+
     // Closest hit group
     {
         vks::PipelineShaderStageCreateInfo stage;
         stage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
         stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_CLOSEST_HIT).module;
+        stage.pName = "main";
+        shaderStages.push_back(stage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+        shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+    }
+
+    // Shadow hit group
+    {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+        stage.module = shader_modules.at(ShaderModuleType::RT_BASIC_SHADOW_HIT).module;
         stage.pName = "main";
         shaderStages.push_back(stage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
@@ -1011,7 +1054,7 @@ void RendererVulkan::build_rtpp() {
     rayTracingPipelineCI.pStages = shaderStages.data();
     rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
     rayTracingPipelineCI.pGroups = shaderGroups.data();
-    rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;
+    rayTracingPipelineCI.maxPipelineRayRecursionDepth = 2;
     rayTracingPipelineCI.layout = raytracing_layout;
     VK_CHECK(vkCreateRayTracingPipelinesKHR(dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI, nullptr, &raytracing_pipeline));
 }
@@ -1026,7 +1069,7 @@ void RendererVulkan::build_sbt() {
     vkGetRayTracingShaderGroupHandlesKHR(dev, raytracing_pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
 
     const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    Buffer raygenShaderBindingTable = Buffer{ "buffer_sbt", handleSize * 4, bufferUsageFlags, true };
+    Buffer raygenShaderBindingTable = Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, true };
 
     // Copy handles
     memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize * 4);
