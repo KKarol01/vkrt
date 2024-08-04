@@ -16,10 +16,6 @@
 #include "probes.inc.glsl"
 #include "light.inc"
 
-layout(location = 1) rayPayloadEXT struct RayPayloadShadow {
-    float distance;
-} payload_shadow;
-
 #if 1
 const vec4 colors[] = vec4[](
 	vec4(0.0, 1.0, 0.0, 1.0),
@@ -112,7 +108,7 @@ void main() {
     vec4 target = cam.projInverse * vec4(vec3(vec4(d.x, -d.y, 1, 1).xyz), 1.0);
     vec4 direction = cam.viewInverse * vec4(normalize(target.xyz), 0);
 
-	const float t = float(ddgi.frame_num) * 0.0001;
+	const float t = float(ddgi.frame_num + 21500) * 0.0001;
 	direction.xyz = mat3(
 		vec3(cos(t), 0.0, -sin(t)),
 		vec3(0.0, 1.0, 0.0),
@@ -141,22 +137,12 @@ void main() {
 		const vec3 hit_pos = origin.xyz + direction.xyz * payload.distance;
 		vec3 final_color = payload.radiance;
 
-#if 1
-		vec3 pl = light - hit_pos;
-		float pld = length(pl);
-		pl /= pld;
-
-		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask | 1, sbtOffset + 1, sbtStride, missIndex + 1, hit_pos + payload.normal * 0.01 - pl * 0.01, tmin, pl, pld, 1);
-		const float shadow = (pld > payload_shadow.distance) ? 0.0 : 1.0;
-		final_color *= vec3(shadow);
-#endif
-
 #if GLOBAL_ILLUMINATION
 		vec3 irradiance = sample_irradiance(hit_pos, payload.normal, origin.xyz);
 		final_color += irradiance * payload.albedo;
 #endif
 
-		final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo, final_color, clamp(sin(t*2.0*PI) * 2.0, 0.0, 1.0));
+		final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * payload.shadow, final_color, clamp(sin(t*6.0*PI) * 2.0, 0.0, 1.0));
 
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(final_color, 1.0)); 
 	} else if (mode == 1) {
@@ -177,19 +163,6 @@ void main() {
 
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset, sbtStride, missIndex, ray_origin, ddgi.min_probe_distance, ray_dir, ddgi.max_probe_distance, 0);
 
-#if 1
-		const vec3 hit_pos = origin.xyz + direction.xyz * payload.distance;
-		vec3 pl = light - hit_pos;
-		float pld = length(pl);
-		pl /= pld;
-		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask, sbtOffset + 1, sbtStride, missIndex + 1, hit_pos + payload.normal * 0.01 - pl * 0.01, tmin, pl, pld, 1);
-		const float shadow = (pld > payload_shadow.distance) ? 0.0 : 1.0;
-#endif
-
-#if 0
-        imageStore(ddgi_radiance_image, pixel_coord, colors[probe_idx]);
-#else
-        imageStore(ddgi_radiance_image, pixel_coord, vec4(payload.radiance * vec3(shadow), payload.distance));
-#endif
+        imageStore(ddgi_radiance_image, pixel_coord, vec4(payload.radiance, payload.distance));
     }
 }

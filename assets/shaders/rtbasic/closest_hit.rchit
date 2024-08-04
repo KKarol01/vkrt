@@ -6,12 +6,18 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
+#define RAYTRACING
+
 #include "ray_payload.inc"
 #include "push_constants.inc"
 #include "descriptor_layout.inc"
 #include "light.inc"
 #include "common.inc"
 #include "probes.inc.glsl"
+
+layout(location = 1) rayPayloadEXT struct RayPayloadShadow {
+    float distance;
+} payload_shadow;
 
 hitAttributeEXT vec2 barycentric_weights;
 
@@ -85,6 +91,26 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	return (irr / sum_weight) * 0.5 * PI;
 }
 
+float calc_shadow(vec3 o, vec3 n) {
+    float tmin = 0.00001;
+    float tmax = 5.0;
+
+    const uint cull_mask = 0xFE;
+    const uint sbtOffset = 3;
+    const uint sbtStride = 1;
+    const uint missIndex = 1;
+
+	float shadow = 0.0;
+	for(int i=0; i<num_lights && shadow < EPSILON; ++i) {
+		vec3 pl = lights[i] - o;
+		float pld = length(pl);
+		pl /= pld;
+		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask | 1, sbtOffset + 1, sbtStride, missIndex + 1, o + n * 0.01 - pl * 0.01, tmin, pl, pld, 1);
+		shadow += (pld > payload_shadow.distance) ? 0.0 : 1.0;
+	}
+	return shadow;
+}
+
 void main()
 {
   if(gl_HitKindEXT == gl_HitKindBackFacingTriangleEXT) {
@@ -92,6 +118,7 @@ void main()
 	payload.normal = vec3(0.0);
     payload.radiance = vec3(0.0);
     payload.distance = gl_RayTmaxEXT * -0.2;
+	payload.shadow = 0.0;
     return;
   }
 
@@ -114,8 +141,9 @@ void main()
   const vec2 uvs = v0.uv * a + v1.uv * b + v2.uv * c;
   const vec3 nor = v0.nor * a + v1.nor * b + v2.nor * c;
   const vec3 color_value = texture(textures[nonuniformEXT(mesh_data.color_texture)], uvs).rgb;
- 
-  payload.radiance = color_value * calc_direct_lighting(pos, nor);
+  const float shadow = calc_shadow(pos, nor);
+
+  payload.radiance = color_value * calc_direct_lighting(pos, nor) * shadow;
 
 #if GLOBAL_ILLUMINATION && TEMPORAL_ACCUMULATION
 	 payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
@@ -125,6 +153,7 @@ void main()
   payload.normal = nor;
   payload.distance = gl_RayTminEXT + gl_HitTEXT;
   payload.normal = nor;
+  payload.shadow = shadow;
 }
 
 /*
