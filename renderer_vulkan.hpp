@@ -144,7 +144,7 @@ class RendererVulkan : public Renderer {
 
     struct DDGI_Settings {
         BoundingBox probe_dims;
-        float probe_distance{ 0.5f };
+        float probe_distance{ 0.4f };
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
         int32_t irradiance_probe_side{ 6 };
@@ -279,6 +279,7 @@ class RendererVulkan : public Renderer {
     std::vector<RenderMesh> meshes;
     std::vector<RenderModelRTMetadata> rt_metadata;
     std::vector<RenderModel> models;
+    std::vector<BoundingBox> model_bbs;
 
     HandleVector<RenderModelInstance> model_instances;
 

@@ -88,6 +88,8 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 void main()
 {
   if(gl_HitKindEXT == gl_HitKindBackFacingTriangleEXT) {
+	payload.albedo = vec3(0.0);
+	payload.normal = vec3(0.0);
     payload.radiance = vec3(0.0);
     payload.distance = gl_RayTmaxEXT * -0.2;
     return;
@@ -120,6 +122,7 @@ void main()
 #endif
   payload.albedo = color_value;
   payload.distance = gl_RayTminEXT + gl_HitTEXT;
+  payload.normal = nor;
 }
 
 /*

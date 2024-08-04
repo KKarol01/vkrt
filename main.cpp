@@ -17,7 +17,7 @@
 struct Camera {
     glm::mat4 get_view() const { return glm::lookAt(position, position + direction, glm::vec3{ 0.0f, 1.0f, 0.0f }); }
 
-    glm::vec3 position{ 0.0f, 0.0f, 2.0f };
+    glm::vec3 position{ 0.0f, 0.0f, 0.0f };
     glm::vec3 direction{ 0.0f, 0.0f, -1.0f };
 };
 
@@ -45,10 +45,12 @@ int main() {
         {
             ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
             ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
+            ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
             HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
+            HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED_BIT });
             //HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
 
-            Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+            Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
             //Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         }
 

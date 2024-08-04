@@ -8,5 +8,6 @@ rayPayloadInEXT
 struct RayPayload {
     vec3 radiance;
     vec3 albedo;
+    vec3 normal;
     float distance;
 } payload;

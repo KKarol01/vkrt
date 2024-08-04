@@ -281,7 +281,7 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
     ubo = Buffer{ "ubo", 1024, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
-    constexpr size_t ONE_MB = 1024 * 1024 * 10;
+    constexpr size_t ONE_MB = 1024ull * 1024ull * 150ull;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -333,6 +333,8 @@ void RendererVulkan::render() {
         ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
         sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED_BIT });
     }
+
+#if 0
     if(num_frame == 1) {
         const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
         const auto num_probes_xy = ddgi.probe_counts.x * ddgi.probe_counts.y;
@@ -353,7 +355,7 @@ void RendererVulkan::render() {
         }
     }
 
-    if(num_frame >= 1 ) {
+    if(num_frame >= 1 && 0 == 1) {
         for(uint32_t i = 0; i < probe_visualizers.size(); ++i) {
             const auto off = static_cast<glm::vec3*>(ddgi_debug_probe_offsets_buffer.mapped)[i];
             const auto orig = original_transforms.at(i)[3];
@@ -361,6 +363,7 @@ void RendererVulkan::render() {
             update_transform(probe_visualizers.at(i), (glm::translate(glm::mat4{ 1.0f }, glm::mix(orig, orig + off, interp))));
         }
     }
+#endif
 
     reset_command_pool(cmdpool);
     if(flags & VkRendererFlags::DIRTY_UPLOADS) {
@@ -620,7 +623,11 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
     upload_indices.resize(upload_indices.size() + model.indices.size());
 
     std::transform(model.vertices.begin(), model.vertices.end(), upload_vertices.end() - model.vertices.size(),
-                   [](const ImportedModel::Vertex& v) { return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv }; });
+                   [&aabb = model_bbs.emplace_back()](const ImportedModel::Vertex& v) {
+                       aabb.min = glm::min(aabb.min, v.pos);
+                       aabb.max = glm::max(aabb.max, v.pos);
+                       return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv };
+                   });
 
     // undoing relative indices - they are now absolute (correctly, without any offsets, index the big vertex buffer with other models)
     for(uint32_t i = 0, idx = 0, offset = upload_indices.size() - model.indices.size(); i < model.meshes.size(); ++i) {
@@ -791,10 +798,10 @@ void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 tr
     const auto handle = Handle<RenderModelInstance>{ *model };
     auto& instance = model_instances.get(handle);
     instance.transform = transform;
-    //ENG_WARN("FIX THIS METHOD");
-    // TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
-    // memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
-    //       sizeof(transform));
+    // ENG_WARN("FIX THIS METHOD");
+    //  TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
+    //  memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
+    //        sizeof(transform));
     if(instance.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= VkRendererFlags::REFIT_TLAS; }
 }
 
@@ -1426,17 +1433,13 @@ void RendererVulkan::refit_tlas() {
 void RendererVulkan::prepare_ddgi() {
     for(auto& mi : model_instances) {
         auto& m = models.at(*mi.model);
-
-        for(uint32_t i = 0; i < m.vertex_count; ++i) {
-            scene_bounding_box.min =
-                glm::min(scene_bounding_box.min, ((Vertex*)vertex_buffer.mapped + m.first_vertex + i)->pos);
-            scene_bounding_box.max =
-                glm::max(scene_bounding_box.max, ((Vertex*)vertex_buffer.mapped + m.first_vertex + i)->pos);
-        }
+        BoundingBox aabb{ .min = model_bbs.at(*mi.model).min * mi.transform, .max = model_bbs.at(*mi.model).max * mi.transform };
+        scene_bounding_box.min = aabb.min;
+        scene_bounding_box.max = aabb.max;
     }
 
     ddgi.probe_dims = scene_bounding_box;
-    ddgi.probe_distance = 0.5f;
+    ddgi.probe_distance = 0.3f;
     ddgi.probe_dims.min *= glm::vec3{ 0.9, 0.7, 0.9 };
     ddgi.probe_dims.max *= glm::vec3{ 0.9, 0.7, 0.9 };
 
