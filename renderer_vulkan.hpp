@@ -92,7 +92,7 @@ struct RenderMesh {
 };
 
 struct RenderModel {
-    Flags<RenderModelFlags> flags;
+    Flags<RenderModelFlags> flags{};
     uint32_t first_vertex{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t first_index{ 0 };
@@ -106,19 +106,19 @@ struct RenderModel {
 };
 
 struct RenderModelRTMetadata {
-    VkAccelerationStructureKHR blas;
-    Buffer blas_buffer;
+    VkAccelerationStructureKHR blas{};
+    Buffer blas_buffer{};
 };
 
 struct RenderModelInstance {
-    Handle<RenderModel> model;
-    Flags<InstanceFlags> flags;
+    Handle<RenderModel> model{};
+    Flags<InstanceFlags> flags{};
     glm::mat4x3 transform{ 1.0f };
     uint32_t tlas_instance_mask : 8 { 0xFF };
 };
 
 struct RenderInstanceBatch {
-    Handle<RenderMesh> mesh;
+    Handle<RenderMesh> mesh{};
     uint32_t first_instance{ 0 };
     uint32_t count{ 0 };
 };
@@ -132,7 +132,7 @@ struct RecordingSubmitInfo {
 struct GPURenderMeshData {
     // uint32_t index_offset;
     // uint32_t vertex_offset;
-    uint32_t color_texture_idx;
+    uint32_t color_texture_idx{ 0 };
 };
 
 struct RenderModelInstanceMeshDataAndOffsets {
@@ -158,18 +158,18 @@ enum class RendererPipelineType {
 };
 
 struct ShaderModuleWrapper {
-    VkShaderModule module;
-    VkShaderStageFlagBits stage;
+    VkShaderModule module{};
+    VkShaderStageFlagBits stage{};
 };
 
 struct RendererPipelineWrapper {
-    VkPipeline pipeline;
-    VkPipelineLayout layout;
+    VkPipeline pipeline{};
+    VkPipelineLayout layout{};
     uint32_t rt_shader_group_count{ 0 };
 };
 
 struct RendererPipelineLayout {
-    VkPipelineLayout layout;
+    VkPipelineLayout layout{};
     std::vector<VkDescriptorSetLayout> descriptor_layouts;
     std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
     std::bitset<4> variable_sized{};
