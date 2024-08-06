@@ -46,11 +46,11 @@ int main() {
             ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
             ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
             ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
-            HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED_BIT });
-            HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED_BIT });
+            HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED });
+            HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
             //HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
 
-            Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+            Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
             //Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         }
 
@@ -62,8 +62,8 @@ int main() {
         const glm::mat4 view = camera.get_view();
         const glm::mat4 inv_projection = glm::inverse(projection);
         const glm::mat4 inv_view = glm::inverse(view);
-        memcpy(vk_renderer->ubo.mapped, &inv_view[0][0], sizeof(inv_view));
-        memcpy(static_cast<std::byte*>(vk_renderer->ubo.mapped) + sizeof(inv_view), &inv_projection[0][0], sizeof(inv_projection));
+        vk_renderer->ubo.push_data(&inv_view, sizeof(inv_view), 0);
+        vk_renderer->ubo.push_data(&inv_projection, sizeof(inv_projection), sizeof(inv_view));
 
         int num_frame = 0;
 
@@ -74,7 +74,7 @@ int main() {
             glm::mat3 rand_mat =
                 glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-            memcpy((glm::mat4*)vk_renderer->ubo.mapped + 2, &rand_mat[0][0], sizeof(rand_mat));
+            vk_renderer->ubo.push_data(&rand_mat, sizeof(rand_mat), sizeof(inv_view) + sizeof(inv_projection));
 
             vk_renderer->render();
 

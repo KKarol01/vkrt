@@ -1,6 +1,8 @@
 #pragma once
 
 #include <span>
+#include <bitset>
+#include <unordered_set>
 #include <vulkan/vulkan.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <glm/mat4x3.hpp>
@@ -8,15 +10,18 @@
 #include "vulkan_structs.hpp"
 #include "handle_vector.hpp"
 
-enum class VkRendererFlags : uint32_t {
-    DIRTY_INSTANCES = 0x1,
-    DIRTY_UPLOADS = 0x2,
+#define VK_CHECK(func)                                                                                                 \
+    if(const auto res = func; res != VK_SUCCESS) { ENG_RTERROR("{}", #func); }
+
+enum class RendererFlags : uint32_t {
+    DIRTY_MODEL_INSTANCES = 0x1,
+    DIRTY_MODEL_BATCHES = 0x2,
     DIRTY_BLAS = 0x4,
     DIRTY_TLAS = 0x8,
     REFIT_TLAS = 0x10,
 };
-inline Flags<VkRendererFlags> operator|(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } | b; }
-inline Flags<VkRendererFlags> operator&(VkRendererFlags a, VkRendererFlags b) { return Flags{ a } & b; }
+
+enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
 
 class Buffer {
   public:
@@ -24,10 +29,26 @@ class Buffer {
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
     Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
 
-    size_t push_data(std::span<const std::byte> data);
+    Buffer(Buffer&& other) noexcept;
+    Buffer& operator=(Buffer&& other) noexcept;
+
+    bool push_data(std::span<const std::byte> data, uint32_t offset);
+    bool push_data(std::span<const std::byte> data) { return push_data(data, size); }
+    bool push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
+    bool push_data(const void* data, size_t size_bytes, size_t offset) {
+        return push_data(std::span{ static_cast<const std::byte*>(data), size_bytes }, offset);
+    }
+    template <typename T> bool push_data(const std::vector<T>& vec) { return push_data(vec, size); }
+    template <typename T> bool push_data(const std::vector<T>& vec, uint32_t offset) {
+        return push_data(std::as_bytes(std::span{ vec }), offset);
+    }
+    bool resize(size_t new_size);
     constexpr size_t get_free_space() const { return capacity - size; }
 
+    std::string name;
+    VkBufferUsageFlags usage{};
     size_t size{ 0 }, capacity{ 0 };
+    uint32_t alignment{ 1 };
     VkBuffer buffer{};
     VmaAllocation alloc{};
     void* mapped{};
@@ -71,7 +92,7 @@ struct RenderMesh {
 };
 
 struct RenderModel {
-    Flags<VkRendererFlags> flags;
+    Flags<RenderModelFlags> flags;
     uint32_t first_vertex{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t first_index{ 0 };
@@ -129,9 +150,248 @@ enum class ShaderModuleType {
     RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE,
 };
 
+enum class RendererPipelineType {
+    DEFAULT_UNLIT,
+    DDGI_PROBE_RAYCAST,
+    DDGI_PROBE_UPDATE,
+    DDGI_PROBE_OFFSET,
+};
+
 struct ShaderModuleWrapper {
     VkShaderModule module;
     VkShaderStageFlagBits stage;
+};
+
+struct RendererPipelineWrapper {
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+    uint32_t rt_shader_group_count{ 0 };
+};
+
+struct RendererPipelineLayout {
+    VkPipelineLayout layout;
+    std::vector<VkDescriptorSetLayout> descriptor_layouts;
+    std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
+    std::bitset<4> variable_sized{};
+};
+
+class RendererPipelineLayoutBuilder {
+  public:
+    RendererPipelineLayoutBuilder& add_set_binding(uint32_t set, uint32_t binding, uint32_t count, VkDescriptorType type) {
+        if(descriptor_layouts.size() <= set) {
+            ENG_WARN("Trying to access out of bounds descriptor set layout with idx: {}", set);
+            return *this;
+        }
+
+        if(set > 0 && descriptor_layouts.at(set - 1).bindings.empty()) {
+            ENG_WARN("Settings descriptor set layout with idx {} while the previous descriptor set layout ({}) has "
+                     "empty bindings.",
+                     set, set - 1);
+        }
+
+        descriptor_layouts.at(set).bindings.emplace_back(binding, type, count, VK_SHADER_STAGE_ALL, nullptr);
+        return *this;
+    }
+
+    RendererPipelineLayoutBuilder& add_variable_descriptor_count(uint32_t set) {
+        if(descriptor_layouts.size() <= set) {
+            ENG_WARN("Trying to access out of bounds descriptor set layout with idx: {}", set);
+            return *this;
+        }
+
+        descriptor_layouts.at(set).last_binding_variable_count = true;
+        return *this;
+    }
+
+    RendererPipelineLayoutBuilder& set_push_constants(uint32_t size) {
+        push_constants_size = size;
+        return *this;
+    }
+
+    RendererPipelineLayout build();
+
+  private:
+    uint32_t push_constants_size{ 0 };
+    struct DescriptorLayout {
+        VkDescriptorSetLayout layout;
+        bool last_binding_variable_count{ 0 };
+        std::vector<VkDescriptorSetLayoutBinding> bindings;
+    };
+    std::array<DescriptorLayout, 4> descriptor_layouts;
+};
+
+class RendererComputePipelineBuilder {
+  public:
+    RendererComputePipelineBuilder& set_stage(VkShaderModule module) {
+        this->module = module;
+        return *this;
+    }
+
+    RendererComputePipelineBuilder& set_layout(VkPipelineLayout layout) {
+        this->layout = layout;
+        return *this;
+    }
+
+    VkPipeline build();
+
+  private:
+    VkShaderModule module{};
+    VkPipelineLayout layout{};
+};
+
+class RendererRaytracingPipelineBuilder {
+  public:
+    RendererRaytracingPipelineBuilder& add_raygen_stage(VkShaderModule module) {
+        vks::RayTracingShaderGroupCreateInfoKHR group;
+        group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        group.generalShader = static_cast<uint32_t>(stages.size());
+        group.closestHitShader = VK_SHADER_UNUSED_KHR;
+        group.anyHitShader = VK_SHADER_UNUSED_KHR;
+        group.intersectionShader = VK_SHADER_UNUSED_KHR;
+        add_stage(VK_SHADER_STAGE_RAYGEN_BIT_KHR, module, group);
+        return *this;
+    }
+
+    RendererRaytracingPipelineBuilder& add_closest_hit_stage(VkShaderModule module) {
+        vks::RayTracingShaderGroupCreateInfoKHR group;
+        group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+        group.generalShader = VK_SHADER_UNUSED_KHR;
+        group.closestHitShader = static_cast<uint32_t>(stages.size());
+        group.anyHitShader = VK_SHADER_UNUSED_KHR;
+        group.intersectionShader = VK_SHADER_UNUSED_KHR;
+        add_stage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, module, group);
+        return *this;
+    }
+
+    RendererRaytracingPipelineBuilder& add_miss_stage(VkShaderModule module) {
+        vks::RayTracingShaderGroupCreateInfoKHR group;
+        group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        group.generalShader = static_cast<uint32_t>(stages.size());
+        group.closestHitShader = VK_SHADER_UNUSED_KHR;
+        group.anyHitShader = VK_SHADER_UNUSED_KHR;
+        group.intersectionShader = VK_SHADER_UNUSED_KHR;
+        add_stage(VK_SHADER_STAGE_MISS_BIT_KHR, module, group);
+        return *this;
+    }
+
+    RendererRaytracingPipelineBuilder& set_layout(VkPipelineLayout layout) {
+        this->layout = layout;
+        return *this;
+    }
+
+    RendererRaytracingPipelineBuilder& set_recursion_depth(uint32_t depth) {
+        recursion_depth = depth;
+        return *this;
+    }
+
+    VkPipeline build();
+
+  private:
+    void add_stage(VkShaderStageFlagBits stage, VkShaderModule module, vks::RayTracingShaderGroupCreateInfoKHR group) {
+        vks::PipelineShaderStageCreateInfo info{};
+        info.stage = stage;
+        info.module = module;
+        info.pName = "main";
+        stages.push_back(info);
+        shader_groups.push_back(group);
+    }
+
+    std::vector<vks::PipelineShaderStageCreateInfo> stages;
+    std::vector<vks::RayTracingShaderGroupCreateInfoKHR> shader_groups;
+    uint32_t recursion_depth{ 1 };
+    VkPipelineLayout layout{};
+};
+
+class RendererGraphicsPipelineBuilder {
+  public:
+    RendererGraphicsPipelineBuilder& set_vertex_input(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset) {
+        vertex_inputs.emplace_back(location, binding, format, offset);
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_vertex_binding(uint32_t binding, uint32_t stride, VkVertexInputRate input_rate) {
+        vertex_bindings.emplace_back(binding, stride, input_rate);
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_depth_test(bool depth_write, VkCompareOp compare) {
+        depth_test = true;
+        this->depth_write = depth_write;
+        depth_op = compare;
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_stencil_test(VkStencilOpState front, VkStencilOpState back) {
+        stencil_test = true;
+        stencil_front = front;
+        stencil_back = back;
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_attachment_color_blending(VkBlendFactor src_col, VkBlendFactor dst_col,
+                                                                   VkBlendOp col_op, VkBlendFactor src_a, VkBlendFactor dst_a,
+                                                                   VkBlendOp a_op, VkColorComponentFlagBits col_write_mask) {
+        color_blending_attachments.emplace_back(true, src_col, dst_col, col_op, src_a, dst_a, a_op, col_write_mask);
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_dynamic_state(VkDynamicState state) {
+        dynamic_states.push_back(state);
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_stage(VkShaderStageFlagBits stage, VkShaderModule module) {
+        shader_stages.emplace_back(stage, module);
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_layout(VkPipelineLayout layout) {
+        this->layout = layout;
+        return *this;
+    }
+
+    VkPipeline build();
+
+  private:
+    std::vector<VkVertexInputAttributeDescription> vertex_inputs;
+    std::vector<VkVertexInputBindingDescription> vertex_bindings;
+
+    bool depth_test{ false }, depth_write{ false };
+    VkCompareOp depth_op{};
+
+    bool stencil_test{ false };
+    VkStencilOpState stencil_front{}, stencil_back{};
+
+    bool color_blending{ false };
+    std::vector<VkPipelineColorBlendAttachmentState> color_blending_attachments;
+
+    std::vector<VkDynamicState> dynamic_states;
+
+    std::vector<std::pair<VkShaderStageFlagBits, VkShaderModule>> shader_stages;
+
+    VkPipelineLayout layout{};
+};
+
+class DescriptorSetAllocator {
+    struct AllocationInfo {
+        uint32_t max_sets{}, num_allocs{};
+    };
+
+  public:
+    VkDescriptorSet allocate(const RendererPipelineLayout& layout, uint32_t set, uint32_t variable_count = 0);
+
+    void create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets);
+
+  private:
+    VkDescriptorPool try_find_free_pool(VkDescriptorSetLayout layout) {
+        for(const auto& [pool, alloc] : pool_alloc_infos) {
+            if(alloc.max_sets > alloc.num_allocs) { return pool; }
+        }
+        return nullptr;
+    }
+
+    std::unordered_map<VkDescriptorSetLayout, std::vector<VkDescriptorPool>> layout_pools;
+    std::unordered_map<VkDescriptorPool, AllocationInfo> pool_alloc_infos;
 };
 
 class RendererVulkan : public Renderer {
@@ -196,7 +456,7 @@ class RendererVulkan : public Renderer {
     void update_transform(HandleInstancedModel model, glm::mat4x3 transform);
 
     void compile_shaders();
-    void build_rtpp();
+    void build_pipelines();
     void build_sbt();
     void build_desc_sets();
     void create_rt_output_image();
@@ -251,13 +511,11 @@ class RendererVulkan : public Renderer {
     Buffer vertex_buffer, index_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
+    std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
+    std::vector<RendererPipelineLayout> layouts;
+    DescriptorSetAllocator descriptor_allocator;
+    VkDescriptorSet default_set;
 
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups;
-    VkPipeline raytracing_pipeline;
-    VkPipelineLayout raytracing_layout;
-    VkDescriptorSetLayout raytracing_set_layout;
-    VkDescriptorSet raytracing_set;
-    VkDescriptorPool raytracing_pool;
     Buffer sbt;
 
     Buffer per_triangle_mesh_id_buffer;
@@ -265,9 +523,6 @@ class RendererVulkan : public Renderer {
     Buffer render_mesh_data_buffer;
     Buffer per_tlas_transform_buffer;
     Buffer combined_rt_buffers_buffer;
-
-    VkPipeline ddgi_compute_pipeline;
-    VkPipeline ddgi_probe_offset_compute_pipeline;
 
     DDGI_Settings ddgi;
     Image rt_image;
@@ -284,10 +539,9 @@ class RendererVulkan : public Renderer {
 
     HandleVector<RenderModelInstance> model_instances;
 
-    Flags<VkRendererFlags> flags;
+    Flags<RendererFlags> flags;
     struct UploadImage {
-        std::string name;
-        uint32_t width, height;
+        uint64_t image_index;
         std::vector<std::byte> rgba_data;
     };
     struct InstanceUpload {

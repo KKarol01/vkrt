@@ -1,17 +1,22 @@
 #pragma once
 
 #include <memory>
-#include <format>
+#include <print>
 #include <cstdint>
 #include "renderer.hpp"
 
-#define ENG_RTERROR(message)                                                                                           \
-    throw std::runtime_error { message }
+#ifndef NDEBUG
+#define ENG_RTERROR(fmt, ...)                                                                                          \
+    throw std::runtime_error { std::format("[RT ERROR][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__) }
 
-#define ENG_WARN(format, ...) std::printf("[WARN][%s : %d]: " format "\n", __FILE__, __LINE__, __VA_ARGS__)
+#define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
 
-#define ENG_LOG(fmt, ...)                                                                                              \
-    std::printf("%s", std::format("[LOG][{} : {}]: " fmt "\n", __FILE__, __LINE__, __VA_ARGS__).c_str())
+#define ENG_LOG(fmt, ...) std::println("[LOG][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
+#else
+#define ENG_RTERROR(fmt, ...)
+#define ENG_WARN(fmt, ...)
+#define ENG_LOG(fmt, ...)
+#endif
 
 struct GLFWwindow;
 
