@@ -5,13 +5,8 @@
 #include "handle.hpp"
 #include "flags.hpp"
 
-enum class BatchFlags : uint32_t { RAY_TRACED_BIT = 0x1 };
-inline Flags<BatchFlags> operator|(BatchFlags a, BatchFlags b) { return Flags{ a } | b; }
-inline Flags<BatchFlags> operator&(BatchFlags a, BatchFlags b) { return Flags{ a } & b; }
-
-enum class InstanceFlags : uint32_t { RAY_TRACED_BIT = 0x1 };
-inline Flags<InstanceFlags> operator|(InstanceFlags a, InstanceFlags b) { return Flags{ a } | b; }
-inline Flags<InstanceFlags> operator&(InstanceFlags a, InstanceFlags b) { return Flags{ a } & b; }
+enum class BatchFlags : uint32_t { RAY_TRACED = 0x1 };
+enum class InstanceFlags : uint32_t { RAY_TRACED = 0x1 };
 
 struct BatchSettings {
     Flags<BatchFlags> flags;
