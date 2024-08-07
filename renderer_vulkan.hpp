@@ -213,7 +213,7 @@ class RendererPipelineLayoutBuilder {
   private:
     uint32_t push_constants_size{ 0 };
     struct DescriptorLayout {
-        VkDescriptorSetLayout layout;
+        VkDescriptorSetLayout layout{};
         bool last_binding_variable_count{ 0 };
         std::vector<VkDescriptorSetLayoutBinding> bindings;
     };
@@ -376,11 +376,16 @@ class DescriptorSetAllocator {
     struct AllocationInfo {
         uint32_t max_sets{}, num_allocs{};
     };
+    struct DescriptorSetAllocation {
+        uint32_t set_idx{};
+        uint32_t layout_idx{};
+    };
 
   public:
     VkDescriptorSet allocate(const RendererPipelineLayout& layout, uint32_t set, uint32_t variable_count = 0);
-
     void create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets);
+    const RendererPipelineLayout& get_layout(VkDescriptorSet set);
+    const uint32_t get_set_idx(VkDescriptorSet set);
 
   private:
     VkDescriptorPool try_find_free_pool(VkDescriptorSetLayout layout) {
@@ -392,6 +397,36 @@ class DescriptorSetAllocator {
 
     std::unordered_map<VkDescriptorSetLayout, std::vector<VkDescriptorPool>> layout_pools;
     std::unordered_map<VkDescriptorPool, AllocationInfo> pool_alloc_infos;
+    std::unordered_map<VkDescriptorSet, DescriptorSetAllocation> set_layout_idx;
+    std::vector<RendererPipelineLayout> set_layouts;
+};
+
+class DescriptorSetWriter {
+    struct WriteImage {
+        VkImageView view{};
+        VkImageLayout layout{};
+        VkSampler sampler{};
+    };
+    struct WriteBuffer {
+        VkBuffer buffer{};
+        uint32_t offset{};
+        uint32_t range{};
+    };
+    struct WriteData {
+        uint32_t binding{};
+        uint32_t array_element{};
+        std::variant<WriteImage, WriteBuffer, VkAccelerationStructureKHR> payload;
+    };
+
+  public:
+    DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Image& image, VkImageLayout layout);
+    DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Image& image, VkSampler sampler, VkImageLayout layout);
+    DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Buffer& buffer, uint32_t offset, uint32_t range);
+    DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const VkAccelerationStructureKHR ac);
+    bool update(VkDescriptorSet set);
+
+  private:
+    std::vector<WriteData> writes;
 };
 
 class RendererVulkan : public Renderer {

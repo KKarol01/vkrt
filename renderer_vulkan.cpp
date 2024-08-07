@@ -976,43 +976,6 @@ void RendererVulkan::build_sbt() {
 }
 
 void RendererVulkan::build_desc_sets() {
-    vks::WriteDescriptorSetAccelerationStructureKHR descriptorAccelerationStructureInfo{};
-    descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
-    descriptorAccelerationStructureInfo.pAccelerationStructures = &tlas;
-
-    vks::WriteDescriptorSet accelerationStructureWrite{};
-    // The specialized acceleration structure descriptor has to be chained
-    accelerationStructureWrite.pNext = &descriptorAccelerationStructureInfo;
-    accelerationStructureWrite.dstSet = default_set;
-    accelerationStructureWrite.dstBinding = 0;
-    accelerationStructureWrite.descriptorCount = 1;
-    accelerationStructureWrite.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-
-    VkDescriptorImageInfo storageImageDescriptor{};
-    storageImageDescriptor.imageView = rt_image.view;
-    storageImageDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkDescriptorImageInfo ddgiRadianceDescriptor{};
-    ddgiRadianceDescriptor.imageView = ddgi.radiance_texture.view;
-    ddgiRadianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkDescriptorImageInfo ddgiIrradianceDescriptor{};
-    ddgiIrradianceDescriptor.imageView = ddgi.irradiance_texture.view;
-    ddgiIrradianceDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkDescriptorImageInfo ddgiVisibilityDescriptor{};
-    ddgiVisibilityDescriptor.imageView = ddgi.visibility_texture.view;
-    ddgiVisibilityDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkDescriptorImageInfo ddgiProbeOffsetDescriptor{};
-    ddgiProbeOffsetDescriptor.imageView = ddgi.probe_offsets_texture.view;
-    ddgiProbeOffsetDescriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkDescriptorBufferInfo ubo_descriptor{};
-    ubo_descriptor.buffer = ubo.buffer;
-    ubo_descriptor.offset = 0;
-    ubo_descriptor.range = 1024;
-
     vks::SamplerCreateInfo sampler_info;
     sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -1027,90 +990,22 @@ void RendererVulkan::build_desc_sets() {
     VkSampler sampler;
     VK_CHECK(vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
 
-    std::vector<VkDescriptorImageInfo> bindlessImagesDescriptors;
-    for(const auto& tex : textures) {
-        bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
-            .sampler = sampler,
-            .imageView = tex.view,
-            .imageLayout = tex.current_layout,
-        });
+    DescriptorSetWriter writer;
+    writer.write(0, 0, tlas)
+        .write(1, 0, rt_image, VK_IMAGE_LAYOUT_GENERAL)
+        .write(2, 0, ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL)
+        .write(3, 0, ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL)
+        .write(4, 0, ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL)
+        .write(5, 0, ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL)
+        .write(14, 0, ubo, 0, 1024);
+    for(uint32_t counter = 0; const auto& e : textures) {
+        writer.write(15, counter++, e, sampler, e.current_layout);
     }
-
-    bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
-        .sampler = sampler, .imageView = ddgi.radiance_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
-
-    bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
-        .sampler = sampler, .imageView = ddgi.irradiance_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
-
-    bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
-        .sampler = sampler, .imageView = ddgi.visibility_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
-
-    bindlessImagesDescriptors.push_back(VkDescriptorImageInfo{
-        .sampler = sampler, .imageView = ddgi.probe_offsets_texture.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL });
-
-    VkDescriptorImageInfo output_image_infos[]{ storageImageDescriptor };
-
-    vks::WriteDescriptorSet resultImageWrite;
-    resultImageWrite.dstSet = default_set;
-    resultImageWrite.dstBinding = 1;
-    resultImageWrite.dstArrayElement = 0;
-    resultImageWrite.descriptorCount = 1;
-    resultImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    resultImageWrite.pImageInfo = output_image_infos;
-
-    vks::WriteDescriptorSet ddgiRadianceImageWrite;
-    ddgiRadianceImageWrite.dstSet = default_set;
-    ddgiRadianceImageWrite.dstBinding = 2;
-    ddgiRadianceImageWrite.dstArrayElement = 0;
-    ddgiRadianceImageWrite.descriptorCount = 1;
-    ddgiRadianceImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    ddgiRadianceImageWrite.pImageInfo = &ddgiRadianceDescriptor;
-
-    vks::WriteDescriptorSet ddgiIrradianceWrite;
-    ddgiIrradianceWrite.dstSet = default_set;
-    ddgiIrradianceWrite.dstBinding = 3;
-    ddgiIrradianceWrite.dstArrayElement = 0;
-    ddgiIrradianceWrite.descriptorCount = 1;
-    ddgiIrradianceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    ddgiIrradianceWrite.pImageInfo = &ddgiIrradianceDescriptor;
-
-    vks::WriteDescriptorSet ddgiVisibilityWrite;
-    ddgiVisibilityWrite.dstSet = default_set;
-    ddgiVisibilityWrite.dstBinding = 4;
-    ddgiVisibilityWrite.dstArrayElement = 0;
-    ddgiVisibilityWrite.descriptorCount = 1;
-    ddgiVisibilityWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    ddgiVisibilityWrite.pImageInfo = &ddgiVisibilityDescriptor;
-
-    vks::WriteDescriptorSet ddgiProbeOffsetWrite;
-    ddgiProbeOffsetWrite.dstSet = default_set;
-    ddgiProbeOffsetWrite.dstBinding = 5;
-    ddgiProbeOffsetWrite.dstArrayElement = 0;
-    ddgiProbeOffsetWrite.descriptorCount = 1;
-    ddgiProbeOffsetWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    ddgiProbeOffsetWrite.pImageInfo = &ddgiProbeOffsetDescriptor;
-
-    vks::WriteDescriptorSet uniformBufferWrite;
-    uniformBufferWrite.dstSet = default_set;
-    uniformBufferWrite.dstBinding = 14;
-    uniformBufferWrite.dstArrayElement = 0;
-    uniformBufferWrite.descriptorCount = 1;
-    uniformBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformBufferWrite.pBufferInfo = &ubo_descriptor;
-
-    vks::WriteDescriptorSet bindlessTexturesWrite;
-    bindlessTexturesWrite.dstSet = default_set;
-    bindlessTexturesWrite.dstBinding = 15;
-    bindlessTexturesWrite.dstArrayElement = 0;
-    bindlessTexturesWrite.descriptorCount = bindlessImagesDescriptors.size();
-    bindlessTexturesWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindlessTexturesWrite.pImageInfo = bindlessImagesDescriptors.data();
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets = { accelerationStructureWrite, resultImageWrite,
-                                                              ddgiRadianceImageWrite,     ddgiIrradianceWrite,
-                                                              ddgiVisibilityWrite,        ddgiProbeOffsetWrite,
-                                                              uniformBufferWrite,         bindlessTexturesWrite };
-    vkUpdateDescriptorSets(dev, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, VK_NULL_HANDLE);
+    writer.write(15, textures.size() + 0, ddgi.radiance_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .write(15, textures.size() + 1, ddgi.irradiance_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .write(15, textures.size() + 2, ddgi.visibility_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .write(15, textures.size() + 3, ddgi.probe_offsets_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .update(default_set);
 }
 
 void RendererVulkan::create_rt_output_image() {
@@ -1832,6 +1727,16 @@ VkDescriptorSet DescriptorSetAllocator::allocate(const RendererPipelineLayout& l
     VK_CHECK(vkAllocateDescriptorSets(static_cast<RendererVulkan*>(Engine::renderer())->dev, &info, &descriptor));
 
     ++pool_alloc_infos.at(free_pool).num_allocs;
+    auto layout_it = std::find_if(set_layouts.begin(), set_layouts.end(),
+                                  [&layout](const RendererPipelineLayout& l) { return layout.layout == l.layout; });
+    if(layout_it == set_layouts.end()) {
+        set_layouts.push_back(layout);
+        layout_it = set_layouts.begin() + (set_layouts.size() - 1);
+    }
+    set_layout_idx[descriptor] = DescriptorSetAllocation{
+        .set_idx = set,
+        .layout_idx = static_cast<uint32_t>(std::distance(set_layouts.begin(), layout_it)),
+    };
 
     return descriptor;
 }
@@ -1862,4 +1767,86 @@ void DescriptorSetAllocator::create_pool(const RendererPipelineLayout& layout, u
 
     layout_pools[layout.descriptor_layouts.at(set)].push_back(pool);
     pool_alloc_infos[pool] = AllocationInfo{ .max_sets = max_sets, .num_allocs = 0 };
+}
+
+const RendererPipelineLayout& DescriptorSetAllocator::get_layout(VkDescriptorSet set) {
+    return set_layouts.at(set_layout_idx.at(set).layout_idx);
+}
+
+const uint32_t DescriptorSetAllocator::get_set_idx(VkDescriptorSet set) { return set_layout_idx.at(set).set_idx; }
+
+DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, const Image& image, VkImageLayout layout) {
+    writes.emplace_back(binding, array_element, WriteImage{ image.view, layout, VkSampler{} });
+    return *this;
+}
+
+DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, const Image& image,
+                                                VkSampler sampler, VkImageLayout layout) {
+    writes.emplace_back(binding, array_element, WriteImage{ image.view, layout, sampler });
+    return *this;
+}
+
+DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, const Buffer& buffer,
+                                                uint32_t offset, uint32_t range) {
+    writes.emplace_back(binding, array_element, WriteBuffer{ buffer.buffer, offset, range });
+    return *this;
+}
+
+DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, const VkAccelerationStructureKHR ac) {
+    writes.emplace_back(binding, array_element, ac);
+    return *this;
+}
+
+template <class... Ts> struct Visitor : Ts... {
+    using Ts::operator()...;
+};
+template <class... Ts> Visitor(Ts...) -> Visitor<Ts...>;
+
+bool DescriptorSetWriter::update(VkDescriptorSet set) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+
+    const uint32_t set_idx = renderer->descriptor_allocator.get_set_idx(set);
+    const RendererPipelineLayout& layout = renderer->descriptor_allocator.get_layout(set);
+    const std::vector<VkDescriptorSetLayoutBinding>& set_bindings = layout.bindings.at(set_idx);
+
+    std::vector<std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, vks::WriteDescriptorSetAccelerationStructureKHR>> write_infos;
+    std::vector<vks::WriteDescriptorSet> write_sets;
+    write_sets.reserve(writes.size());
+    write_infos.reserve(writes.size());
+
+    for(const WriteData& wd : writes) {
+        vks::WriteDescriptorSet& write_set = write_sets.emplace_back();
+        write_set.dstSet = set;
+        write_set.dstBinding = wd.binding;
+        write_set.descriptorCount = 1;
+        write_set.dstArrayElement = wd.array_element;
+        write_set.descriptorType =
+            std::find_if(set_bindings.begin(), set_bindings.end(), [&wd](const VkDescriptorSetLayoutBinding& b) {
+                return b.binding == wd.binding;
+            })->descriptorType;
+        std::visit(Visitor{ [&](const WriteImage& p) {
+                               write_set.pImageInfo = &std::get<0>(write_infos.emplace_back(VkDescriptorImageInfo{
+                                   .sampler = p.sampler,
+                                   .imageView = p.view,
+                                   .imageLayout = p.layout,
+                               }));
+                           },
+                            [&](const WriteBuffer& p) {
+                                write_set.pBufferInfo = &std::get<1>(write_infos.emplace_back(VkDescriptorBufferInfo{
+                                    .buffer = p.buffer,
+                                    .offset = p.offset,
+                                    .range = p.range,
+                                }));
+                            },
+                            [&](const VkAccelerationStructureKHR& p) {
+                                vks::WriteDescriptorSetAccelerationStructureKHR write_acc;
+                                write_acc.accelerationStructureCount = 1;
+                                write_acc.pAccelerationStructures = &p;
+                                write_set.pNext = &std::get<2>(write_infos.emplace_back(write_acc));
+                            } },
+                   wd.payload);
+    }
+
+    vkUpdateDescriptorSets(renderer->dev, write_sets.size(), write_sets.data(), 0, nullptr);
+    return true;
 }
