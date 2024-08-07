@@ -422,7 +422,7 @@ void RendererVulkan::render() {
     if(flags & RendererFlags::DIRTY_TLAS) {
         build_tlas();
         prepare_ddgi();
-        build_desc_sets();
+        update_descriptor_sets();
         flags ^= RendererFlags::DIRTY_TLAS;
     }
     if(flags & RendererFlags::REFIT_TLAS) {
@@ -858,15 +858,18 @@ void RendererVulkan::compile_shaders() {
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_offset.comp",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "default_unlit" / "default.vert.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "default_unlit" / "default.frag.glsl",
     };
     shaderc_shader_kind kinds[]{
-        shaderc_closesthit_shader, shaderc_closesthit_shader, shaderc_miss_shader,    shaderc_miss_shader,
-        shaderc_raygen_shader,     shaderc_compute_shader,    shaderc_compute_shader,
+        shaderc_closesthit_shader, shaderc_closesthit_shader, shaderc_miss_shader,
+        shaderc_miss_shader,       shaderc_raygen_shader,     shaderc_compute_shader,
+        shaderc_compute_shader,    shaderc_vertex_shader,     shaderc_fragment_shader,
     };
     VkShaderStageFlagBits stages[]{
         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
         VK_SHADER_STAGE_MISS_BIT_KHR,        VK_SHADER_STAGE_RAYGEN_BIT_KHR,      VK_SHADER_STAGE_COMPUTE_BIT,
-        VK_SHADER_STAGE_COMPUTE_BIT,
+        VK_SHADER_STAGE_COMPUTE_BIT,         VK_SHADER_STAGE_VERTEX_BIT,          VK_SHADER_STAGE_FRAGMENT_BIT,
     };
     ShaderModuleType types[]{
         ShaderModuleType::RT_BASIC_CLOSEST_HIT,
@@ -876,6 +879,8 @@ void RendererVulkan::compile_shaders() {
         ShaderModuleType::RT_BASIC_RAYGEN,
         ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
         ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE,
+        ShaderModuleType::DEFAULT_UNLIT_VERTEX,
+        ShaderModuleType::DEFAULT_UNLIT_FRAGMENT,
     };
     std::vector<std::vector<uint32_t>> compiled_modules;
 
@@ -917,12 +922,24 @@ void RendererVulkan::build_pipelines() {
                                                 .set_push_constants(128)
                                                 .build();
 
-    // pipelines[RendererPipelineType::DEFAULT_UNLIT] =
-    //     RendererGraphicsPipelineBuilder{}
-    //         .set_vertex_binding(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX)
-    //         .set_vertex_input(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos))
-    //         .set_vertex_input(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, nor))
-    //         .set_vertex_input(2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv))
+    pipelines[RendererPipelineType::DEFAULT_UNLIT] = RendererPipelineWrapper{
+        .pipeline =
+            RendererGraphicsPipelineBuilder{}
+                .set_vertex_binding(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX)
+                .set_vertex_input(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos))
+                .set_vertex_input(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, nor))
+                .set_vertex_input(2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv))
+                .add_color_attachment_format(VK_FORMAT_R8G8B8A8_SRGB)
+                .set_depth_attachment_format(VK_FORMAT_D32_SFLOAT)
+                .set_stage(VK_SHADER_STAGE_VERTEX_BIT, shader_modules.at(ShaderModuleType::DEFAULT_UNLIT_VERTEX).module)
+                .set_stage(VK_SHADER_STAGE_FRAGMENT_BIT, shader_modules.at(ShaderModuleType::DEFAULT_UNLIT_FRAGMENT).module)
+                .set_depth_test(true, VK_COMPARE_OP_LESS)
+                .set_layout(default_layout.layout)
+                .set_dynamic_state(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)
+                .set_dynamic_state(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)
+                .build(),
+        .layout = default_layout.layout,
+    };
 
     pipelines[RendererPipelineType::DDGI_PROBE_RAYCAST] = RendererPipelineWrapper{
         .pipeline = RendererRaytracingPipelineBuilder{}
@@ -975,7 +992,7 @@ void RendererVulkan::build_sbt() {
     sbt.push_data(shaderHandleStorage);
 }
 
-void RendererVulkan::build_desc_sets() {
+void RendererVulkan::update_descriptor_sets() {
     vks::SamplerCreateInfo sampler_info;
     sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -1647,6 +1664,7 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     pRasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
     pRasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
     pRasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    pRasterizationState.lineWidth = 1.0f;
 
     vks::PipelineMultisampleStateCreateInfo pMultisampleState;
     pMultisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -1673,6 +1691,12 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     pDynamicState.dynamicStateCount = dynamic_states.size();
     pDynamicState.pDynamicStates = dynamic_states.data();
 
+    vks::PipelineRenderingCreateInfo pDynamicRendering;
+    pDynamicRendering.colorAttachmentCount = color_attachment_formats.size();
+    pDynamicRendering.pColorAttachmentFormats = color_attachment_formats.data();
+    pDynamicRendering.depthAttachmentFormat = depth_attachment_format;
+    pDynamicRendering.stencilAttachmentFormat = stencil_attachment_format;
+
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
     vks::GraphicsPipelineCreateInfo info;
@@ -1688,6 +1712,7 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     info.pColorBlendState = &pColorBlendState;
     info.pDynamicState = &pDynamicState;
     info.layout = layout;
+    info.pNext = &pDynamicRendering;
 
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(renderer->dev, nullptr, 1, &info, nullptr, &pipeline));
