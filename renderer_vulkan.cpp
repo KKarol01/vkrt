@@ -457,13 +457,14 @@ void RendererVulkan::render() {
         .clearValue = { .depthStencil = { 1.0f, 0 } },
     };
 
-    VkRenderingInfo rendering_info{ .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                                    .renderArea = VkRect2D{ .offset = { 0, 0 },
-                                                            .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
-                                    .layerCount = 1,
-                                    .colorAttachmentCount = 1,
-                                    .pColorAttachments = r_col_atts,
-                                    .pDepthAttachment = &r_dep_att };
+    VkRenderingInfo rendering_info{
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = r_col_atts,
+        .pDepthAttachment = &r_dep_att,
+    };
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VkDeviceSize vb_offsets[]{ 0 };
@@ -491,7 +492,8 @@ void RendererVulkan::render() {
                          .maxDepth = 1.0f };
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-    vkCmdDrawIndexed(cmd, 3, 1, 0, 0, 0);
+    // vkCmdDrawIndexed(cmd, 3, 1, 0, 0, 0);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRendering(cmd);
 
     swapchain_images.at(sw_img_idx)
@@ -1792,7 +1794,7 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
 
     vks::PipelineRasterizationStateCreateInfo pRasterizationState;
     pRasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
-    pRasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+    pRasterizationState.cullMode = VK_CULL_MODE_NONE;
     pRasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     pRasterizationState.lineWidth = 1.0f;
 
@@ -1812,6 +1814,7 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     if(color_blending_attachments.empty()) {
         auto& att = color_blending_attachments.emplace_back();
         att.blendEnable = false;
+        att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     }
     pColorBlendState.logicOpEnable = false;
     pColorBlendState.attachmentCount = color_blending_attachments.size();
