@@ -148,6 +148,9 @@ enum class ShaderModuleType {
     RT_BASIC_RAYGEN,
     RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
     RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE,
+
+    DEFAULT_UNLIT_VERTEX,
+    DEFAULT_UNLIT_FRAGMENT,
 };
 
 enum class RendererPipelineType {
@@ -350,6 +353,21 @@ class RendererGraphicsPipelineBuilder {
         return *this;
     }
 
+    RendererGraphicsPipelineBuilder& add_color_attachment_format(VkFormat format) {
+        color_attachment_formats.push_back(format);
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_depth_attachment_format(VkFormat format) {
+        depth_attachment_format = format;
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_stencil_attachment_format(VkFormat format) {
+        stencil_attachment_format = format;
+        return *this;
+    }
+
     VkPipeline build();
 
   private:
@@ -370,6 +388,10 @@ class RendererGraphicsPipelineBuilder {
     std::vector<std::pair<VkShaderStageFlagBits, VkShaderModule>> shader_stages;
 
     VkPipelineLayout layout{};
+
+    std::vector<VkFormat> color_attachment_formats;
+    VkFormat depth_attachment_format{ VK_FORMAT_UNDEFINED };
+    VkFormat stencil_attachment_format{ VK_FORMAT_UNDEFINED };
 };
 
 class DescriptorSetAllocator {
@@ -493,7 +515,7 @@ class RendererVulkan : public Renderer {
     void compile_shaders();
     void build_pipelines();
     void build_sbt();
-    void build_desc_sets();
+    void update_descriptor_sets();
     void create_rt_output_image();
     void build_blas();
     void build_tlas();
