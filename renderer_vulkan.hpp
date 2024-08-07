@@ -59,17 +59,23 @@ struct Image {
     constexpr Image() = default;
     Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
           VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
+    Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
+          uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
 
     void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                            VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout);
+
+    void _deduce_aspect(VkImageUsageFlags usage);
+    void _create_default_view(int dims, VkImageUsageFlags usage);
 
     VkImage image{};
     VmaAllocation alloc{};
     VkImageView view{};
     VkFormat format{};
+    VkImageAspectFlags aspect{};
     VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
     uint32_t width{ 0 }, height{ 0 }, depth{ 0 };
-    uint32_t mips{}, layers{};
+    uint32_t mips{ 0 }, layers{ 0 };
 };
 
 struct Vertex {
@@ -553,8 +559,9 @@ class RendererVulkan : public Renderer {
     VkQueue gq, pq;
 
     VkSwapchainKHR swapchain;
-    std::vector<VkImage> swapchain_images;
+    std::vector<Image> swapchain_images;
     VkFormat swapchain_format;
+    Image depth_buffers[2]{};
 
     VkCommandPool cmdpool;
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
@@ -614,6 +621,7 @@ class RendererVulkan : public Renderer {
 
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;
+        VkSemaphore sem_rendering_finished;
         VkSemaphore sem_tracing_done;
         VkSemaphore sem_copy_to_sw_img_done;
     } primitives;

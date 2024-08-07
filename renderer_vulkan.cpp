@@ -333,6 +333,7 @@ void RendererVulkan::initialize_vulkan() {
 
     vks::SemaphoreCreateInfo sem_swapchain_info;
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
+    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_tracing_done));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
 }
@@ -341,7 +342,7 @@ void RendererVulkan::create_swapchain() {
     vks::SwapchainCreateInfoKHR sinfo;
     sinfo.surface = window_surface;
     sinfo.minImageCount = 2;
-    sinfo.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    sinfo.imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
     sinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     sinfo.imageExtent = VkExtent2D{ Engine::window()->size[0], Engine::window()->size[1] };
     sinfo.imageArrayLayers = 1;
@@ -358,7 +359,11 @@ void RendererVulkan::create_swapchain() {
     std::vector<VkImage> images(num_images);
     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, images.data());
 
-    swapchain_images = images;
+    for(uint32_t counter = 0; VkImage img : images) {
+        swapchain_images.push_back(Image{ std::format("swapchain_image_{}", counter), img, sinfo.imageExtent.width,
+                                          sinfo.imageExtent.height, 1u, 1u, sinfo.imageArrayLayers, sinfo.imageFormat,
+                                          VK_SAMPLE_COUNT_1_BIT, sinfo.imageUsage });
+    }
     swapchain_format = sinfo.imageFormat;
 }
 
@@ -430,6 +435,88 @@ void RendererVulkan::render() {
         flags ^= RendererFlags::REFIT_TLAS;
     }
 
+    uint32_t sw_img_idx;
+    vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
+
+    VkRenderingAttachmentInfo r_col_att_1{
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = swapchain_images.at(sw_img_idx).view,
+        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+    };
+    VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
+
+    VkRenderingAttachmentInfo r_dep_att{
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = depth_buffers[sw_img_idx].view,
+        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = { .depthStencil = { 1.0f, 0 } },
+    };
+
+    VkRenderingInfo rendering_info{ .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                                    .renderArea = VkRect2D{ .offset = { 0, 0 },
+                                                            .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
+                                    .layerCount = 1,
+                                    .colorAttachmentCount = 1,
+                                    .pColorAttachments = r_col_atts,
+                                    .pDepthAttachment = &r_dep_att };
+
+    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkDeviceSize vb_offsets[]{ 0 };
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
+    vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &default_set, 0, nullptr);
+
+    swapchain_images.at(sw_img_idx)
+        .transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, true, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    depth_buffers[sw_img_idx].transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                                                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                                                true, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    vkCmdBeginRendering(cmd, &rendering_info);
+    VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->size[0], Engine::window()->size[1] } };
+    VkViewport r_view_1{ .x = 0.0f,
+                         .y = 0.0f,
+                         .width = static_cast<float>(Engine::window()->size[0]),
+                         .height = static_cast<float>(Engine::window()->size[1]),
+                         .minDepth = 0.0f,
+                         .maxDepth = 1.0f };
+    vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
+    vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
+    vkCmdDrawIndexed(cmd, 3, 1, 0, 0, 0);
+    vkCmdEndRendering(cmd);
+
+    swapchain_images.at(sw_img_idx)
+        .transition_layout(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                           VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE, false, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    // TODO: submit_recording ends the buffer anyway... end_recording(cmd);
+
+    /*VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>&wait_sems,
+        const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>&signal_sems,
+        VkFence fence*/
+
+    submit_recording(gq, cmd, { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
+                     { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } }, nullptr);
+
+    vks::PresentInfoKHR pinfo;
+    pinfo.swapchainCount = 1;
+    pinfo.pSwapchains = &swapchain;
+    pinfo.pImageIndices = &sw_img_idx;
+    pinfo.waitSemaphoreCount = 1;
+    pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
+    vkQueuePresentKHR(gq, &pinfo);
+    vkQueueWaitIdle(gq);
+
+#if 0
     static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = num_frame;
 
     vks::AcquireNextImageInfoKHR acq_info;
@@ -619,6 +706,7 @@ void RendererVulkan::render() {
     pinfo.pWaitSemaphores = &primitives.sem_copy_to_sw_img_done;
     vkQueuePresentKHR(gq, &pinfo);
     vkQueueWaitIdle(gq);
+#endif
 
     ++num_frame;
 }
@@ -975,6 +1063,12 @@ void RendererVulkan::build_pipelines() {
 
     descriptor_allocator.create_pool(default_layout, 0, 2);
     default_set = descriptor_allocator.allocate(default_layout, 0, 1024);
+
+    for(int i = 0; i < 2; ++i) {
+        depth_buffers[i] = Image{
+            std::format("depth_buffer_{}", i), Engine::window()->size[0], Engine::window()->size[1], 1, 1, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+        };
+    }
 }
 
 void RendererVulkan::build_sbt() {
@@ -1028,7 +1122,7 @@ void RendererVulkan::update_descriptor_sets() {
 void RendererVulkan::create_rt_output_image() {
     const auto* window = Engine::window();
     rt_image = Image{
-        "rt_image", window->size[0], window->size[1], 1, 1, 1, swapchain_format, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+        "rt_image", window->size[0], window->size[1], 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
     };
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -1505,21 +1599,26 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
 
     VK_CHECK(vmaCreateImage(renderer->vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
 
-    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
+    _deduce_aspect(usage);
+    _create_default_view(dims, usage);
 
-    VkImageAspectFlags view_aspect{ VK_IMAGE_ASPECT_COLOR_BIT };
-    if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-        view_aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
+    set_debug_name(image, name);
+    set_debug_name(view, std::format("{}_default_view", name));
+}
 
-    vks::ImageViewCreateInfo ivinfo;
-    ivinfo.image = image;
-    ivinfo.viewType = view_types[dims];
-    ivinfo.components = {};
-    ivinfo.format = format;
-    ivinfo.subresourceRange = { .aspectMask = view_aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
+Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
+             uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
+    : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
-    VK_CHECK(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view));
+    int dims = -1;
+    if(width > 1) { ++dims; }
+    if(height > 1) { ++dims; }
+    if(depth > 1) { ++dims; }
+    if(dims == -1) { dims = 1; }
+
+    _deduce_aspect(usage);
+    _create_default_view(dims, usage);
 
     set_debug_name(image, name);
     set_debug_name(view, std::format("{}_default_view", name));
@@ -1538,7 +1637,7 @@ void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_sta
     imgb.dstStageMask = dst_stage;
     imgb.dstAccessMask = dst_access;
     imgb.subresourceRange = {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .aspectMask = aspect,
         .baseMipLevel = 0,
         .levelCount = mips,
         .baseArrayLayer = 0,
@@ -1551,6 +1650,37 @@ void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_sta
     vkCmdPipelineBarrier2(cmd, &dep);
 
     current_layout = dst_layout;
+}
+
+void Image::_deduce_aspect(VkImageUsageFlags usage) {
+    aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+        if(format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D16_UNORM) {
+            aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        } else if(format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
+            aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        } else if(format == VK_FORMAT_S8_UINT) {
+            aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
+        } else {
+            ENG_WARN("Unrecognized format for view aspect");
+        }
+    }
+}
+
+void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+
+    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
+
+    vks::ImageViewCreateInfo ivinfo;
+    ivinfo.image = image;
+    ivinfo.viewType = view_types[dims];
+    ivinfo.components = {};
+    ivinfo.format = format;
+    ivinfo.subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
+
+    VK_CHECK(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view));
 }
 
 RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
