@@ -27,6 +27,16 @@ struct Window {
     GLFWwindow* window{ nullptr };
 };
 
+struct FrameTime {
+    void update();
+    float get_avg_frame_time() const { return tick_sum * 0.01f; }
+
+    float last_time{};
+    float tick_sum{};
+    float measures[100]{};
+    int index = 0;
+};
+
 class Engine {
   public:
     constexpr Engine() = default;

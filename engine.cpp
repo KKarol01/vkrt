@@ -32,3 +32,13 @@ void Engine::init() {
 void Engine::destroy() { _this.reset(); }
 
 std::unique_ptr<Engine> Engine::_this = {};
+
+void FrameTime::update() {
+    float time = static_cast<float>(glfwGetTime());
+    float dt = time - last_time;
+    last_time = time;
+    tick_sum -= measures[index];
+    tick_sum += dt;
+    measures[index] = dt;
+    index = (index + 1) % 100;
+}

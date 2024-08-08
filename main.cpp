@@ -45,13 +45,14 @@ int main() {
         {
             ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
             ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
-            ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
-            HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED });
+            ImportedModel import_gallery =
+                ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
             HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
-            //HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
+             HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED });
+            // HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
 
             Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
-            //Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+            // Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         }
 
         const auto* window = Engine::window();
@@ -67,16 +68,24 @@ int main() {
 
         int num_frame = 0;
 
+        FrameTime ft;
+        double last_tick = glfwGetTime();
+
         while(!glfwWindowShouldClose(Engine::window()->window)) {
-            float hx = halton(num_frame, 2) * 2.0 - 1.0;
-            float hy = halton(num_frame, 3) * 2.0 - 1.0;
-            num_frame = (num_frame + 1) % 4;
-            glm::mat3 rand_mat =
-                glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
+            if(glfwGetTime() - last_tick >= 1.0 / 60.0) {
+                last_tick = glfwGetTime();
+                float hx = halton(num_frame, 2) * 2.0 - 1.0;
+                float hy = halton(num_frame, 3) * 2.0 - 1.0;
+                num_frame = (num_frame + 1) % 4;
+                glm::mat3 rand_mat = glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) *
+                                                    glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-            vk_renderer->ubo.push_data(&rand_mat, sizeof(rand_mat), sizeof(inv_view) + sizeof(inv_projection));
+                vk_renderer->ubo.push_data(&rand_mat, sizeof(rand_mat), sizeof(inv_view) + sizeof(inv_projection));
 
-            vk_renderer->render();
+                vk_renderer->render();
+                ft.update();
+                //std::println("avg frame time: {}", ft.get_avg_frame_time());
+            }
 
             glfwPollEvents();
         }
