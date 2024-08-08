@@ -197,23 +197,8 @@ void RendererVulkan::initialize_vulkan() {
     vks::PhysicalDeviceSynchronization2Features synch2_features;
     synch2_features.synchronization2 = true;
 
-    vks::PhysicalDeviceHostQueryResetFeatures query_reset_features;
-    query_reset_features.hostQueryReset = true;
-
     vks::PhysicalDeviceDynamicRenderingFeatures dyn_features;
     dyn_features.dynamicRendering = true;
-
-    vks::PhysicalDeviceDescriptorIndexingFeatures desc_features;
-    desc_features.descriptorBindingVariableDescriptorCount = true;
-    desc_features.descriptorBindingPartiallyBound = true;
-    desc_features.shaderSampledImageArrayNonUniformIndexing = true;
-    desc_features.shaderStorageImageArrayNonUniformIndexing = true;
-    desc_features.descriptorBindingSampledImageUpdateAfterBind = true;
-    desc_features.descriptorBindingStorageImageUpdateAfterBind = true;
-    desc_features.descriptorBindingUniformBufferUpdateAfterBind = true;
-    desc_features.descriptorBindingStorageBufferUpdateAfterBind = true;
-    desc_features.descriptorBindingUpdateUnusedWhilePending = true;
-    desc_features.runtimeDescriptorArray = true;
 
     vks::PhysicalDeviceFeatures2 dev_2_features;
     dev_2_features.features = {
@@ -222,8 +207,22 @@ void RendererVulkan::initialize_vulkan() {
         .fragmentStoresAndAtomics = true,
     };
 
-    vks::PhysicalDeviceBufferDeviceAddressFeatures bda_features;
-    bda_features.bufferDeviceAddress = true;
+    VkPhysicalDeviceVulkan12Features dev_vk12_features{};
+    dev_vk12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    dev_vk12_features.drawIndirectCount = true;
+    dev_vk12_features.descriptorBindingVariableDescriptorCount = true;
+    dev_vk12_features.descriptorBindingPartiallyBound = true;
+    dev_vk12_features.shaderSampledImageArrayNonUniformIndexing = true;
+    dev_vk12_features.shaderStorageImageArrayNonUniformIndexing = true;
+    dev_vk12_features.descriptorBindingSampledImageUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingStorageImageUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingUniformBufferUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingStorageBufferUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingUpdateUnusedWhilePending = true;
+    dev_vk12_features.runtimeDescriptorArray = true;
+    dev_vk12_features.bufferDeviceAddress = true;
+    dev_vk12_features.hostQueryReset = true;
+    dev_vk12_features.scalarBlockLayout = true;
 
     vks::PhysicalDeviceAccelerationStructureFeaturesKHR acc_features;
     acc_features.accelerationStructure = true;
@@ -233,21 +232,15 @@ void RendererVulkan::initialize_vulkan() {
     rtpp_features.rayTracingPipeline = true;
     rtpp_features.rayTraversalPrimitiveCulling = true;
 
-    vks::PhysicalDeviceScalarBlockLayoutFeatures scalar_features;
-    scalar_features.scalarBlockLayout = true;
-
     vks::PhysicalDeviceMaintenance5FeaturesKHR maint5_features;
     maint5_features.maintenance5 = true;
 
     auto dev_ret = device_builder.add_pNext(&dev_2_features)
-                       .add_pNext(&desc_features)
                        .add_pNext(&dyn_features)
-                       .add_pNext(&query_reset_features)
                        .add_pNext(&synch2_features)
-                       .add_pNext(&bda_features)
+                       .add_pNext(&dev_vk12_features)
                        .add_pNext(&acc_features)
                        .add_pNext(&rtpp_features)
-                       .add_pNext(&scalar_features)
                        //.add_pNext(&maint5_features)
                        .build();
     if(!dev_ret) { throw std::runtime_error{ "Failed to create Vulkan device. Error: " }; }
@@ -495,9 +488,10 @@ void RendererVulkan::render() {
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL, 0,
                        sizeof(combined_rt_buffers_buffer.bda), &combined_rt_buffers_buffer.bda);
-    vkCmdDrawIndexed(cmd, models.at(0).index_count, 1, 0, 0, 0);
+    // vkCmdDrawIndexed(cmd, models.at(0).index_count, 1, 0, 0, 0);
+    vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
+                                  indirect_draw_buffer.buffer, 0ull, mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
-
     sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
 
     submit_recording(gq, cmd, { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
@@ -717,19 +711,21 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
     const auto total_textures = static_cast<uint32_t>(textures.size());
     const auto total_models = static_cast<uint32_t>(models.size());
 
-    models.push_back(RenderModel{ .flags = {},
-                                  .first_vertex = total_vertices,
-                                  .vertex_count = (uint32_t)model.vertices.size(),
-                                  .first_index = total_indices,
-                                  .index_count = (uint32_t)model.indices.size(),
-                                  .first_mesh = total_meshes,
-                                  .mesh_count = (uint32_t)model.meshes.size(),
-                                  .first_material = total_materials,
-                                  .material_count = (uint32_t)model.materials.size(),
-                                  .first_texture = total_textures,
-                                  .texture_count = (uint32_t)model.textures.size() });
+    Handle<RenderModel> model_handle = models.push_back(RenderModel{
+        .flags = {},
+        .first_vertex = total_vertices,
+        .vertex_count = (uint32_t)model.vertices.size(),
+        .first_index = total_indices,
+        .index_count = (uint32_t)model.indices.size(),
+        .first_mesh = total_meshes,
+        .mesh_count = (uint32_t)model.meshes.size(),
+        .first_material = total_materials,
+        .material_count = (uint32_t)model.materials.size(),
+        .first_texture = total_textures,
+        .texture_count = (uint32_t)model.textures.size(),
+    });
 
-    RenderModel& render_model = models.back();
+    RenderModel& render_model = models.get(model_handle);
 
     if(settings.flags & BatchFlags::RAY_TRACED) {
         flags |= RendererFlags::DIRTY_BLAS;
@@ -741,7 +737,7 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
                                      .vertex_count = mesh.vertex_count,
                                      .index_offset = mesh.index_offset,
                                      .index_count = mesh.index_count,
-                                     .material = mesh.material ? *mesh.material : 0 });
+                                     .material = mesh.material.value_or(0) });
     }
 
     for(auto& mat : model.materials) {
@@ -765,10 +761,11 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
                    });
 
     // undoing relative indices - they are now absolute (correctly, without any offsets, index the big vertex buffer with the other models)
-    for(uint32_t i = 0, idx = 0, offset = upload_indices.size() - model.indices.size(); i < model.meshes.size(); ++i) {
+    for(uint32_t i = 0, model_index = 0, upload_offset = upload_indices.size() - model.indices.size();
+        i < model.meshes.size(); ++i) {
         const auto& mesh = model.meshes.at(i);
-        for(uint32_t j = 0; j < mesh.index_count; ++j, ++idx) {
-            upload_indices.at(offset + idx) = model.indices.at(idx) + total_vertices + mesh.vertex_offset;
+        for(uint32_t j = 0; j < mesh.index_count; ++j, ++model_index) {
+            upload_indices.at(upload_offset + model_index) = total_vertices + mesh.vertex_offset + model.indices.at(model_index);
         }
     }
 
@@ -790,6 +787,14 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
                                                                  .flags = settings.flags,
                                                                  .transform = settings.transform,
                                                                  .tlas_instance_mask = settings.tlas_instance_mask });
+
+    const auto& rmodel = models.get(Handle<RenderModel>{ *model });
+    for(uint32_t i = 0; i < rmodel.mesh_count; ++i) {
+        mesh_instances.push_back(RenderMeshInstance{
+            .model_instance = handle,
+            .mesh = Handle<RenderMesh>{ i + rmodel.first_mesh },
+        });
+    }
 
     flags |= RendererFlags::DIRTY_MODEL_INSTANCES;
     if(settings.flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::DIRTY_TLAS; }
@@ -860,24 +865,35 @@ void RendererVulkan::upload_staged_models() {
 
 void RendererVulkan::upload_instances() {
     model_instances.sort([](const RenderModelInstance& a, const RenderModelInstance& b) { return a.model < b.model; });
+    std::sort(mesh_instances.begin(), mesh_instances.end(), [](const RenderMeshInstance& a, const RenderMeshInstance& b) {
+        if(a.model_instance > b.model_instance) { return false; }
+        if(a.mesh > b.mesh) { return false; }
+        return true;
+    });
 
     const auto total_triangles = get_total_triangles();
     std::vector<uint32_t> per_triangle_mesh_ids;
     std::vector<uint32_t> per_tlas_instance_triangle_offsets;
     std::vector<GPURenderMeshData> render_mesh_data;
     std::vector<glm::mat4x3> per_tlas_transforms;
+    std::vector<VkDrawIndexedIndirectCommand> draw_commands;
+    IndirectDrawCommandBufferHeader draw_header;
     per_triangle_mesh_ids.reserve(total_triangles);
     per_tlas_instance_triangle_offsets.reserve(model_instances.size());
     render_mesh_data.reserve(model_instances.size() * meshes.size());
     per_tlas_transforms.reserve(model_instances.size());
+    draw_commands.reserve(mesh_instances.size());
 
     for(const RenderModel& model : models) {
         for(uint32_t i = 0u; i < model.mesh_count; ++i) {
             const RenderMesh& mesh = meshes.at(model.first_mesh + i);
             const RenderMaterial& material = materials.at(model.first_material + mesh.material);
 
-            render_mesh_data.push_back(GPURenderMeshData{ .color_texture_idx =
-                                                              model.first_texture + material.color_texture.value_or(0u) });
+            render_mesh_data.push_back(GPURenderMeshData{
+                .index_offset = mesh.index_offset + model.first_index,
+                .index_count = mesh.index_count,
+                .color_texture_idx = model.first_texture + material.color_texture.value_or(0u),
+            });
 
             for(uint32_t j = 0u; j < mesh.index_count / 3u; ++j) {
                 per_triangle_mesh_ids.push_back(model.first_mesh + i);
@@ -891,7 +907,38 @@ void RendererVulkan::upload_instances() {
         per_tlas_transforms.push_back(instance.transform);
     }
 
+    {
+        const RenderMeshInstance* mi = &mesh_instances.at(0);
+        VkDrawIndexedIndirectCommand* cmd = &draw_commands.emplace_back();
+        // TODO: this seems unnecessarily complicated
+        cmd->firstIndex = meshes.at(*mi->mesh).index_offset + models.get(model_instances.get(mi->model_instance).model).first_index;
+        cmd->indexCount = meshes.at(*mi->mesh).index_count;
+        cmd->instanceCount = 1;
+        for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
+            const RenderMeshInstance& cmi = mesh_instances.at(i);
+
+            if(mi->mesh != cmi.mesh) {
+                mi = &cmi;
+                cmd = &draw_commands.emplace_back();
+                cmd->indexCount = meshes.at(*mi->mesh).index_count;
+                cmd->instanceCount = 1;
+                cmd->firstIndex =
+                    meshes.at(*mi->mesh).index_offset + models.get(model_instances.get(mi->model_instance).model).first_index;
+                cmd->firstInstance = i;
+            } else {
+                ++cmd->instanceCount;
+            }
+        }
+
+        draw_header.draw_count = draw_commands.size();
+        draw_header.mesh_instance_count = mesh_instances.size();
+    }
+
     // clang-format off
+    indirect_draw_buffer = Buffer{"indirect draw", sizeof(IndirectDrawCommandBufferHeader) + draw_commands.size() * sizeof(draw_commands[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true};
+    indirect_draw_buffer.push_data(&draw_header, sizeof(IndirectDrawCommandBufferHeader));
+    indirect_draw_buffer.push_data(draw_commands);
+
     per_triangle_mesh_id_buffer = Buffer{"per triangle mesh id", per_triangle_mesh_ids.size() * sizeof(per_triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     per_tlas_triangle_offsets_buffer = Buffer{"per tlas triangle offsets", per_tlas_instance_triangle_offsets.size() * sizeof(per_tlas_instance_triangle_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     render_mesh_data_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};

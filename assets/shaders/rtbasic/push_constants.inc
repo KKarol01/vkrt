@@ -5,8 +5,9 @@ struct Vertex {
 };
 
 struct MeshData {
-    //uint32_t index_offset;
-    //uint32_t vertex_offset;
+    //uint32_t vertex_offset; // supposed to be 0 always (for now)
+    uint32_t index_offset;
+    uint32_t index_count;
     uint32_t color_texture;
 };
 

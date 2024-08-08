@@ -43,15 +43,16 @@ int main() {
         Engine::init();
 
         {
-            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
+            ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
             ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
             ImportedModel import_gallery =
                 ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
             HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
-             HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED });
+             //HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED });
             // HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
 
             Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
+             //Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
             // Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
         }
 
@@ -84,7 +85,7 @@ int main() {
 
                 vk_renderer->render();
                 ft.update();
-                //std::println("avg frame time: {}", ft.get_avg_frame_time());
+                // std::println("avg frame time: {}", ft.get_avg_frame_time());
             }
 
             glfwPollEvents();
