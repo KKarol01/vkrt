@@ -53,11 +53,16 @@ template <typename T> class HandleVector {
         return handle;
     }
 
-    T& get(Handle<T> h) { return data.at(index(h)).second; }
+    T& get(Handle<T> h) { return data.at(index_of(h)).second; }
 
-    constexpr Offset index(Handle<T> h) const { return *h + offsets.at(*h); }
+    constexpr Offset index_of(Handle<T> h) const { return *h + offsets.at(*h); }
 
+    constexpr T& at(Storage idx) { return data.at(idx).second; }
+    constexpr const T& at(Storage idx) const { return data.at(idx).second; }
+    constexpr bool empty() const { return data.empty(); }
     constexpr auto size() const { return data.size(); }
+    template<class Self> constexpr auto& front(this Self& self) { return self.data.front().second; }
+    template<class Self> constexpr auto& back(this Self& self) { return self.data.back().second; }
 
     template <typename SortFunc = std::less<>> void sort(SortFunc&& func = {}) {
         std::sort(data.begin(), data.end(), [&func](const auto& a, const auto& b) { return func(a.second, b.second); });

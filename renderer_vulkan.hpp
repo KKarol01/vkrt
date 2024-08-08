@@ -124,10 +124,10 @@ struct RenderModelInstance {
     uint32_t tlas_instance_mask : 8 { 0xFF };
 };
 
-struct RenderInstanceBatch {
-    Handle<RenderMesh> mesh{};
-    uint32_t first_instance{ 0 };
-    uint32_t count{ 0 };
+struct RenderMeshInstance {
+    Handle<RenderModelInstance> model_instance;
+    Handle<RenderMesh> mesh;
+    glm::mat4x3 transform{ 1.0f };
 };
 
 struct RecordingSubmitInfo {
@@ -137,14 +137,10 @@ struct RecordingSubmitInfo {
 };
 
 struct GPURenderMeshData {
-    // uint32_t index_offset;
     // uint32_t vertex_offset;
+    uint32_t index_offset;
+    uint32_t index_count;
     uint32_t color_texture_idx{ 0 };
-};
-
-struct RenderModelInstanceMeshDataAndOffsets {
-    VkDeviceAddress render_model_instance_mesh_data_buffer;
-    VkDeviceAddress render_model_isntance_mesh_offsets_buffer;
 };
 
 enum class ShaderModuleType {
@@ -557,6 +553,11 @@ class RendererVulkan : public Renderer {
         VkDeviceAddress debug_probe_offsets_buffer;
     };
 
+    struct IndirectDrawCommandBufferHeader {
+        uint32_t draw_count{};
+        uint32_t mesh_instance_count{};
+    };
+
   public:
     void init() final;
 
@@ -628,6 +629,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer, material_index_buffer;
+    Buffer indirect_draw_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
@@ -649,23 +651,20 @@ class RendererVulkan : public Renderer {
     Buffer ddgi_buffer;
     Buffer ddgi_debug_probe_offsets_buffer;
 
-    std::vector<Image> textures;
-    std::vector<RenderMaterial> materials;
+    HandleVector<RenderModel> models;
     std::vector<RenderMesh> meshes;
-    std::vector<RenderModelRTMetadata> rt_metadata;
-    std::vector<RenderModel> models;
+    std::vector<RenderMaterial> materials;
+    std::vector<Image> textures;
     std::vector<BoundingBox> model_bbs;
+    std::vector<RenderModelRTMetadata> rt_metadata;
 
     HandleVector<RenderModelInstance> model_instances;
+    std::vector<RenderMeshInstance> mesh_instances;
 
     Flags<RendererFlags> flags;
     struct UploadImage {
         uint64_t image_index;
         std::vector<std::byte> rgba_data;
-    };
-    struct InstanceUpload {
-        Handle<RenderMesh> batch;
-        glm::mat4x3 transform{ 1.0f };
     };
 
     std::vector<Vertex> upload_vertices;

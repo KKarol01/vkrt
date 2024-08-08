@@ -17,4 +17,5 @@ void main() {
 	MeshData md = combined_rt_buffs.meshes.mesh_datas[vmesh_id];
 
 	FRAG_COL = vec4(texture(textures[nonuniformEXT(md.color_texture)], vuv).rgba);
+	//FRAG_COL = vec4(vuv, 0.0, 1.0);
 }
