@@ -458,6 +458,60 @@ class DescriptorSetWriter {
     std::vector<WriteData> writes;
 };
 
+class ImageStatefulBarrier {
+  public:
+    constexpr ImageStatefulBarrier(Image& img, VkImageAspectFlags aspect, uint32_t base_mip, uint32_t mips,
+                                   uint32_t base_layer, uint32_t layers, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                   VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                   VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
+        : image{ &img }, current_range{ aspect, base_mip, mips, base_layer, layers }, current_layout{ start_layout },
+          current_stage{ start_stage }, current_access{ start_access } {}
+    constexpr ImageStatefulBarrier(Image& img, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                   VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                   VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
+        : image{ &img }, current_range{ img.aspect, 0, img.mips, 0, img.layers }, current_layout{ start_layout },
+          current_stage{ start_stage }, current_access{ start_access } {}
+
+    void insert_barrier(VkCommandBuffer cmd, VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
+        insert_barrier(cmd, current_layout, dst_stage, dst_access, current_range);
+    }
+
+    void insert_barrier(VkCommandBuffer cmd, VkImageLayout dst_layout, VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
+        insert_barrier(cmd, dst_layout, dst_stage, dst_access, current_range);
+    }
+
+  private:
+    void insert_barrier(VkCommandBuffer cmd, VkImageLayout new_layout, VkPipelineStageFlags2 new_stage,
+                        VkAccessFlags2 new_access, VkImageSubresourceRange new_range) {
+        vks::ImageMemoryBarrier2 barrier;
+        barrier.image = image->image;
+        barrier.oldLayout = current_layout;
+        barrier.newLayout = new_layout;
+        barrier.srcStageMask = current_stage;
+        barrier.srcAccessMask = current_access;
+        barrier.dstStageMask = new_stage;
+        barrier.dstAccessMask = new_access;
+        barrier.subresourceRange = current_range;
+
+        vks::DependencyInfo dep;
+        dep.pImageMemoryBarriers = &barrier;
+        dep.imageMemoryBarrierCount = 1;
+        vkCmdPipelineBarrier2(cmd, &dep);
+
+        current_range = new_range;
+        current_layout = new_layout;
+        current_stage = new_stage;
+        current_access = new_access;
+        image->current_layout = new_layout;
+    }
+
+    Image* image;
+    VkImageSubresourceRange current_range;
+    VkImageLayout current_layout;
+    VkPipelineStageFlags2 current_stage;
+    VkAccessFlags2 current_access;
+};
+
 class RendererVulkan : public Renderer {
     struct BoundingBox {
         glm::vec3 center() const { return (max + min) * 0.5f; }
@@ -573,7 +627,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
-    Buffer vertex_buffer, index_buffer;
+    Buffer vertex_buffer, index_buffer, material_index_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;

@@ -375,7 +375,7 @@ static std::vector<glm::mat4x3> original_transforms;
 static HandleBatchedModel sphere;
 
 void RendererVulkan::render() {
-    if(num_frame == 0) {
+    if(num_frame == 0 && false) {
         ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
         sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED });
     }
@@ -466,6 +466,9 @@ void RendererVulkan::render() {
         .pDepthAttachment = &r_dep_att,
     };
 
+    ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
+    ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[sw_img_idx] };
+
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VkDeviceSize vb_offsets[]{ 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
@@ -475,36 +478,27 @@ void RendererVulkan::render() {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &default_set, 0, nullptr);
 
-    swapchain_images.at(sw_img_idx)
-        .transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, true, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
-    depth_buffers[sw_img_idx].transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
-                                                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                                                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                                                true, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+
     vkCmdBeginRendering(cmd, &rendering_info);
     VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->size[0], Engine::window()->size[1] } };
     VkViewport r_view_1{ .x = 0.0f,
-                         .y = 0.0f,
+                         .y = static_cast<float>(Engine::window()->size[1]),
                          .width = static_cast<float>(Engine::window()->size[0]),
-                         .height = static_cast<float>(Engine::window()->size[1]),
+                         .height = -static_cast<float>(Engine::window()->size[1]),
                          .minDepth = 0.0f,
                          .maxDepth = 1.0f };
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-    // vkCmdDrawIndexed(cmd, 3, 1, 0, 0, 0);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL, 0,
+                       sizeof(combined_rt_buffers_buffer.bda), &combined_rt_buffers_buffer.bda);
+    vkCmdDrawIndexed(cmd, models.at(0).index_count, 1, 0, 0, 0);
     vkCmdEndRendering(cmd);
 
-    swapchain_images.at(sw_img_idx)
-        .transition_layout(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                           VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE, false, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-    // TODO: submit_recording ends the buffer anyway... end_recording(cmd);
-
-    /*VkQueue queue, VkCommandBuffer buffer, const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>&wait_sems,
-        const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>&signal_sems,
-        VkFence fence*/
+    sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
 
     submit_recording(gq, cmd, { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
                      { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } }, nullptr);
@@ -1794,7 +1788,7 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
 
     vks::PipelineRasterizationStateCreateInfo pRasterizationState;
     pRasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
-    pRasterizationState.cullMode = VK_CULL_MODE_NONE;
+    pRasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
     pRasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     pRasterizationState.lineWidth = 1.0f;
 
