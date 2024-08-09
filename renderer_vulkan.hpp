@@ -127,7 +127,6 @@ struct RenderModelInstance {
 struct RenderMeshInstance {
     Handle<RenderModelInstance> model_instance;
     Handle<RenderMesh> mesh;
-    glm::mat4x3 transform{ 1.0f };
 };
 
 struct RecordingSubmitInfo {
@@ -628,8 +627,9 @@ class RendererVulkan : public Renderer {
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
-    Buffer vertex_buffer, index_buffer, material_index_buffer;
+    Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
+    Buffer mesh_instance_transform_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
