@@ -488,6 +488,9 @@ void RendererVulkan::render() {
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL, 0,
                        sizeof(combined_rt_buffers_buffer.bda), &combined_rt_buffers_buffer.bda);
+    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                       sizeof(combined_rt_buffers_buffer.bda), sizeof(mesh_instance_transform_buffer.bda),
+                       &mesh_instance_transform_buffer.bda);
     // vkCmdDrawIndexed(cmd, models.at(0).index_count, 1, 0, 0, 0);
     vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
                                   indirect_draw_buffer.buffer, 0ull, mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
@@ -876,10 +879,12 @@ void RendererVulkan::upload_instances() {
     std::vector<uint32_t> per_tlas_instance_triangle_offsets;
     std::vector<GPURenderMeshData> render_mesh_data;
     std::vector<glm::mat4x3> per_tlas_transforms;
+    std::vector<glm::mat4x3> mesh_instance_transforms;
     std::vector<VkDrawIndexedIndirectCommand> draw_commands;
     IndirectDrawCommandBufferHeader draw_header;
     per_triangle_mesh_ids.reserve(total_triangles);
     per_tlas_instance_triangle_offsets.reserve(model_instances.size());
+    mesh_instance_transforms.reserve(mesh_instances.size());
     render_mesh_data.reserve(model_instances.size() * meshes.size());
     per_tlas_transforms.reserve(model_instances.size());
     draw_commands.reserve(mesh_instances.size());
@@ -914,6 +919,7 @@ void RendererVulkan::upload_instances() {
         cmd->firstIndex = meshes.at(*mi->mesh).index_offset + models.get(model_instances.get(mi->model_instance).model).first_index;
         cmd->indexCount = meshes.at(*mi->mesh).index_count;
         cmd->instanceCount = 1;
+        mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
         for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
             const RenderMeshInstance& cmi = mesh_instances.at(i);
 
@@ -928,6 +934,8 @@ void RendererVulkan::upload_instances() {
             } else {
                 ++cmd->instanceCount;
             }
+
+            mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
         }
 
         draw_header.draw_count = draw_commands.size();
@@ -938,6 +946,9 @@ void RendererVulkan::upload_instances() {
     indirect_draw_buffer = Buffer{"indirect draw", sizeof(IndirectDrawCommandBufferHeader) + draw_commands.size() * sizeof(draw_commands[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true};
     indirect_draw_buffer.push_data(&draw_header, sizeof(IndirectDrawCommandBufferHeader));
     indirect_draw_buffer.push_data(draw_commands);
+
+    mesh_instance_transform_buffer = Buffer{"mesh instance transforms", mesh_instance_transforms.size() * sizeof(mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_instance_transform_buffer.push_data(mesh_instance_transforms);
 
     per_triangle_mesh_id_buffer = Buffer{"per triangle mesh id", per_triangle_mesh_ids.size() * sizeof(per_triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     per_tlas_triangle_offsets_buffer = Buffer{"per tlas triangle offsets", per_tlas_instance_triangle_offsets.size() * sizeof(per_tlas_instance_triangle_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
@@ -1025,8 +1036,7 @@ void RendererVulkan::compile_shaders() {
         auto res = c.CompileGlslToSpv(file_str, kinds[i], files[i].filename().string().c_str(), options);
 
         if(res.GetCompilationStatus() != shaderc_compilation_status_success) {
-            throw std::runtime_error{ std::format("Could not compile shader: {}, because: \"{}\"", files[i].string(),
-                                                  res.GetErrorMessage()) };
+            ENG_WARN("Could not compile shader : {}, because : \"{}\"", files[i].string(), res.GetErrorMessage());
         }
 
         compiled_modules.emplace_back(res.begin(), res.end());

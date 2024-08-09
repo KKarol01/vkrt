@@ -12,7 +12,55 @@ layout(location = 2) in vec2 uv;
 layout(location = 0) flat out uint vmesh_id;
 layout(location = 1) out vec2 vuv;
 
-#include "../rtbasic/push_constants.inc"
+struct Vertex {
+    vec3 pos;
+    vec3 nor;
+    vec2 uv;
+};
+
+struct MeshData {
+    //uint32_t vertex_offset; // supposed to be 0 always (for now)
+    uint32_t index_offset;
+    uint32_t index_count;
+    uint32_t color_texture;
+};
+
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer VertexBuffer {
+    Vertex vertices[]; 
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer IndexBuffer {
+    uint32_t indices[]; 
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTriangleMeshId {
+    uint32_t ids[];
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer MeshDatasBuffer {
+    MeshData mesh_datas[];
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTriangleOffsets {
+    uint32_t offsets[];
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasTransform {
+    mat4x3 transforms[];
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) buffer DDGI_DEBUG_PROBE_OFFSETS {
+    vec3 probe_offsets[];
+};
+layout(scalar, buffer_reference, buffer_reference_align = 8) buffer PerMeshInstanceTransform {
+    mat4x3 transforms[];
+};
+
+layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
+    PerTriangleMeshId mesh_ids;
+    PerTlasTriangleOffsets offsets;
+    MeshDatasBuffer meshes;
+    PerTlasTransform transforms;
+};
+
+layout(scalar, push_constant) uniform Constants {
+    CombinedRTBuffers combined_rt_buffs;
+    PerMeshInstanceTransform transforms;
+};
 
 layout(binding = 14, set = 0) uniform CameraProperties {
     mat4 viewInverse;
@@ -25,5 +73,6 @@ void main() {
     uint mesh_id = combined_rt_buffs.mesh_ids.ids[triangle_id + combined_rt_buffs.offsets.offsets[gl_InstanceIndex]];
     vmesh_id = mesh_id;
     vuv = uv;
-	gl_Position = inverse(cam.projInverse) * inverse(cam.viewInverse) * vec4(pos, 1.0);
+
+	gl_Position = inverse(cam.projInverse) * inverse(cam.viewInverse) * vec4(transforms.transforms[gl_InstanceIndex] * vec4(pos, 1.0), 1.0);
 }
