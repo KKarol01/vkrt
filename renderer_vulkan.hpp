@@ -630,6 +630,7 @@ class RendererVulkan : public Renderer {
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
     Buffer mesh_instance_transform_buffer;
+    Buffer mesh_instance_mesh_data_id;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
