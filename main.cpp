@@ -43,11 +43,11 @@ int main() {
     Engine::init();
 
     {
-        ImportedModel import_model = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
+        ImportedModel import_cornell = ModelImporter::import_model("cornell_box", "cornell/cornell.glb");
         ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
         ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
-        HandleBatchedModel cornell = Engine::renderer()->batch_model(import_model, { .flags = BatchFlags::RAY_TRACED });
         HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
+        HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
         // HandleBatchedModel bunny = Engine::renderer()->batch_model(import_bunny, { .flags = BatchFlags::RAY_TRACED_BIT });
 
         Engine::renderer()->instance_model(gallery, InstanceSettings{
@@ -55,7 +55,13 @@ int main() {
                                                         .transform = glm::rotate(glm::mat4{ 1.0f }, glm::radians(35.0f),
                                                                                  glm::vec3{ 0.0f, 1.0f, 0.0f }),
                                                     });
-        // Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
+        Engine::renderer()->instance_model(cornell, InstanceSettings{
+                                                        .flags = InstanceFlags::RAY_TRACED,
+                                                        .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 0.2, 0.0, -0.6 }) *
+                                                                     glm::rotate(glm::mat4{ 1.0f }, -glm::radians(25.0f),
+                                                                                 glm::vec3{ 0.0f, 1.0f, 0.0f }) *
+                                                                     glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.09 }),
+                                                    });
         //  Engine::renderer()->instance_model(bunny, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
     }
 

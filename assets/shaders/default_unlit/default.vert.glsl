@@ -49,6 +49,9 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) buffer DDGI_DEBUG_P
 layout(scalar, buffer_reference, buffer_reference_align = 8) buffer PerMeshInstanceTransform {
     mat4x3 transforms[];
 };
+layout(scalar, buffer_reference, buffer_reference_align = 8) buffer PerMeshInstanceMeshId {
+    uint32_t ids[];
+};
 
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer CombinedRTBuffers {
     PerTriangleMeshId mesh_ids;
@@ -60,6 +63,7 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Com
 layout(scalar, push_constant) uniform Constants {
     CombinedRTBuffers combined_rt_buffs;
     PerMeshInstanceTransform transforms;
+    PerMeshInstanceMeshId ids;
 };
 
 layout(binding = 14, set = 0) uniform CameraProperties {
@@ -70,7 +74,7 @@ layout(binding = 14, set = 0) uniform CameraProperties {
 
 void main() {
     uint triangle_id = (gl_VertexIndex + 3 - gl_VertexIndex % 3) / 2;
-    uint mesh_id = combined_rt_buffs.mesh_ids.ids[triangle_id + combined_rt_buffs.offsets.offsets[gl_InstanceIndex]];
+    uint mesh_id = ids.ids[gl_InstanceIndex];
     vmesh_id = mesh_id;
     vuv = uv;
 
