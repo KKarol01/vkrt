@@ -36,13 +36,16 @@ void Engine::init() {
     _this->_renderer->init();
 
     _this->_last_frame_time = get_time_secs();
+
+    const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    if(monitor_videomode) { _this->_refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 }
 
 void Engine::destroy() { _this.reset(); }
 
 void Engine::start() {
     while(!Engine::window()->should_close()) {
-        if(get_time_secs() - last_frame_time() >= 1.0 / 60.0) {
+        if(get_time_secs() - last_frame_time() >= _this->_refresh_rate) {
             /*
             last_tick = glfwGetTime();
             float hx = halton(num_frame, 2) * 2.0 - 1.0;
@@ -51,23 +54,20 @@ void Engine::start() {
             glm::mat3 rand_mat =
                 glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-            vk_renderer->render();
-            ft.update();
             */
             // std::println("avg frame time: {}", ft.get_avg_frame_time());
 
             update();
         }
-
         glfwPollEvents();
     }
 }
 
 void Engine::update() {
-    _this->_camera->update();
-    _this->_renderer->render();
     _this->_delta_time = get_time_secs() - _this->_last_frame_time;
     _this->_last_frame_time = get_time_secs();
+    _this->_camera->update();
+    _this->_renderer->render();
     ++_this->_frame_num;
 }
 

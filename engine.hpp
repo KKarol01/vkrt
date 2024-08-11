@@ -59,4 +59,5 @@ class Engine {
     double _last_frame_time{};
     double _delta_time{};
     uint64_t _frame_num{};
+    float _refresh_rate{ 60.0f };
 };
