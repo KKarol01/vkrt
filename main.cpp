@@ -42,9 +42,16 @@ int main() {
         HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
 
         Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
-        Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED,
-                                                                      .transform = glm::translate(glm::mat4{ 1.0f },
-                                                                                                  glm::vec3{ 1.0f, 0.0f, 0.0f }) });
+        Engine::renderer()->instance_model(cornell, InstanceSettings{
+                                                        .flags = InstanceFlags::RAY_TRACED,
+                                                        .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 2.0f, 0.0f, 0.0f }),
+                                                    });
+        Engine::renderer()->instance_model(gallery, InstanceSettings{
+                                                        .flags = InstanceFlags::RAY_TRACED,
+                                                        .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 4.0f, 0.0f, 0.0f }) *
+                                                                     glm::rotate(glm::mat4{ 1.0f }, glm::radians(25.0f),
+                                                                                 glm::vec3{ 0.0f, 1.0f, 0.0f }),
+                                                    });
     }
 
     Engine::start();

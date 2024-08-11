@@ -14,8 +14,8 @@ class Camera {
   private:
     glm::mat4 projection{ 1.0f };
     glm::mat4 view{ 1.0f };
-    glm::vec3 pos{ 0.0f, 0.0f, 2.0f };
-    float pitch{ 0.0f }, yaw{ 0.0f };
+    glm::vec3 pos{ 4.0f, 3.0f, 2.0f };
+    float pitch{ -0.5f }, yaw{ 0.0f };
     float lpx{ -1.0f }, lpy{ -1.0f };
     float last_press_time{ 0.0f };
     bool enabled{ true };
