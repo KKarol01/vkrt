@@ -4,16 +4,13 @@
 #include <print>
 #include <cstdint>
 #include "renderer.hpp"
+#include "camera.hpp"
 
 #ifndef NDEBUG
-#define ENG_RTERROR(fmt, ...)                                                                                          \
-    throw std::runtime_error { std::format("[RT ERROR][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__) }
-
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
 
 #define ENG_LOG(fmt, ...) std::println("[LOG][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
 #else
-#define ENG_RTERROR(fmt, ...)
 #define ENG_WARN(fmt, ...)
 #define ENG_LOG(fmt, ...)
 #endif
@@ -23,6 +20,7 @@ struct GLFWwindow;
 struct Window {
     Window(uint32_t width, uint32_t height);
     ~Window();
+    bool should_close() const;
     uint32_t size[2]{};
     GLFWwindow* window{ nullptr };
 };
@@ -42,12 +40,23 @@ class Engine {
     constexpr Engine() = default;
     static void init();
     static void destroy();
+    static void start();
+    static void update();
 
     inline static Window* window() { return &*_this->_window; }
     inline static Renderer* renderer() { return &*_this->_renderer; }
+    inline static Camera* camera() { return &*_this->_camera; }
+    static double get_time_secs();
+    static double last_frame_time() { return _this->_last_frame_time; }
+    static double delta_time() { return _this->_delta_time; }
+    static double frame_num() { return _this->_frame_num; }
 
   private:
     static std::unique_ptr<Engine> _this;
     std::unique_ptr<Window> _window;
+    std::unique_ptr<Camera> _camera;
     std::unique_ptr<Renderer> _renderer;
+    double _last_frame_time{};
+    double _delta_time{};
+    uint64_t _frame_num{};
 };

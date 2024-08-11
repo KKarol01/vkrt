@@ -313,7 +313,12 @@ void RendererVulkan::initialize_vulkan() {
 
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
-    ubo = Buffer{ "ubo", 1024, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true };
+    common_values_buffer =
+        Buffer{ "common values", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    common_values_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_projection(), sizeof(glm::mat4), 1 * sizeof(glm::mat4));
+    common_values_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_projection()),
+                                   sizeof(glm::mat4), 3 * sizeof(glm::mat4));
+
     constexpr size_t ONE_MB = 1024ull * 1024ull;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -409,13 +414,13 @@ void RendererVulkan::render() {
         upload_staged_models();
         flags ^= RendererFlags::DIRTY_MODEL_BATCHES;
     }
-    if(flags & RendererFlags::DIRTY_BLAS) {
-        build_blas();
-        flags ^= RendererFlags::DIRTY_BLAS;
-    }
     if(flags & RendererFlags::DIRTY_MODEL_INSTANCES) {
         upload_instances();
         flags ^= RendererFlags::DIRTY_MODEL_INSTANCES;
+    }
+    if(flags & RendererFlags::DIRTY_BLAS) {
+        build_blas();
+        flags ^= RendererFlags::DIRTY_BLAS;
     }
     if(flags & RendererFlags::DIRTY_TLAS) {
         build_tlas();
@@ -427,6 +432,10 @@ void RendererVulkan::render() {
         refit_tlas();
         flags ^= RendererFlags::REFIT_TLAS;
     }
+
+    common_values_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_view(), sizeof(glm::mat4), 0);
+    common_values_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_view()), sizeof(glm::mat4),
+                                   2 * sizeof(glm::mat4));
 
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
@@ -487,12 +496,13 @@ void RendererVulkan::render() {
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &combined_rt_buffers_buffer.bda);
+                       0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &common_values_buffer.bda);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffer.bda);
+                       1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_mesh_data_id.bda);
-    // vkCmdDrawIndexed(cmd, models.at(0).index_count, 1, 0, 0, 0);
+                       2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &per_mesh_instance_mesh_data_ids.bda);
+    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                       3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &per_mesh_instance_transform_buffer.bda);
     vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
                                   indirect_draw_buffer.buffer, 0ull, mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
@@ -764,14 +774,16 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
                        return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv };
                    });
 
-    // undoing relative indices - they are now absolute (correctly, without any offsets, index the big vertex buffer with the other models)
-    for(uint32_t i = 0, model_index = 0, upload_offset = upload_indices.size() - model.indices.size();
-        i < model.meshes.size(); ++i) {
-        const auto& mesh = model.meshes.at(i);
-        for(uint32_t j = 0; j < mesh.index_count; ++j, ++model_index) {
-            upload_indices.at(upload_offset + model_index) = total_vertices + mesh.vertex_offset + model.indices.at(model_index);
-        }
-    }
+    std::transform(model.indices.begin(), model.indices.end(), upload_indices.end() - model.indices.size(),
+                   [](const auto& i) { return i; });
+    //// undoing relative indices - they are now absolute (correctly, without any offsets, index the big vertex buffer with the other models)
+    // for(uint32_t i = 0, model_index = 0, upload_offset = upload_indices.size() - model.indices.size();
+    //     i < model.meshes.size(); ++i) {
+    //     const auto& mesh = model.meshes.at(i);
+    //     for(uint32_t j = 0; j < mesh.index_count; ++j, ++model_index) {
+    //         upload_indices.at(upload_offset + model_index) = total_vertices + mesh.vertex_offset + model.indices.at(model_index);
+    //     }
+    // }
 
     rt_metadata.emplace_back();
 
@@ -796,7 +808,7 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
     for(uint32_t i = 0; i < rmodel.mesh_count; ++i) {
         mesh_instances.push_back(RenderMeshInstance{
             .model_instance = handle,
-            .mesh = Handle<RenderMesh>{ i + rmodel.first_mesh },
+            .mesh = Handle<RenderMesh>{ rmodel.first_mesh + i },
         });
     }
 
@@ -881,14 +893,14 @@ void RendererVulkan::upload_instances() {
     std::vector<uint32_t> per_mesh_instance_mesh_ids;
     std::vector<GPURenderMeshData> render_mesh_data;
     std::vector<glm::mat4x3> per_tlas_transforms;
-    std::vector<glm::mat4x3> mesh_instance_transforms;
+    std::vector<glm::mat4x3> per_mesh_instance_transforms;
     std::vector<VkDrawIndexedIndirectCommand> draw_commands;
     IndirectDrawCommandBufferHeader draw_header;
     per_triangle_mesh_ids.reserve(total_triangles);
     per_tlas_instance_triangle_offsets.reserve(model_instances.size());
     per_mesh_instance_mesh_ids.reserve(mesh_instances.size());
-    mesh_instance_transforms.reserve(mesh_instances.size());
-    render_mesh_data.reserve(model_instances.size() * meshes.size());
+    per_mesh_instance_transforms.reserve(mesh_instances.size());
+    render_mesh_data.reserve(meshes.size());
     per_tlas_transforms.reserve(model_instances.size());
     draw_commands.reserve(mesh_instances.size());
 
@@ -898,8 +910,8 @@ void RendererVulkan::upload_instances() {
             const RenderMaterial& material = materials.at(model.first_material + mesh.material);
 
             render_mesh_data.push_back(GPURenderMeshData{
-                .index_offset = mesh.index_offset + model.first_index,
-                .index_count = mesh.index_count,
+                /*.index_offset = mesh.index_offset + model.first_index,
+                .index_count = mesh.index_count,*/
                 .color_texture_idx = model.first_texture + material.color_texture.value_or(0u),
             });
 
@@ -919,10 +931,12 @@ void RendererVulkan::upload_instances() {
         const RenderMeshInstance* mi = &mesh_instances.at(0);
         VkDrawIndexedIndirectCommand* cmd = &draw_commands.emplace_back();
         // TODO: this seems unnecessarily complicated
-        cmd->firstIndex = meshes.at(*mi->mesh).index_offset + models.get(model_instances.get(mi->model_instance).model).first_index;
+        cmd->firstIndex = models.get(model_instances.get(mi->model_instance).model).first_index + meshes.at(*mi->mesh).index_offset;
         cmd->indexCount = meshes.at(*mi->mesh).index_count;
         cmd->instanceCount = 1;
-        mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
+        cmd->vertexOffset =
+            models.get(model_instances.get(mi->model_instance).model).first_vertex + meshes.at(*mi->mesh).vertex_offset;
+        per_mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
         per_mesh_instance_mesh_ids.push_back(*mi->mesh);
         for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
             const RenderMeshInstance& cmi = mesh_instances.at(i);
@@ -935,11 +949,13 @@ void RendererVulkan::upload_instances() {
                 cmd->firstIndex =
                     meshes.at(*mi->mesh).index_offset + models.get(model_instances.get(mi->model_instance).model).first_index;
                 cmd->firstInstance = i;
+                cmd->vertexOffset = models.get(model_instances.get(mi->model_instance).model).first_vertex +
+                                    meshes.at(*mi->mesh).vertex_offset;
             } else {
                 ++cmd->instanceCount;
             }
 
-            mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
+            per_mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
             per_mesh_instance_mesh_ids.push_back(*mi->mesh);
         }
 
@@ -952,23 +968,23 @@ void RendererVulkan::upload_instances() {
     indirect_draw_buffer.push_data(&draw_header, sizeof(IndirectDrawCommandBufferHeader));
     indirect_draw_buffer.push_data(draw_commands);
 
-    mesh_instance_transform_buffer = Buffer{"mesh instance transforms", mesh_instance_transforms.size() * sizeof(mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    mesh_instance_transform_buffer.push_data(mesh_instance_transforms);
+    per_mesh_instance_transform_buffer = Buffer{"per mesh instance transforms", per_mesh_instance_transforms.size() * sizeof(per_mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    per_mesh_instance_transform_buffer.push_data(per_mesh_instance_transforms);
 
-    mesh_instance_mesh_data_id = Buffer{"mesh instance transforms", per_mesh_instance_mesh_ids.size() * sizeof(per_mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    mesh_instance_mesh_data_id.push_data(per_mesh_instance_mesh_ids);
+    per_mesh_instance_mesh_data_ids = Buffer{"mesh instance transforms", per_mesh_instance_mesh_ids.size() * sizeof(per_mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    per_mesh_instance_mesh_data_ids.push_data(per_mesh_instance_mesh_ids);
 
     per_triangle_mesh_id_buffer = Buffer{"per triangle mesh id", per_triangle_mesh_ids.size() * sizeof(per_triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     per_tlas_triangle_offsets_buffer = Buffer{"per tlas triangle offsets", per_tlas_instance_triangle_offsets.size() * sizeof(per_tlas_instance_triangle_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    render_mesh_data_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_datas_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     per_tlas_transform_buffer = Buffer{"per tlas transforms", model_instances.size() * sizeof(glm::mat4x3), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
 
     per_triangle_mesh_id_buffer.push_data(per_triangle_mesh_ids);
     per_tlas_triangle_offsets_buffer.push_data(per_tlas_instance_triangle_offsets);
-    render_mesh_data_buffer.push_data(render_mesh_data);
+    mesh_datas_buffer.push_data(render_mesh_data);
     per_tlas_transform_buffer.push_data(per_tlas_transforms);
 
-    VkDeviceAddress combined_rt_buffers[] { per_triangle_mesh_id_buffer.bda, per_tlas_triangle_offsets_buffer.bda, render_mesh_data_buffer.bda, per_tlas_transform_buffer.bda };
+    VkDeviceAddress combined_rt_buffers[] { per_triangle_mesh_id_buffer.bda, per_tlas_triangle_offsets_buffer.bda, mesh_datas_buffer.bda, per_tlas_transform_buffer.bda };
     combined_rt_buffers_buffer = Buffer{"combined rt buffers", sizeof(combined_rt_buffers), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     combined_rt_buffers_buffer.push_data(combined_rt_buffers, sizeof(combined_rt_buffers));
     // clang-format on
@@ -1065,7 +1081,6 @@ void RendererVulkan::build_pipelines() {
                                                 .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
                                                 .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
                                                 .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 14, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                                                 .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                                                 .add_variable_descriptor_count(0)
                                                 .set_push_constants(128)
@@ -1168,8 +1183,7 @@ void RendererVulkan::update_descriptor_sets() {
         .write(2, 0, ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL)
         .write(3, 0, ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL)
         .write(4, 0, ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL)
-        .write(5, 0, ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL)
-        .write(14, 0, ubo, 0, 1024);
+        .write(5, 0, ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL);
     for(uint32_t counter = 0; const auto& e : textures) {
         writer.write(15, counter++, e, sampler, e.current_layout);
     }
@@ -1194,54 +1208,70 @@ void RendererVulkan::create_rt_output_image() {
 }
 
 void RendererVulkan::build_blas() {
-    std::vector<uint32_t> dirty;
+    std::vector<const RenderModel*> dirty_models;
+    std::vector<RenderModelRTMetadata*> dirty_rt_metadatas;
+    uint32_t total_dirty_meshes = 0;
     for(uint32_t i = 0; i < models.size(); ++i) {
         if(models.at(i).flags & RenderModelFlags::DIRTY_BLAS) {
             // TODO: Maybe move it to the end, when the building is finished
-            dirty.push_back(i);
+            dirty_models.push_back(&models.at(i));
+            dirty_rt_metadatas.push_back(&rt_metadata.at(i));
+            total_dirty_meshes += models.at(i).mesh_count;
             models.at(i).flags ^= RenderModelFlags::DIRTY_BLAS;
         }
     }
 
-    std::vector<vks::AccelerationStructureGeometryTrianglesDataKHR> triangles(dirty.size());
-    std::vector<vks::AccelerationStructureGeometryKHR> geometries(dirty.size());
-    std::vector<vks::AccelerationStructureBuildGeometryInfoKHR> build_geometries(dirty.size());
-    std::vector<uint32_t> scratch_sizes(dirty.size());
-    std::vector<vks::AccelerationStructureBuildRangeInfoKHR> offsets(dirty.size());
+    vks::AccelerationStructureGeometryTrianglesDataKHR triangles;
+    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    triangles.vertexData.deviceAddress = vertex_buffer.bda;
+    triangles.vertexStride = sizeof(Vertex);
+    triangles.indexType = VK_INDEX_TYPE_UINT32;
+    triangles.indexData.deviceAddress = index_buffer.bda;
+    triangles.maxVertex = get_total_vertices() - 1u;
+
+    std::vector<vks::AccelerationStructureGeometryKHR> geometries;
+    std::vector<vks::AccelerationStructureBuildGeometryInfoKHR> build_geometries;
+    std::vector<uint32_t> scratch_sizes;
+    std::vector<vks::AccelerationStructureBuildRangeInfoKHR> ranges;
+    std::vector<uint32_t> max_primitive_counts;
     Buffer scratch_buffer;
 
-    for(uint32_t i = 0; i < dirty.size(); ++i) {
-        const RenderModel& model = models.at(dirty.at(i));
-        RenderModelRTMetadata& meta = rt_metadata.at(dirty.at(i));
+    geometries.reserve(total_dirty_meshes);
+    build_geometries.reserve(dirty_models.size());
+    scratch_sizes.reserve(dirty_models.size());
+    max_primitive_counts.reserve(total_dirty_meshes);
+    ranges.reserve(total_dirty_meshes);
 
-        triangles.at(i).vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-        triangles.at(i).vertexData.deviceAddress = vertex_buffer.bda;
-        triangles.at(i).vertexStride = sizeof(Vertex);
-        triangles.at(i).indexType = VK_INDEX_TYPE_UINT32;
-        triangles.at(i).indexData.deviceAddress = index_buffer.bda;
-        triangles.at(i).maxVertex = model.first_vertex + model.vertex_count - 1u;
-        triangles.at(i).transformData = {};
+    for(uint32_t i = 0; i < dirty_models.size(); ++i) {
+        const RenderModel& model = *dirty_models.at(i);
+        RenderModelRTMetadata& meta = *dirty_rt_metadatas.at(i);
 
-        geometries.at(i).geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-        geometries.at(i).flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-        geometries.at(i).geometry.triangles = triangles.at(i);
+        for(uint32_t j = 0; j < model.mesh_count; ++j) {
+            const RenderMesh& mesh = meshes.at(model.first_mesh + j);
+            vks::AccelerationStructureGeometryKHR& geometry = geometries.emplace_back();
+            geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+            geometry.geometry.triangles = triangles;
+            max_primitive_counts.push_back(mesh.index_count / 3u);
+        }
 
-        build_geometries.at(i).type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-        build_geometries.at(i).flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-        build_geometries.at(i).geometryCount = 1;
-        build_geometries.at(i).pGeometries = &geometries.at(i);
-        build_geometries.at(i).mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        vks::AccelerationStructureBuildGeometryInfoKHR& build_geometry = build_geometries.emplace_back();
+        build_geometry.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        build_geometry.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        build_geometry.geometryCount = model.mesh_count;
+        build_geometry.pGeometries = &geometries.at(geometries.size() - model.mesh_count);
+        build_geometry.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
 
-        const uint32_t max_primitives = model.index_count / 3u;
         vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
-        vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                &build_geometries.at(i), &max_primitives, &build_size_info);
+        vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_geometry,
+                                                &max_primitive_counts.at(max_primitive_counts.size() - model.mesh_count),
+                                                &build_size_info);
 
         meta.blas_buffer =
             Buffer{ "blas_buffer", build_size_info.accelerationStructureSize,
                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-        scratch_sizes.at(i) = align_up(build_size_info.buildScratchSize,
-                                       static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment));
+        scratch_sizes.push_back(align_up(build_size_info.buildScratchSize,
+                                         static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment)));
 
         vks::AccelerationStructureCreateInfoKHR blas_info;
         blas_info.buffer = meta.blas_buffer.buffer;
@@ -1254,26 +1284,29 @@ void RendererVulkan::build_blas() {
     scratch_buffer = Buffer{ "blas_scratch_buffer", total_scratch_size, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    for(uint32_t i = 0, offset = 0; i < dirty.size(); ++i) {
-        const RenderModel& model = models.at(dirty.at(i));
-        RenderModelRTMetadata& meta = rt_metadata.at(dirty.at(i));
+    for(uint32_t i = 0, offset = 0; i < dirty_models.size(); ++i) {
+        const RenderModel& model = *dirty_models.at(i);
+        RenderModelRTMetadata& meta = *dirty_rt_metadatas.at(i);
 
         build_geometries.at(i).scratchData.deviceAddress = scratch_buffer.bda + offset;
         build_geometries.at(i).dstAccelerationStructure = meta.blas;
-
-        const uint32_t max_primitives = model.index_count / 3u;
-        offsets.at(i).firstVertex = 0;
-        offsets.at(i).primitiveCount = max_primitives;
-        offsets.at(i).primitiveOffset = (model.first_index) * sizeof(model.first_index);
-        offsets.at(i).transformOffset = 0;
-
         offset += scratch_sizes.at(i);
+
+        for(uint32_t j = 0; j < model.mesh_count; ++j) {
+            const RenderMesh& mesh = meshes.at(model.first_mesh + j);
+            VkAccelerationStructureBuildRangeInfoKHR& range = ranges.emplace_back();
+            range.firstVertex = model.first_vertex + mesh.vertex_offset;
+            range.primitiveCount = mesh.index_count / 3u;
+            range.primitiveOffset = (model.first_index + mesh.index_offset) * sizeof(model.first_index);
+            range.transformOffset = 0;
+        }
     }
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR*> poffsets(dirty.size());
-    for(uint32_t i = 0; i < dirty.size(); ++i) {
-        poffsets.at(i) = &offsets.at(i);
+    std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> poffsets(dirty_models.size());
+    for(uint32_t i = 0, offset = 0; i < dirty_models.size(); ++i) {
+        poffsets.at(i) = &ranges.at(offset);
+        offset += dirty_models.at(i)->mesh_count;
     }
     vkCmdBuildAccelerationStructuresKHR(cmd, build_geometries.size(), build_geometries.data(), poffsets.data());
     submit_recording(gq, cmd);

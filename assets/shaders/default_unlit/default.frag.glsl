@@ -7,15 +7,18 @@
 
 layout(location = 0) out vec4 FRAG_COL;
 
-layout(location = 0) flat in uint vmesh_id;
-layout(location = 1) in vec2 vuv;
+layout(location = 0) in VertexOutput {
+    flat uint mesh_id;
+    vec2 uv;
+} vert;
 
-#include "../rtbasic/push_constants.inc"
+#include "../common.inc.glsl"
+#include "push_constants.inc.glsl"
+
 layout(binding = 15, set = 0) uniform sampler2D textures[];
 
 void main() {
-	MeshData md = combined_rt_buffs.meshes.mesh_datas[vmesh_id];
+	MeshData md = mesh_datas.at[vert.mesh_id];
 
-	FRAG_COL = vec4(texture(textures[nonuniformEXT(md.color_texture)], vuv).rgba);
-	//FRAG_COL = vec4(vuv, 0.0, 1.0);
+	FRAG_COL = vec4(texture(textures[nonuniformEXT(md.color_texture)], vert.uv).rgba);
 }
