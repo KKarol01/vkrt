@@ -12,7 +12,7 @@
 #include "handle_vector.hpp"
 
 #define VK_CHECK(func)                                                                                                 \
-    if(const auto res = func; res != VK_SUCCESS) { ENG_RTERROR("{}", #func); }
+    if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
 
 enum class RendererFlags : uint32_t {
     DIRTY_MODEL_INSTANCES = 0x1,
@@ -43,6 +43,7 @@ class Buffer {
     template <typename T> bool push_data(const std::vector<T>& vec, uint32_t offset) {
         return push_data(std::as_bytes(std::span{ vec }), offset);
     }
+    void clear() { size = 0; }
     bool resize(size_t new_size);
     constexpr size_t get_free_space() const { return capacity - size; }
 
@@ -137,8 +138,8 @@ struct RecordingSubmitInfo {
 
 struct GPURenderMeshData {
     // uint32_t vertex_offset;
-    uint32_t index_offset;
-    uint32_t index_count;
+    /*uint32_t index_offset;
+    uint32_t index_count;*/
     uint32_t color_texture_idx{ 0 };
 };
 
@@ -629,8 +630,8 @@ class RendererVulkan : public Renderer {
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer mesh_instance_transform_buffer;
-    Buffer mesh_instance_mesh_data_id;
+    Buffer per_mesh_instance_transform_buffer;
+    Buffer per_mesh_instance_mesh_data_ids;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
@@ -642,13 +643,13 @@ class RendererVulkan : public Renderer {
 
     Buffer per_triangle_mesh_id_buffer;
     Buffer per_tlas_triangle_offsets_buffer;
-    Buffer render_mesh_data_buffer;
+    Buffer mesh_datas_buffer;
     Buffer per_tlas_transform_buffer;
     Buffer combined_rt_buffers_buffer;
 
     DDGI_Settings ddgi;
     Image rt_image;
-    Buffer ubo;
+    Buffer common_values_buffer;
     Buffer ddgi_buffer;
     Buffer ddgi_debug_probe_offsets_buffer;
 
