@@ -144,7 +144,7 @@ void main()
 
   const vec3 color_value = texture(textures[nonuniformEXT(mesh_data.color_texture)], uvs).rgb;
   const float shadow = calc_shadow(pos, nor);
-  payload.radiance = color_value * calc_direct_lighting(pos, nor) * vec3(shadow);
+  payload.radiance = color_value * calc_direct_lighting(pos, nor) * shadow;
 
 #if GLOBAL_ILLUMINATION && TEMPORAL_ACCUMULATION
 	payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;

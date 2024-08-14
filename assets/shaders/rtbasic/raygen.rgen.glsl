@@ -148,7 +148,7 @@ void main() {
 		final_color += irradiance * payload.albedo;
 #endif
 
-		//final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo, final_color, 1.0);
+	    //final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * max(payload.shadow, 1.0), final_color, 0.0);
 
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(final_color, 1.0)); 
 	} else if (mode == 1) {
