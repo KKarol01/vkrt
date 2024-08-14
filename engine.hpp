@@ -3,6 +3,7 @@
 #include <memory>
 #include <print>
 #include <cstdint>
+#include <functional>
 #include "renderer.hpp"
 #include "camera.hpp"
 
@@ -43,13 +44,15 @@ class Engine {
     static void start();
     static void update();
 
+    static void set_on_update_callback(const std::function<void()>& on_update_callback);
+
     inline static Window* window() { return &*_this->_window; }
     inline static Renderer* renderer() { return &*_this->_renderer; }
     inline static Camera* camera() { return &*_this->_camera; }
     static double get_time_secs();
     static double last_frame_time() { return _this->_last_frame_time; }
     static double delta_time() { return _this->_delta_time; }
-    static double frame_num() { return _this->_frame_num; }
+    static uint64_t frame_num() { return _this->_frame_num; }
 
   private:
     static std::unique_ptr<Engine> _this;
@@ -60,4 +63,5 @@ class Engine {
     double _delta_time{};
     uint64_t _frame_num{};
     float _refresh_rate{ 60.0f };
+    std::function<void()> _on_update_callback;
 };

@@ -1,5 +1,7 @@
 #include <volk/volk.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <glm/mat3x3.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
@@ -14,6 +16,22 @@
 #include "set_debug_name.hpp"
 #include <numeric>
 #include <fstream>
+#include <utility>
+
+// https://www.shadertoy.com/view/WlSSWc
+static float halton(int i, int b) {
+    /* Creates a halton sequence of values between 0 and 1.
+        https://en.wikipedia.org/wiki/Halton_sequence
+        Used for jittering based on a constant set of 2D points. */
+    float f = 1.0;
+    float r = 0.0;
+    while(i > 0) {
+        f = f / float(b);
+        r = r + f * float(i % b);
+        i = i / b;
+    }
+    return r;
+}
 
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
     : name{ name }, usage{ usage }, capacity{ size } {
@@ -313,11 +331,11 @@ void RendererVulkan::initialize_vulkan() {
 
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
-    common_values_buffer =
-        Buffer{ "common values", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
-    common_values_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_projection(), sizeof(glm::mat4), 1 * sizeof(glm::mat4));
-    common_values_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_projection()),
-                                   sizeof(glm::mat4), 3 * sizeof(glm::mat4));
+    global_buffer =
+        Buffer{ "globals", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+    global_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_projection(), sizeof(glm::mat4), 1 * sizeof(glm::mat4));
+    global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_projection()), sizeof(glm::mat4),
+                            3 * sizeof(glm::mat4));
 
     constexpr size_t ONE_MB = 1024ull * 1024ull;
     vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
@@ -425,20 +443,289 @@ void RendererVulkan::render() {
     if(flags & RendererFlags::DIRTY_TLAS) {
         build_tlas();
         prepare_ddgi();
-        update_descriptor_sets();
         flags ^= RendererFlags::DIRTY_TLAS;
     }
     if(flags & RendererFlags::REFIT_TLAS) {
         refit_tlas();
         flags ^= RendererFlags::REFIT_TLAS;
     }
+    if(flags & RendererFlags::UPDATE_MESH_POSITIONS) {
+        upload_transforms();
+        flags ^= RendererFlags::UPDATE_MESH_POSITIONS;
+    }
+    if(flags & RendererFlags::DIRTY_DESCRIPTORS) {
+        update_descriptor_sets();
+        flags ^= RendererFlags::DIRTY_DESCRIPTORS;
+    }
 
-    common_values_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_view(), sizeof(glm::mat4), 0);
-    common_values_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_view()), sizeof(glm::mat4),
-                                   2 * sizeof(glm::mat4));
+    const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0) / static_cast<float>(Engine::window()->size[0]) * 1.0f;
+    const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0) / static_cast<float>(Engine::window()->size[1]) * 1.0f;
+    const glm::mat3 rand_mat =
+        glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
+
+    global_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_view(), sizeof(glm::mat4), 0);
+    global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_view()), sizeof(glm::mat4),
+                            2 * sizeof(glm::mat4));
+    global_buffer.push_data(&rand_mat, sizeof(glm::mat3), 4 * sizeof(glm::mat4));
 
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
+    ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
+
+    {
+        static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = Engine::frame_num();
+
+        auto raytrace_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+        const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
+
+        vks::StridedDeviceAddressRegionKHR raygen_sbt;
+        raygen_sbt.deviceAddress = sbt.bda;
+        raygen_sbt.size = handle_size_aligned * 1;
+        raygen_sbt.stride = handle_size_aligned;
+
+        vks::StridedDeviceAddressRegionKHR miss_sbt;
+        miss_sbt.deviceAddress = sbt.bda;
+        miss_sbt.size = handle_size_aligned * 2;
+        miss_sbt.stride = handle_size_aligned;
+
+        vks::StridedDeviceAddressRegionKHR hit_sbt;
+        hit_sbt.deviceAddress = sbt.bda;
+        hit_sbt.size = handle_size_aligned * 2;
+        hit_sbt.stride = handle_size_aligned;
+
+        vks::StridedDeviceAddressRegionKHR callable_sbt;
+
+        // TODO: MOVE THIS
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
+        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
+
+        const auto* window = Engine::window();
+        uint32_t mode = 0;
+        // clang-format off
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_mesh_ids_buffer.bda);
+        // clang-format on
+
+        ImageStatefulBarrier radiance_image_barrier{ ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
+        ImageStatefulBarrier irradiance_image_barrier{ ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+        ImageStatefulBarrier visibility_image_barrier{ ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+        ImageStatefulBarrier offset_image_barrier{ ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+        
+        // radiance pass
+        mode = 1;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
+                          ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
+
+        radiance_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
+        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
+
+        // irradiance pass, only need radiance texture
+        mode = 0;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
+                      std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
+
+        // visibility pass, only need radiance texture
+        mode = 1;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
+                      std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
+
+        // probe offset pass, only need radiance texture to complete
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_OFFSET).pipeline);
+        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
+                      std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
+
+        irradiance_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_READ_BIT);
+        visibility_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_READ_BIT);
+        offset_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_READ_BIT);
+
+        sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                      VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+
+        ImageStatefulBarrier raytrace_img_barrier{ rt_image };
+        raytrace_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_GENERAL,
+                                            VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT);
+
+        mode = 0;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+
+        raytrace_img_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+        vks::ImageCopy img_copy;
+        img_copy.srcOffset = {};
+        img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        img_copy.dstOffset = {};
+        img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        img_copy.extent = { window->size[0], window->size[1], 1 };
+        vkCmdCopyImage(raytrace_cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, swapchain_images.at(sw_img_idx).image,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &img_copy);
+
+        sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                      VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
+
+        submit_recording(gq, raytrace_cmd, { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
+                         { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } }, nullptr);
+
+        vks::PresentInfoKHR pinfo;
+        pinfo.swapchainCount = 1;
+        pinfo.pSwapchains = &swapchain;
+        pinfo.pImageIndices = &sw_img_idx;
+        pinfo.waitSemaphoreCount = 1;
+        pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
+        vkQueuePresentKHR(gq, &pinfo);
+        vkQueueWaitIdle(gq);
+
+        return;
+#if 0
+        vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
+        rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
+        rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+        rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+        rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        rt_to_comp_img_barrier.subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+        };
+
+        vks::DependencyInfo rt_to_comp_dep_info;
+        rt_to_comp_dep_info.imageMemoryBarrierCount = 1;
+        rt_to_comp_dep_info.pImageMemoryBarriers = &rt_to_comp_img_barrier;
+
+        vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
+
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
+        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
+
+        // irradiance pass, only need radiance texture
+        mode = 0;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
+        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
+                      std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
+
+        // visibility pass, only need radiance texture
+        mode = 1;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
+        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
+                      std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
+
+        // probe offset pass, only need radiance texture to complete
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_OFFSET).pipeline);
+        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
+                      std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
+
+        rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
+        rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT;
+        rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+        rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        rt_to_comp_img_barrier.subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+        };
+
+        vks::ImageMemoryBarrier2 ddgi_visibility_comp_to_rt_barrier = rt_to_comp_img_barrier;
+        ddgi_visibility_comp_to_rt_barrier.image = ddgi.visibility_texture.image;
+
+        vks::ImageMemoryBarrier2 ddgi_probe_offsets_comp_to_rt_barrier = rt_to_comp_img_barrier;
+        ddgi_probe_offsets_comp_to_rt_barrier.image = ddgi.probe_offsets_texture.image;
+
+        vks::ImageMemoryBarrier2 ddgi_barriers[]{ rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier,
+                                                  ddgi_probe_offsets_comp_to_rt_barrier };
+        rt_to_comp_dep_info.imageMemoryBarrierCount = sizeof(ddgi_barriers) / sizeof(ddgi_barriers[0]);
+        rt_to_comp_dep_info.pImageMemoryBarriers = ddgi_barriers;
+        vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
+        rt_to_comp_dep_info.imageMemoryBarrierCount =
+            1; // just to be safe and i'm too lazy to check if i'm reusing this variable anywhere later
+
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
+        mode = 0;
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
+                           VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
+        vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+
+#endif
+
+        // end_recording(raytrace_cmd);
+        submit_recording(gq, raytrace_cmd);
+
+#if 0
+        auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+        vks::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
+        sw_to_dst.image = swapchain_images.at(sw_img_idx).image;
+        sw_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        sw_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        sw_to_dst.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        sw_to_dst.srcAccessMask = VK_ACCESS_NONE;
+        sw_to_dst.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        sw_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sw_to_dst.subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+        };
+        sw_to_pres = sw_to_dst;
+        sw_to_pres.oldLayout = sw_to_dst.newLayout;
+        sw_to_pres.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        sw_to_pres.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        sw_to_pres.dstAccessMask = VK_ACCESS_NONE;
+
+        vks::DependencyInfo sw_dep_info;
+        sw_dep_info.imageMemoryBarrierCount = 1;
+        sw_dep_info.pImageMemoryBarriers = &sw_to_dst;
+        vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
+
+        vks::ImageCopy img_copy;
+        img_copy.srcOffset = {};
+        img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        img_copy.dstOffset = {};
+        img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        img_copy.extent = { window->size[0], window->size[1], 1 };
+        vkCmdCopyImage(present_cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, sw_to_dst.image, sw_to_dst.newLayout, 1, &img_copy);
+
+        sw_dep_info.pImageMemoryBarriers = &sw_to_pres;
+        vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
+        end_recording(present_cmd);
+
+        submit_recordings(
+            gq, { RecordingSubmitInfo{ .buffers = { raytrace_cmd },
+                                       .signals = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR } } },
+                  RecordingSubmitInfo{ .buffers = { present_cmd },
+                                       .waits = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_TRANSFER_BIT },
+                                                  { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TRANSFER_BIT } },
+                                       .signals = { { primitives.sem_copy_to_sw_img_done, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } } } });
+#endif
+    }
 
     VkRenderingAttachmentInfo r_col_att_1{
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -468,7 +755,6 @@ void RendererVulkan::render() {
         .pDepthAttachment = &r_dep_att,
     };
 
-    ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
     ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[sw_img_idx] };
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -496,13 +782,13 @@ void RendererVulkan::render() {
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &common_values_buffer.bda);
+                       0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                        1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &per_mesh_instance_mesh_data_ids.bda);
+                       2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_mesh_id_buffer.bda);
     vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &per_mesh_instance_transform_buffer.bda);
+                       3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &per_mesh_instance_transform_buffer[0]->bda);
     vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
                                   indirect_draw_buffer.buffer, 0ull, mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
@@ -758,10 +1044,18 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
         materials.push_back(RenderMaterial{ .color_texture = mat.color_texture, .normal_texture = mat.normal_texture });
     }
 
+    VkSampler default_linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
     for(auto& tex : model.textures) {
         textures.push_back(Image{ tex.name, tex.size.first, tex.size.second, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
                                   VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         upload_images.push_back(UploadImage{ .image_index = textures.size() - 1u, .rgba_data = tex.rgba_data });
+        flags |= RendererFlags::DIRTY_DESCRIPTORS;
+        update_descriptors.push_back(UpdateDescriptor{
+            .set = default_set,
+            .payload = std::tuple{ textures.back().view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, default_linear_sampler },
+            .binding = 15,
+            .element = static_cast<uint32_t>(textures.size()) - 1u });
     }
 
     upload_vertices.resize(upload_vertices.size() + model.vertices.size());
@@ -776,14 +1070,6 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
 
     std::transform(model.indices.begin(), model.indices.end(), upload_indices.end() - model.indices.size(),
                    [](const auto& i) { return i; });
-    //// undoing relative indices - they are now absolute (correctly, without any offsets, index the big vertex buffer with the other models)
-    // for(uint32_t i = 0, model_index = 0, upload_offset = upload_indices.size() - model.indices.size();
-    //     i < model.meshes.size(); ++i) {
-    //     const auto& mesh = model.meshes.at(i);
-    //     for(uint32_t j = 0; j < mesh.index_count; ++j, ++model_index) {
-    //         upload_indices.at(upload_offset + model_index) = total_vertices + mesh.vertex_offset + model.indices.at(model_index);
-    //     }
-    // }
 
     rt_metadata.emplace_back();
 
@@ -888,21 +1174,22 @@ void RendererVulkan::upload_instances() {
     });
 
     const auto total_triangles = get_total_triangles();
-    std::vector<uint32_t> per_triangle_mesh_ids;
-    std::vector<uint32_t> per_tlas_instance_triangle_offsets;
-    std::vector<uint32_t> per_mesh_instance_mesh_ids;
+    std::vector<uint32_t> tlas_mesh_offsets;
+    std::vector<uint32_t> blas_mesh_offsets;
+    std::vector<uint32_t> triangle_mesh_ids;
     std::vector<GPURenderMeshData> render_mesh_data;
-    std::vector<glm::mat4x3> per_tlas_transforms;
-    std::vector<glm::mat4x3> per_mesh_instance_transforms;
     std::vector<VkDrawIndexedIndirectCommand> draw_commands;
     IndirectDrawCommandBufferHeader draw_header;
-    per_triangle_mesh_ids.reserve(total_triangles);
-    per_tlas_instance_triangle_offsets.reserve(model_instances.size());
-    per_mesh_instance_mesh_ids.reserve(mesh_instances.size());
-    per_mesh_instance_transforms.reserve(mesh_instances.size());
+    std::vector<glm::mat4x3> tlas_transforms;
+    std::vector<glm::mat4x3> per_mesh_instance_transforms;
+    tlas_mesh_offsets.reserve(model_instances.size());
+    blas_mesh_offsets.reserve(mesh_instances.size());
+    triangle_mesh_ids.reserve(total_triangles);
     render_mesh_data.reserve(meshes.size());
-    per_tlas_transforms.reserve(model_instances.size());
     draw_commands.reserve(mesh_instances.size());
+
+    per_mesh_instance_transforms.reserve(mesh_instances.size());
+    tlas_transforms.reserve(model_instances.size());
 
     for(const RenderModel& model : models) {
         for(uint32_t i = 0u; i < model.mesh_count; ++i) {
@@ -916,15 +1203,17 @@ void RendererVulkan::upload_instances() {
             });
 
             for(uint32_t j = 0u; j < mesh.index_count / 3u; ++j) {
-                per_triangle_mesh_ids.push_back(model.first_mesh + i);
+                triangle_mesh_ids.push_back(model.first_mesh + i);
             }
+
+            blas_mesh_offsets.push_back((model.first_index + mesh.index_offset) / 3u);
         }
     }
 
     for(const RenderModelInstance& instance : model_instances) {
         const RenderModel& model = models.at(*instance.model);
-        per_tlas_instance_triangle_offsets.push_back(model.first_index / 3u);
-        per_tlas_transforms.push_back(instance.transform);
+        tlas_mesh_offsets.push_back(model.first_mesh);
+        tlas_transforms.push_back(instance.transform);
     }
 
     {
@@ -937,7 +1226,6 @@ void RendererVulkan::upload_instances() {
         cmd->vertexOffset =
             models.get(model_instances.get(mi->model_instance).model).first_vertex + meshes.at(*mi->mesh).vertex_offset;
         per_mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
-        per_mesh_instance_mesh_ids.push_back(*mi->mesh);
         for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
             const RenderMeshInstance& cmi = mesh_instances.at(i);
 
@@ -956,7 +1244,6 @@ void RendererVulkan::upload_instances() {
             }
 
             per_mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
-            per_mesh_instance_mesh_ids.push_back(*mi->mesh);
         }
 
         draw_header.draw_count = draw_commands.size();
@@ -968,26 +1255,40 @@ void RendererVulkan::upload_instances() {
     indirect_draw_buffer.push_data(&draw_header, sizeof(IndirectDrawCommandBufferHeader));
     indirect_draw_buffer.push_data(draw_commands);
 
-    per_mesh_instance_transform_buffer = Buffer{"per mesh instance transforms", per_mesh_instance_transforms.size() * sizeof(per_mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    per_mesh_instance_transform_buffer.push_data(per_mesh_instance_transforms);
+    per_mesh_instance_transform_buffer[0] = new Buffer{"per mesh instance transforms 1", per_mesh_instance_transforms.size() * sizeof(per_mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    per_mesh_instance_transform_buffer[1] = new Buffer{"per mesh instance transforms 0", per_mesh_instance_transforms.size() * sizeof(per_mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    per_mesh_instance_transform_buffer[0]->push_data(per_mesh_instance_transforms);
+    per_mesh_instance_transform_buffer[1]->push_data(per_mesh_instance_transforms);
 
-    per_mesh_instance_mesh_data_ids = Buffer{"mesh instance transforms", per_mesh_instance_mesh_ids.size() * sizeof(per_mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    per_mesh_instance_mesh_data_ids.push_data(per_mesh_instance_mesh_ids);
+    mesh_instance_mesh_id_buffer = Buffer{"mesh instance mesh id", blas_mesh_offsets.size() * sizeof(blas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_instance_mesh_id_buffer.push_data(blas_mesh_offsets);
 
-    per_triangle_mesh_id_buffer = Buffer{"per triangle mesh id", per_triangle_mesh_ids.size() * sizeof(per_triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    per_tlas_triangle_offsets_buffer = Buffer{"per tlas triangle offsets", per_tlas_instance_triangle_offsets.size() * sizeof(per_tlas_instance_triangle_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    tlas_mesh_offsets_buffer = Buffer{"tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    tlas_mesh_offsets_buffer.push_data(tlas_mesh_offsets);
+    
+    tlas_transform_buffer = Buffer{"tlas transform", tlas_transforms.size() * sizeof(tlas_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    tlas_transform_buffer.push_data(tlas_transforms);
+
+    blas_mesh_offsets_buffer = Buffer{"blas mesh offsets", blas_mesh_offsets.size() * sizeof(blas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    blas_mesh_offsets_buffer.push_data(blas_mesh_offsets);
+
+    triangle_mesh_ids_buffer = Buffer{"triangle mesh id buffer", triangle_mesh_ids.size() * sizeof(triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    triangle_mesh_ids_buffer.push_data(triangle_mesh_ids);
+
     mesh_datas_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    per_tlas_transform_buffer = Buffer{"per tlas transforms", model_instances.size() * sizeof(glm::mat4x3), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-
-    per_triangle_mesh_id_buffer.push_data(per_triangle_mesh_ids);
-    per_tlas_triangle_offsets_buffer.push_data(per_tlas_instance_triangle_offsets);
     mesh_datas_buffer.push_data(render_mesh_data);
-    per_tlas_transform_buffer.push_data(per_tlas_transforms);
-
-    VkDeviceAddress combined_rt_buffers[] { per_triangle_mesh_id_buffer.bda, per_tlas_triangle_offsets_buffer.bda, mesh_datas_buffer.bda, per_tlas_transform_buffer.bda };
-    combined_rt_buffers_buffer = Buffer{"combined rt buffers", sizeof(combined_rt_buffers), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    combined_rt_buffers_buffer.push_data(combined_rt_buffers, sizeof(combined_rt_buffers));
     // clang-format on
+}
+
+void RendererVulkan::upload_transforms() {
+    std::vector<glm::mat4x3> transforms;
+    transforms.reserve(mesh_instances.size());
+
+    std::transform(mesh_instances.begin(), mesh_instances.end(), std::back_inserter(transforms),
+                   [this](const RenderMeshInstance& inst) { return model_instances.get(inst.model_instance).transform; });
+
+    per_mesh_instance_transform_buffer[1]->push_data(transforms, 0);
+    std::swap(per_mesh_instance_transform_buffer[0], per_mesh_instance_transform_buffer[1]);
 }
 
 void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 transform) {
@@ -999,6 +1300,8 @@ void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 tr
     //  memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
     //        sizeof(transform));
     if(instance.flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::REFIT_TLAS; }
+    upload_positions.emplace_back(handle, transform);
+    flags |= RendererFlags::UPDATE_MESH_POSITIONS;
 }
 
 void RendererVulkan::compile_shaders() {
@@ -1008,20 +1311,25 @@ void RendererVulkan::compile_shaders() {
         std::string path_str = path.string();
         std::string path_to_includes = path.parent_path().string();
 
-        char error[256];
-
+        char error[256] = {};
         char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
+
+        if(!parsed_file) {
+            ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
+            return std::string{};
+        }
+
         std::string parsed_file_str{ parsed_file };
         free(parsed_file);
         return parsed_file_str;
     };
 
     std::filesystem::path files[]{
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.rchit",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rchit",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rmiss",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.rchit.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rchit.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.rmiss.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rmiss.glsl",
+        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen.glsl",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_offset.comp",
         std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "default_unlit" / "default.vert.glsl",
@@ -1078,9 +1386,11 @@ void RendererVulkan::build_pipelines() {
                                                 .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
                                                 .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
                                                 .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                                .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                                                 .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
                                                 .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                                                 .add_variable_descriptor_count(0)
                                                 .set_push_constants(128)
@@ -1163,35 +1473,23 @@ void RendererVulkan::build_sbt() {
 }
 
 void RendererVulkan::update_descriptor_sets() {
-    vks::SamplerCreateInfo sampler_info;
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.anisotropyEnable = false;
-    sampler_info.compareEnable = false;
-    sampler_info.minFilter = VK_FILTER_LINEAR;
-    sampler_info.magFilter = VK_FILTER_LINEAR;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_info.unnormalizedCoordinates = false;
-    sampler_info.minLod = 0.0f;
-    sampler_info.maxLod = 1.0f;
-    VkSampler sampler;
-    VK_CHECK(vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
-
-    DescriptorSetWriter writer;
-    writer.write(0, 0, tlas)
-        .write(1, 0, rt_image, VK_IMAGE_LAYOUT_GENERAL)
-        .write(2, 0, ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL)
-        .write(3, 0, ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL)
-        .write(4, 0, ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL)
-        .write(5, 0, ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL);
-    for(uint32_t counter = 0; const auto& e : textures) {
-        writer.write(15, counter++, e, sampler, e.current_layout);
+    std::unordered_map<VkDescriptorSet, DescriptorSetWriter> writers;
+    writers.reserve(update_descriptors.size());
+    for(const UpdateDescriptor& ud : update_descriptors) {
+        std::visit(Visitor{
+                       [&writers, &ud](const std::tuple<VkImageView, VkImageLayout, VkSampler>& p) {
+                           const auto& [image, layout, sampler] = p;
+                           writers[ud.set].write(ud.binding, ud.element, image, sampler, layout);
+                       },
+                       [&writers, &ud](const VkAccelerationStructureKHR& acc) {
+                           writers[ud.set].write(ud.binding, ud.element, acc);
+                       },
+                   },
+                   ud.payload);
     }
-    writer.write(15, textures.size() + 0, ddgi.radiance_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .write(15, textures.size() + 1, ddgi.irradiance_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .write(15, textures.size() + 2, ddgi.visibility_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .write(15, textures.size() + 3, ddgi.probe_offsets_texture, sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .update(default_set);
+    for(auto& w : writers) {
+        w.second.update(w.first);
+    }
 }
 
 void RendererVulkan::create_rt_output_image() {
@@ -1385,6 +1683,9 @@ void RendererVulkan::build_tlas() {
     submit_recording(gq, cmd);
     vkDeviceWaitIdle(dev);
 
+    update_descriptors.push_back(UpdateDescriptor{ .set = default_set, .payload = tlas, .binding = 0, .element = 0 });
+
+    flags |= RendererFlags::DIRTY_DESCRIPTORS;
     tlas_buffer = std::move(buffer_tlas);
 }
 
@@ -1413,7 +1714,7 @@ void RendererVulkan::refit_tlas() {
                  tlas_instance_buffer.capacity, render_model_instances.size() * sizeof(render_model_instances[0]));
     }
 
-    tlas_instance_buffer.push_data(instances);
+    tlas_instance_buffer.push_data(instances, 0);
 
     vks::AccelerationStructureGeometryKHR geometry;
     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -1488,6 +1789,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.visibility_texture = Image{
         "ddgi visibility", visibility_texture_width, visibility_texture_height, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
+
     ddgi.probe_offsets_texture = Image{ "ddgi probe offsets",
                                         ddgi.probe_counts.x * ddgi.probe_counts.y,
                                         ddgi.probe_counts.z,
@@ -1508,24 +1810,12 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.visibility_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                               VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+
     ddgi.probe_offsets_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    submit_recording(gq, cmd);
 
-    vks::SamplerCreateInfo sampler_info;
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.anisotropyEnable = false;
-    sampler_info.compareEnable = false;
-    sampler_info.minFilter = VK_FILTER_LINEAR;
-    sampler_info.magFilter = VK_FILTER_LINEAR;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_info.unnormalizedCoordinates = false;
-    sampler_info.minLod = 0.0f;
-    sampler_info.maxLod = 1.0f;
-    VkSampler sampler;
-    VK_CHECK(vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
+    submit_recording(gq, cmd);
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
@@ -1551,11 +1841,57 @@ void RendererVulkan::prepare_ddgi() {
     ddgi_buffer_mapped->irradiance_probe_side = ddgi.irradiance_probe_side;
     ddgi_buffer_mapped->visibility_probe_side = ddgi.visibility_probe_side;
     ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
-    ddgi_buffer_mapped->radiance_tex_idx =
-        textures.size(); // TODO: this is wrong, because as new models get added, their texture ids override the ddgi ones
+#if 0
     ddgi_buffer_mapped->debug_probe_offsets_buffer = ddgi_debug_probe_offsets_buffer.bda;
+#endif
 
     if(ddgi.probe_counts.y == 1) { ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f; }
+
+    VkSampler sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ rt_image.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
+        .binding = 1,
+        .element = 0,
+    });
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ ddgi.radiance_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
+        .binding = 2,
+        .element = 0,
+    });
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ ddgi.irradiance_texture.view, VK_IMAGE_LAYOUT_GENERAL, sampler },
+        .binding = 3,
+        .element = 0,
+    });
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ ddgi.visibility_texture.view, VK_IMAGE_LAYOUT_GENERAL, sampler },
+        .binding = 4,
+        .element = 0,
+    });
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ ddgi.probe_offsets_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
+        .binding = 5,
+        .element = 0,
+    });
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ ddgi.irradiance_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
+        .binding = 6,
+        .element = 0,
+    });
+    update_descriptors.push_back(UpdateDescriptor{
+        .set = default_set,
+        .payload = std::tuple{ ddgi.visibility_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
+        .binding = 7,
+        .element = 0,
+    });
+    flags |= RendererFlags::DIRTY_DESCRIPTORS;
 
     vkQueueWaitIdle(gq);
 }
@@ -2036,6 +2372,12 @@ DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array
     return *this;
 }
 
+DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, VkImageView image,
+                                                VkSampler sampler, VkImageLayout layout) {
+    writes.emplace_back(binding, array_element, WriteImage{ image, layout, sampler });
+    return *this;
+}
+
 DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, const Buffer& buffer,
                                                 uint32_t offset, uint32_t range) {
     writes.emplace_back(binding, array_element, WriteBuffer{ buffer.buffer, offset, range });
@@ -2046,11 +2388,6 @@ DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array
     writes.emplace_back(binding, array_element, ac);
     return *this;
 }
-
-template <class... Ts> struct Visitor : Ts... {
-    using Ts::operator()...;
-};
-template <class... Ts> Visitor(Ts...) -> Visitor<Ts...>;
 
 bool DescriptorSetWriter::update(VkDescriptorSet set) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
@@ -2099,4 +2436,50 @@ bool DescriptorSetWriter::update(VkDescriptorSet set) {
 
     vkUpdateDescriptorSets(renderer->dev, write_sets.size(), write_sets.data(), 0, nullptr);
     return true;
+}
+
+VkSampler SamplerStorage::get_sampler() {
+    vks::SamplerCreateInfo sampler_info;
+    return get_sampler(sampler_info);
+}
+
+VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode address) {
+    vks::SamplerCreateInfo sampler_info;
+    sampler_info.addressModeU = address;
+    sampler_info.addressModeV = address;
+    sampler_info.addressModeW = address;
+    sampler_info.minFilter = filter;
+    sampler_info.magFilter = filter;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.maxLod = sampler_info.minLod + 1.0f;
+    return get_sampler(sampler_info);
+}
+
+VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
+    for(const auto& [c, s] : samplers) {
+        if(c.magFilter != info.magFilter) { continue; }
+        if(c.minFilter != info.minFilter) { continue; }
+        if(c.mipmapMode != info.mipmapMode) { continue; }
+        if(c.addressModeU != info.addressModeU) { continue; }
+        if(c.addressModeV != info.addressModeV) { continue; }
+        if(c.addressModeW != info.addressModeW) { continue; }
+        if(c.mipLodBias != info.mipLodBias) { continue; }
+        if(c.anisotropyEnable != info.anisotropyEnable) { continue; }
+        if(c.maxAnisotropy != info.maxAnisotropy) { continue; }
+        if(c.compareEnable != info.compareEnable) { continue; }
+        if(c.compareOp != info.compareOp) { continue; }
+        if(c.minLod != info.minLod) { continue; }
+        if(c.maxLod != info.maxLod) { continue; }
+        if(c.borderColor != info.borderColor) { continue; }
+        if(c.unnormalizedCoordinates != info.unnormalizedCoordinates) { continue; }
+        return s;
+    }
+
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+
+    VkSampler sampler;
+    VK_CHECK(vkCreateSampler(renderer->dev, &info, nullptr, &sampler));
+
+    samplers.emplace_back(info, sampler);
+    return sampler;
 }

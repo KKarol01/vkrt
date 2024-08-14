@@ -12,7 +12,7 @@ layout(location = 0) in VertexOutput {
     vec2 uv;
 } vert;
 
-#include "../common.inc.glsl"
+#include "../global_common.inc.glsl"
 #include "push_constants.inc.glsl"
 
 layout(binding = 15, set = 0) uniform sampler2D textures[];

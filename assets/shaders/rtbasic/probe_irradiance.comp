@@ -7,9 +7,10 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-#include "common.inc"
-#include "descriptor_layout.inc"
-#include "push_constants.inc"
+#include "../global_common.inc.glsl"
+#include "common.inc.glsl"
+#include "../global_layout.inc.glsl"
+#include "push_constants.inc.glsl"
 #include "probes.inc.glsl"
 
 // TODO: the tables should be generated if any probe resolution (side length) should change
@@ -65,7 +66,7 @@ void main() {
 		for(int ray_idx = 0; ray_idx < ddgi.rays_per_probe; ++ray_idx) {
 			ivec2 sample_pos = ivec2(ray_idx, probe_id);
 #if RANDOM_ROTATION
-			vec3 ray_dir = normalize(cam.randomRotation * spherical_fibonacci(float(ray_idx), float(ddgi.rays_per_probe)));
+			vec3 ray_dir = normalize(globals.randomRotation * spherical_fibonacci(float(ray_idx), float(ddgi.rays_per_probe)));
 #else
 			vec3 ray_dir = spherical_fibonacci(float(ray_idx), float(ddgi.rays_per_probe));
 #endif

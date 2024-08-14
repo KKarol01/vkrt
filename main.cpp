@@ -14,21 +14,6 @@
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 
-// https://www.shadertoy.com/view/WlSSWc
-float halton(int i, int b) {
-    /* Creates a halton sequence of values between 0 and 1.
-        https://en.wikipedia.org/wiki/Halton_sequence
-        Used for jittering based on a constant set of 2D points. */
-    float f = 1.0;
-    float r = 0.0;
-    while(i > 0) {
-        f = f / float(b);
-        r = r + f * float(i % b);
-        i = i / b;
-    }
-    return r;
-}
-
 int main() {
 
     Engine::init();
@@ -38,20 +23,17 @@ int main() {
         // ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
         ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
 
-        HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
-        HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
+        //HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
+         HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
 
-        Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
-        Engine::renderer()->instance_model(cornell, InstanceSettings{
-                                                        .flags = InstanceFlags::RAY_TRACED,
-                                                        .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 2.0f, 0.0f, 0.0f }),
-                                                    });
-        Engine::renderer()->instance_model(gallery, InstanceSettings{
-                                                        .flags = InstanceFlags::RAY_TRACED,
-                                                        .transform = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 4.0f, 0.0f, 0.0f }) *
-                                                                     glm::rotate(glm::mat4{ 1.0f }, glm::radians(25.0f),
-                                                                                 glm::vec3{ 0.0f, 1.0f, 0.0f }),
-                                                    });
+        HandleInstancedModel cornell_i1 =
+            Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
+        //Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });
+
+        Engine::set_on_update_callback([&] {
+            const glm::mat4x3 T = glm::rotate(glm::mat4{ 1.0f }, (float)Engine::get_time_secs(), glm::vec3{ 0.0f, 1.0f, 0.0f });
+            //((RendererVulkan*)Engine::renderer())->update_transform(cornell_i1, T);
+        });
     }
 
     Engine::start();
