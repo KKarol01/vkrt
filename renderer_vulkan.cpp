@@ -458,8 +458,8 @@ void RendererVulkan::render() {
         flags ^= RendererFlags::DIRTY_DESCRIPTORS;
     }
 
-    const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0) /*/ static_cast<float>(Engine::window()->size[0])*/ * 1.0f;
-    const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0) /*/ static_cast<float>(Engine::window()->size[1])*/ * 1.0f;
+    const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0);
+    const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0);
     const glm::mat3 rand_mat =
         glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
