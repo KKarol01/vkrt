@@ -14,7 +14,7 @@ layout(location = 0) out VertexOutput {
     vec2 uv;
 } vert;
 
-#include "../common.inc.glsl"
+#include "../global_common.inc.glsl"
 #include "push_constants.inc.glsl"
 
 void main() {
@@ -24,5 +24,5 @@ void main() {
     vert.mesh_id = mesh_id;
     vert.uv = uv;
 
-	gl_Position = common_values.proj * common_values.view * vec4(tpos, 1.0);
+	gl_Position = globals.proj * globals.view * vec4(tpos, 1.0);
 }

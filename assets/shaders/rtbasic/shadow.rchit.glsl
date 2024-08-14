@@ -6,10 +6,11 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
-#include "push_constants.inc"
-#include "descriptor_layout.inc"
+#include "../global_common.inc.glsl"
+#include "common.inc.glsl"
+#include "push_constants.inc.glsl"
+#include "../global_layout.inc.glsl"
 #include "light.inc"
-#include "common.inc"
 #include "probes.inc.glsl"
 
 layout(location = 1) rayPayloadInEXT struct RayPayloadShadow {

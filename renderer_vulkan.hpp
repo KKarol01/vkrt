@@ -20,6 +20,8 @@ enum class RendererFlags : uint32_t {
     DIRTY_BLAS = 0x4,
     DIRTY_TLAS = 0x8,
     REFIT_TLAS = 0x10,
+    DIRTY_DESCRIPTORS = 0x20,
+    UPDATE_MESH_POSITIONS = 0x40,
 };
 
 enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
@@ -446,12 +448,23 @@ class DescriptorSetWriter {
   public:
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Image& image, VkImageLayout layout);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Image& image, VkSampler sampler, VkImageLayout layout);
+    DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, VkImageView image, VkSampler sampler, VkImageLayout layout);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Buffer& buffer, uint32_t offset, uint32_t range);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const VkAccelerationStructureKHR ac);
     bool update(VkDescriptorSet set);
 
   private:
     std::vector<WriteData> writes;
+};
+
+class SamplerStorage {
+  public:
+    VkSampler get_sampler();
+    VkSampler get_sampler(VkFilter filter, VkSamplerAddressMode address);
+    VkSampler get_sampler(vks::SamplerCreateInfo info);
+
+  private:
+    std::vector<std::pair<vks::SamplerCreateInfo, VkSampler>> samplers;
 };
 
 class ImageStatefulBarrier {
@@ -508,6 +521,11 @@ class ImageStatefulBarrier {
     VkAccessFlags2 current_access;
 };
 
+template <class... Ts> struct Visitor : Ts... {
+    using Ts::operator()...;
+};
+template <class... Ts> Visitor(Ts...) -> Visitor<Ts...>;
+
 class RendererVulkan : public Renderer {
     struct BoundingBox {
         glm::vec3 center() const { return (max + min) * 0.5f; }
@@ -549,8 +567,6 @@ class RendererVulkan : public Renderer {
         int32_t irradiance_probe_side;
         int32_t visibility_probe_side;
         uint32_t rays_per_probe;
-        uint32_t radiance_tex_idx; // +1 for irradiance_tex, +2 for visibility_tex, +3 for probe offsets
-        VkDeviceAddress debug_probe_offsets_buffer;
     };
 
     struct IndirectDrawCommandBufferHeader {
@@ -571,6 +587,7 @@ class RendererVulkan : public Renderer {
     void upload_model_textures();
     void upload_staged_models();
     void upload_instances();
+    void upload_transforms();
 
     void update_transform(HandleInstancedModel model, glm::mat4x3 transform);
 
@@ -623,6 +640,8 @@ class RendererVulkan : public Renderer {
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
     std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> used_pool_buffers;
 
+    SamplerStorage samplers;
+
     BoundingBox scene_bounding_box;
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
@@ -630,8 +649,8 @@ class RendererVulkan : public Renderer {
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer per_mesh_instance_transform_buffer;
-    Buffer per_mesh_instance_mesh_data_ids;
+    Buffer* per_mesh_instance_transform_buffer[2];
+    Buffer mesh_instance_mesh_id_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
@@ -641,15 +660,15 @@ class RendererVulkan : public Renderer {
 
     Buffer sbt;
 
-    Buffer per_triangle_mesh_id_buffer;
-    Buffer per_tlas_triangle_offsets_buffer;
+    Buffer tlas_mesh_offsets_buffer;
+    Buffer tlas_transform_buffer;
+    Buffer blas_mesh_offsets_buffer;
+    Buffer triangle_mesh_ids_buffer;
     Buffer mesh_datas_buffer;
-    Buffer per_tlas_transform_buffer;
-    Buffer combined_rt_buffers_buffer;
 
     DDGI_Settings ddgi;
     Image rt_image;
-    Buffer common_values_buffer;
+    Buffer global_buffer;
     Buffer ddgi_buffer;
     Buffer ddgi_debug_probe_offsets_buffer;
 
@@ -668,10 +687,18 @@ class RendererVulkan : public Renderer {
         uint64_t image_index;
         std::vector<std::byte> rgba_data;
     };
+    struct UpdateDescriptor {
+        VkDescriptorSet set;
+        std::variant<std::tuple<VkImageView, VkImageLayout, VkSampler>, VkAccelerationStructureKHR> payload;
+        uint32_t binding;
+        uint32_t element;
+    };
 
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
+    std::vector<std::pair<Handle<RenderModelInstance>, glm::mat4x3>> upload_positions;
+    std::vector<UpdateDescriptor> update_descriptors;
 
     uint32_t num_frame{ 0 };
 

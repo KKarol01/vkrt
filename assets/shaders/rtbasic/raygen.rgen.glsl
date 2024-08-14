@@ -9,10 +9,11 @@
 #define RAYTRACING
 #define SHADER_TYPE_RAYGEN
 
-#include "common.inc"
+#include "../global_common.inc.glsl"
+#include "common.inc.glsl"
 #include "ray_payload.inc"
-#include "descriptor_layout.inc"
-#include "push_constants.inc"
+#include "../global_layout.inc.glsl"
+#include "push_constants.inc.glsl"
 #include "probes.inc.glsl"
 #include "light.inc"
 
@@ -63,7 +64,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 			probe_to_biased_point_dir *= 1.0 / dist_to_biased_point;
 
 			vec2 uv = get_probe_uv(probe_to_biased_point_dir, probe_idx, ddgi.visibility_tex_size.x, ddgi.visibility_tex_size.y, int(ddgi.vis_res));
-			vec2 visibility = textureLod(textures[ddgi.radiance_tex_idx + 2], uv, 0).rg;
+			vec2 visibility = textureLod(ddgi_visibility_texture, uv, 0).rg;
 			float mean_dist = visibility.x;
 			float chebyshev = 1.0;
 
@@ -88,7 +89,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 #if 0
 		vec3 probe_irr = colors[probe_idx].xyz;
 #else
-		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_idx, ddgi.irradiance_tex_size.x, ddgi.irradiance_tex_size.y, ddgi.irr_res), 0).rgb;
+		vec3 probe_irr = textureLod(ddgi_irradiance_texture, get_probe_uv(normal, probe_idx, ddgi.irradiance_tex_size.x, ddgi.irradiance_tex_size.y, ddgi.irr_res), 0).rgb;
 		//probe_irr = vec3(get_probe_uv(normal, probe_coord), 0.0);
 #endif
 		irr += weight * probe_irr;
@@ -104,31 +105,38 @@ void main() {
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
 
-    vec4 origin = cam.viewInverse * vec4(0.0, 0.0, 0.0, 1);
-    vec4 target = cam.projInverse * vec4(vec3(vec4(d.x, -d.y, 1, 1).xyz), 1.0);
-    vec4 direction = cam.viewInverse * vec4(normalize(target.xyz), 0);
+    vec4 origin = globals.viewInverse * vec4(0.0, 0.0, 0.0, 1);
+    vec4 target = globals.projInverse * vec4(vec3(vec4(d.x, -d.y, 1, 1).xyz), 1.0);
+    vec4 direction = globals.viewInverse * vec4(normalize(target.xyz), 0);
 
-	const float t = float(ddgi.frame_num + 21500) * 0.0001;
-	direction.xyz = mat3(
+	//direction = vec4(globals.randomRotation * direction.xyz, 0.0);
+
+#if 1
+	//const float t = float(ddgi.frame_num + 21500) * 0.0001;
+
+	/*direction.xyz = mat3(
 		vec3(cos(t), 0.0, -sin(t)),
 		vec3(0.0, 1.0, 0.0),
 		vec3(sin(t), 0.0, cos(t))
-	) * direction.xyz;
+	) * direction.xyz;*/
+#endif
 
     float tmin = 0.00001;
-    float tmax = 5.0;
+    float tmax = 15.0;
 
     payload.radiance = vec3(0.0);
     payload.distance = 0.0;
 
     const uint cull_mask = 0xFE;
     const uint sbtOffset = 3;
-    const uint sbtStride = 1;
+    const uint sbtStride = 0;
     const uint missIndex = 1;
 
-    if(mode == 0) {
+    if(mode == MODE_OUTPUT) {
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask | 1, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
-
+		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.radiance, 1.0)); 
+		return;
+#if 1
 		if(payload.distance < 0.0 || payload.distance > tmax) {
 			imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(0.0), 1.0)); 		
 			return;
@@ -142,11 +150,12 @@ void main() {
 		final_color += irradiance * payload.albedo;
 #endif
 
-		final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * payload.shadow, final_color, clamp(sin(t*6.0*PI) * 2.0, 0.0, 1.0));
+		//final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * payload.shadow, final_color, clamp(sin(t*6.0*PI) * 2.0, 0.0, 1.0));
 		final_color = pow(final_color, vec3(1.0 / 2.2));
 
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(final_color, 1.0)); 
-	} else if (mode == 1) {
+#endif
+	} else if (mode == MODE_RADIANCE) {
         const ivec2 pixel_coord = ivec2(gl_LaunchIDEXT.xy); 
         const int probe_idx = pixel_coord.y;
         const int ray_idx = pixel_coord.x;
@@ -157,7 +166,7 @@ void main() {
         vec3 ray_origin = grid_indices_to_world(probe_grid_indices, probe_idx);
 
 #if RANDOM_ROTATION
-        vec3 ray_dir = normalize(cam.randomRotation * spherical_fibonacci(float(ray_idx), float(ddgi.rays_per_probe)));
+        vec3 ray_dir = normalize(globals.randomRotation * spherical_fibonacci(float(ray_idx), float(ddgi.rays_per_probe)));
 #else
         vec3 ray_dir = spherical_fibonacci(float(ray_idx), float(ddgi.rays_per_probe));
 #endif

@@ -8,11 +8,12 @@
 
 #define RAYTRACING
 
+#include "common.inc.glsl"
+#include "../global_common.inc.glsl"
 #include "ray_payload.inc"
-#include "push_constants.inc"
-#include "descriptor_layout.inc"
+#include "push_constants.inc.glsl"
+#include "../global_layout.inc.glsl"
 #include "light.inc"
-#include "common.inc"
 #include "probes.inc.glsl"
 
 layout(location = 1) rayPayloadEXT struct RayPayloadShadow {
@@ -55,7 +56,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 			probe_to_biased_point_dir *= 1.0 / dist_to_biased_point;
 
 			vec2 uv = get_probe_uv(probe_to_biased_point_dir, probe_idx, ddgi.visibility_tex_size.x, ddgi.visibility_tex_size.y, int(ddgi.vis_res));
-			vec2 visibility = textureLod(textures[ddgi.radiance_tex_idx + 2], uv, 0).rg;
+			vec2 visibility = textureLod(ddgi_visibility_texture, uv, 0).rg;
 			float mean_dist = visibility.x;
 			float chebyshev = 1.0;
 
@@ -80,7 +81,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 #if 0
 		vec3 probe_irr = colors[probe_idx].xyz;
 #else
-		vec3 probe_irr = textureLod(textures[ddgi.radiance_tex_idx + 1], get_probe_uv(normal, probe_idx, ddgi.irradiance_tex_size.x, ddgi.irradiance_tex_size.y, ddgi.irr_res), 0).rgb;
+		vec3 probe_irr = textureLod(ddgi_irradiance_texture, get_probe_uv(normal, probe_idx, ddgi.irradiance_tex_size.x, ddgi.irradiance_tex_size.y, ddgi.irr_res), 0).rgb;
 		//probe_irr = vec3(get_probe_uv(normal, probe_coord), 0.0);
 #endif
 		irr += weight * probe_irr;
@@ -97,7 +98,7 @@ float calc_shadow(vec3 o, vec3 n) {
 
     const uint cull_mask = 0xFE;
     const uint sbtOffset = 3;
-    const uint sbtStride = 1;
+    const uint sbtStride = 0;
     const uint missIndex = 1;
 
 	float shadow = 0.0;
@@ -122,16 +123,16 @@ void main()
     return;
   }
 
-  uint32_t triangle_offset = combined_rt_buffs.offsets.offsets[gl_InstanceID];
-  uint32_t mesh_id = combined_rt_buffs.mesh_ids.ids[triangle_offset + gl_PrimitiveID];
-  MeshData mesh_data = combined_rt_buffs.meshes.mesh_datas[mesh_id];
+  const uint32_t triangle_offset = blas_mesh_offsets.at[tlas_mesh_offsets.at[gl_InstanceID] + gl_GeometryIndexEXT];
+  const uint32_t mesh_id = triangle_mesh_ids.at[triangle_offset + gl_PrimitiveID];
+  const MeshData mesh_data = mesh_datas.at[mesh_id];
 
-  const uint32_t i0 = index_buffer.indices[(triangle_offset + gl_PrimitiveID)*3 + 0];
-  const uint32_t i1 = index_buffer.indices[(triangle_offset + gl_PrimitiveID)*3 + 1];
-  const uint32_t i2 = index_buffer.indices[(triangle_offset + gl_PrimitiveID)*3 + 2];
-  const Vertex v0 = vertex_buffer.vertices[i0];
-  const Vertex v1 = vertex_buffer.vertices[i1];
-  const Vertex v2 = vertex_buffer.vertices[i2];
+  const uint32_t i0 = index_buffer.at[(triangle_offset + gl_PrimitiveID)*3 + 0];
+  const uint32_t i1 = index_buffer.at[(triangle_offset + gl_PrimitiveID)*3 + 1];
+  const uint32_t i2 = index_buffer.at[(triangle_offset + gl_PrimitiveID)*3 + 2];
+  const Vertex v0 = vertex_buffer.at[i0];
+  const Vertex v1 = vertex_buffer.at[i1];
+  const Vertex v2 = vertex_buffer.at[i2];
 
   const float b = barycentric_weights.x;
   const float c = barycentric_weights.y;
@@ -140,19 +141,18 @@ void main()
   const vec3 pos = v0.pos * a + v1.pos * b + v2.pos * c;
   const vec2 uvs = v0.uv * a + v1.uv * b + v2.uv * c;
   const vec3 nor = v0.nor * a + v1.nor * b + v2.nor * c;
+
   const vec3 color_value = texture(textures[nonuniformEXT(mesh_data.color_texture)], uvs).rgb;
   const float shadow = calc_shadow(pos, nor);
-
-  payload.radiance = color_value * calc_direct_lighting(pos, nor) * shadow;
+  payload.radiance = color_value * calc_direct_lighting(pos, nor) * vec3(shadow);
 
 #if GLOBAL_ILLUMINATION && TEMPORAL_ACCUMULATION
-	 payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
+	payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
 #endif
 
   payload.albedo = color_value;
   payload.normal = nor;
   payload.distance = gl_RayTminEXT + gl_HitTEXT;
-  payload.normal = nor;
   payload.shadow = shadow;
 }
 
