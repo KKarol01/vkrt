@@ -1,8 +1,8 @@
 const int num_lights = 1;
 const vec3 lights[] = {
-	vec3(0.0, 0.0,  1.0),
-	vec3(0.0, 0.3, -0.3),
-	vec3(0.0, 0.3,  1.3)
+	vec3(0.0, 0.8,  0.0),
+	vec3(0.0, 0.8, -0.5),
+	vec3(0.0, 0.8,  0.5)
 };
 
 vec3 calc_direct_lighting(vec3 p, vec3 n) {

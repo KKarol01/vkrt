@@ -127,9 +127,9 @@ void main()
   const uint32_t mesh_id = triangle_mesh_ids.at[triangle_offset + gl_PrimitiveID];
   const MeshData mesh_data = mesh_datas.at[mesh_id];
 
-  const uint32_t i0 = index_buffer.at[(triangle_offset + gl_PrimitiveID)*3 + 0];
-  const uint32_t i1 = index_buffer.at[(triangle_offset + gl_PrimitiveID)*3 + 1];
-  const uint32_t i2 = index_buffer.at[(triangle_offset + gl_PrimitiveID)*3 + 2];
+  const uint32_t i0 = index_buffer.at[mesh_data.index_offset + gl_PrimitiveID * 3 + 0] + mesh_data.vertex_offset;
+  const uint32_t i1 = index_buffer.at[mesh_data.index_offset + gl_PrimitiveID * 3 + 1] + mesh_data.vertex_offset;
+  const uint32_t i2 = index_buffer.at[mesh_data.index_offset + gl_PrimitiveID * 3 + 2] + mesh_data.vertex_offset;
   const Vertex v0 = vertex_buffer.at[i0];
   const Vertex v1 = vertex_buffer.at[i1];
   const Vertex v2 = vertex_buffer.at[i2];

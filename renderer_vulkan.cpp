@@ -458,8 +458,8 @@ void RendererVulkan::render() {
         flags ^= RendererFlags::DIRTY_DESCRIPTORS;
     }
 
-    const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0) / static_cast<float>(Engine::window()->size[0]) * 1.0f;
-    const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0) / static_cast<float>(Engine::window()->size[1]) * 1.0f;
+    const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0) /*/ static_cast<float>(Engine::window()->size[0])*/ * 1.0f;
+    const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0) /*/ static_cast<float>(Engine::window()->size[1])*/ * 1.0f;
     const glm::mat3 rand_mat =
         glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
@@ -496,12 +496,6 @@ void RendererVulkan::render() {
 
         vks::StridedDeviceAddressRegionKHR callable_sbt;
 
-        // TODO: MOVE THIS
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
-        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
-
         const auto* window = Engine::window();
         uint32_t mode = 0;
         // clang-format off
@@ -515,11 +509,20 @@ void RendererVulkan::render() {
         vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_mesh_ids_buffer.bda);
         // clang-format on
 
-        ImageStatefulBarrier radiance_image_barrier{ ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
-        ImageStatefulBarrier irradiance_image_barrier{ ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-        ImageStatefulBarrier visibility_image_barrier{ ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-        ImageStatefulBarrier offset_image_barrier{ ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-        
+        ImageStatefulBarrier radiance_image_barrier{ ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                     VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
+        ImageStatefulBarrier irradiance_image_barrier{ ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+        ImageStatefulBarrier visibility_image_barrier{ ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+        ImageStatefulBarrier offset_image_barrier{ ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                          pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
+        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
+
         // radiance pass
         mode = 1;
         vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
@@ -1197,8 +1200,8 @@ void RendererVulkan::upload_instances() {
             const RenderMaterial& material = materials.at(model.first_material + mesh.material);
 
             render_mesh_data.push_back(GPURenderMeshData{
-                /*.index_offset = mesh.index_offset + model.first_index,
-                .index_count = mesh.index_count,*/
+                .vertex_offset = model.first_vertex + mesh.vertex_offset,
+                .index_offset = model.first_index + mesh.index_offset,
                 .color_texture_idx = model.first_texture + material.color_texture.value_or(0u),
             });
 

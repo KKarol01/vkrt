@@ -139,10 +139,9 @@ struct RecordingSubmitInfo {
 };
 
 struct GPURenderMeshData {
-    // uint32_t vertex_offset;
-    /*uint32_t index_offset;
-    uint32_t index_count;*/
-    uint32_t color_texture_idx{ 0 };
+    uint32_t vertex_offset{};
+    uint32_t index_offset{};
+    uint32_t color_texture_idx{};
 };
 
 enum class ShaderModuleType {
