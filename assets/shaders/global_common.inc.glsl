@@ -5,6 +5,8 @@ struct Vertex {
 };
 
 struct MeshData {
+    uint32_t vertex_offset;
+    uint32_t index_offset;
     uint32_t color_texture;
 };
 

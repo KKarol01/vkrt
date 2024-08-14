@@ -132,11 +132,9 @@ void main() {
     const uint sbtStride = 0;
     const uint missIndex = 1;
 
-    if(mode == MODE_OUTPUT) {
+    if(mode == 0) {
 		traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, cull_mask | 1, sbtOffset, sbtStride, missIndex, origin.xyz, tmin, direction.xyz, tmax, 0);
-		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.radiance, 1.0)); 
-		return;
-#if 1
+
 		if(payload.distance < 0.0 || payload.distance > tmax) {
 			imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(0.0), 1.0)); 		
 			return;
@@ -150,12 +148,10 @@ void main() {
 		final_color += irradiance * payload.albedo;
 #endif
 
-		//final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * payload.shadow, final_color, clamp(sin(t*6.0*PI) * 2.0, 0.0, 1.0));
-		final_color = pow(final_color, vec3(1.0 / 2.2));
+		//final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo, final_color, 1.0);
 
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(final_color, 1.0)); 
-#endif
-	} else if (mode == MODE_RADIANCE) {
+	} else if (mode == 1) {
         const ivec2 pixel_coord = ivec2(gl_LaunchIDEXT.xy); 
         const int probe_idx = pixel_coord.y;
         const int ray_idx = pixel_coord.x;
