@@ -1,4 +1,4 @@
-const int num_lights = 1;
+const int num_lights = 3;
 const vec3 lights[] = {
 	vec3(0.0, 0.8,  0.0),
 	vec3(0.0, 0.8, -0.5),
