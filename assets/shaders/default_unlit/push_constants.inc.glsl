@@ -3,4 +3,5 @@ layout(scalar, push_constant) uniform Constants {
     MeshDataBuffer mesh_datas;
     PerMeshInstanceMeshIdBuffer mesh_ids;
     PerMeshInstanceTransformBuffer transforms;
+    DDGIBuffer ddgi;
 };

@@ -206,6 +206,7 @@ void RendererVulkan::initialize_vulkan() {
                         .add_required_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
+                        .add_required_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
                         //.add_required_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
                         .select();
     if(!phys_ret) { throw std::runtime_error{ "Failed to select Vulkan Physical Device. Error: " }; }
@@ -253,12 +254,17 @@ void RendererVulkan::initialize_vulkan() {
     vks::PhysicalDeviceMaintenance5FeaturesKHR maint5_features;
     maint5_features.maintenance5 = true;
 
+    VkPhysicalDeviceRayQueryFeaturesKHR rayq_features{};
+    rayq_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    rayq_features.rayQuery =  true;
+
     auto dev_ret = device_builder.add_pNext(&dev_2_features)
                        .add_pNext(&dyn_features)
                        .add_pNext(&synch2_features)
                        .add_pNext(&dev_vk12_features)
                        .add_pNext(&acc_features)
                        .add_pNext(&rtpp_features)
+                       .add_pNext(&rayq_features)
                        //.add_pNext(&maint5_features)
                        .build();
     if(!dev_ret) { throw std::runtime_error{ "Failed to create Vulkan device. Error: " }; }
@@ -557,33 +563,78 @@ void RendererVulkan::render() {
         vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
                       std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
 
-        irradiance_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_READ_BIT);
-        visibility_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_READ_BIT);
-        offset_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_READ_BIT);
+        irradiance_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        visibility_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        offset_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
-        sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                      VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VkRenderingAttachmentInfo r_col_att_1{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = swapchain_images.at(sw_img_idx).view,
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+        };
+        VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
 
-        ImageStatefulBarrier raytrace_img_barrier{ rt_image };
-        raytrace_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_GENERAL,
-                                            VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT);
+        VkRenderingAttachmentInfo r_dep_att{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = depth_buffers[sw_img_idx].view,
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = { .depthStencil = { 1.0f, 0 } },
+        };
 
-        mode = 0;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
+        VkRenderingInfo rendering_info{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = r_col_atts,
+            .pDepthAttachment = &r_dep_att,
+        };
 
-        raytrace_img_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[sw_img_idx] };
 
-        vks::ImageCopy img_copy;
-        img_copy.srcOffset = {};
-        img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        img_copy.dstOffset = {};
-        img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        img_copy.extent = { window->size[0], window->size[1], 1 };
-        vkCmdCopyImage(raytrace_cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, swapchain_images.at(sw_img_idx).image,
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &img_copy);
+        VkDeviceSize vb_offsets[]{ 0 };
+        vkCmdBindVertexBuffers(raytrace_cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
+        vkCmdBindIndexBuffer(raytrace_cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
+        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          pipelines.at(RendererPipelineType::DEFAULT_UNLIT).pipeline);
+        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &default_set, 0, nullptr);
+
+        sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        depth_buffer_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+
+        vkCmdBeginRendering(raytrace_cmd, &rendering_info);
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->size[0], Engine::window()->size[1] } };
+        VkViewport r_view_1{ .x = 0.0f,
+                             .y = static_cast<float>(Engine::window()->size[1]),
+                             .width = static_cast<float>(Engine::window()->size[0]),
+                             .height = -static_cast<float>(Engine::window()->size[1]),
+                             .minDepth = 0.0f,
+                             .maxDepth = 1.0f };
+        vkCmdSetScissorWithCount(raytrace_cmd, 1, &r_sciss_1);
+        vkCmdSetViewportWithCount(raytrace_cmd, 1, &r_view_1);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                           0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                           1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                           2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_mesh_id_buffer.bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                           3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffer[0]->bda);
+        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                           4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+        vkCmdDrawIndexedIndirectCount(raytrace_cmd, indirect_draw_buffer.buffer,
+                                      sizeof(IndirectDrawCommandBufferHeader), indirect_draw_buffer.buffer, 0ull,
+                                      mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
+        vkCmdEndRendering(raytrace_cmd);
         sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                       VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
 
@@ -598,216 +649,6 @@ void RendererVulkan::render() {
         pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
         vkQueuePresentKHR(gq, &pinfo);
         vkQueueWaitIdle(gq);
-
-        return;
-#if 0
-        vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
-        rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
-        rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-        rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-        rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-        rt_to_comp_img_barrier.subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-        };
-
-        vks::DependencyInfo rt_to_comp_dep_info;
-        rt_to_comp_dep_info.imageMemoryBarrierCount = 1;
-        rt_to_comp_dep_info.pImageMemoryBarriers = &rt_to_comp_img_barrier;
-
-        vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
-
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
-        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
-
-        // irradiance pass, only need radiance texture
-        mode = 0;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
-        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
-                      std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
-
-        // visibility pass, only need radiance texture
-        mode = 1;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
-        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
-                      std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
-
-        // probe offset pass, only need radiance texture to complete
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          pipelines.at(RendererPipelineType::DDGI_PROBE_OFFSET).pipeline);
-        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
-                      std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
-
-        rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
-        rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT;
-        rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-        rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-        rt_to_comp_img_barrier.subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-        };
-
-        vks::ImageMemoryBarrier2 ddgi_visibility_comp_to_rt_barrier = rt_to_comp_img_barrier;
-        ddgi_visibility_comp_to_rt_barrier.image = ddgi.visibility_texture.image;
-
-        vks::ImageMemoryBarrier2 ddgi_probe_offsets_comp_to_rt_barrier = rt_to_comp_img_barrier;
-        ddgi_probe_offsets_comp_to_rt_barrier.image = ddgi.probe_offsets_texture.image;
-
-        vks::ImageMemoryBarrier2 ddgi_barriers[]{ rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier,
-                                                  ddgi_probe_offsets_comp_to_rt_barrier };
-        rt_to_comp_dep_info.imageMemoryBarrierCount = sizeof(ddgi_barriers) / sizeof(ddgi_barriers[0]);
-        rt_to_comp_dep_info.pImageMemoryBarriers = ddgi_barriers;
-        vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
-        rt_to_comp_dep_info.imageMemoryBarrierCount =
-            1; // just to be safe and i'm too lazy to check if i'm reusing this variable anywhere later
-
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
-        mode = 0;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, push_constant_mode_offset, sizeof(uint32_t), &mode);
-        vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
-
-#endif
-
-        // end_recording(raytrace_cmd);
-        submit_recording(gq, raytrace_cmd);
-
-#if 0
-        auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-        vks::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
-        sw_to_dst.image = swapchain_images.at(sw_img_idx).image;
-        sw_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        sw_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        sw_to_dst.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        sw_to_dst.srcAccessMask = VK_ACCESS_NONE;
-        sw_to_dst.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        sw_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        sw_to_dst.subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-        };
-        sw_to_pres = sw_to_dst;
-        sw_to_pres.oldLayout = sw_to_dst.newLayout;
-        sw_to_pres.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        sw_to_pres.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        sw_to_pres.dstAccessMask = VK_ACCESS_NONE;
-
-        vks::DependencyInfo sw_dep_info;
-        sw_dep_info.imageMemoryBarrierCount = 1;
-        sw_dep_info.pImageMemoryBarriers = &sw_to_dst;
-        vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
-
-        vks::ImageCopy img_copy;
-        img_copy.srcOffset = {};
-        img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        img_copy.dstOffset = {};
-        img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        img_copy.extent = { window->size[0], window->size[1], 1 };
-        vkCmdCopyImage(present_cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, sw_to_dst.image, sw_to_dst.newLayout, 1, &img_copy);
-
-        sw_dep_info.pImageMemoryBarriers = &sw_to_pres;
-        vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
-        end_recording(present_cmd);
-
-        submit_recordings(
-            gq, { RecordingSubmitInfo{ .buffers = { raytrace_cmd },
-                                       .signals = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR } } },
-                  RecordingSubmitInfo{ .buffers = { present_cmd },
-                                       .waits = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_TRANSFER_BIT },
-                                                  { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TRANSFER_BIT } },
-                                       .signals = { { primitives.sem_copy_to_sw_img_done, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } } } });
-#endif
-    }
-
-    VkRenderingAttachmentInfo r_col_att_1{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = swapchain_images.at(sw_img_idx).view,
-        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-    };
-    VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
-
-    VkRenderingAttachmentInfo r_dep_att{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = depth_buffers[sw_img_idx].view,
-        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = { .depthStencil = { 1.0f, 0 } },
-    };
-
-    VkRenderingInfo rendering_info{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = r_col_atts,
-        .pDepthAttachment = &r_dep_att,
-    };
-
-    ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[sw_img_idx] };
-
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    VkDeviceSize vb_offsets[]{ 0 };
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
-    vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &default_set, 0, nullptr);
-
-    sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-
-    vkCmdBeginRendering(cmd, &rendering_info);
-    VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->size[0], Engine::window()->size[1] } };
-    VkViewport r_view_1{ .x = 0.0f,
-                         .y = static_cast<float>(Engine::window()->size[1]),
-                         .width = static_cast<float>(Engine::window()->size[0]),
-                         .height = -static_cast<float>(Engine::window()->size[1]),
-                         .minDepth = 0.0f,
-                         .maxDepth = 1.0f };
-    vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-    vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
-    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
-    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_mesh_id_buffer.bda);
-    vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                       3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &per_mesh_instance_transform_buffer[0]->bda);
-    vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
-                                  indirect_draw_buffer.buffer, 0ull, mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
-    vkCmdEndRendering(cmd);
-    sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
-
-    submit_recording(gq, cmd, { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
-                     { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } }, nullptr);
-
-    vks::PresentInfoKHR pinfo;
-    pinfo.swapchainCount = 1;
-    pinfo.pSwapchains = &swapchain;
-    pinfo.pImageIndices = &sw_img_idx;
-    pinfo.waitSemaphoreCount = 1;
-    pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
-    vkQueuePresentKHR(gq, &pinfo);
-    vkQueueWaitIdle(gq);
 
 #if 0
     static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = num_frame;
@@ -1001,7 +842,8 @@ void RendererVulkan::render() {
     vkQueueWaitIdle(gq);
 #endif
 
-    ++num_frame;
+        ++num_frame;
+    }
 }
 
 HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
@@ -1180,18 +1022,20 @@ void RendererVulkan::upload_instances() {
     std::vector<uint32_t> tlas_mesh_offsets;
     std::vector<uint32_t> blas_mesh_offsets;
     std::vector<uint32_t> triangle_mesh_ids;
+    std::vector<uint32_t> mesh_instance_mesh_ids;
     std::vector<GPURenderMeshData> render_mesh_data;
     std::vector<VkDrawIndexedIndirectCommand> draw_commands;
     IndirectDrawCommandBufferHeader draw_header;
     std::vector<glm::mat4x3> tlas_transforms;
-    std::vector<glm::mat4x3> per_mesh_instance_transforms;
+    std::vector<glm::mat4x3> mesh_instance_transforms;
     tlas_mesh_offsets.reserve(model_instances.size());
     blas_mesh_offsets.reserve(mesh_instances.size());
     triangle_mesh_ids.reserve(total_triangles);
+    mesh_instance_mesh_ids.reserve(mesh_instances.size());
     render_mesh_data.reserve(meshes.size());
     draw_commands.reserve(mesh_instances.size());
 
-    per_mesh_instance_transforms.reserve(mesh_instances.size());
+    mesh_instance_transforms.reserve(mesh_instances.size());
     tlas_transforms.reserve(model_instances.size());
 
     for(const RenderModel& model : models) {
@@ -1228,7 +1072,8 @@ void RendererVulkan::upload_instances() {
         cmd->instanceCount = 1;
         cmd->vertexOffset =
             models.get(model_instances.get(mi->model_instance).model).first_vertex + meshes.at(*mi->mesh).vertex_offset;
-        per_mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
+        mesh_instance_mesh_ids.push_back(*mi->mesh);
+        mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
         for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
             const RenderMeshInstance& cmi = mesh_instances.at(i);
 
@@ -1246,7 +1091,8 @@ void RendererVulkan::upload_instances() {
                 ++cmd->instanceCount;
             }
 
-            per_mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
+            mesh_instance_mesh_ids.push_back(*mi->mesh);
+            mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
         }
 
         draw_header.draw_count = draw_commands.size();
@@ -1258,13 +1104,13 @@ void RendererVulkan::upload_instances() {
     indirect_draw_buffer.push_data(&draw_header, sizeof(IndirectDrawCommandBufferHeader));
     indirect_draw_buffer.push_data(draw_commands);
 
-    per_mesh_instance_transform_buffer[0] = new Buffer{"per mesh instance transforms 1", per_mesh_instance_transforms.size() * sizeof(per_mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    per_mesh_instance_transform_buffer[1] = new Buffer{"per mesh instance transforms 0", per_mesh_instance_transforms.size() * sizeof(per_mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    per_mesh_instance_transform_buffer[0]->push_data(per_mesh_instance_transforms);
-    per_mesh_instance_transform_buffer[1]->push_data(per_mesh_instance_transforms);
+    mesh_instance_transform_buffer[0] = new Buffer{"mesh instance transforms 1", mesh_instance_transforms.size() * sizeof(mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_instance_transform_buffer[1] = new Buffer{"mesh instance transforms 0", mesh_instance_transforms.size() * sizeof(mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_instance_transform_buffer[0]->push_data(mesh_instance_transforms);
+    mesh_instance_transform_buffer[1]->push_data(mesh_instance_transforms);
 
-    mesh_instance_mesh_id_buffer = Buffer{"mesh instance mesh id", blas_mesh_offsets.size() * sizeof(blas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    mesh_instance_mesh_id_buffer.push_data(blas_mesh_offsets);
+    mesh_instance_mesh_id_buffer = Buffer{"mesh instance mesh id", mesh_instance_mesh_ids.size() * sizeof(mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_instance_mesh_id_buffer.push_data(mesh_instance_mesh_ids);
 
     tlas_mesh_offsets_buffer = Buffer{"tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
     tlas_mesh_offsets_buffer.push_data(tlas_mesh_offsets);
@@ -1290,8 +1136,8 @@ void RendererVulkan::upload_transforms() {
     std::transform(mesh_instances.begin(), mesh_instances.end(), std::back_inserter(transforms),
                    [this](const RenderMeshInstance& inst) { return model_instances.get(inst.model_instance).transform; });
 
-    per_mesh_instance_transform_buffer[1]->push_data(transforms, 0);
-    std::swap(per_mesh_instance_transform_buffer[0], per_mesh_instance_transform_buffer[1]);
+    mesh_instance_transform_buffer[1]->push_data(transforms, 0);
+    std::swap(mesh_instance_transform_buffer[0], mesh_instance_transform_buffer[1]);
 }
 
 void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 transform) {

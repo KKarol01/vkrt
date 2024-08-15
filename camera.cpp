@@ -27,9 +27,9 @@ void Camera::update() {
     glm::vec3 up = glm::vec3{ 0.0f, 1.0f, 0.0f };
 
     if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { pos += forward * dt; }
-    if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { pos += right * dt; }
+    if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { pos -= right * dt; }
     if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) { pos -= forward * dt; }
-    if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { pos -= right * dt; }
+    if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { pos += right * dt; }
     if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) { pos -= up * dt; }
     if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) { pos += up * dt; }
 

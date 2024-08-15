@@ -11,6 +11,8 @@ layout(location = 2) in vec2 uv;
 
 layout(location = 0) out VertexOutput {
     flat uint mesh_id;
+    vec3 pos;
+    vec3 nor;
     vec2 uv;
 } vert;
 
@@ -18,11 +20,13 @@ layout(location = 0) out VertexOutput {
 #include "push_constants.inc.glsl"
 
 void main() {
-    uint mesh_id = mesh_ids.at[gl_InstanceIndex];
-    vec3 tpos = transforms.at[gl_InstanceIndex] * vec4(pos, 1.0);
-
-    vert.mesh_id = mesh_id;
-    vert.uv = uv;
+   uint mesh_id = mesh_ids.at[gl_InstanceIndex];
+   vec3 tpos = transforms.at[gl_InstanceIndex] * vec4(pos, 1.0);
+   
+   vert.mesh_id = mesh_id;
+   vert.pos = tpos;
+   vert.nor = nor;
+   vert.uv = uv;
 
 	gl_Position = globals.proj * globals.view * vec4(tpos, 1.0);
 }
