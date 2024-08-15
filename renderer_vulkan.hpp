@@ -648,7 +648,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer* per_mesh_instance_transform_buffer[2];
+    Buffer* mesh_instance_transform_buffer[2];
     Buffer mesh_instance_mesh_id_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
