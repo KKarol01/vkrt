@@ -417,14 +417,13 @@ void RendererVulkan::initialize_imgui() {
 
     VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_UNORM };
 
-    // TODO: don't index layouts with 1
     ImGui_ImplVulkan_InitInfo init_info = { 
         .Instance = instance,
         .PhysicalDevice = pdev,
         .Device = dev,
         .QueueFamily = gqi,
         .Queue = gq,
-        .DescriptorPool = descriptor_allocator.get_latest_pool(layouts.at(1).descriptor_layouts.at(0)),
+        .DescriptorPool = imgui_desc_pool,
         .MinImageCount = (uint32_t)swapchain_images.size(),
         .ImageCount = (uint32_t)swapchain_images.size(),
         .UseDynamicRendering = true,
@@ -515,10 +514,25 @@ void RendererVulkan::render() {
         upload_transforms();
         flags ^= RendererFlags::UPDATE_MESH_POSITIONS;
     }
-    if(flags & RendererFlags::DIRTY_DESCRIPTORS) {
-        update_descriptor_sets();
-        flags ^= RendererFlags::DIRTY_DESCRIPTORS;
+
+    VkDescriptorSet frame_desc_set =
+        descriptor_pool_allocator.allocate_set(per_frame_desc_pool, layouts.at(0).descriptor_layouts.at(0), textures.size());
+
+    VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
+    DescriptorSetWriter per_frame_set_writer;
+    per_frame_set_writer.write(0, 0, tlas)
+        .write(1, 0, rt_image.view, {}, VK_IMAGE_LAYOUT_GENERAL)
+        .write(2, 0, ddgi.radiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .write(3, 0, ddgi.irradiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .write(4, 0, ddgi.visibility_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .write(5, 0, ddgi.probe_offsets_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
+        .write(6, 0, ddgi.irradiance_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
+        .write(7, 0, ddgi.visibility_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL);
+    for(uint32_t i = 0; i < textures.size(); ++i) {
+        per_frame_set_writer.write(15, i, textures.at(i).view, linear_sampler, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     }
+    per_frame_set_writer.update(frame_desc_set, layouts.at(0), 0);
 
     const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0);
     const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0);
@@ -583,7 +597,7 @@ void RendererVulkan::render() {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
+                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &frame_desc_set, 0, nullptr);
 
         // radiance pass
         mode = 1;
@@ -596,7 +610,7 @@ void RendererVulkan::render() {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
+                                pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &frame_desc_set, 0, nullptr);
 
         // irradiance pass, only need radiance texture
         mode = 0;
@@ -657,7 +671,7 @@ void RendererVulkan::render() {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &default_set, 0, nullptr);
+                                pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &frame_desc_set, 0, nullptr);
 
         sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                       VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
@@ -756,6 +770,7 @@ void RendererVulkan::render() {
         vkQueueWaitIdle(gq);
         vkDestroyImageView(dev, i_sw_view, nullptr);
 
+        descriptor_pool_allocator.reset_pool(per_frame_desc_pool);
         ++num_frame;
     }
 }
@@ -809,12 +824,6 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
         textures.push_back(Image{ tex.name, tex.size.first, tex.size.second, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
                                   VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         upload_images.push_back(UploadImage{ .image_index = textures.size() - 1u, .rgba_data = tex.rgba_data });
-        flags |= RendererFlags::DIRTY_DESCRIPTORS;
-        update_descriptors.push_back(UpdateDescriptor{
-            .set = default_set,
-            .payload = std::tuple{ textures.back().view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, default_linear_sampler },
-            .binding = 15,
-            .element = static_cast<uint32_t>(textures.size()) - 1u });
     }
 
     upload_vertices.resize(upload_vertices.size() + model.vertices.size());
@@ -1146,25 +1155,23 @@ void RendererVulkan::compile_shaders() {
 }
 
 void RendererVulkan::build_pipelines() {
-    RendererPipelineLayout default_layout =
-        RendererPipelineLayoutBuilder{}
-            .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-            .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .add_variable_descriptor_count(0)
-            .set_push_constants(128)
-            .build(VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-                       VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-                   VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+
+    RendererPipelineLayout default_layout = RendererPipelineLayoutBuilder{}
+                                                .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                                                .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                                .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                                .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                                .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                                .add_variable_descriptor_count(0)
+                                                .set_push_constants(128)
+                                                .build();
     RendererPipelineLayout imgui_layout =
         RendererPipelineLayoutBuilder{}
-            .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)
+            .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {}, VK_SHADER_STAGE_FRAGMENT_BIT)
             .set_push_constants(16, VK_SHADER_STAGE_VERTEX_BIT)
             .build();
 
@@ -1220,10 +1227,8 @@ void RendererVulkan::build_pipelines() {
     layouts.push_back(default_layout);
     layouts.push_back(imgui_layout);
 
-    descriptor_allocator.create_pool(default_layout, 0, 2, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
-    default_set = descriptor_allocator.allocate(default_layout, 0, 1024);
-
-    descriptor_allocator.create_pool(imgui_layout, 0, 8);
+    per_frame_desc_pool = descriptor_pool_allocator.allocate_pool(default_layout, 0, 2);
+    imgui_desc_pool = descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 1);
 
     for(int i = 0; i < 2; ++i) {
         depth_buffers[i] = Image{
@@ -1245,26 +1250,6 @@ void RendererVulkan::build_sbt() {
     const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     sbt = Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, true };
     sbt.push_data(shaderHandleStorage);
-}
-
-void RendererVulkan::update_descriptor_sets() {
-    std::unordered_map<VkDescriptorSet, DescriptorSetWriter> writers;
-    writers.reserve(update_descriptors.size());
-    for(const UpdateDescriptor& ud : update_descriptors) {
-        std::visit(Visitor{
-                       [&writers, &ud](const std::tuple<VkImageView, VkImageLayout, VkSampler>& p) {
-                           const auto& [image, layout, sampler] = p;
-                           writers[ud.set].write(ud.binding, ud.element, image, sampler, layout);
-                       },
-                       [&writers, &ud](const VkAccelerationStructureKHR& acc) {
-                           writers[ud.set].write(ud.binding, ud.element, acc);
-                       },
-                   },
-                   ud.payload);
-    }
-    for(auto& w : writers) {
-        w.second.update(w.first);
-    }
 }
 
 void RendererVulkan::create_rt_output_image() {
@@ -1458,9 +1443,6 @@ void RendererVulkan::build_tlas() {
     submit_recording(gq, cmd);
     vkDeviceWaitIdle(dev);
 
-    update_descriptors.push_back(UpdateDescriptor{ .set = default_set, .payload = tlas, .binding = 0, .element = 0 });
-
-    flags |= RendererFlags::DIRTY_DESCRIPTORS;
     tlas_buffer = std::move(buffer_tlas);
 }
 
@@ -1621,52 +1603,6 @@ void RendererVulkan::prepare_ddgi() {
 #endif
 
     if(ddgi.probe_counts.y == 1) { ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f; }
-
-    VkSampler sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ rt_image.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
-        .binding = 1,
-        .element = 0,
-    });
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ ddgi.radiance_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
-        .binding = 2,
-        .element = 0,
-    });
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ ddgi.irradiance_texture.view, VK_IMAGE_LAYOUT_GENERAL, sampler },
-        .binding = 3,
-        .element = 0,
-    });
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ ddgi.visibility_texture.view, VK_IMAGE_LAYOUT_GENERAL, sampler },
-        .binding = 4,
-        .element = 0,
-    });
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ ddgi.probe_offsets_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
-        .binding = 5,
-        .element = 0,
-    });
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ ddgi.irradiance_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
-        .binding = 6,
-        .element = 0,
-    });
-    update_descriptors.push_back(UpdateDescriptor{
-        .set = default_set,
-        .payload = std::tuple{ ddgi.visibility_texture.view, VK_IMAGE_LAYOUT_GENERAL, VkSampler{} },
-        .binding = 7,
-        .element = 0,
-    });
-    flags |= RendererFlags::DIRTY_DESCRIPTORS;
 
     vkQueueWaitIdle(gq);
 }
@@ -1888,41 +1824,37 @@ void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
     VK_CHECK(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view));
 }
 
-RendererPipelineLayout RendererPipelineLayoutBuilder::build(VkDescriptorBindingFlags binding_flags,
-                                                            VkDescriptorSetLayoutCreateFlags layout_flags) {
+RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
     uint32_t num_desc_layouts = 0;
     std::array<VkDescriptorSetLayout, 4> set_layouts;
     std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
-    std::bitset<4> variable_sized{};
-    for(auto& set_layout : descriptor_layouts) {
+    std::vector<std::vector<VkDescriptorBindingFlags>> binding_flags;
+    for(uint32_t i = 0; i < descriptor_layouts.size(); ++i) {
+        DescriptorLayout& set_layout = descriptor_layouts.at(i);
+
         if(set_layout.bindings.empty()) { break; }
         ++num_desc_layouts;
 
-        std::vector<VkDescriptorBindingFlags> flags;
-        flags.reserve(set_layout.bindings.size());
-        for(const auto& b : set_layout.bindings) {
-            flags.push_back(binding_flags);
-        }
-        if(set_layout.last_binding_variable_count) {
-            flags.back() |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-            variable_sized.set(num_desc_layouts - 1);
+        if(set_layout.last_binding_of_variable_count) {
+            set_layout.binding_flags.back() |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
         }
 
         vks::DescriptorSetLayoutBindingFlagsCreateInfo flags_info;
-        flags_info.bindingCount = flags.size();
-        flags_info.pBindingFlags = flags.data();
+        flags_info.bindingCount = set_layout.binding_flags.size();
+        flags_info.pBindingFlags = set_layout.binding_flags.data();
 
         vks::DescriptorSetLayoutCreateInfo info;
         info.bindingCount = set_layout.bindings.size();
         info.pBindings = set_layout.bindings.data();
-        info.flags = layout_flags;
+        info.flags = descriptor_layout_flags.at(i);
         info.pNext = &flags_info;
 
         VK_CHECK(vkCreateDescriptorSetLayout(renderer->dev, &info, nullptr, &set_layout.layout));
         set_layouts.at(num_desc_layouts - 1) = set_layout.layout;
         bindings.push_back(set_layout.bindings);
+        binding_flags.push_back(set_layout.binding_flags);
     }
 
     vks::PipelineLayoutCreateInfo layout_info;
@@ -1940,7 +1872,11 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build(VkDescriptorBindingF
     VkPipelineLayout layout;
     VK_CHECK(vkCreatePipelineLayout(renderer->dev, &layout_info, nullptr, &layout));
 
-    return RendererPipelineLayout{ layout, { set_layouts.begin(), set_layouts.end() }, bindings, variable_sized };
+    return RendererPipelineLayout{ layout,
+                                   { set_layouts.begin(), set_layouts.end() },
+                                   { descriptor_layout_flags.begin(), descriptor_layout_flags.end() },
+                                   bindings,
+                                   binding_flags };
 }
 
 VkPipeline RendererComputePipelineBuilder::build() {
@@ -2058,87 +1994,6 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     return pipeline;
 }
 
-VkDescriptorSet DescriptorSetAllocator::allocate(const RendererPipelineLayout& layout, uint32_t set, uint32_t variable_count) {
-    if(!layout_pools.contains(layout.descriptor_layouts.at(set))) {
-        ENG_WARN("Pool for this layout {} was not created", reinterpret_cast<uintptr_t>(layout.descriptor_layouts.at(set)));
-        return nullptr;
-    }
-
-    VkDescriptorPool free_pool = try_find_free_pool(layout.descriptor_layouts.at(set));
-    if(!free_pool) {
-        create_pool(layout, set, pool_alloc_infos.at(layout_pools.at(layout.descriptor_layouts.at(set)).back()).max_sets);
-        free_pool = try_find_free_pool(layout.descriptor_layouts.at(set));
-
-        if(!free_pool) {
-            assert(false && "Internal allocator error");
-            return nullptr;
-        }
-    }
-
-    uint32_t variable_counts[]{ variable_count };
-    vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_alloc;
-    variable_alloc.descriptorSetCount = 1;
-    variable_alloc.pDescriptorCounts = variable_counts;
-
-    vks::DescriptorSetAllocateInfo info;
-    info.descriptorPool = free_pool;
-    info.descriptorSetCount = 1;
-    info.pSetLayouts = &layout.descriptor_layouts.at(set);
-    if(variable_count > 0) { info.pNext = &variable_alloc; }
-
-    VkDescriptorSet descriptor;
-    VK_CHECK(vkAllocateDescriptorSets(static_cast<RendererVulkan*>(Engine::renderer())->dev, &info, &descriptor));
-
-    ++pool_alloc_infos.at(free_pool).num_allocs;
-    auto layout_it = std::find_if(set_layouts.begin(), set_layouts.end(),
-                                  [&layout](const RendererPipelineLayout& l) { return layout.layout == l.layout; });
-    if(layout_it == set_layouts.end()) {
-        set_layouts.push_back(layout);
-        layout_it = set_layouts.begin() + (set_layouts.size() - 1);
-    }
-    set_layout_idx[descriptor] = DescriptorSetAllocation{
-        .set_idx = set,
-        .layout_idx = static_cast<uint32_t>(std::distance(set_layouts.begin(), layout_it)),
-    };
-
-    return descriptor;
-}
-
-void DescriptorSetAllocator::create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
-                                         VkDescriptorPoolCreateFlags pool_flags) {
-    std::unordered_map<VkDescriptorType, uint32_t> total_counts;
-    for(uint32_t i = 0; i < layout.bindings.at(set).size(); ++i) {
-        const auto& b = layout.bindings.at(set).at(i);
-        total_counts[b.descriptorType] += (i == layout.bindings.at(set).size() - 1 && layout.variable_sized.test(set))
-                                              ? b.descriptorCount
-                                              : b.descriptorCount * max_sets;
-    }
-
-    std::vector<VkDescriptorPoolSize> sizes;
-    sizes.reserve(total_counts.size());
-    for(const auto& [type, count] : total_counts) {
-        sizes.emplace_back(type, count);
-    }
-
-    vks::DescriptorPoolCreateInfo info;
-    info.flags = pool_flags;
-    info.poolSizeCount = sizes.size();
-    info.pPoolSizes = sizes.data();
-    info.maxSets = max_sets;
-
-    VkDescriptorPool pool;
-    VK_CHECK(vkCreateDescriptorPool(static_cast<RendererVulkan*>(Engine::renderer())->dev, &info, nullptr, &pool));
-
-    layout_pools[layout.descriptor_layouts.at(set)].push_back(pool);
-    pool_alloc_infos[pool] = AllocationInfo{ .max_sets = max_sets, .num_allocs = 0 };
-}
-
-const RendererPipelineLayout& DescriptorSetAllocator::get_layout(VkDescriptorSet set) {
-    return set_layouts.at(set_layout_idx.at(set).layout_idx);
-}
-
-const uint32_t DescriptorSetAllocator::get_set_idx(VkDescriptorSet set) { return set_layout_idx.at(set).set_idx; }
-
 DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array_element, const Image& image, VkImageLayout layout) {
     writes.emplace_back(binding, array_element, WriteImage{ image.view, layout, VkSampler{} });
     return *this;
@@ -2167,11 +2022,9 @@ DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array
     return *this;
 }
 
-bool DescriptorSetWriter::update(VkDescriptorSet set) {
+bool DescriptorSetWriter::update(VkDescriptorSet set, const RendererPipelineLayout& layout, uint32_t set_idx) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
-    const uint32_t set_idx = renderer->descriptor_allocator.get_set_idx(set);
-    const RendererPipelineLayout& layout = renderer->descriptor_allocator.get_layout(set);
     const std::vector<VkDescriptorSetLayoutBinding>& set_bindings = layout.bindings.at(set_idx);
 
     std::vector<std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, vks::WriteDescriptorSetAccelerationStructureKHR>> write_infos;
@@ -2260,4 +2113,63 @@ VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
 
     samplers.emplace_back(info, sampler);
     return sampler;
+}
+
+VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RendererPipelineLayout& layout, uint32_t set,
+                                                        uint32_t max_sets, VkDescriptorPoolCreateFlags flags) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+
+    const std::vector<VkDescriptorSetLayoutBinding>& bindings = layout.bindings.at(set);
+    const std::vector<VkDescriptorBindingFlags>& binding_flags = layout.binding_flags.at(set);
+
+    std::vector<VkDescriptorPoolSize> sizes;
+    sizes.reserve(bindings.size());
+
+    const auto find_size_of_type = [&sizes](VkDescriptorType type) -> VkDescriptorPoolSize& {
+        for(auto& s : sizes) {
+            if(s.type == type) { return s; }
+        }
+        return sizes.emplace_back(VkDescriptorPoolSize{ .type = type, .descriptorCount = 0u });
+    };
+
+    for(uint32_t i = 0; i < bindings.size(); ++i) {
+        if(binding_flags.at(i) & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+            find_size_of_type(bindings.at(i).descriptorType).descriptorCount += bindings.at(i).descriptorCount;
+        } else {
+            find_size_of_type(bindings.at(i).descriptorType).descriptorCount += bindings.at(i).descriptorCount * max_sets;
+        }
+    }
+
+    vks::DescriptorPoolCreateInfo info;
+    info.maxSets = max_sets;
+    info.flags = flags;
+    info.poolSizeCount = sizes.size();
+    info.pPoolSizes = sizes.data();
+    VkDescriptorPool& pool = pools.emplace_back();
+    VK_CHECK(vkCreateDescriptorPool(renderer->dev, &info, nullptr, &pool));
+    return pool;
+}
+
+VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+
+    vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_info;
+    variable_info.descriptorSetCount = 1;
+    variable_info.pDescriptorCounts = &variable_count;
+
+    vks::DescriptorSetAllocateInfo info;
+    info.descriptorPool = pool;
+    info.descriptorSetCount = 1;
+    info.pSetLayouts = &layout;
+    if(variable_count > 0) { info.pNext = &variable_info; }
+
+    VkDescriptorSet set;
+    VK_CHECK(vkAllocateDescriptorSets(renderer->dev, &info, &set));
+
+    return set;
+}
+
+void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
+    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+    VK_CHECK(vkResetDescriptorPool(renderer->dev, pool, {}));
 }
