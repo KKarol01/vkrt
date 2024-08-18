@@ -11,9 +11,12 @@
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
 
 #define ENG_LOG(fmt, ...) std::println("[LOG][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
+
+#define ENG_ASSERT(expr, fmt, ...) if(!(expr)) { std::println("[ASSERT][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__); assert(false); }
 #else
 #define ENG_WARN(fmt, ...)
 #define ENG_LOG(fmt, ...)
+#define ENG_ASSERT(expr, fmt, ...)
 #endif
 
 struct GLFWwindow;
@@ -38,7 +41,6 @@ struct FrameTime {
 
 class Engine {
   public:
-    constexpr Engine() = default;
     static void init();
     static void destroy();
     static void start();

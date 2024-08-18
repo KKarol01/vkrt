@@ -178,18 +178,18 @@ struct RendererPipelineWrapper {
 struct RendererPipelineLayout {
     VkPipelineLayout layout{};
     std::vector<VkDescriptorSetLayout> descriptor_layouts;
+    std::vector<VkDescriptorSetLayoutCreateFlags> layout_flags;
     std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
-    std::bitset<4> variable_sized{};
+    std::vector<std::vector<VkDescriptorBindingFlags>> binding_flags;
 };
 
 class RendererPipelineLayoutBuilder {
   public:
-    RendererPipelineLayoutBuilder& add_set_binding(uint32_t set, uint32_t binding, uint32_t count, VkDescriptorType type,
+    RendererPipelineLayoutBuilder& add_set_binding(uint32_t set, uint32_t binding, uint32_t count,
+                                                   VkDescriptorType type, VkDescriptorBindingFlags binding_flags = {},
                                                    VkShaderStageFlags stages = VK_SHADER_STAGE_ALL) {
-        if(descriptor_layouts.size() <= set) {
-            ENG_WARN("Trying to access out of bounds descriptor set layout with idx: {}", set);
-            return *this;
-        }
+
+        ENG_ASSERT(set < descriptor_layouts.size(), "Trying to access out of bounds descriptor set layout with idx: {}", set);
 
         if(set > 0 && descriptor_layouts.at(set - 1).bindings.empty()) {
             ENG_WARN("Settings descriptor set layout with idx {} while the previous descriptor set layout ({}) has "
@@ -198,6 +198,7 @@ class RendererPipelineLayoutBuilder {
         }
 
         descriptor_layouts.at(set).bindings.emplace_back(binding, type, count, stages, nullptr);
+        descriptor_layouts.at(set).binding_flags.emplace_back(binding_flags);
         return *this;
     }
 
@@ -207,7 +208,7 @@ class RendererPipelineLayoutBuilder {
             return *this;
         }
 
-        descriptor_layouts.at(set).last_binding_variable_count = true;
+        descriptor_layouts.at(set).last_binding_of_variable_count = true;
         return *this;
     }
 
@@ -217,7 +218,12 @@ class RendererPipelineLayoutBuilder {
         return *this;
     }
 
-    RendererPipelineLayout build(VkDescriptorBindingFlags binding_flags = {}, VkDescriptorSetLayoutCreateFlags layout_flags = {});
+    RendererPipelineLayoutBuilder& set_layout_flags(uint32_t set, VkDescriptorSetLayoutCreateFlags layout_flags) {
+        ENG_ASSERT(set < descriptor_layouts.size(), "Trying to access out of bounds descriptor set layout with idx: {}", set);
+        descriptor_layout_flags.at(set) = layout_flags;
+    }
+
+    RendererPipelineLayout build();
 
   private:
     uint32_t push_constants_size{ 0 };
@@ -225,10 +231,12 @@ class RendererPipelineLayoutBuilder {
 
     struct DescriptorLayout {
         VkDescriptorSetLayout layout{};
-        bool last_binding_variable_count{ 0 };
+        bool last_binding_of_variable_count{ 0 };
         std::vector<VkDescriptorSetLayoutBinding> bindings;
+        std::vector<VkDescriptorBindingFlags> binding_flags;
     };
-    std::array<DescriptorLayout, 4> descriptor_layouts;
+    std::array<DescriptorLayout, 4> descriptor_layouts{};
+    std::array<VkDescriptorSetLayoutCreateFlags, 4> descriptor_layout_flags{};
 };
 
 class RendererComputePipelineBuilder {
@@ -414,35 +422,14 @@ class RendererGraphicsPipelineBuilder {
     uint32_t viewport_count{}, scissor_count{};
 };
 
-class DescriptorSetAllocator {
-    struct AllocationInfo {
-        uint32_t max_sets{}, num_allocs{};
-    };
-    struct DescriptorSetAllocation {
-        uint32_t set_idx{};
-        uint32_t layout_idx{};
-    };
-
+class DescriptorPoolAllocator {
   public:
-    VkDescriptorSet allocate(const RendererPipelineLayout& layout, uint32_t set, uint32_t variable_count = 0);
-    void create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
-                     VkDescriptorPoolCreateFlags pool_flags = {});
-    const RendererPipelineLayout& get_layout(VkDescriptorSet set);
-    const uint32_t get_set_idx(VkDescriptorSet set);
-    VkDescriptorPool get_latest_pool(VkDescriptorSetLayout layout) { return layout_pools.at(layout).back(); }
+    VkDescriptorPool allocate_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets, VkDescriptorPoolCreateFlags flags = {});
+    VkDescriptorSet allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count = 0);
+    void reset_pool(VkDescriptorPool pool);
 
   private:
-    VkDescriptorPool try_find_free_pool(VkDescriptorSetLayout layout) {
-        for(const auto& [pool, alloc] : pool_alloc_infos) {
-            if(alloc.max_sets > alloc.num_allocs) { return pool; }
-        }
-        return nullptr;
-    }
-
-    std::unordered_map<VkDescriptorSetLayout, std::vector<VkDescriptorPool>> layout_pools;
-    std::unordered_map<VkDescriptorPool, AllocationInfo> pool_alloc_infos;
-    std::unordered_map<VkDescriptorSet, DescriptorSetAllocation> set_layout_idx;
-    std::vector<RendererPipelineLayout> set_layouts;
+    std::vector<VkDescriptorPool> pools;
 };
 
 class DescriptorSetWriter {
@@ -468,7 +455,7 @@ class DescriptorSetWriter {
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, VkImageView image, VkSampler sampler, VkImageLayout layout);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Buffer& buffer, uint32_t offset, uint32_t range);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const VkAccelerationStructureKHR ac);
-    bool update(VkDescriptorSet set);
+    bool update(VkDescriptorSet set, const RendererPipelineLayout& layout, uint32_t set_idx);
 
   private:
     std::vector<WriteData> writes;
@@ -613,7 +600,6 @@ class RendererVulkan : public Renderer {
     void compile_shaders();
     void build_pipelines();
     void build_sbt();
-    void update_descriptor_sets();
     void create_rt_output_image();
     void build_blas();
     void build_tlas();
@@ -668,14 +654,15 @@ class RendererVulkan : public Renderer {
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer* mesh_instance_transform_buffer[2];
+    Buffer* mesh_instance_transform_buffer[2]; // memory leak
     Buffer mesh_instance_mesh_id_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
     std::vector<RendererPipelineLayout> layouts;
-    DescriptorSetAllocator descriptor_allocator;
-    VkDescriptorSet default_set;
+    DescriptorPoolAllocator descriptor_pool_allocator;
+    VkDescriptorPool per_frame_desc_pool;
+    VkDescriptorPool imgui_desc_pool;
 
     Buffer sbt;
 
@@ -706,18 +693,11 @@ class RendererVulkan : public Renderer {
         uint64_t image_index;
         std::vector<std::byte> rgba_data;
     };
-    struct UpdateDescriptor {
-        VkDescriptorSet set;
-        std::variant<std::tuple<VkImageView, VkImageLayout, VkSampler>, VkAccelerationStructureKHR> payload;
-        uint32_t binding;
-        uint32_t element;
-    };
 
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
     std::vector<std::pair<Handle<RenderModelInstance>, glm::mat4x3>> upload_positions;
-    std::vector<UpdateDescriptor> update_descriptors;
 
     uint32_t num_frame{ 0 };
 
