@@ -184,7 +184,8 @@ struct RendererPipelineLayout {
 
 class RendererPipelineLayoutBuilder {
   public:
-    RendererPipelineLayoutBuilder& add_set_binding(uint32_t set, uint32_t binding, uint32_t count, VkDescriptorType type) {
+    RendererPipelineLayoutBuilder& add_set_binding(uint32_t set, uint32_t binding, uint32_t count, VkDescriptorType type,
+                                                   VkShaderStageFlags stages = VK_SHADER_STAGE_ALL) {
         if(descriptor_layouts.size() <= set) {
             ENG_WARN("Trying to access out of bounds descriptor set layout with idx: {}", set);
             return *this;
@@ -196,7 +197,7 @@ class RendererPipelineLayoutBuilder {
                      set, set - 1);
         }
 
-        descriptor_layouts.at(set).bindings.emplace_back(binding, type, count, VK_SHADER_STAGE_ALL, nullptr);
+        descriptor_layouts.at(set).bindings.emplace_back(binding, type, count, stages, nullptr);
         return *this;
     }
 
@@ -210,15 +211,18 @@ class RendererPipelineLayoutBuilder {
         return *this;
     }
 
-    RendererPipelineLayoutBuilder& set_push_constants(uint32_t size) {
+    RendererPipelineLayoutBuilder& set_push_constants(uint32_t size, VkShaderStageFlags stages = VK_SHADER_STAGE_ALL) {
         push_constants_size = size;
+        push_constants_stage = stages;
         return *this;
     }
 
-    RendererPipelineLayout build();
+    RendererPipelineLayout build(VkDescriptorBindingFlags binding_flags = {}, VkDescriptorSetLayoutCreateFlags layout_flags = {});
 
   private:
     uint32_t push_constants_size{ 0 };
+    VkShaderStageFlags push_constants_stage{};
+
     struct DescriptorLayout {
         VkDescriptorSetLayout layout{};
         bool last_binding_variable_count{ 0 };
@@ -372,6 +376,16 @@ class RendererGraphicsPipelineBuilder {
         return *this;
     }
 
+    RendererGraphicsPipelineBuilder& set_viewport_count(uint32_t count) {
+        viewport_count = count;
+        return *this;
+    }
+
+    RendererGraphicsPipelineBuilder& set_scissor_count(uint32_t count) {
+        scissor_count = count;
+        return *this;
+    }
+
     VkPipeline build();
 
   private:
@@ -396,6 +410,8 @@ class RendererGraphicsPipelineBuilder {
     std::vector<VkFormat> color_attachment_formats;
     VkFormat depth_attachment_format{ VK_FORMAT_UNDEFINED };
     VkFormat stencil_attachment_format{ VK_FORMAT_UNDEFINED };
+
+    uint32_t viewport_count{}, scissor_count{};
 };
 
 class DescriptorSetAllocator {
@@ -409,9 +425,11 @@ class DescriptorSetAllocator {
 
   public:
     VkDescriptorSet allocate(const RendererPipelineLayout& layout, uint32_t set, uint32_t variable_count = 0);
-    void create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets);
+    void create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
+                     VkDescriptorPoolCreateFlags pool_flags = {});
     const RendererPipelineLayout& get_layout(VkDescriptorSet set);
     const uint32_t get_set_idx(VkDescriptorSet set);
+    VkDescriptorPool get_latest_pool(VkDescriptorSetLayout layout) { return layout_pools.at(layout).back(); }
 
   private:
     VkDescriptorPool try_find_free_pool(VkDescriptorSetLayout layout) {
@@ -474,6 +492,7 @@ class ImageStatefulBarrier {
                                    VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
         : image{ &img }, current_range{ aspect, base_mip, mips, base_layer, layers }, current_layout{ start_layout },
           current_stage{ start_stage }, current_access{ start_access } {}
+
     constexpr ImageStatefulBarrier(Image& img, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
                                    VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
                                    VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
@@ -578,6 +597,7 @@ class RendererVulkan : public Renderer {
 
     void initialize_vulkan();
     void create_swapchain();
+    void initialize_imgui();
 
     void render() final;
 
@@ -704,7 +724,7 @@ class RendererVulkan : public Renderer {
     struct RenderingPrimitives {
         VkSemaphore sem_swapchain_image;
         VkSemaphore sem_rendering_finished;
-        VkSemaphore sem_tracing_done;
+        VkSemaphore sem_gui_start;
         VkSemaphore sem_copy_to_sw_img_done;
     } primitives;
 };

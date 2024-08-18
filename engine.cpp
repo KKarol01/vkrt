@@ -4,6 +4,8 @@
 #include "renderer_vulkan.hpp"
 #include "camera.hpp"
 
+static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::camera()->on_mouse_move(px, py); }
+
 Window::Window(uint32_t width, uint32_t height) {
     if(!Engine::window()) {
         if(glfwInit() != GLFW_TRUE) {
@@ -33,32 +35,34 @@ void Engine::init() {
     _this->_window = std::make_unique<Window>(1280, 768);
     _this->_camera = std::make_unique<Camera>(glm::radians(90.0f), 0.01f, 100.0f);
     _this->_renderer = std::make_unique<RendererVulkan>();
-    _this->_renderer->init();
 
     _this->_last_frame_time = get_time_secs();
 
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { _this->_refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
+
+    glfwSetCursorPosCallback(_this->_window->window, on_mouse_move);
+
+    _this->_renderer->init(); // has to be lower for imgui callbacks to work
 }
 
 void Engine::destroy() { _this.reset(); }
 
 void Engine::start() {
     while(!Engine::window()->should_close()) {
-        if(get_time_secs() - last_frame_time() >= _this->_refresh_rate) {
-            update();
-        }
+        if(get_time_secs() - last_frame_time() >= _this->_refresh_rate) { update(); }
         glfwPollEvents();
     }
 }
 
 void Engine::update() {
-    _this->_delta_time = get_time_secs() - _this->_last_frame_time;
-    _this->_last_frame_time = get_time_secs();
+    const float now = get_time_secs();
     _this->_on_update_callback();
     _this->_camera->update();
     _this->_renderer->render();
     ++_this->_frame_num;
+    _this->_last_frame_time = now;
+    _this->_delta_time = get_time_secs() - _this->_last_frame_time;
 }
 
 void Engine::set_on_update_callback(const std::function<void()>& on_update_callback) {

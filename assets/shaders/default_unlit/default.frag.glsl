@@ -123,7 +123,7 @@ void main() {
 	vec3 irr = sample_irradiance(vert.pos, vert.nor, cam_pos);
 	vec3 col1 = texture(textures[nonuniformEXT(md.color_texture)], vert.uv).rgb;
 
-	float shadow = calc_shadow();
+	float shadow = 1.0; //calc_shadow();
 
 	vec3 final_color = (calc_direct_lighting(vert.pos, vert.nor) * shadow + irr) * col1;
 
