@@ -6,7 +6,15 @@
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
     : projection{ glm::perspectiveFov(fov_radians, static_cast<float>(Engine::window()->size[0]),
-                                      static_cast<float>(Engine::window()->size[1]), min_dist, max_dist) } {}
+                                      static_cast<float>(Engine::window()->size[1]), min_dist, max_dist) } {
+    GLFWwindow* window = Engine::window()->window;
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    double pos[2];
+    glfwGetCursorPos(window, &pos[0], &pos[1]);
+    lpx = pos[0];
+    lpy = pos[1];
+}
 
 void Camera::update() {
     GLFWwindow* window = Engine::window()->window;
@@ -15,6 +23,11 @@ void Camera::update() {
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && glfwGetTime() - last_press_time > 0.3f) {
         last_press_time = glfwGetTime();
         enabled = !enabled;
+        if(!enabled) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        } else {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
     }
 
     if(!enabled) { return; }
@@ -24,7 +37,7 @@ void Camera::update() {
 
     glm::vec3 forward = glm::normalize(rot * glm::vec3{ 0.0f, 0.0f, -1.0f });
     glm::vec3 right = glm::normalize(rot * glm::vec3{ 1.0f, 0.0f, 0.0f });
-    glm::vec3 up = glm::vec3{ 0.0f, 1.0f, 0.0f };
+    glm::vec3 up = glm::cross(right, forward);
 
     if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { pos += forward * dt; }
     if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { pos -= right * dt; }
@@ -39,9 +52,9 @@ void Camera::update() {
 void Camera::on_mouse_move(float px, float py) {
     const float dt = Engine::delta_time();
 
-    pitch += (py - lpy) * dt;
-    yaw += (lpx - px) * dt;
-    pitch = glm::clamp(pitch, -89.0f, 89.0f);
+    pitch += glm::radians((lpy - py) * dt) * 20.0f;
+    yaw += glm::radians((lpx - px) * dt) * 20.0f;
+    pitch = glm::clamp(pitch, -glm::half_pi<float>(), glm::half_pi<float>());
     lpx = px;
     lpy = py;
 }

@@ -11,6 +11,9 @@
 #define STB_INCLUDE_IMPLEMENTATION
 #define STB_INCLUDE_LINE_GLSL
 #include <stb/stb_include.h>
+#include <imgui/imgui.h>
+#include <imgui/backends/imgui_impl_glfw.h>
+#include <imgui/backends/imgui_impl_vulkan.h>
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
@@ -174,6 +177,7 @@ void RendererVulkan::init() {
     compile_shaders();
     build_pipelines();
     build_sbt();
+    initialize_imgui();
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -207,6 +211,8 @@ void RendererVulkan::initialize_vulkan() {
                         .add_required_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
+                        .add_required_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)        // for imgui
+                        .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME) // for imgui
                         //.add_required_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
                         .select();
     if(!phys_ret) { throw std::runtime_error{ "Failed to select Vulkan Physical Device. Error: " }; }
@@ -256,7 +262,7 @@ void RendererVulkan::initialize_vulkan() {
 
     VkPhysicalDeviceRayQueryFeaturesKHR rayq_features{};
     rayq_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    rayq_features.rayQuery =  true;
+    rayq_features.rayQuery = true;
 
     auto dev_ret = device_builder.add_pNext(&dev_2_features)
                        .add_pNext(&dyn_features)
@@ -356,7 +362,7 @@ void RendererVulkan::initialize_vulkan() {
     vks::SemaphoreCreateInfo sem_swapchain_info;
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
-    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_tracing_done));
+    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
 }
 
@@ -364,6 +370,7 @@ void RendererVulkan::create_swapchain() {
     vks::SwapchainCreateInfoKHR sinfo;
     sinfo.surface = window_surface;
     sinfo.minImageCount = 2;
+    sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
     sinfo.imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
     sinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     sinfo.imageExtent = VkExtent2D{ Engine::window()->size[0], Engine::window()->size[1] };
@@ -373,6 +380,18 @@ void RendererVulkan::create_swapchain() {
     sinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     sinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     sinfo.clipped = true;
+
+    VkFormat view_formats[]{
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_FORMAT_R8G8B8A8_UNORM,
+    };
+
+    VkImageFormatListCreateInfo format_list_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
+        .viewFormatCount = 2,
+        .pViewFormats = view_formats,
+    };
+    sinfo.pNext = &format_list_info;
 
     VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
     uint32_t num_images;
@@ -387,6 +406,43 @@ void RendererVulkan::create_swapchain() {
                                           VK_SAMPLE_COUNT_1_BIT, sinfo.imageUsage });
     }
     swapchain_format = sinfo.imageFormat;
+}
+
+void RendererVulkan::initialize_imgui() {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplGlfw_InitForVulkan(Engine::window()->window, true);
+
+    VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_UNORM };
+
+    // TODO: don't index layouts with 1
+    ImGui_ImplVulkan_InitInfo init_info = { 
+        .Instance = instance,
+        .PhysicalDevice = pdev,
+        .Device = dev,
+        .QueueFamily = gqi,
+        .Queue = gq,
+        .DescriptorPool = descriptor_allocator.get_latest_pool(layouts.at(1).descriptor_layouts.at(0)),
+        .MinImageCount = (uint32_t)swapchain_images.size(),
+        .ImageCount = (uint32_t)swapchain_images.size(),
+        .UseDynamicRendering = true,
+        .PipelineRenderingCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = color_formats,
+        },
+    };
+    ImGui_ImplVulkan_Init(&init_info);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->AddFontDefault();
+
+    auto cmdimgui = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    ImGui_ImplVulkan_CreateFontsTexture();
+    submit_recording(gq, cmdimgui);
+    vkQueueWaitIdle(gq);
 }
 
 // aligns a to the nearest multiple any power of two
@@ -481,7 +537,7 @@ void RendererVulkan::render() {
     {
         static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = Engine::frame_num();
 
-        auto raytrace_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+        auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
@@ -505,14 +561,14 @@ void RendererVulkan::render() {
         const auto* window = Engine::window();
         uint32_t mode = 0;
         // clang-format off
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_mesh_ids_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_mesh_ids_buffer.bda);
         // clang-format on
 
         ImageStatefulBarrier radiance_image_barrier{ ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
@@ -524,48 +580,46 @@ void RendererVulkan::render() {
         ImageStatefulBarrier offset_image_barrier{ ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
                                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
 
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
-        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                                 pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
 
         // radiance pass
         mode = 1;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
+                           8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdTraceRaysKHR(cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
                           ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
-        radiance_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        radiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
-        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                 pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
 
         // irradiance pass, only need radiance texture
         mode = 0;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
+                           8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdDispatch(cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
                       std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
         // visibility pass, only need radiance texture
         mode = 1;
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout,
-                           VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
+                           8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdDispatch(cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
                       std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
 
         // probe offset pass, only need radiance texture to complete
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          pipelines.at(RendererPipelineType::DDGI_PROBE_OFFSET).pipeline);
-        vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RendererPipelineType::DDGI_PROBE_OFFSET).pipeline);
+        vkCmdDispatch(cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
                       std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
 
-        irradiance_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        visibility_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        offset_image_barrier.insert_barrier(raytrace_cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        irradiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        visibility_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+        offset_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
         VkRenderingAttachmentInfo r_col_att_1{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -598,20 +652,19 @@ void RendererVulkan::render() {
         ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[sw_img_idx] };
 
         VkDeviceSize vb_offsets[]{ 0 };
-        vkCmdBindVertexBuffers(raytrace_cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
-        vkCmdBindIndexBuffer(raytrace_cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
+        vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipelines.at(RendererPipelineType::DEFAULT_UNLIT).pipeline);
-        vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &default_set, 0, nullptr);
 
-        sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-        depth_buffer_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+        sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
-        vkCmdBeginRendering(raytrace_cmd, &rendering_info);
+        vkCmdBeginRendering(cmd, &rendering_info);
         VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->size[0], Engine::window()->size[1] } };
         VkViewport r_view_1{ .x = 0.0f,
                              .y = static_cast<float>(Engine::window()->size[1]),
@@ -619,27 +672,79 @@ void RendererVulkan::render() {
                              .height = -static_cast<float>(Engine::window()->size[1]),
                              .minDepth = 0.0f,
                              .maxDepth = 1.0f };
-        vkCmdSetScissorWithCount(raytrace_cmd, 1, &r_sciss_1);
-        vkCmdSetViewportWithCount(raytrace_cmd, 1, &r_view_1);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+        vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
+        vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_datas_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_mesh_id_buffer.bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffer[0]->bda);
-        vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
-        vkCmdDrawIndexedIndirectCount(raytrace_cmd, indirect_draw_buffer.buffer,
-                                      sizeof(IndirectDrawCommandBufferHeader), indirect_draw_buffer.buffer, 0ull,
-                                      mesh_instances.size(), sizeof(VkDrawIndexedIndirectCommand));
-        vkCmdEndRendering(raytrace_cmd);
-        sw_img_barrier.insert_barrier(raytrace_cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                      VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
+        vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
+                                      indirect_draw_buffer.buffer, 0ull, mesh_instances.size(),
+                                      sizeof(VkDrawIndexedIndirectCommand));
+        vkCmdEndRendering(cmd);
 
-        submit_recording(gq, raytrace_cmd, { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
-                         { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } }, nullptr);
+        vks::ImageViewCreateInfo i_sw_img_view;
+        i_sw_img_view.format = VK_FORMAT_R8G8B8A8_UNORM;
+        i_sw_img_view.image = swapchain_images.at(sw_img_idx).image;
+        i_sw_img_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        i_sw_img_view.subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        };
+        VkImageView i_sw_view{};
+        VK_CHECK(vkCreateImageView(dev, &i_sw_img_view, nullptr, &i_sw_view));
+
+        VkRenderingAttachmentInfo i_col_atts[]{
+            VkRenderingAttachmentInfo{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = i_sw_view,
+                .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+            },
+        };
+        VkRenderingInfo imgui_rendering_info{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = i_col_atts,
+        };
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        ImGui::Begin("a");
+        ImGui::Text("asdf");
+        ImGui::End();
+        ImGui::Render();
+        ImDrawData* im_draw_data = ImGui::GetDrawData();
+
+        vkCmdBeginRendering(cmd, &imgui_rendering_info);
+        vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
+        vkCmdSetViewport(cmd, 0, 1, &r_view_1);
+        ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
+        vkCmdEndRendering(cmd);
+
+        sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
+
+        vkEndCommandBuffer(cmd);
+
+        submit_recordings(gq, {
+                                  RecordingSubmitInfo{
+                                      .buffers = { cmd },
+                                      .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
+                                      .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
+                                  },
+                              });
 
         vks::PresentInfoKHR pinfo;
         pinfo.swapchainCount = 1;
@@ -649,198 +754,7 @@ void RendererVulkan::render() {
         pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
         vkQueuePresentKHR(gq, &pinfo);
         vkQueueWaitIdle(gq);
-
-#if 0
-    static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = num_frame;
-
-    vks::AcquireNextImageInfoKHR acq_info;
-    uint32_t sw_img_idx;
-    vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
-
-    auto raytrace_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                      pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
-    vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
-
-    const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
-
-    vks::StridedDeviceAddressRegionKHR raygen_sbt;
-    raygen_sbt.deviceAddress = sbt.bda;
-    raygen_sbt.size = handle_size_aligned * 1;
-    raygen_sbt.stride = handle_size_aligned;
-
-    vks::StridedDeviceAddressRegionKHR miss_sbt;
-    miss_sbt.deviceAddress = sbt.bda;
-    miss_sbt.size = handle_size_aligned * 2;
-    miss_sbt.stride = handle_size_aligned;
-
-    vks::StridedDeviceAddressRegionKHR hit_sbt;
-    hit_sbt.deviceAddress = sbt.bda;
-    hit_sbt.size = handle_size_aligned * 2;
-    hit_sbt.stride = handle_size_aligned;
-
-    vks::StridedDeviceAddressRegionKHR callable_sbt;
-
-    VkClearColorValue clear_value{ 0.0f, 0.0f, 0.0f, 1.0f };
-    VkImageSubresourceRange clear_range{
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-    };
-    const auto* window = Engine::window();
-    uint32_t push_offset = 0;
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_offset, sizeof(combined_rt_buffers_buffer.bda), &combined_rt_buffers_buffer.bda);
-    push_offset += sizeof(VkDeviceAddress);
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_offset, sizeof(VkDeviceAddress), &vertex_buffer.bda);
-    push_offset += sizeof(VkDeviceAddress);
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_offset, sizeof(VkDeviceAddress), &index_buffer.bda);
-    push_offset += sizeof(VkDeviceAddress);
-    uint32_t mode = 1;
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_offset, sizeof(VkDeviceAddress), &ddgi_buffer.bda);
-    push_offset += sizeof(VkDeviceAddress);
-    const auto push_constant_mode_offset = push_offset;
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_constant_mode_offset, sizeof(uint32_t), &mode);
-
-    // radiance pass
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
-                      ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
-
-    vks::ImageMemoryBarrier2 rt_to_comp_img_barrier;
-    rt_to_comp_img_barrier.image = ddgi.radiance_texture.image;
-    rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-    rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-    rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-    rt_to_comp_img_barrier.subresourceRange = {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-    };
-
-    vks::DependencyInfo rt_to_comp_dep_info;
-    rt_to_comp_dep_info.imageMemoryBarrierCount = 1;
-    rt_to_comp_dep_info.pImageMemoryBarriers = &rt_to_comp_img_barrier;
-
-    vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
-
-    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      pipelines.at(RendererPipelineType::DDGI_PROBE_UPDATE).pipeline);
-    vkCmdBindDescriptorSets(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &default_set, 0, nullptr);
-
-    // irradiance pass, only need radiance texture
-    mode = 0;
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_constant_mode_offset, sizeof(uint32_t), &mode);
-    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
-                  std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
-
-    // visibility pass, only need radiance texture
-    mode = 1;
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_constant_mode_offset, sizeof(uint32_t), &mode);
-    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
-                  std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
-
-    // probe offset pass, only need radiance texture to complete
-    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      pipelines.at(RendererPipelineType::DDGI_PROBE_OFFSET).pipeline);
-    vkCmdDispatch(raytrace_cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
-                  std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
-
-    rt_to_comp_img_barrier.image = ddgi.irradiance_texture.image;
-    rt_to_comp_img_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    rt_to_comp_img_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    rt_to_comp_img_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    rt_to_comp_img_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT;
-    rt_to_comp_img_barrier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-    rt_to_comp_img_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-    rt_to_comp_img_barrier.subresourceRange = {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-    };
-
-    vks::ImageMemoryBarrier2 ddgi_visibility_comp_to_rt_barrier = rt_to_comp_img_barrier;
-    ddgi_visibility_comp_to_rt_barrier.image = ddgi.visibility_texture.image;
-
-    vks::ImageMemoryBarrier2 ddgi_probe_offsets_comp_to_rt_barrier = rt_to_comp_img_barrier;
-    ddgi_probe_offsets_comp_to_rt_barrier.image = ddgi.probe_offsets_texture.image;
-
-    vks::ImageMemoryBarrier2 ddgi_barriers[]{ rt_to_comp_img_barrier, ddgi_visibility_comp_to_rt_barrier,
-                                              ddgi_probe_offsets_comp_to_rt_barrier };
-    rt_to_comp_dep_info.imageMemoryBarrierCount = sizeof(ddgi_barriers) / sizeof(ddgi_barriers[0]);
-    rt_to_comp_dep_info.pImageMemoryBarriers = ddgi_barriers;
-    vkCmdPipelineBarrier2(raytrace_cmd, &rt_to_comp_dep_info);
-    rt_to_comp_dep_info.imageMemoryBarrierCount =
-        1; // just to be safe and i'm too lazy to check if i'm reusing this variable anywhere later
-
-    vkCmdBindPipeline(raytrace_cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                      pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).pipeline);
-    mode = 0;
-    vkCmdPushConstants(raytrace_cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                       push_constant_mode_offset, sizeof(uint32_t), &mode);
-    vkCmdTraceRaysKHR(raytrace_cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, window->size[0], window->size[1], 1);
-
-    end_recording(raytrace_cmd);
-    auto present_cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-    vks::ImageMemoryBarrier2 sw_to_dst, sw_to_pres;
-    sw_to_dst.image = swapchain_images.at(sw_img_idx);
-    sw_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    sw_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    sw_to_dst.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    sw_to_dst.srcAccessMask = VK_ACCESS_NONE;
-    sw_to_dst.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    sw_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    sw_to_dst.subresourceRange = {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-    };
-    sw_to_pres = sw_to_dst;
-    sw_to_pres.oldLayout = sw_to_dst.newLayout;
-    sw_to_pres.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    sw_to_pres.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    sw_to_pres.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    sw_to_pres.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    sw_to_pres.dstAccessMask = VK_ACCESS_NONE;
-
-    vks::DependencyInfo sw_dep_info;
-    sw_dep_info.imageMemoryBarrierCount = 1;
-    sw_dep_info.pImageMemoryBarriers = &sw_to_dst;
-    vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
-
-    vks::ImageCopy img_copy;
-    img_copy.srcOffset = {};
-    img_copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    img_copy.dstOffset = {};
-    img_copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    img_copy.extent = { window->size[0], window->size[1], 1 };
-    vkCmdCopyImage(present_cmd, rt_image.image, VK_IMAGE_LAYOUT_GENERAL, sw_to_dst.image, sw_to_dst.newLayout, 1, &img_copy);
-
-    sw_dep_info.pImageMemoryBarriers = &sw_to_pres;
-    vkCmdPipelineBarrier2(present_cmd, &sw_dep_info);
-    end_recording(present_cmd);
-
-    submit_recordings(
-        gq, { RecordingSubmitInfo{ .buffers = { raytrace_cmd },
-                                   .signals = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR } } },
-              RecordingSubmitInfo{ .buffers = { present_cmd },
-                                   .waits = { { primitives.sem_tracing_done, VK_PIPELINE_STAGE_2_TRANSFER_BIT },
-                                              { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TRANSFER_BIT } },
-                                   .signals = { { primitives.sem_copy_to_sw_img_done, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } } } });
-
-    vks::PresentInfoKHR pinfo;
-    pinfo.swapchainCount = 1;
-    pinfo.pSwapchains = &swapchain;
-    pinfo.pImageIndices = &sw_img_idx;
-    pinfo.waitSemaphoreCount = 1;
-    pinfo.pWaitSemaphores = &primitives.sem_copy_to_sw_img_done;
-    vkQueuePresentKHR(gq, &pinfo);
-    vkQueueWaitIdle(gq);
-#endif
+        vkDestroyImageView(dev, i_sw_view, nullptr);
 
         ++num_frame;
     }
@@ -1193,6 +1107,7 @@ void RendererVulkan::compile_shaders() {
         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
         VK_SHADER_STAGE_MISS_BIT_KHR,        VK_SHADER_STAGE_RAYGEN_BIT_KHR,      VK_SHADER_STAGE_COMPUTE_BIT,
         VK_SHADER_STAGE_COMPUTE_BIT,         VK_SHADER_STAGE_VERTEX_BIT,          VK_SHADER_STAGE_FRAGMENT_BIT,
+
     };
     ShaderModuleType types[]{
         ShaderModuleType::RT_BASIC_CLOSEST_HIT,
@@ -1231,19 +1146,27 @@ void RendererVulkan::compile_shaders() {
 }
 
 void RendererVulkan::build_pipelines() {
-    RendererPipelineLayout default_layout = RendererPipelineLayoutBuilder{}
-                                                .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-                                                .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                                .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                                .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                                .add_variable_descriptor_count(0)
-                                                .set_push_constants(128)
-                                                .build();
+    RendererPipelineLayout default_layout =
+        RendererPipelineLayoutBuilder{}
+            .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+            .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+            .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+            .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+            .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+            .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+            .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+            .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+            .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+            .add_variable_descriptor_count(0)
+            .set_push_constants(128)
+            .build(VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                       VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
+                   VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+    RendererPipelineLayout imgui_layout =
+        RendererPipelineLayoutBuilder{}
+            .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)
+            .set_push_constants(16, VK_SHADER_STAGE_VERTEX_BIT)
+            .build();
 
     pipelines[RendererPipelineType::DEFAULT_UNLIT] = RendererPipelineWrapper{
         .pipeline =
@@ -1295,9 +1218,12 @@ void RendererVulkan::build_pipelines() {
     };
 
     layouts.push_back(default_layout);
+    layouts.push_back(imgui_layout);
 
-    descriptor_allocator.create_pool(default_layout, 0, 2);
+    descriptor_allocator.create_pool(default_layout, 0, 2, VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT);
     default_set = descriptor_allocator.allocate(default_layout, 0, 1024);
+
+    descriptor_allocator.create_pool(imgui_layout, 0, 8);
 
     for(int i = 0; i < 2; ++i) {
         depth_buffers[i] = Image{
@@ -1962,7 +1888,8 @@ void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
     VK_CHECK(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view));
 }
 
-RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
+RendererPipelineLayout RendererPipelineLayoutBuilder::build(VkDescriptorBindingFlags binding_flags,
+                                                            VkDescriptorSetLayoutCreateFlags layout_flags) {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
     uint32_t num_desc_layouts = 0;
@@ -1976,8 +1903,7 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
         std::vector<VkDescriptorBindingFlags> flags;
         flags.reserve(set_layout.bindings.size());
         for(const auto& b : set_layout.bindings) {
-            flags.push_back(VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-                            VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT);
+            flags.push_back(binding_flags);
         }
         if(set_layout.last_binding_variable_count) {
             flags.back() |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
@@ -1991,7 +1917,7 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
         vks::DescriptorSetLayoutCreateInfo info;
         info.bindingCount = set_layout.bindings.size();
         info.pBindings = set_layout.bindings.data();
-        info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+        info.flags = layout_flags;
         info.pNext = &flags_info;
 
         VK_CHECK(vkCreateDescriptorSetLayout(renderer->dev, &info, nullptr, &set_layout.layout));
@@ -2002,7 +1928,7 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
     vks::PipelineLayoutCreateInfo layout_info;
     VkPushConstantRange push_constant_range;
     if(push_constants_size > 0) {
-        push_constant_range.stageFlags = VK_SHADER_STAGE_ALL;
+        push_constant_range.stageFlags = push_constants_stage;
         push_constant_range.offset = 0;
         push_constant_range.size = push_constants_size;
         layout_info.pushConstantRangeCount = 1;
@@ -2068,6 +1994,8 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     vks::PipelineTessellationStateCreateInfo pTessellationState;
 
     vks::PipelineViewportStateCreateInfo pViewportState;
+    pViewportState.scissorCount = scissor_count;
+    pViewportState.viewportCount = viewport_count;
 
     vks::PipelineRasterizationStateCreateInfo pRasterizationState;
     pRasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
@@ -2176,7 +2104,8 @@ VkDescriptorSet DescriptorSetAllocator::allocate(const RendererPipelineLayout& l
     return descriptor;
 }
 
-void DescriptorSetAllocator::create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets) {
+void DescriptorSetAllocator::create_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
+                                         VkDescriptorPoolCreateFlags pool_flags) {
     std::unordered_map<VkDescriptorType, uint32_t> total_counts;
     for(uint32_t i = 0; i < layout.bindings.at(set).size(); ++i) {
         const auto& b = layout.bindings.at(set).at(i);
@@ -2192,7 +2121,7 @@ void DescriptorSetAllocator::create_pool(const RendererPipelineLayout& layout, u
     }
 
     vks::DescriptorPoolCreateInfo info;
-    info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    info.flags = pool_flags;
     info.poolSizeCount = sizes.size();
     info.pPoolSizes = sizes.data();
     info.maxSets = max_sets;

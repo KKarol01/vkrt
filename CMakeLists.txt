@@ -52,6 +52,28 @@ set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_USE_STD_MODULE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fastgltf)
 
+add_library(imgui STATIC
+    "third_party/imgui/imgui.cpp"
+    "third_party/imgui/imgui_draw.cpp"
+    "third_party/imgui/imgui_tables.cpp"
+    "third_party/imgui/imgui_widgets.cpp"
+    "third_party/imgui/backends/imgui_impl_glfw.cpp"
+    "third_party/imgui/backends/imgui_impl_vulkan.cpp"
+)
+target_include_directories(imgui 
+    PUBLIC
+        third_party/imgui 
+        third_party/volk
+    PRIVATE 
+        third_party/imgui/backends 
+        ${Vulkan_INCLUDE_DIRS} 
+        third_party/glfw/include
+)
+target_compile_definitions(imgui
+    PRIVATE
+        IMGUI_IMPL_VULKAN_USE_VOLK
+)
+
 add_executable(vkrt main.cpp "model_importer.cpp" "engine.cpp"  "renderer_vulkan.cpp" "camera.cpp")
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
@@ -65,6 +87,7 @@ target_link_libraries(vkrt
     vma
     volk
     stb
+    imgui
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
