@@ -340,7 +340,6 @@ void RendererVulkan::initialize_vulkan() {
 
     vks::CommandPoolCreateInfo cmdpi;
     cmdpi.queueFamilyIndex = gqi;
-
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
     global_buffer =
@@ -440,7 +439,8 @@ void RendererVulkan::initialize_imgui() {
 
     auto cmdimgui = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ImGui_ImplVulkan_CreateFontsTexture();
-    submit_recording(gq, cmdimgui);
+    end_recording(cmdimgui);
+    submit_recording(gq, { { cmdimgui } });
     vkQueueWaitIdle(gq);
 }
 
@@ -752,13 +752,11 @@ void RendererVulkan::render() {
 
         vkEndCommandBuffer(cmd);
 
-        submit_recordings(gq, {
-                                  RecordingSubmitInfo{
-                                      .buffers = { cmd },
-                                      .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
-                                      .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
-                                  },
-                              });
+        submit_recording(gq, RecordingSubmitInfo{
+                                 .buffers = { cmd },
+                                 .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
+                                 .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
+                             });
 
         vks::PresentInfoKHR pinfo;
         pinfo.swapchainCount = 1;
@@ -771,6 +769,7 @@ void RendererVulkan::render() {
         vkDestroyImageView(dev, i_sw_view, nullptr);
 
         descriptor_pool_allocator.reset_pool(per_frame_desc_pool);
+        reset_command_pool(cmdpool);
         ++num_frame;
     }
 }
@@ -919,7 +918,8 @@ void RendererVulkan::upload_model_textures() {
                                   false, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     }
 
-    submit_recording(gq, cmd);
+    end_recording(cmd);
+    submit_recording(gq, { { cmd } });
     vkQueueWaitIdle(gq);
 }
 void RendererVulkan::upload_staged_models() {
@@ -1261,7 +1261,8 @@ void RendererVulkan::create_rt_output_image() {
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    submit_recording(gq, cmd);
+    end_recording(cmd);
+    submit_recording(gq, { { cmd } });
     vkQueueWaitIdle(gq);
 }
 
@@ -1367,7 +1368,8 @@ void RendererVulkan::build_blas() {
         offset += dirty_models.at(i)->mesh_count;
     }
     vkCmdBuildAccelerationStructuresKHR(cmd, build_geometries.size(), build_geometries.data(), poffsets.data());
-    submit_recording(gq, cmd);
+    end_recording(cmd);
+    submit_recording(gq, { { cmd } });
     vkDeviceWaitIdle(dev);
 }
 
@@ -1440,7 +1442,8 @@ void RendererVulkan::build_tlas() {
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    submit_recording(gq, cmd);
+    end_recording(cmd);
+    submit_recording(gq, { { cmd } });
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = std::move(buffer_tlas);
@@ -1501,7 +1504,8 @@ void RendererVulkan::refit_tlas() {
 
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    submit_recording(gq, cmd);
+    end_recording(cmd);
+    submit_recording(gq, { { cmd } });
     vkDeviceWaitIdle(dev);
 }
 
@@ -1572,7 +1576,8 @@ void RendererVulkan::prepare_ddgi() {
                                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
 
-    submit_recording(gq, cmd);
+    end_recording(cmd);
+    submit_recording(gq, { { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
@@ -1608,7 +1613,21 @@ void RendererVulkan::prepare_ddgi() {
 }
 
 VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
-    VkCommandBuffer cmd = get_or_allocate_free_command_buffer(pool);
+    VkCommandBuffer cmd;
+
+    auto free_buffer_it =
+        std::find_if(command_buffers.begin(), command_buffers.end(), [](const CommandBuffer& b) { return !b.used; });
+    if(free_buffer_it == command_buffers.end()) {
+        vks::CommandBufferAllocateInfo alloc_info;
+        alloc_info.commandPool = pool;
+        alloc_info.commandBufferCount = 1;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        VK_CHECK(vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
+        command_buffers.emplace_back(cmd, true);
+    } else {
+        cmd = free_buffer_it->command_buffer;
+        free_buffer_it->used = true;
+    }
 
     vks::CommandBufferBeginInfo info;
     info.flags = usage;
@@ -1617,29 +1636,29 @@ VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBuf
     return cmd;
 }
 
-void RendererVulkan::submit_recording(VkQueue queue, VkCommandBuffer buffer,
-                                      const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems,
-                                      const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& signal_sems, VkFence fence) {
-    VK_CHECK(vkEndCommandBuffer(buffer));
-
-    vks::CommandBufferSubmitInfo buffer_info;
-    buffer_info.commandBuffer = buffer;
-
-    std::vector<vks::SemaphoreSubmitInfo> waits(wait_sems.size());
-    for(uint32_t i = 0; i < wait_sems.size(); ++i) {
-        waits.at(i).semaphore = wait_sems.at(i).first;
-        waits.at(i).stageMask = wait_sems.at(i).second;
+void RendererVulkan::submit_recording(VkQueue queue, const RecordingSubmitInfo& info, VkFence fence) {
+    std::vector<vks::CommandBufferSubmitInfo> buffer_infos;
+    for(const auto& cmd : info.buffers) {
+        vks::CommandBufferSubmitInfo info;
+        info.commandBuffer = cmd;
+        buffer_infos.push_back(info);
     }
 
-    std::vector<vks::SemaphoreSubmitInfo> signals(signal_sems.size());
-    for(uint32_t i = 0; i < signal_sems.size(); ++i) {
-        signals.at(i).semaphore = signal_sems.at(i).first;
-        signals.at(i).stageMask = signal_sems.at(i).second;
+    std::vector<vks::SemaphoreSubmitInfo> waits(info.waits.size());
+    for(uint32_t i = 0u; i < info.waits.size(); ++i) {
+        waits.at(i).semaphore = info.waits.at(i).first;
+        waits.at(i).stageMask = info.waits.at(i).second;
+    }
+
+    std::vector<vks::SemaphoreSubmitInfo> signals(info.signals.size());
+    for(uint32_t i = 0u; i < info.signals.size(); ++i) {
+        signals.at(i).semaphore = info.signals.at(i).first;
+        signals.at(i).stageMask = info.signals.at(i).second;
     }
 
     vks::SubmitInfo2 submit_info;
-    submit_info.commandBufferInfoCount = 1;
-    submit_info.pCommandBufferInfos = &buffer_info;
+    submit_info.commandBufferInfoCount = buffer_infos.size();
+    submit_info.pCommandBufferInfos = buffer_infos.data();
     submit_info.waitSemaphoreInfoCount = waits.size();
     submit_info.pWaitSemaphoreInfos = waits.data();
     submit_info.signalSemaphoreInfoCount = signals.size();
@@ -1691,23 +1710,8 @@ void RendererVulkan::end_recording(VkCommandBuffer buffer) { VK_CHECK(vkEndComma
 
 void RendererVulkan::reset_command_pool(VkCommandPool pool) {
     VK_CHECK(vkResetCommandPool(dev, pool, {}));
-    free_pool_buffers[pool] = std::move(used_pool_buffers[pool]);
-}
-
-VkCommandBuffer RendererVulkan::get_or_allocate_free_command_buffer(VkCommandPool pool) {
-    if(free_pool_buffers[pool].empty()) {
-        vks::CommandBufferAllocateInfo info;
-        info.commandPool = pool;
-        info.commandBufferCount = 1;
-        info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
-        auto& buffer = used_pool_buffers[pool].emplace_back(nullptr);
-        VK_CHECK(vkAllocateCommandBuffers(dev, &info, &buffer));
-        return buffer;
-    } else {
-        used_pool_buffers[pool].push_back(free_pool_buffers[pool].back());
-        free_pool_buffers[pool].erase(free_pool_buffers[pool].end() - 1);
-        return used_pool_buffers[pool].back();
+    for(auto& e : command_buffers) {
+        e.used = false;
     }
 }
 
@@ -1827,34 +1831,33 @@ void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
 RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
     RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
 
-    uint32_t num_desc_layouts = 0;
-    std::array<VkDescriptorSetLayout, 4> set_layouts;
+    std::vector<VkDescriptorSetLayout> vk_layouts;
     std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
     std::vector<std::vector<VkDescriptorBindingFlags>> binding_flags;
     for(uint32_t i = 0; i < descriptor_layouts.size(); ++i) {
-        DescriptorLayout& set_layout = descriptor_layouts.at(i);
+        DescriptorLayout& desc_layout = descriptor_layouts.at(i);
 
-        if(set_layout.bindings.empty()) { break; }
-        ++num_desc_layouts;
+        if(desc_layout.bindings.empty()) { break; }
 
-        if(set_layout.last_binding_of_variable_count) {
-            set_layout.binding_flags.back() |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+        if(desc_layout.last_binding_of_variable_count) {
+            desc_layout.binding_flags.back() |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
         }
 
         vks::DescriptorSetLayoutBindingFlagsCreateInfo flags_info;
-        flags_info.bindingCount = set_layout.binding_flags.size();
-        flags_info.pBindingFlags = set_layout.binding_flags.data();
+        flags_info.bindingCount = desc_layout.binding_flags.size();
+        flags_info.pBindingFlags = desc_layout.binding_flags.data();
 
         vks::DescriptorSetLayoutCreateInfo info;
-        info.bindingCount = set_layout.bindings.size();
-        info.pBindings = set_layout.bindings.data();
+        info.bindingCount = desc_layout.bindings.size();
+        info.pBindings = desc_layout.bindings.data();
         info.flags = descriptor_layout_flags.at(i);
         info.pNext = &flags_info;
 
-        VK_CHECK(vkCreateDescriptorSetLayout(renderer->dev, &info, nullptr, &set_layout.layout));
-        set_layouts.at(num_desc_layouts - 1) = set_layout.layout;
-        bindings.push_back(set_layout.bindings);
-        binding_flags.push_back(set_layout.binding_flags);
+        VK_CHECK(vkCreateDescriptorSetLayout(renderer->dev, &info, nullptr, &desc_layout.layout));
+
+        vk_layouts.push_back(desc_layout.layout);
+        bindings.push_back(desc_layout.bindings);
+        binding_flags.push_back(desc_layout.binding_flags);
     }
 
     vks::PipelineLayoutCreateInfo layout_info;
@@ -1866,14 +1869,14 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
         layout_info.pushConstantRangeCount = 1;
         layout_info.pPushConstantRanges = &push_constant_range;
     }
-    layout_info.setLayoutCount = num_desc_layouts;
-    layout_info.pSetLayouts = set_layouts.data();
+    layout_info.setLayoutCount = vk_layouts.size();
+    layout_info.pSetLayouts = vk_layouts.data();
 
     VkPipelineLayout layout;
     VK_CHECK(vkCreatePipelineLayout(renderer->dev, &layout_info, nullptr, &layout));
 
     return RendererPipelineLayout{ layout,
-                                   { set_layouts.begin(), set_layouts.end() },
+                                   { vk_layouts.begin(), vk_layouts.end() },
                                    { descriptor_layout_flags.begin(), descriptor_layout_flags.end() },
                                    bindings,
                                    binding_flags };
