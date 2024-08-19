@@ -20,8 +20,7 @@ enum class RendererFlags : uint32_t {
     DIRTY_BLAS = 0x4,
     DIRTY_TLAS = 0x8,
     REFIT_TLAS = 0x10,
-    DIRTY_DESCRIPTORS = 0x20,
-    UPDATE_MESH_POSITIONS = 0x40,
+    UPDATE_MESH_POSITIONS = 0x20,
 };
 
 enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
@@ -424,7 +423,8 @@ class RendererGraphicsPipelineBuilder {
 
 class DescriptorPoolAllocator {
   public:
-    VkDescriptorPool allocate_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets, VkDescriptorPoolCreateFlags flags = {});
+    VkDescriptorPool allocate_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
+                                   VkDescriptorPoolCreateFlags flags = {});
     VkDescriptorSet allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count = 0);
     void reset_pool(VkDescriptorPool pool);
 
@@ -455,6 +455,12 @@ class DescriptorSetWriter {
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, VkImageView image, VkSampler sampler, VkImageLayout layout);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Buffer& buffer, uint32_t offset, uint32_t range);
     DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const VkAccelerationStructureKHR ac);
+    DescriptorSetWriter& write(uint32_t binding, uint32_t array_element, const Image* imgs, uint32_t count,
+                               VkSampler sampler, VkImageLayout layout) {
+        for(uint32_t i = 0; i < count; ++i) {
+            write(binding, array_element + i, imgs[i], sampler, layout);
+        }
+    }
     bool update(VkDescriptorSet set, const RendererPipelineLayout& layout, uint32_t set_idx);
 
   private:
@@ -607,14 +613,10 @@ class RendererVulkan : public Renderer {
     void prepare_ddgi();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
-    void submit_recording(VkQueue queue, VkCommandBuffer buffer,
-                          const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& wait_sems = {},
-                          const std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>>& signal_sems = {},
-                          VkFence fence = nullptr);
+    void submit_recording(VkQueue queue, const RecordingSubmitInfo& info, VkFence fence = nullptr);
     void submit_recordings(VkQueue queue, const std::vector<RecordingSubmitInfo>& submits, VkFence fence = nullptr);
     void end_recording(VkCommandBuffer buffer);
     void reset_command_pool(VkCommandPool pool);
-    VkCommandBuffer get_or_allocate_free_command_buffer(VkCommandPool pool);
 
     uint32_t get_total_vertices() const {
         return models.empty() ? 0u : models.back().first_vertex + models.back().vertex_count;
@@ -642,8 +644,11 @@ class RendererVulkan : public Renderer {
     Image depth_buffers[2]{};
 
     VkCommandPool cmdpool;
-    std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> free_pool_buffers;
-    std::unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> used_pool_buffers;
+    struct CommandBuffer {
+        VkCommandBuffer command_buffer{};
+        bool used{ false };
+    };
+    std::vector<CommandBuffer> command_buffers;
 
     SamplerStorage samplers;
 
