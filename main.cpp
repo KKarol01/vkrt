@@ -13,9 +13,9 @@
 #include "model_importer.hpp"
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
+#include "handle_vector.hpp"
 
 int main() {
-
     Engine::init();
 
     {
@@ -24,7 +24,7 @@ int main() {
         ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
 
         HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED });
-         //HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
+        // HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
 
         /*HandleInstancedModel cornell_i1 =
             Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });*/

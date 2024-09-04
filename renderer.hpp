@@ -28,6 +28,6 @@ class Renderer {
     virtual ~Renderer() = default;
     virtual void init() = 0;
     virtual void render() = 0;
-    virtual HandleBatchedModel batch_model(ImportedModel& model, BatchSettings settings) = 0;
+    virtual HandleBatchedModel batch_model(const ImportedModel& model, BatchSettings settings) = 0;
     virtual HandleInstancedModel instance_model(HandleBatchedModel model, InstanceSettings settings) = 0;
 };

@@ -21,6 +21,8 @@
 #include <fstream>
 #include <utility>
 
+RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
+
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
     /* Creates a halton sequence of values between 0 and 1.
@@ -36,9 +38,39 @@ static float halton(int i, int b) {
     return r;
 }
 
+template <typename Storage> struct HandleDispatcher<RenderModel, Storage> {
+    constexpr RenderModel* operator()(const Handle<RenderModel, Storage>& h) const {
+        return &get_renderer().models.at(h);
+    }
+};
+template <typename Storage> struct HandleDispatcher<BatchedModel, Storage> {
+    constexpr RenderModel* operator()(const Handle<BatchedModel, Storage>& h) const {
+        return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h });
+    }
+};
+template <typename Storage> struct HandleDispatcher<RenderModelRTMetadata, Storage> {
+    constexpr RenderModelRTMetadata* operator()(const Handle<RenderModelRTMetadata, Storage>& h) const {
+        return &get_renderer().rt_metadata.at(h);
+    }
+};
+template <typename Storage> struct HandleDispatcher<RenderModelInstance, Storage> {
+    constexpr RenderModelInstance* operator()(const Handle<RenderModelInstance, Storage>& h) const {
+        return &get_renderer().model_instances.at(h);
+    }
+};
+template <typename Storage> struct HandleDispatcher<InstancedModel, Storage> {
+    constexpr RenderModelInstance* operator()(const Handle<InstancedModel, Storage>& h) const {
+        return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h });
+    }
+};
+template <typename Storage> struct HandleDispatcher<RenderMesh, Storage> {
+    constexpr RenderMesh* operator()(const Handle<RenderMesh, Storage>& h) const {
+        return &get_renderer().meshes.at(*h);
+    }
+};
+
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
     : name{ name }, usage{ usage }, capacity{ size } {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
     vks::BufferCreateInfo binfo;
     VmaAllocationCreateInfo vinfo{};
     const auto use_bda = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) > 0;
@@ -49,11 +81,13 @@ Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, b
     vinfo.usage = VMA_MEMORY_USAGE_AUTO;
     if(map) {
         vinfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    } else {
+        binfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
     if(use_bda) { vinfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT; }
 
     VmaAllocationInfo vainfo{};
-    if(vmaCreateBuffer(renderer->vma, &binfo, &vinfo, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
+    if(vmaCreateBuffer(get_renderer().vma, &binfo, &vinfo, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
         ENG_WARN("Could not create buffer {}", name);
         return;
     }
@@ -63,7 +97,7 @@ Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, b
     if(use_bda) {
         vks::BufferDeviceAddressInfo bdainfo;
         bdainfo.buffer = buffer;
-        bda = vkGetBufferDeviceAddress(renderer->dev, &bdainfo);
+        bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
     }
 
     set_debug_name(buffer, name);
@@ -73,7 +107,6 @@ Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, b
 
 Buffer::Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map)
     : name{ name }, usage{ usage }, capacity{ size }, alignment{ alignment } {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
     vks::BufferCreateInfo binfo;
     VmaAllocationCreateInfo vinfo{};
     const auto use_bda = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) > 0;
@@ -88,7 +121,7 @@ Buffer::Buffer(const std::string& name, size_t size, uint32_t alignment, VkBuffe
     if(use_bda) { vinfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT; }
 
     VmaAllocationInfo vainfo{};
-    if(vmaCreateBufferWithAlignment(renderer->vma, &binfo, &vinfo, alignment, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
+    if(vmaCreateBufferWithAlignment(get_renderer().vma, &binfo, &vinfo, alignment, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
         ENG_WARN("Could not create buffer {}", name);
         return;
     }
@@ -98,20 +131,33 @@ Buffer::Buffer(const std::string& name, size_t size, uint32_t alignment, VkBuffe
     if(use_bda) {
         vks::BufferDeviceAddressInfo bdainfo;
         bdainfo.buffer = buffer;
-        bda = vkGetBufferDeviceAddress(renderer->dev, &bdainfo);
+        bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
     }
 
     set_debug_name(buffer, name);
+    ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
+}
 
+Buffer::Buffer(const std::string& name, const vks::BufferCreateInfo& create_info, const VmaAllocationCreateInfo& alloc_info) {
+    VmaAllocationInfo vainfo{};
+    VK_CHECK(vmaCreateBuffer(get_renderer().vma, &create_info, &alloc_info, &buffer, &alloc, &vainfo));
+
+    if(vainfo.pMappedData) { mapped = vainfo.pMappedData; };
+
+    if(create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+        vks::BufferDeviceAddressInfo bdainfo;
+        bdainfo.buffer = buffer;
+        bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
+    }
+
+    set_debug_name(buffer, name);
     ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
 }
 
 Buffer::Buffer(Buffer&& other) noexcept { *this = std::move(other); }
 
 Buffer& Buffer::operator=(Buffer&& other) noexcept {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
-    vmaDestroyBuffer(renderer->vma, buffer, alloc);
+    vmaDestroyBuffer(get_renderer().vma, buffer, alloc);
 
     name = std::move(other.name);
     usage = other.usage;
@@ -363,6 +409,8 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
+
+    staging = GpuStagingManager{ 1024 * 1024 * 64 }; // 64MB
 }
 
 void RendererVulkan::create_swapchain() {
@@ -549,9 +597,19 @@ void RendererVulkan::render() {
     ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
 
     {
-        static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = Engine::frame_num();
+        const auto frame_num = Engine::frame_num();
+        staging.send_to(ddgi_buffer.buffer, offsetof(DDGI_Buffer, frame_num), &frame_num, sizeof(frame_num));
+        // static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = Engine::frame_num();
 
         auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+        staging.update(cmd);
+
+        VkMemoryBarrier mem_barrier{ .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                                     .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+                                     .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, {}, 1,
+                             &mem_barrier, 0, nullptr, 0, nullptr);
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
@@ -774,18 +832,20 @@ void RendererVulkan::render() {
     }
 }
 
-HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettings settings) {
-    flags |= RendererFlags::DIRTY_MODEL_BATCHES;
-
+HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, BatchSettings settings) {
     const auto total_vertices = get_total_vertices();
     const auto total_indices = get_total_indices();
     const auto total_meshes = static_cast<uint32_t>(meshes.size());
     const auto total_materials = static_cast<uint32_t>(materials.size());
     const auto total_textures = static_cast<uint32_t>(textures.size());
     const auto total_models = static_cast<uint32_t>(models.size());
+    const auto rt_metadata_handle = rt_metadata.emplace_back();
+
+    flags |= RendererFlags::DIRTY_MODEL_BATCHES;
 
     Handle<RenderModel> model_handle = models.push_back(RenderModel{
         .flags = {},
+        .rt_metadata = rt_metadata_handle,
         .first_vertex = total_vertices,
         .vertex_count = (uint32_t)model.vertices.size(),
         .first_index = total_indices,
@@ -798,11 +858,9 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
         .texture_count = (uint32_t)model.textures.size(),
     });
 
-    RenderModel& render_model = models.get(model_handle);
-
     if(settings.flags & BatchFlags::RAY_TRACED) {
         flags |= RendererFlags::DIRTY_BLAS;
-        render_model.flags |= RenderModelFlags::DIRTY_BLAS;
+        model_handle->flags |= RenderModelFlags::DIRTY_BLAS;
     }
 
     for(auto& mesh : model.meshes) {
@@ -814,7 +872,8 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
     }
 
     for(auto& mat : model.materials) {
-        materials.push_back(RenderMaterial{ .color_texture = mat.color_texture, .normal_texture = mat.normal_texture });
+        materials.push_back(RenderMaterial{ .color_texture = mat.color_texture.value_or(0),
+                                            .normal_texture = mat.normal_texture.value_or(0) });
     }
 
     VkSampler default_linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
@@ -838,8 +897,6 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
     std::transform(model.indices.begin(), model.indices.end(), upload_indices.end() - model.indices.size(),
                    [](const auto& i) { return i; });
 
-    rt_metadata.emplace_back();
-
     // clang-format off
     ENG_LOG("Batching model {}: [VXS: {:.2f} KB, IXS: {:.2f} KB, Textures: {:.2f} KB]", 
             model.name,
@@ -848,7 +905,7 @@ HandleBatchedModel RendererVulkan::batch_model(ImportedModel& model, BatchSettin
             static_cast<float>(std::accumulate(model.textures.begin(), model.textures.end(), 0ull, [](uint64_t sum, const ImportedModel::Texture& tex) { return sum + tex.size.first * tex.size.second * 4u; })) / 1000.0f);
     // clang-format on
 
-    return HandleBatchedModel{ total_models };
+    return HandleBatchedModel{ *model_handle };
 }
 
 HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, InstanceSettings settings) {
@@ -857,11 +914,10 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
                                                                  .transform = settings.transform,
                                                                  .tlas_instance_mask = settings.tlas_instance_mask });
 
-    const auto& rmodel = models.get(Handle<RenderModel>{ *model });
-    for(uint32_t i = 0; i < rmodel.mesh_count; ++i) {
+    for(uint32_t i = 0; i < model->mesh_count; ++i) {
         mesh_instances.push_back(RenderMeshInstance{
             .model_instance = handle,
-            .mesh = Handle<RenderMesh>{ rmodel.first_mesh + i },
+            .mesh = Handle<RenderMesh>{ model->first_mesh + i },
         });
     }
 
@@ -934,7 +990,8 @@ void RendererVulkan::upload_staged_models() {
 }
 
 void RendererVulkan::upload_instances() {
-    model_instances.sort([](const RenderModelInstance& a, const RenderModelInstance& b) { return a.model < b.model; });
+    std::sort(model_instances.begin(), model_instances.end(),
+              [](const RenderModelInstance& a, const RenderModelInstance& b) { return a.model < b.model; });
     std::sort(mesh_instances.begin(), mesh_instances.end(), [](const RenderMeshInstance& a, const RenderMeshInstance& b) {
         if(a.model_instance > b.model_instance) { return false; }
         if(a.mesh > b.mesh) { return false; }
@@ -969,7 +1026,7 @@ void RendererVulkan::upload_instances() {
             render_mesh_data.push_back(GPURenderMeshData{
                 .vertex_offset = model.first_vertex + mesh.vertex_offset,
                 .index_offset = model.first_index + mesh.index_offset,
-                .color_texture_idx = model.first_texture + material.color_texture.value_or(0u),
+                .color_texture_idx = model.first_texture + material.color_texture,
             });
 
             for(uint32_t j = 0u; j < mesh.index_count / 3u; ++j) {
@@ -981,41 +1038,36 @@ void RendererVulkan::upload_instances() {
     }
 
     for(const RenderModelInstance& instance : model_instances) {
-        const RenderModel& model = models.at(*instance.model);
-        tlas_mesh_offsets.push_back(model.first_mesh);
+        tlas_mesh_offsets.push_back(instance.model->first_mesh);
         tlas_transforms.push_back(instance.transform);
     }
 
     {
         const RenderMeshInstance* mi = &mesh_instances.at(0);
         VkDrawIndexedIndirectCommand* cmd = &draw_commands.emplace_back();
-        // TODO: this seems unnecessarily complicated
-        cmd->firstIndex = models.get(model_instances.get(mi->model_instance).model).first_index + meshes.at(*mi->mesh).index_offset;
-        cmd->indexCount = meshes.at(*mi->mesh).index_count;
+        cmd->firstIndex = mi->model_instance->model->first_index + mi->mesh->index_offset;
+        cmd->indexCount = mi->mesh->index_count;
         cmd->instanceCount = 1;
-        cmd->vertexOffset =
-            models.get(model_instances.get(mi->model_instance).model).first_vertex + meshes.at(*mi->mesh).vertex_offset;
+        cmd->vertexOffset = mi->model_instance->model->first_vertex + mi->mesh->vertex_offset;
         mesh_instance_mesh_ids.push_back(*mi->mesh);
-        mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
+        mesh_instance_transforms.push_back(mi->model_instance->transform);
         for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
             const RenderMeshInstance& cmi = mesh_instances.at(i);
 
             if(mi->mesh != cmi.mesh) {
                 mi = &cmi;
                 cmd = &draw_commands.emplace_back();
-                cmd->indexCount = meshes.at(*mi->mesh).index_count;
+                cmd->indexCount = mi->mesh->index_count;
                 cmd->instanceCount = 1;
-                cmd->firstIndex =
-                    meshes.at(*mi->mesh).index_offset + models.get(model_instances.get(mi->model_instance).model).first_index;
+                cmd->firstIndex = mi->mesh->index_offset + mi->model_instance->model->first_index;
                 cmd->firstInstance = i;
-                cmd->vertexOffset = models.get(model_instances.get(mi->model_instance).model).first_vertex +
-                                    meshes.at(*mi->mesh).vertex_offset;
+                cmd->vertexOffset = mi->model_instance->model->first_vertex + mi->mesh->vertex_offset;
             } else {
                 ++cmd->instanceCount;
             }
 
             mesh_instance_mesh_ids.push_back(*mi->mesh);
-            mesh_instance_transforms.push_back(model_instances.get(mi->model_instance).transform);
+            mesh_instance_transforms.push_back(mi->model_instance->transform);
         }
 
         draw_header.draw_count = draw_commands.size();
@@ -1057,22 +1109,20 @@ void RendererVulkan::upload_transforms() {
     transforms.reserve(mesh_instances.size());
 
     std::transform(mesh_instances.begin(), mesh_instances.end(), std::back_inserter(transforms),
-                   [this](const RenderMeshInstance& inst) { return model_instances.get(inst.model_instance).transform; });
+                   [this](const RenderMeshInstance& inst) { return inst.model_instance->transform; });
 
     mesh_instance_transform_buffer[1]->push_data(transforms, 0);
     std::swap(mesh_instance_transform_buffer[0], mesh_instance_transform_buffer[1]);
 }
 
 void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 transform) {
-    const auto handle = Handle<RenderModelInstance>{ *model };
-    auto& instance = model_instances.get(handle);
-    instance.transform = transform;
+    model->transform = transform;
     // ENG_WARN("FIX THIS METHOD");
     //  TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
     //  memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
     //        sizeof(transform));
-    if(instance.flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::REFIT_TLAS; }
-    upload_positions.emplace_back(handle, transform);
+    if(model->flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::REFIT_TLAS; }
+    upload_positions.emplace_back(Handle<RenderModelInstance>{ *model }, transform);
     flags |= RendererFlags::UPDATE_MESH_POSITIONS;
 }
 
@@ -1268,15 +1318,16 @@ void RendererVulkan::create_rt_output_image() {
 
 void RendererVulkan::build_blas() {
     std::vector<const RenderModel*> dirty_models;
-    std::vector<RenderModelRTMetadata*> dirty_rt_metadatas;
+    std::vector<Handle<RenderModelRTMetadata>> dirty_rt_metadatas;
     uint32_t total_dirty_meshes = 0;
-    for(uint32_t i = 0; i < models.size(); ++i) {
-        if(models.at(i).flags & RenderModelFlags::DIRTY_BLAS) {
+
+    for(auto& model : models) {
+        if(model.flags & RenderModelFlags::DIRTY_BLAS) {
             // TODO: Maybe move it to the end, when the building is finished
-            dirty_models.push_back(&models.at(i));
-            dirty_rt_metadatas.push_back(&rt_metadata.at(i));
-            total_dirty_meshes += models.at(i).mesh_count;
-            models.at(i).flags ^= RenderModelFlags::DIRTY_BLAS;
+            dirty_models.push_back(&model);
+            dirty_rt_metadatas.push_back(model.rt_metadata);
+            total_dirty_meshes += model.mesh_count;
+            model.flags ^= RenderModelFlags::DIRTY_BLAS;
         }
     }
 
@@ -1303,7 +1354,7 @@ void RendererVulkan::build_blas() {
 
     for(uint32_t i = 0; i < dirty_models.size(); ++i) {
         const RenderModel& model = *dirty_models.at(i);
-        RenderModelRTMetadata& meta = *dirty_rt_metadatas.at(i);
+        Handle<RenderModelRTMetadata> meta = dirty_rt_metadatas.at(i);
 
         for(uint32_t j = 0; j < model.mesh_count; ++j) {
             const RenderMesh& mesh = meshes.at(model.first_mesh + j);
@@ -1326,17 +1377,17 @@ void RendererVulkan::build_blas() {
                                                 &max_primitive_counts.at(max_primitive_counts.size() - model.mesh_count),
                                                 &build_size_info);
 
-        meta.blas_buffer =
+        meta->blas_buffer =
             Buffer{ "blas_buffer", build_size_info.accelerationStructureSize,
                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
         scratch_sizes.push_back(align_up(build_size_info.buildScratchSize,
                                          static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment)));
 
         vks::AccelerationStructureCreateInfoKHR blas_info;
-        blas_info.buffer = meta.blas_buffer.buffer;
+        blas_info.buffer = meta->blas_buffer.buffer;
         blas_info.size = build_size_info.accelerationStructureSize;
         blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-        VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &meta.blas));
+        VK_CHECK(vkCreateAccelerationStructureKHR(dev, &blas_info, nullptr, &meta->blas));
     }
 
     const auto total_scratch_size = std::accumulate(scratch_sizes.begin(), scratch_sizes.end(), 0ul);
@@ -1345,10 +1396,10 @@ void RendererVulkan::build_blas() {
 
     for(uint32_t i = 0, offset = 0; i < dirty_models.size(); ++i) {
         const RenderModel& model = *dirty_models.at(i);
-        RenderModelRTMetadata& meta = *dirty_rt_metadatas.at(i);
+        Handle<RenderModelRTMetadata> meta = dirty_rt_metadatas.at(i);
 
         build_geometries.at(i).scratchData.deviceAddress = scratch_buffer.bda + offset;
-        build_geometries.at(i).dstAccelerationStructure = meta.blas;
+        build_geometries.at(i).dstAccelerationStructure = meta->blas;
         offset += scratch_sizes.at(i);
 
         for(uint32_t j = 0; j < model.mesh_count; ++j) {
@@ -1389,7 +1440,7 @@ void RendererVulkan::build_tlas() {
         instance.mask = render_model_instances.at(i)->tlas_instance_mask;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
+        instance.accelerationStructureReference = render_model_instances.at(i)->model->rt_metadata->blas_buffer.bda;
     }
 
     tlas_instance_buffer =
@@ -1465,7 +1516,7 @@ void RendererVulkan::refit_tlas() {
         instance.mask = render_model_instances.at(i)->tlas_instance_mask;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = rt_metadata.at(*render_model_instances.at(i)->model).blas_buffer.bda;
+        instance.accelerationStructureReference = render_model_instances.at(i)->model->rt_metadata->blas_buffer.bda;
     }
 
     if(tlas_instance_buffer.capacity != instances.size() * sizeof(instances[0])) {
@@ -1511,7 +1562,6 @@ void RendererVulkan::refit_tlas() {
 
 void RendererVulkan::prepare_ddgi() {
     for(auto& mi : model_instances) {
-        auto& m = models.at(*mi.model);
         BoundingBox aabb{ .min = model_bbs.at(*mi.model).min * mi.transform, .max = model_bbs.at(*mi.model).max * mi.transform };
         scene_bounding_box.min = aabb.min;
         scene_bounding_box.max = aabb.max;
@@ -1580,34 +1630,37 @@ void RendererVulkan::prepare_ddgi() {
     submit_recording(gq, { { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
-                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     ddgi_debug_probe_offsets_buffer =
         Buffer{ "ddgi debug probe offsets buffer", sizeof(glm::vec3) * num_probes,
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
 
-    DDGI_Buffer* ddgi_buffer_mapped = static_cast<DDGI_Buffer*>(ddgi_buffer.mapped);
-    ddgi_buffer_mapped->radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height };
-    ddgi_buffer_mapped->irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture.width, ddgi.irradiance_texture.height };
-    ddgi_buffer_mapped->visibility_tex_size = glm::ivec2{ ddgi.visibility_texture.width, ddgi.visibility_texture.height };
-    ddgi_buffer_mapped->probe_offset_tex_size = glm::ivec2{ ddgi.probe_offsets_texture.width, ddgi.probe_offsets_texture.height };
-    ddgi_buffer_mapped->probe_start = ddgi.probe_dims.min;
-    ddgi_buffer_mapped->probe_counts = ddgi.probe_counts;
-    ddgi_buffer_mapped->probe_walk = ddgi.probe_walk;
-    ddgi_buffer_mapped->min_probe_distance = 0.01f;
-    ddgi_buffer_mapped->max_probe_distance = 20.0f;
-    ddgi_buffer_mapped->min_dist = 0.1f;
-    ddgi_buffer_mapped->max_dist = 20.0f;
-    ddgi_buffer_mapped->normal_bias = 0.08f;
-    ddgi_buffer_mapped->max_probe_offset = 0.5f;
-    ddgi_buffer_mapped->frame_num = 0;
-    ddgi_buffer_mapped->irradiance_probe_side = ddgi.irradiance_probe_side;
-    ddgi_buffer_mapped->visibility_probe_side = ddgi.visibility_probe_side;
-    ddgi_buffer_mapped->rays_per_probe = ddgi.rays_per_probe;
+    DDGI_Buffer ddgi_gpu_settings{
+        .radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height },
+        .irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture.width, ddgi.irradiance_texture.height },
+        .visibility_tex_size = glm::ivec2{ ddgi.visibility_texture.width, ddgi.visibility_texture.height },
+        .probe_offset_tex_size = glm::ivec2{ ddgi.probe_offsets_texture.width, ddgi.probe_offsets_texture.height },
+        .probe_start = ddgi.probe_dims.min,
+        .probe_counts = ddgi.probe_counts,
+        .probe_walk = ddgi.probe_walk,
+        .min_probe_distance = 0.01f,
+        .max_probe_distance = 20.0f,
+        .min_dist = 0.1f,
+        .max_dist = 20.0f,
+        .normal_bias = 0.08f,
+        .max_probe_offset = 0.5f,
+        .frame_num = 0,
+        .irradiance_probe_side = ddgi.irradiance_probe_side,
+        .visibility_probe_side = ddgi.visibility_probe_side,
+        .rays_per_probe = ddgi.rays_per_probe,
+    };
 #if 0
     ddgi_buffer_mapped->debug_probe_offsets_buffer = ddgi_debug_probe_offsets_buffer.bda;
 #endif
 
-    if(ddgi.probe_counts.y == 1) { ddgi_buffer_mapped->probe_start.y += ddgi.probe_walk.y * 0.5f; }
+    if(ddgi.probe_counts.y == 1) { ddgi_gpu_settings.probe_start.y += ddgi.probe_walk.y * 0.5f; }
+
+    staging.send_to(ddgi_buffer.buffer, 0, &ddgi_gpu_settings, sizeof(ddgi_gpu_settings));
 
     vkQueueWaitIdle(gq);
 }
@@ -1718,7 +1771,6 @@ void RendererVulkan::reset_command_pool(VkCommandPool pool) {
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
              VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
     vks::ImageCreateInfo iinfo;
 
     int dims = -1;
@@ -1742,7 +1794,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     VmaAllocationCreateInfo vmainfo{};
     vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VK_CHECK(vmaCreateImage(renderer->vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
+    VK_CHECK(vmaCreateImage(get_renderer().vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
 
     _deduce_aspect(usage);
     _create_default_view(dims, usage);
@@ -1754,8 +1806,6 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
 Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
              uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     int dims = -1;
     if(width > 1) { ++dims; }
     if(height > 1) { ++dims; }
@@ -1772,7 +1822,7 @@ Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t he
 void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                               VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined,
                               VkImageLayout dst_layout) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
+
     vks::ImageMemoryBarrier2 imgb;
     imgb.image = image;
     imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
@@ -1814,8 +1864,6 @@ void Image::_deduce_aspect(VkImageUsageFlags usage) {
 }
 
 void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
 
     vks::ImageViewCreateInfo ivinfo;
@@ -1825,12 +1873,10 @@ void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
     ivinfo.format = format;
     ivinfo.subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
 
-    VK_CHECK(vkCreateImageView(renderer->dev, &ivinfo, nullptr, &view));
+    VK_CHECK(vkCreateImageView(get_renderer().dev, &ivinfo, nullptr, &view));
 }
 
 RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     std::vector<VkDescriptorSetLayout> vk_layouts;
     std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
     std::vector<std::vector<VkDescriptorBindingFlags>> binding_flags;
@@ -1853,7 +1899,7 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
         info.flags = descriptor_layout_flags.at(i);
         info.pNext = &flags_info;
 
-        VK_CHECK(vkCreateDescriptorSetLayout(renderer->dev, &info, nullptr, &desc_layout.layout));
+        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &info, nullptr, &desc_layout.layout));
 
         vk_layouts.push_back(desc_layout.layout);
         bindings.push_back(desc_layout.bindings);
@@ -1873,7 +1919,7 @@ RendererPipelineLayout RendererPipelineLayoutBuilder::build() {
     layout_info.pSetLayouts = vk_layouts.data();
 
     VkPipelineLayout layout;
-    VK_CHECK(vkCreatePipelineLayout(renderer->dev, &layout_info, nullptr, &layout));
+    VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &layout_info, nullptr, &layout));
 
     return RendererPipelineLayout{ layout,
                                    { vk_layouts.begin(), vk_layouts.end() },
@@ -1974,8 +2020,6 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     pDynamicRendering.depthAttachmentFormat = depth_attachment_format;
     pDynamicRendering.stencilAttachmentFormat = stencil_attachment_format;
 
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     vks::GraphicsPipelineCreateInfo info;
     info.stageCount = pStages.size();
     info.pStages = pStages.data();
@@ -1992,7 +2036,7 @@ VkPipeline RendererGraphicsPipelineBuilder::build() {
     info.pNext = &pDynamicRendering;
 
     VkPipeline pipeline;
-    VK_CHECK(vkCreateGraphicsPipelines(renderer->dev, nullptr, 1, &info, nullptr, &pipeline));
+    VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
 
     return pipeline;
 }
@@ -2026,8 +2070,6 @@ DescriptorSetWriter& DescriptorSetWriter::write(uint32_t binding, uint32_t array
 }
 
 bool DescriptorSetWriter::update(VkDescriptorSet set, const RendererPipelineLayout& layout, uint32_t set_idx) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     const std::vector<VkDescriptorSetLayoutBinding>& set_bindings = layout.bindings.at(set_idx);
 
     std::vector<std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, vks::WriteDescriptorSetAccelerationStructureKHR>> write_infos;
@@ -2068,7 +2110,7 @@ bool DescriptorSetWriter::update(VkDescriptorSet set, const RendererPipelineLayo
                    wd.payload);
     }
 
-    vkUpdateDescriptorSets(renderer->dev, write_sets.size(), write_sets.data(), 0, nullptr);
+    vkUpdateDescriptorSets(get_renderer().dev, write_sets.size(), write_sets.data(), 0, nullptr);
     return true;
 }
 
@@ -2109,10 +2151,8 @@ VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
         return s;
     }
 
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     VkSampler sampler;
-    VK_CHECK(vkCreateSampler(renderer->dev, &info, nullptr, &sampler));
+    VK_CHECK(vkCreateSampler(get_renderer().dev, &info, nullptr, &sampler));
 
     samplers.emplace_back(info, sampler);
     return sampler;
@@ -2120,8 +2160,6 @@ VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
 
 VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RendererPipelineLayout& layout, uint32_t set,
                                                         uint32_t max_sets, VkDescriptorPoolCreateFlags flags) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     const std::vector<VkDescriptorSetLayoutBinding>& bindings = layout.bindings.at(set);
     const std::vector<VkDescriptorBindingFlags>& binding_flags = layout.binding_flags.at(set);
 
@@ -2149,13 +2187,11 @@ VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RendererPipelineLa
     info.poolSizeCount = sizes.size();
     info.pPoolSizes = sizes.data();
     VkDescriptorPool& pool = pools.emplace_back();
-    VK_CHECK(vkCreateDescriptorPool(renderer->dev, &info, nullptr, &pool));
+    VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &info, nullptr, &pool));
     return pool;
 }
 
 VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-
     vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_info;
     variable_info.descriptorSetCount = 1;
     variable_info.pDescriptorCounts = &variable_count;
@@ -2167,12 +2203,11 @@ VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkD
     if(variable_count > 0) { info.pNext = &variable_info; }
 
     VkDescriptorSet set;
-    VK_CHECK(vkAllocateDescriptorSets(renderer->dev, &info, &set));
+    VK_CHECK(vkAllocateDescriptorSets(get_renderer().dev, &info, &set));
 
     return set;
 }
 
 void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
-    RendererVulkan* renderer = static_cast<RendererVulkan*>(Engine::renderer());
-    VK_CHECK(vkResetDescriptorPool(renderer->dev, pool, {}));
+    VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
 }

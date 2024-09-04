@@ -10,9 +10,15 @@
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
 #include "handle_vector.hpp"
+#include "gpu_staging_manager.hpp"
+#include "engine.hpp"
 
 #define VK_CHECK(func)                                                                                                 \
     if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
+
+template <class... Ts> struct Visitor : Ts... {
+    using Ts::operator()...;
+};
 
 enum class RendererFlags : uint32_t {
     DIRTY_MODEL_INSTANCES = 0x1,
@@ -30,6 +36,7 @@ class Buffer {
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
     Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
+    Buffer(const std::string& name, const vks::BufferCreateInfo& create_info, const VmaAllocationCreateInfo& alloc_info);
 
     Buffer(Buffer&& other) noexcept;
     Buffer& operator=(Buffer&& other) noexcept;
@@ -88,10 +95,12 @@ struct Vertex {
 };
 
 struct RenderMaterial {
-    std::optional<uint32_t> color_texture;
-    std::optional<uint32_t> normal_texture;
+    uint32_t color_texture;
+    uint32_t normal_texture;
 };
 
+// offsets and material are offsets relative to the model, not whole array
+// thus, to calculate correct global vector index, do: mesh->model.first_vertex + mesh.vertex_offset
 struct RenderMesh {
     uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
@@ -100,8 +109,14 @@ struct RenderMesh {
     uint32_t material{ 0 };
 };
 
+struct RenderModelRTMetadata {
+    VkAccelerationStructureKHR blas{};
+    Buffer blas_buffer{};
+};
+
 struct RenderModel {
     Flags<RenderModelFlags> flags{};
+    Handle<RenderModelRTMetadata> rt_metadata;
     uint32_t first_vertex{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t first_index{ 0 };
@@ -112,11 +127,6 @@ struct RenderModel {
     uint32_t material_count{ 0 };
     uint32_t first_texture{ 0 };
     uint32_t texture_count{ 0 };
-};
-
-struct RenderModelRTMetadata {
-    VkAccelerationStructureKHR blas{};
-    Buffer blas_buffer{};
 };
 
 struct RenderModelInstance {
@@ -532,11 +542,6 @@ class ImageStatefulBarrier {
     VkAccessFlags2 current_access;
 };
 
-template <class... Ts> struct Visitor : Ts... {
-    using Ts::operator()...;
-};
-template <class... Ts> Visitor(Ts...) -> Visitor<Ts...>;
-
 class RendererVulkan : public Renderer {
     struct BoundingBox {
         glm::vec3 center() const { return (max + min) * 0.5f; }
@@ -594,7 +599,7 @@ class RendererVulkan : public Renderer {
 
     void render() final;
 
-    HandleBatchedModel batch_model(ImportedModel& model, BatchSettings settings) final;
+    HandleBatchedModel batch_model(const ImportedModel& model, BatchSettings settings) final;
     HandleInstancedModel instance_model(HandleBatchedModel model, InstanceSettings settings) final;
     void upload_model_textures();
     void upload_staged_models();
@@ -650,6 +655,8 @@ class RendererVulkan : public Renderer {
     };
     std::vector<CommandBuffer> command_buffers;
 
+    GpuStagingManager staging;
+
     SamplerStorage samplers;
 
     BoundingBox scene_bounding_box;
@@ -688,7 +695,7 @@ class RendererVulkan : public Renderer {
     std::vector<RenderMaterial> materials;
     std::vector<Image> textures;
     std::vector<BoundingBox> model_bbs;
-    std::vector<RenderModelRTMetadata> rt_metadata;
+    HandleVector<RenderModelRTMetadata> rt_metadata;
 
     HandleVector<RenderModelInstance> model_instances;
     std::vector<RenderMeshInstance> mesh_instances;

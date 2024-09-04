@@ -74,7 +74,14 @@ target_compile_definitions(imgui
         IMGUI_IMPL_VULKAN_USE_VOLK
 )
 
-add_executable(vkrt main.cpp "model_importer.cpp" "engine.cpp"  "renderer_vulkan.cpp" "camera.cpp")
+add_executable(vkrt 
+    "main.cpp"
+    "model_importer.cpp" 
+    "engine.cpp"  
+    "renderer_vulkan.cpp" 
+    "camera.cpp"
+    "gpu_staging_manager.cpp"
+)
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
