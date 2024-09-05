@@ -489,7 +489,7 @@ void RendererVulkan::initialize_imgui() {
     auto cmdimgui = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ImGui_ImplVulkan_CreateFontsTexture();
     end_recording(cmdimgui);
-    scheduler_gq.enqueue({ { cmdimgui } });
+    scheduler_gq.enqueue_wait_submit({ { cmdimgui } });
     vkQueueWaitIdle(gq);
 }
 
@@ -501,42 +501,6 @@ static std::vector<glm::mat4x3> original_transforms;
 static HandleBatchedModel sphere;
 
 void RendererVulkan::render() {
-    if(num_frame == 0 && false) {
-        ImportedModel import_sphere = ModelImporter::import_model("sphere", "sphere/sphere.glb");
-        sphere = Engine::renderer()->batch_model(import_sphere, { .flags = BatchFlags::RAY_TRACED });
-    }
-
-#if 0 // Probe visualization and position offset update 
-    if(num_frame == 1) {
-        const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
-        const auto num_probes_xy = ddgi.probe_counts.x * ddgi.probe_counts.y;
-
-        for(uint32_t i = 0; i < num_probes; ++i) {
-            const auto x = i % ddgi.probe_counts.x;
-            const auto y = (i % num_probes_xy) / ddgi.probe_counts.x;
-            const auto z = i / num_probes_xy;
-            const auto probe_pos = ddgi.probe_dims.min + glm::vec3(x, y, z) * ddgi.probe_walk;
-
-            const auto transform = glm::translate(glm::mat4{ 1.0f }, probe_pos);
-            original_transforms.push_back(transform);
-            probe_visualizers.push_back(instance_model(sphere, InstanceSettings{
-                                                                   .flags = InstanceFlags::RAY_TRACED_BIT,
-                                                                   .transform = transform,
-                                                                   .tlas_instance_mask = 0x1,
-                                                               }));
-        }
-    }
-
-    if(num_frame >= 1 && 0 == 1) {
-        for(uint32_t i = 0; i < probe_visualizers.size(); ++i) {
-            const auto off = static_cast<glm::vec3*>(ddgi_debug_probe_offsets_buffer.mapped)[i];
-            const auto orig = original_transforms.at(i)[3];
-            float interp = glm::clamp(float(num_frame % 1500) / 1500.0f * 3.0f, 0.0f, 1.0f);
-            update_transform(probe_visualizers.at(i), (glm::translate(glm::mat4{ 1.0f }, glm::mix(orig, orig + off, interp))));
-        }
-    }
-#endif
-
     reset_command_pool(cmdpool);
     if(flags & RendererFlags::DIRTY_MODEL_BATCHES) {
         upload_staged_models();
@@ -811,7 +775,7 @@ void RendererVulkan::render() {
 
         vkEndCommandBuffer(cmd);
 
-        scheduler_gq.enqueue(RecordingSubmitInfo{
+        scheduler_gq.enqueue_wait_submit(RecordingSubmitInfo{
             .buffers = { cmd },
             .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
             .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
@@ -976,7 +940,7 @@ void RendererVulkan::upload_model_textures() {
     }
 
     end_recording(cmd);
-    scheduler_gq.enqueue({ { cmd } });
+    scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkQueueWaitIdle(gq);
 }
 void RendererVulkan::upload_staged_models() {
@@ -1313,7 +1277,7 @@ void RendererVulkan::create_rt_output_image() {
     rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     end_recording(cmd);
-    scheduler_gq.enqueue({ { cmd } });
+    scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkQueueWaitIdle(gq);
 }
 
@@ -1423,7 +1387,7 @@ void RendererVulkan::build_blas() {
     }
     vkCmdBuildAccelerationStructuresKHR(cmd, build_geometries.size(), build_geometries.data(), poffsets.data());
     end_recording(cmd);
-    scheduler_gq.enqueue({ { cmd } });
+    scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
 
@@ -1497,7 +1461,7 @@ void RendererVulkan::build_tlas() {
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     end_recording(cmd);
-    scheduler_gq.enqueue({ { cmd } });
+    scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = std::move(buffer_tlas);
@@ -1559,7 +1523,7 @@ void RendererVulkan::refit_tlas() {
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     end_recording(cmd);
-    scheduler_gq.enqueue({ { cmd } });
+    scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
 
@@ -1630,7 +1594,7 @@ void RendererVulkan::prepare_ddgi() {
                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
 
     end_recording(cmd);
-    scheduler_gq.enqueue({ { cmd } });
+    scheduler_gq.enqueue_wait_submit({ { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
@@ -2151,9 +2115,32 @@ ThreadedQueueScheduler::ThreadedQueueScheduler(VkQueue queue) : scheduler{ queue
     submit_thread_stop_token = submit_thread.get_stop_token();
 }
 
-void ThreadedQueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
+ThreadedQueueScheduler::ThreadedQueueScheduler(ThreadedQueueScheduler&& other) noexcept { *this = std::move(other); }
+
+ThreadedQueueScheduler& ThreadedQueueScheduler::operator=(ThreadedQueueScheduler&& other) noexcept {
+    if(scheduler.vkqueue) {
+        if(submit_thread_stop_token.stop_possible()) { submit_thread.request_stop(); }
+        submit_thread.join();
+    }
+
+    scheduler = std::move(other.scheduler);
+    submit_queue = std::move(other.submit_queue);
+    submit_thread = std::jthread{ &ThreadedQueueScheduler::submit_thread_func, this };
+    submit_thread_stop_token = submit_thread.get_stop_token();
+    return *this;
+}
+
+ThreadedQueueScheduler::~ThreadedQueueScheduler() noexcept { submit_thread_cvar.notify_one(); }
+
+std::shared_ptr<std::latch> ThreadedQueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
     std::scoped_lock lock{ submit_queue_mutex };
-    submit_queue.push_back(std::make_pair(info, fence));
+    submit_queue.push_back(QueueItem{ info, fence, std::make_shared<std::latch>(1) });
+    submit_thread_cvar.notify_one();
+    return submit_queue.back().on_submit_latch;
+}
+
+void ThreadedQueueScheduler::enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence) {
+    enqueue(info, fence)->wait();
 }
 
 void ThreadedQueueScheduler::submit_thread_func() {
@@ -2167,12 +2154,13 @@ void ThreadedQueueScheduler::submit_thread_func() {
             return;
         }
 
-        std::vector<std::pair<RecordingSubmitInfo, VkFence>> submits = std::move(submit_queue);
+        std::vector<QueueItem> submits = std::move(submit_queue);
         submit_queue.clear();
         lock.unlock();
 
         for(uint32_t i = 0; i < submits.size(); ++i) {
-            scheduler.enqueue(submits.at(i).first, submits.at(i).second);
+            scheduler.enqueue(submits.at(i).info, submits.at(i).fence);
+            submits.at(i).on_submit_latch->count_down();
         }
     }
 
@@ -2220,3 +2208,5 @@ void QueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
                                .pSignalSemaphoreInfos = batch.info_signals.data() };
     VK_CHECK(vkQueueSubmit2(vkqueue, 1, &submit_info, fence));
 }
+
+void QueueScheduler::enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence) { enqueue(info, fence); }
