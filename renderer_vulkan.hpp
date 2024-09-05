@@ -4,6 +4,7 @@
 #include <span>
 #include <bitset>
 #include <unordered_set>
+#include <latch>
 #include <vulkan/vulkan.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <glm/mat4x3.hpp>
@@ -548,17 +549,29 @@ class QueueScheduler {
     QueueScheduler(VkQueue queue);
 
     void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+    void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
 
   private:
     VkQueue vkqueue;
+    friend class ThreadedQueueScheduler;
 };
 
 class ThreadedQueueScheduler {
+    struct QueueItem {
+        RecordingSubmitInfo info;
+        VkFence fence;
+        std::shared_ptr<std::latch> on_submit_latch;
+    };
+
   public:
     ThreadedQueueScheduler() = default;
     ThreadedQueueScheduler(VkQueue queue);
+    ThreadedQueueScheduler(ThreadedQueueScheduler&& other) noexcept;
+    ThreadedQueueScheduler& operator=(ThreadedQueueScheduler&& other) noexcept;
+    ~ThreadedQueueScheduler() noexcept;
 
-    void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+    std::shared_ptr<std::latch> enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+    void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
 
   private:
     void submit_thread_func();
@@ -568,7 +581,7 @@ class ThreadedQueueScheduler {
     std::stop_token submit_thread_stop_token;
     std::mutex submit_queue_mutex;
     std::condition_variable submit_thread_cvar;
-    std::vector<std::pair<RecordingSubmitInfo, VkFence>> submit_queue;
+    std::vector<QueueItem> submit_queue;
 };
 
 class RendererVulkan : public Renderer {
