@@ -542,6 +542,35 @@ class ImageStatefulBarrier {
     VkAccessFlags2 current_access;
 };
 
+class QueueScheduler {
+  public:
+    QueueScheduler() = default;
+    QueueScheduler(VkQueue queue);
+
+    void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+
+  private:
+    VkQueue vkqueue;
+};
+
+class ThreadedQueueScheduler {
+  public:
+    ThreadedQueueScheduler() = default;
+    ThreadedQueueScheduler(VkQueue queue);
+
+    void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+
+  private:
+    void submit_thread_func();
+
+    QueueScheduler scheduler;
+    std::jthread submit_thread;
+    std::stop_token submit_thread_stop_token;
+    std::mutex submit_queue_mutex;
+    std::condition_variable submit_thread_cvar;
+    std::vector<std::pair<RecordingSubmitInfo, VkFence>> submit_queue;
+};
+
 class RendererVulkan : public Renderer {
     struct BoundingBox {
         glm::vec3 center() const { return (max + min) * 0.5f; }
@@ -618,8 +647,6 @@ class RendererVulkan : public Renderer {
     void prepare_ddgi();
 
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
-    void submit_recording(VkQueue queue, const RecordingSubmitInfo& info, VkFence fence = nullptr);
-    void submit_recordings(VkQueue queue, const std::vector<RecordingSubmitInfo>& submits, VkFence fence = nullptr);
     void end_recording(VkCommandBuffer buffer);
     void reset_command_pool(VkCommandPool pool);
 
@@ -640,8 +667,9 @@ class RendererVulkan : public Renderer {
     vks::PhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     vks::PhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
-    uint32_t gqi, pqi;
-    VkQueue gq, pq;
+    QueueScheduler scheduler_gq;
+    uint32_t gqi, pqi, tqi1;
+    VkQueue gq, pq, tq1;
 
     VkSwapchainKHR swapchain;
     std::vector<Image> swapchain_images;

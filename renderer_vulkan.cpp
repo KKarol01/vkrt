@@ -343,6 +343,7 @@ void RendererVulkan::initialize_vulkan() {
     gq = vkb_device.get_queue(vkb::QueueType::graphics).value();
     pqi = vkb_device.get_queue_index(vkb::QueueType::present).value();
     pq = vkb_device.get_queue(vkb::QueueType::present).value();
+    scheduler_gq = QueueScheduler{ gq };
 
     VmaVulkanFunctions vulkanFunctions = {};
     vulkanFunctions.vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr;
@@ -488,7 +489,7 @@ void RendererVulkan::initialize_imgui() {
     auto cmdimgui = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ImGui_ImplVulkan_CreateFontsTexture();
     end_recording(cmdimgui);
-    submit_recording(gq, { { cmdimgui } });
+    scheduler_gq.enqueue({ { cmdimgui } });
     vkQueueWaitIdle(gq);
 }
 
@@ -810,11 +811,11 @@ void RendererVulkan::render() {
 
         vkEndCommandBuffer(cmd);
 
-        submit_recording(gq, RecordingSubmitInfo{
-                                 .buffers = { cmd },
-                                 .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
-                                 .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
-                             });
+        scheduler_gq.enqueue(RecordingSubmitInfo{
+            .buffers = { cmd },
+            .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
+            .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
+        });
 
         vks::PresentInfoKHR pinfo;
         pinfo.swapchainCount = 1;
@@ -975,7 +976,7 @@ void RendererVulkan::upload_model_textures() {
     }
 
     end_recording(cmd);
-    submit_recording(gq, { { cmd } });
+    scheduler_gq.enqueue({ { cmd } });
     vkQueueWaitIdle(gq);
 }
 void RendererVulkan::upload_staged_models() {
@@ -986,10 +987,10 @@ void RendererVulkan::upload_staged_models() {
 
     upload_vertices = {};
     upload_indices = {};
-    upload_images = {};
 }
 
 void RendererVulkan::upload_instances() {
+    upload_images = {};
     std::sort(model_instances.begin(), model_instances.end(),
               [](const RenderModelInstance& a, const RenderModelInstance& b) { return a.model < b.model; });
     std::sort(mesh_instances.begin(), mesh_instances.end(), [](const RenderMeshInstance& a, const RenderMeshInstance& b) {
@@ -1312,7 +1313,7 @@ void RendererVulkan::create_rt_output_image() {
     rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     end_recording(cmd);
-    submit_recording(gq, { { cmd } });
+    scheduler_gq.enqueue({ { cmd } });
     vkQueueWaitIdle(gq);
 }
 
@@ -1321,6 +1322,8 @@ void RendererVulkan::build_blas() {
     std::vector<Handle<RenderModelRTMetadata>> dirty_rt_metadatas;
     uint32_t total_dirty_meshes = 0;
 
+    // TODO: Right now it is wrong to iterate over elements inside
+    // HandleVector, if any element was removed from it.
     for(auto& model : models) {
         if(model.flags & RenderModelFlags::DIRTY_BLAS) {
             // TODO: Maybe move it to the end, when the building is finished
@@ -1420,7 +1423,7 @@ void RendererVulkan::build_blas() {
     }
     vkCmdBuildAccelerationStructuresKHR(cmd, build_geometries.size(), build_geometries.data(), poffsets.data());
     end_recording(cmd);
-    submit_recording(gq, { { cmd } });
+    scheduler_gq.enqueue({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
 
@@ -1494,7 +1497,7 @@ void RendererVulkan::build_tlas() {
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     end_recording(cmd);
-    submit_recording(gq, { { cmd } });
+    scheduler_gq.enqueue({ { cmd } });
     vkDeviceWaitIdle(dev);
 
     tlas_buffer = std::move(buffer_tlas);
@@ -1556,7 +1559,7 @@ void RendererVulkan::refit_tlas() {
     auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     end_recording(cmd);
-    submit_recording(gq, { { cmd } });
+    scheduler_gq.enqueue({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
 
@@ -1627,7 +1630,7 @@ void RendererVulkan::prepare_ddgi() {
                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
 
     end_recording(cmd);
-    submit_recording(gq, { { cmd } });
+    scheduler_gq.enqueue({ { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
@@ -1687,76 +1690,6 @@ VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBuf
     VK_CHECK(vkBeginCommandBuffer(cmd, &info));
 
     return cmd;
-}
-
-void RendererVulkan::submit_recording(VkQueue queue, const RecordingSubmitInfo& info, VkFence fence) {
-    std::vector<vks::CommandBufferSubmitInfo> buffer_infos;
-    for(const auto& cmd : info.buffers) {
-        vks::CommandBufferSubmitInfo info;
-        info.commandBuffer = cmd;
-        buffer_infos.push_back(info);
-    }
-
-    std::vector<vks::SemaphoreSubmitInfo> waits(info.waits.size());
-    for(uint32_t i = 0u; i < info.waits.size(); ++i) {
-        waits.at(i).semaphore = info.waits.at(i).first;
-        waits.at(i).stageMask = info.waits.at(i).second;
-    }
-
-    std::vector<vks::SemaphoreSubmitInfo> signals(info.signals.size());
-    for(uint32_t i = 0u; i < info.signals.size(); ++i) {
-        signals.at(i).semaphore = info.signals.at(i).first;
-        signals.at(i).stageMask = info.signals.at(i).second;
-    }
-
-    vks::SubmitInfo2 submit_info;
-    submit_info.commandBufferInfoCount = buffer_infos.size();
-    submit_info.pCommandBufferInfos = buffer_infos.data();
-    submit_info.waitSemaphoreInfoCount = waits.size();
-    submit_info.pWaitSemaphoreInfos = waits.data();
-    submit_info.signalSemaphoreInfoCount = signals.size();
-    submit_info.pSignalSemaphoreInfos = signals.data();
-
-    VK_CHECK(vkQueueSubmit2(queue, 1, &submit_info, fence));
-}
-
-void RendererVulkan::submit_recordings(VkQueue queue, const std::vector<RecordingSubmitInfo>& submits, VkFence fence) {
-    std::vector<vks::SubmitInfo2> infos(submits.size());
-    std::vector<std::vector<vks::CommandBufferSubmitInfo>> buffer_submits(submits.size());
-    std::vector<std::vector<vks::SemaphoreSubmitInfo>> wait_submits(submits.size());
-    std::vector<std::vector<vks::SemaphoreSubmitInfo>> signal_submits(submits.size());
-
-    for(uint32_t i = 0; i < submits.size(); ++i) {
-        const auto& buffers = submits.at(i).buffers;
-        const auto& waits = submits.at(i).waits;
-        const auto& signals = submits.at(i).signals;
-
-        buffer_submits.at(i).resize(buffers.size());
-        for(uint32_t j = 0; j < buffers.size(); ++j) {
-            buffer_submits.at(i).at(j).commandBuffer = buffers.at(j);
-        }
-
-        wait_submits.at(i).resize(waits.size());
-        for(uint32_t j = 0; j < waits.size(); ++j) {
-            wait_submits.at(i).at(j).semaphore = waits.at(j).first;
-            wait_submits.at(i).at(j).stageMask = waits.at(j).second;
-        }
-
-        signal_submits.at(i).resize(signals.size());
-        for(uint32_t j = 0; j < signals.size(); ++j) {
-            signal_submits.at(i).at(j).semaphore = signals.at(j).first;
-            signal_submits.at(i).at(j).stageMask = signals.at(j).second;
-        }
-
-        infos.at(i).commandBufferInfoCount = buffer_submits.at(i).size();
-        infos.at(i).pCommandBufferInfos = buffer_submits.at(i).data();
-        infos.at(i).waitSemaphoreInfoCount = wait_submits.at(i).size();
-        infos.at(i).pWaitSemaphoreInfos = wait_submits.at(i).data();
-        infos.at(i).signalSemaphoreInfoCount = signal_submits.at(i).size();
-        infos.at(i).pSignalSemaphoreInfos = signal_submits.at(i).data();
-    }
-
-    VK_CHECK(vkQueueSubmit2(queue, infos.size(), infos.data(), fence));
 }
 
 void RendererVulkan::end_recording(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
@@ -2210,4 +2143,80 @@ VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkD
 
 void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
     VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
+}
+
+ThreadedQueueScheduler::ThreadedQueueScheduler(VkQueue queue) : scheduler{ queue } {
+    assert(queue);
+    submit_thread = std::jthread{ &ThreadedQueueScheduler::submit_thread_func, this };
+    submit_thread_stop_token = submit_thread.get_stop_token();
+}
+
+void ThreadedQueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
+    std::scoped_lock lock{ submit_queue_mutex };
+    submit_queue.push_back(std::make_pair(info, fence));
+}
+
+void ThreadedQueueScheduler::submit_thread_func() {
+    while(!submit_thread_stop_token.stop_requested()) {
+        std::unique_lock lock{ submit_queue_mutex };
+        submit_thread_cvar.wait(lock,
+                                [this]() { return !submit_queue.empty() || submit_thread_stop_token.stop_requested(); });
+
+        if(submit_thread_stop_token.stop_requested()) {
+            lock.unlock();
+            return;
+        }
+
+        std::vector<std::pair<RecordingSubmitInfo, VkFence>> submits = std::move(submit_queue);
+        submit_queue.clear();
+        lock.unlock();
+
+        for(uint32_t i = 0; i < submits.size(); ++i) {
+            scheduler.enqueue(submits.at(i).first, submits.at(i).second);
+        }
+    }
+
+    ENG_LOG("Threaded queue scheduler safely stopping");
+}
+
+QueueScheduler::QueueScheduler(VkQueue queue) : vkqueue{ queue } { assert(queue); }
+
+void QueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
+    struct BatchedSubmits {
+        std::vector<vks::CommandBufferSubmitInfo> info_submits;
+        std::vector<vks::SemaphoreSubmitInfo> info_waits;
+        std::vector<vks::SemaphoreSubmitInfo> info_signals;
+    };
+
+    BatchedSubmits batch;
+    batch.info_submits.reserve(info.buffers.size());
+    batch.info_waits.reserve(info.waits.size());
+    batch.info_signals.reserve(info.signals.size());
+
+    for(auto& e : info.buffers) {
+        vks::CommandBufferSubmitInfo info;
+        info.commandBuffer = e;
+        batch.info_submits.push_back(info);
+    }
+    for(auto& e : info.waits) {
+        vks::SemaphoreSubmitInfo info;
+        info.semaphore = e.first;
+        info.stageMask = e.second;
+        batch.info_waits.push_back(info);
+    }
+    for(auto& e : info.signals) {
+        vks::SemaphoreSubmitInfo info;
+        info.semaphore = e.first;
+        info.stageMask = e.second;
+        batch.info_signals.push_back(info);
+    }
+
+    VkSubmitInfo2 submit_info{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+                               .waitSemaphoreInfoCount = (uint32_t)batch.info_waits.size(),
+                               .pWaitSemaphoreInfos = batch.info_waits.data(),
+                               .commandBufferInfoCount = (uint32_t)batch.info_submits.size(),
+                               .pCommandBufferInfos = batch.info_submits.data(),
+                               .signalSemaphoreInfoCount = (uint32_t)batch.info_signals.size(),
+                               .pSignalSemaphoreInfos = batch.info_signals.data() };
+    VK_CHECK(vkQueueSubmit2(vkqueue, 1, &submit_info, fence));
 }
