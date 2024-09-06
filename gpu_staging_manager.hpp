@@ -8,6 +8,7 @@
 
 class FreeListAllocator;
 class Buffer;
+class QueueScheduler;
 
 class GpuStagingManager {
     struct Transaction {
@@ -25,24 +26,32 @@ class GpuStagingManager {
 
   public:
     GpuStagingManager() = default;
-    explicit GpuStagingManager(size_t pool_size_bytes);
+    explicit GpuStagingManager(VkQueue queue, uint32_t queue_index, size_t pool_size_bytes);
     ~GpuStagingManager() noexcept;
 
     GpuStagingManager(GpuStagingManager&& other) noexcept;
     GpuStagingManager& operator=(GpuStagingManager&& other) noexcept;
 
     void send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes);
-    void update(VkCommandBuffer cmd);
     bool empty() const { return transactions.empty(); }
 
   private:
     void schedule_upload();
-    void process_uploaded();
-    void submit_uploads(VkCommandBuffer cmd);
+    void submit_uploads();
 
+    VkCommandPool cmdpool{};
+
+    QueueScheduler* submit_queue;
     Buffer* pool_memory;
     FreeListAllocator* pool;
     std::forward_list<Transaction> transactions;
     std::queue<Transaction*> queue;
     std::vector<Upload> uploads;
+
+    std::jthread stage_thread;
+    std::stop_token stop_token;
+    std::mutex queue_mutex;
+    std::condition_variable thread_cvar;
+    std::atomic_int allocated_command_buffers{ 0 };
+    std::atomic_int background_task_count{ 0 };
 };

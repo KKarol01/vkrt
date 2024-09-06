@@ -2,7 +2,10 @@
 #include "free_list_allocator.hpp"
 #include "renderer_vulkan.hpp"
 
-GpuStagingManager::GpuStagingManager(size_t pool_size_bytes) {
+GpuStagingManager::GpuStagingManager(VkQueue queue, uint32_t queue_index, size_t pool_size_bytes)
+    : submit_queue{ new QueueScheduler{ queue } } {
+    assert(submit_queue);
+
     vks::BufferCreateInfo binfo;
     binfo.size = pool_size_bytes;
     binfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -21,10 +24,23 @@ GpuStagingManager::GpuStagingManager(size_t pool_size_bytes) {
         void* alloc = pool->allocate(biggest_size);
         assert(alloc);
         pool->deallocate(alloc);
+
+        stage_thread = std::jthread{ &GpuStagingManager::submit_uploads, this };
+        stop_token = stage_thread.get_stop_token();
     }
+
+    vks::CommandPoolCreateInfo cmdpool_info;
+    cmdpool_info.queueFamilyIndex = queue_index;
+    VK_CHECK(vkCreateCommandPool(RendererVulkan::get()->dev, &cmdpool_info, {}, &cmdpool));
+    assert(cmdpool);
 }
 
 GpuStagingManager::~GpuStagingManager() noexcept {
+    if(stop_token.stop_possible()) {
+        stage_thread.request_stop();
+        thread_cvar.notify_one();
+        if(stage_thread.joinable()) { stage_thread.join(); }
+    }
     if(pool) {
         delete pool;
         pool = nullptr;
@@ -32,6 +48,13 @@ GpuStagingManager::~GpuStagingManager() noexcept {
     if(pool_memory) {
         delete pool_memory;
         pool_memory = nullptr;
+    }
+    delete submit_queue;
+
+    auto* renderer = RendererVulkan::get();
+    if(cmdpool) {
+        vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+        vkDestroyCommandPool(renderer->dev, cmdpool, {});
     }
 }
 
@@ -43,27 +66,26 @@ GpuStagingManager& GpuStagingManager::operator=(GpuStagingManager&& other) noexc
     transactions = std::move(other.transactions);
     queue = std::move(other.queue);
     uploads = std::move(other.uploads);
+    if(other.stage_thread.joinable() && other.stop_token.stop_possible()) {
+        other.stage_thread.request_stop();
+        other.stage_thread.join();
+    }
+    cmdpool = std::exchange(other.cmdpool, nullptr);
+    submit_queue = std::exchange(other.submit_queue, nullptr);
+    stage_thread = std::jthread{ &GpuStagingManager::submit_uploads, this };
+    stop_token = stage_thread.get_stop_token();
     return *this;
 }
 
 void GpuStagingManager::send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes) {
+    std::scoped_lock lock{ queue_mutex };
     transactions.push_front(Transaction{
         .data = { static_cast<const std::byte*>(data), static_cast<const std::byte*>(data) + size_bytes },
         .dst = dst_buffer,
         .uploaded = 0,
     });
     queue.push(&transactions.front());
-}
-
-void GpuStagingManager::update(VkCommandBuffer cmd) {
-    if(!pool) {
-        assert(false && "Pool shouldn't be nullptr when update is called");
-        return;
-    }
-
-    process_uploaded();
-    schedule_upload();
-    submit_uploads(cmd);
+    thread_cvar.notify_one();
 }
 
 void GpuStagingManager::schedule_upload() {
@@ -105,23 +127,78 @@ void GpuStagingManager::schedule_upload() {
     }
 }
 
-void GpuStagingManager::process_uploaded() {
-    for(const auto& e : uploads) {
-        e.t->uploaded += pool->get_alloc_data_size(e.pool_alloc);
-        pool->deallocate(e.pool_alloc);
-    }
+void GpuStagingManager::submit_uploads() {
+    while(!stop_token.stop_requested()) {
+        std::unique_lock lock{ queue_mutex };
+        thread_cvar.wait(lock, [this] { return !queue.empty() || stop_token.stop_requested(); });
 
-    for(auto it = transactions.before_begin(); it != transactions.end(); ++it) {
-        if(auto n = std::next(it); n != transactions.end() && n->uploaded == n->data.size()) {
-            transactions.erase_after(it);
+        if(stop_token.stop_requested()) { return; }
+
+        auto* renderer = RendererVulkan::get();
+
+        if(allocated_command_buffers >= 1024) {
+            while(background_task_count > 0) {
+                background_task_count.wait(background_task_count);
+            }
+            VK_CHECK(vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
+            allocated_command_buffers = 0;
         }
-    }
 
-    uploads.clear();
-}
+        schedule_upload();
+        auto uploads = std::move(this->uploads);
+        this->uploads.clear();
 
-void GpuStagingManager::submit_uploads(VkCommandBuffer cmd) {
-    for(const auto& e : uploads) {
-        vkCmdCopyBuffer(cmd, pool_memory->buffer, e.t->dst, 1, &e.region);
+        lock.unlock();
+
+        if(!uploads.empty()) {
+            VkCommandBuffer cmd{};
+            vks::CommandBufferAllocateInfo alloc_info;
+            alloc_info.commandPool = cmdpool;
+            alloc_info.commandBufferCount = 1;
+            alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            VK_CHECK(vkAllocateCommandBuffers(renderer->dev, &alloc_info, &cmd));
+            if(!cmd) {
+                ENG_WARN("GpuStagingManager could not allocate command buffer.");
+                continue;
+            }
+
+            VkFence fence{};
+            VkFenceCreateInfo fence_info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            VK_CHECK(vkCreateFence(renderer->dev, &fence_info, {}, &fence));
+
+            vks::CommandBufferBeginInfo begin_info;
+            begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
+            for(const auto& e : uploads) {
+                vkCmdCopyBuffer(cmd, pool_memory->buffer, e.t->dst, 1, &e.region);
+            }
+            VK_CHECK(vkEndCommandBuffer(cmd));
+
+            ++allocated_command_buffers;
+
+            submit_queue->enqueue({ { cmd } }, fence);
+
+            std::thread clear_thread{ [&mutex = this->queue_mutex, &pool = this->pool, &transactions = this->transactions,
+                                       &cmdpool = this->cmdpool, &background_task_count = this->background_task_count,
+                                       uploads = std::move(uploads), cmd, fence, renderer = RendererVulkan::get()] {
+                ++background_task_count;
+                VK_CHECK(vkWaitForFences(
+                    renderer->dev, 1, &fence, true,
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{ 100 }).count()));
+
+                std::scoped_lock lock{ mutex };
+                for(const auto& e : uploads) {
+                    e.t->uploaded += pool->get_alloc_data_size(e.pool_alloc);
+                    pool->deallocate(e.pool_alloc);
+                }
+                for(auto it = transactions.begin(); it != transactions.end(); ++it) {
+                    if(auto n = std::next(it); n != transactions.end() && n->uploaded == n->data.size()) {
+                        transactions.erase_after(it);
+                    }
+                }
+                --background_task_count;
+            } };
+            clear_thread.detach();
+        }
     }
 }

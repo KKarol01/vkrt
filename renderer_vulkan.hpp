@@ -633,6 +633,8 @@ class RendererVulkan : public Renderer {
     };
 
   public:
+    static RendererVulkan* get() { return static_cast<RendererVulkan*>(Engine::renderer()); }
+
     void init() final;
 
     void initialize_vulkan();

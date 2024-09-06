@@ -78,6 +78,13 @@ Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, b
     binfo.size = size;
     binfo.usage = usage;
 
+    uint32_t queue_family_indices[]{ get_renderer().gqi, get_renderer().tqi1 };
+    if(queue_family_indices[0] != queue_family_indices[1]) {
+        binfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+        binfo.queueFamilyIndexCount = 2;
+        binfo.pQueueFamilyIndices = queue_family_indices;
+    }
+
     vinfo.usage = VMA_MEMORY_USAGE_AUTO;
     if(map) {
         vinfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
@@ -343,6 +350,12 @@ void RendererVulkan::initialize_vulkan() {
     gq = vkb_device.get_queue(vkb::QueueType::graphics).value();
     pqi = vkb_device.get_queue_index(vkb::QueueType::present).value();
     pq = vkb_device.get_queue(vkb::QueueType::present).value();
+    tqi1 = vkb_device.get_dedicated_queue_index(vkb::QueueType::transfer).has_value()
+               ? vkb_device.get_dedicated_queue_index(vkb::QueueType::transfer).value()
+               : vkb_device.get_queue_index(vkb::QueueType::transfer).value();
+    tq1 = vkb_device.get_dedicated_queue(vkb::QueueType::transfer).has_value()
+              ? vkb_device.get_dedicated_queue(vkb::QueueType::transfer).value()
+              : vkb_device.get_queue(vkb::QueueType::transfer).value();
     scheduler_gq = QueueScheduler{ gq };
 
     VmaVulkanFunctions vulkanFunctions = {};
@@ -411,7 +424,7 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
 
-    staging = GpuStagingManager{ 1024 * 1024 * 64 }; // 64MB
+    staging = GpuStagingManager{ tq1, tqi1, 1024 * 1024 * 64 }; // 64MB
 }
 
 void RendererVulkan::create_swapchain() {
@@ -567,8 +580,6 @@ void RendererVulkan::render() {
         // static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = Engine::frame_num();
 
         auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-        staging.update(cmd);
 
         VkMemoryBarrier mem_barrier{ .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                                      .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
