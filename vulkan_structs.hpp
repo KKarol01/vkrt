@@ -4,14 +4,14 @@
 
 // clang-format off
 namespace vks {
-#ifdef __clang__
+	#define EXPAND(x) x
 	#define INIT_VK_STRUCT_1(name, ...) struct name : public Vk##name { constexpr name(): Vk##name() {} }
-	#define INIT_VK_STRUCT_2(name, type, ...) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
+	#define INIT_VK_STRUCT_2(name, type, ...) struct name : public Vk##name {			\
+		constexpr name() : Vk##name({type}) {}											\
+		constexpr name(const Vk##name& vktype) : Vk##name(vktype) { sType = type; }		\
+	}
 	#define INIT_VK_STRUCT_NAME(ARG1, ARG2, NAME, ...) NAME
-	#define INIT_VK_STRUCT(...) INIT_VK_STRUCT_NAME(__VA_ARGS__, INIT_VK_STRUCT_2, INIT_VK_STRUCT_1)(__VA_ARGS__)
-#elif defined(_MSC_VER)
-	#define INIT_VK_STRUCT(name, type) struct name : public Vk##name { constexpr name() : Vk##name({type}) {} }
-#endif
+	#define INIT_VK_STRUCT(...) EXPAND(INIT_VK_STRUCT_NAME(__VA_ARGS__, INIT_VK_STRUCT_2, INIT_VK_STRUCT_1)(__VA_ARGS__))
 
 	INIT_VK_STRUCT(Win32SurfaceCreateInfoKHR, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
 	INIT_VK_STRUCT(PhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES);

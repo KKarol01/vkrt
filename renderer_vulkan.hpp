@@ -37,7 +37,7 @@ class Buffer {
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
     Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, const vks::BufferCreateInfo& create_info, const VmaAllocationCreateInfo& alloc_info);
+    Buffer(const std::string& name, vks::BufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, uint32_t alignment);
 
     Buffer(Buffer&& other) noexcept;
     Buffer& operator=(Buffer&& other) noexcept;
@@ -698,7 +698,7 @@ class RendererVulkan : public Renderer {
     };
     std::vector<CommandBuffer> command_buffers;
 
-    GpuStagingManager staging;
+    std::unique_ptr<GpuStagingManager> staging;
 
     SamplerStorage samplers;
 

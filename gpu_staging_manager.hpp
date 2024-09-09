@@ -29,8 +29,10 @@ class GpuStagingManager {
     explicit GpuStagingManager(VkQueue queue, uint32_t queue_index, size_t pool_size_bytes);
     ~GpuStagingManager() noexcept;
 
-    GpuStagingManager(GpuStagingManager&& other) noexcept;
-    GpuStagingManager& operator=(GpuStagingManager&& other) noexcept;
+    GpuStagingManager(const GpuStagingManager&) noexcept = delete;
+    GpuStagingManager& operator=(const GpuStagingManager&) noexcept = delete;
+    GpuStagingManager(GpuStagingManager&& other) noexcept = delete;
+    GpuStagingManager& operator=(GpuStagingManager&& other) noexcept = delete;
 
     void send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes);
     bool empty() const { return transactions.empty(); }
