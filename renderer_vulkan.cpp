@@ -95,6 +95,8 @@ Buffer::Buffer(const std::string& name, vks::BufferCreateInfo create_info, VmaAl
         alloc_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     }
 
+    create_info.size = std::max(create_info.size, 1ull);
+
     VmaAllocationInfo vainfo{};
     if(alignment > 1) {
         VK_CHECK(vmaCreateBufferWithAlignment(get_renderer().vma, &create_info, &alloc_info, alignment, &buffer, &alloc, &vainfo));
@@ -126,23 +128,18 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
     size = other.size;
     capacity = other.capacity;
     alignment = other.alignment;
-    buffer = other.buffer;
-    alloc = other.alloc;
-    mapped = other.mapped;
-    bda = other.bda;
+    buffer = std::exchange(other.buffer, nullptr);
+    alloc = std::exchange(other.alloc, nullptr);
+    mapped = std::exchange(other.mapped, nullptr);
+    bda = std::exchange(other.bda, VkDeviceAddress{});
 
     return *this;
 }
 
-bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
-    if(!mapped) {
-        ENG_WARN("Trying to push to an unmapped buffer");
-        return false;
-    }
-
+Buffer::PushResult Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
     if(offset > capacity) {
         ENG_WARN("Provided buffer offset is bigger than the capacity");
-        return false;
+        return std::make_pair(false, std::make_shared<std::latch>(0u));
     }
 
     const auto size_after = offset + data.size_bytes();
@@ -151,29 +148,32 @@ bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
         size_t new_size = std::ceill(static_cast<long double>(capacity) * 1.5l);
         if(new_size < size_after) { new_size = size_after; }
         ENG_LOG("Resizing buffer {}", name);
-        if(!resize(new_size)) { return false; }
+        if(!resize(new_size)) {
+            ENG_LOG("Failed to resize the buffer {}", name);
+            return std::make_pair(false, std::make_shared<std::latch>(0u));
+        }
     }
 
-    memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
+    std::shared_ptr<std::latch> return_latch = std::make_shared<std::latch>(0u);
+
+    if(mapped) {
+        memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
+    } else {
+        return_latch = get_renderer().staging->send_to(buffer, offset, data.data(), data.size_bytes());
+    }
+
+    return_latch->wait();
+
     size = std::max(size, offset + data.size_bytes());
 
-    return true;
+    return std::make_pair(true, return_latch);
 }
 
 bool Buffer::resize(size_t new_size) {
-    if(!mapped) {
-        ENG_WARN("Cannot resize buffer beacuse it is not mapped!");
-        return false;
-    }
-
-    Buffer new_buffer;
-    if(alignment > 1) {
-        new_buffer = Buffer{ name, new_size, alignment, usage, !!mapped };
-    } else if(alignment == 1) {
-        new_buffer = Buffer{ name, new_size, usage, !!mapped };
-    }
-
-    new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
+    Buffer new_buffer{ name, new_size, alignment, usage, !!mapped };
+    const auto ret = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
+    if(!ret.first) { return false; }
+    ret.second->wait();
     *this = std::move(new_buffer);
     return true;
 }
@@ -360,20 +360,19 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
 
     global_buffer =
-        Buffer{ "globals", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+        Buffer{ "globals", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     global_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_projection(), sizeof(glm::mat4), 1 * sizeof(glm::mat4));
     global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_projection()), sizeof(glm::mat4),
                             3 * sizeof(glm::mat4));
 
-    constexpr size_t ONE_MB = 1024ull * 1024ull;
-    vertex_buffer = Buffer{ "vertex_buffer", ONE_MB,
+    vertex_buffer = Buffer{ "vertex_buffer", 0ull,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                            true };
-    index_buffer = Buffer{ "index_buffer", ONE_MB,
+                            false };
+    index_buffer = Buffer{ "index_buffer", 0ull,
                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                           true };
+                           false };
 
     vks::SemaphoreCreateInfo sem_swapchain_info;
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
@@ -1005,7 +1004,7 @@ void RendererVulkan::upload_instances() {
     }
 
     // clang-format off
-    indirect_draw_buffer = Buffer{"indirect draw", sizeof(IndirectDrawCommandBufferHeader) + draw_commands.size() * sizeof(draw_commands[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true};
+    indirect_draw_buffer = Buffer{"indirect draw", sizeof(IndirectDrawCommandBufferHeader) + draw_commands.size() * sizeof(draw_commands[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false};
     indirect_draw_buffer.push_data(&draw_header, sizeof(IndirectDrawCommandBufferHeader));
     indirect_draw_buffer.push_data(draw_commands);
 
@@ -1014,22 +1013,22 @@ void RendererVulkan::upload_instances() {
     mesh_instance_transform_buffer[0]->push_data(mesh_instance_transforms);
     mesh_instance_transform_buffer[1]->push_data(mesh_instance_transforms);
 
-    mesh_instance_mesh_id_buffer = Buffer{"mesh instance mesh id", mesh_instance_mesh_ids.size() * sizeof(mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_instance_mesh_id_buffer = Buffer{"mesh instance mesh id", mesh_instance_mesh_ids.size() * sizeof(mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     mesh_instance_mesh_id_buffer.push_data(mesh_instance_mesh_ids);
 
-    tlas_mesh_offsets_buffer = Buffer{"tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    tlas_mesh_offsets_buffer = Buffer{"tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     tlas_mesh_offsets_buffer.push_data(tlas_mesh_offsets);
     
-    tlas_transform_buffer = Buffer{"tlas transform", tlas_transforms.size() * sizeof(tlas_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    tlas_transform_buffer = Buffer{"tlas transform", tlas_transforms.size() * sizeof(tlas_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     tlas_transform_buffer.push_data(tlas_transforms);
 
-    blas_mesh_offsets_buffer = Buffer{"blas mesh offsets", blas_mesh_offsets.size() * sizeof(blas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    blas_mesh_offsets_buffer = Buffer{"blas mesh offsets", blas_mesh_offsets.size() * sizeof(blas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     blas_mesh_offsets_buffer.push_data(blas_mesh_offsets);
 
-    triangle_mesh_ids_buffer = Buffer{"triangle mesh id buffer", triangle_mesh_ids.size() * sizeof(triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    triangle_mesh_ids_buffer = Buffer{"triangle mesh id buffer", triangle_mesh_ids.size() * sizeof(triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     triangle_mesh_ids_buffer.push_data(triangle_mesh_ids);
 
-    mesh_datas_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
+    mesh_datas_buffer = Buffer{"render mesh data", render_mesh_data.size() * sizeof(render_mesh_data[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     mesh_datas_buffer.push_data(render_mesh_data);
     // clang-format on
 }
@@ -1228,7 +1227,7 @@ void RendererVulkan::build_sbt() {
     vkGetRayTracingShaderGroupHandlesKHR(dev, pipeline.pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
 
     const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    sbt = Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, true };
+    sbt = Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, false };
     sbt.push_data(shaderHandleStorage);
 }
 
@@ -1378,7 +1377,7 @@ void RendererVulkan::build_tlas() {
     tlas_instance_buffer =
         Buffer{ "tlas_instance_buffer", sizeof(instances[0]) * instances.size(), 16u,
                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                true };
+                false };
     tlas_instance_buffer.push_data(instances);
 
     vks::AccelerationStructureGeometryKHR geometry;
@@ -1562,10 +1561,10 @@ void RendererVulkan::prepare_ddgi() {
     scheduler_gq.enqueue_wait_submit({ { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
-                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     ddgi_debug_probe_offsets_buffer =
         Buffer{ "ddgi debug probe offsets buffer", sizeof(glm::vec3) * num_probes,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     DDGI_Buffer ddgi_gpu_settings{
         .radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height },
@@ -1593,7 +1592,6 @@ void RendererVulkan::prepare_ddgi() {
     if(ddgi.probe_counts.y == 1) { ddgi_gpu_settings.probe_start.y += ddgi.probe_walk.y * 0.5f; }
 
     ddgi_buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI_Buffer));
-    // staging.send_to(ddgi_buffer.buffer, 0, &ddgi_gpu_settings, sizeof(ddgi_gpu_settings));
 
     vkQueueWaitIdle(gq);
 }

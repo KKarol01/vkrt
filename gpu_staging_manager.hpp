@@ -4,6 +4,8 @@
 #include <vector>
 #include <forward_list>
 #include <queue>
+#include <memory>
+#include <latch>
 #include <vulkan/vulkan.h>
 
 class FreeListAllocator;
@@ -14,8 +16,10 @@ class GpuStagingManager {
     struct Transaction {
         constexpr size_t get_remaining() const { return data.size() - uploaded; }
 
+        std::shared_ptr<std::latch> on_upload_complete_latch;
         std::vector<std::byte> data;
         VkBuffer dst;
+        size_t dst_offset;
         size_t uploaded;
     };
     struct Upload {
@@ -34,7 +38,7 @@ class GpuStagingManager {
     GpuStagingManager(GpuStagingManager&& other) noexcept = delete;
     GpuStagingManager& operator=(GpuStagingManager&& other) noexcept = delete;
 
-    void send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes);
+    std::shared_ptr<std::latch> send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes);
     bool empty() const { return transactions.empty(); }
 
   private:
