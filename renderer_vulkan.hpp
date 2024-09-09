@@ -34,6 +34,8 @@ enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
 
 class Buffer {
   public:
+    using PushResult = std::pair<bool, std::shared_ptr<std::latch>>;
+
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
     Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
@@ -42,14 +44,14 @@ class Buffer {
     Buffer(Buffer&& other) noexcept;
     Buffer& operator=(Buffer&& other) noexcept;
 
-    bool push_data(std::span<const std::byte> data, uint32_t offset);
-    bool push_data(std::span<const std::byte> data) { return push_data(data, size); }
-    bool push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
-    bool push_data(const void* data, size_t size_bytes, size_t offset) {
+    PushResult push_data(std::span<const std::byte> data, uint32_t offset);
+    PushResult push_data(std::span<const std::byte> data) { return push_data(data, size); }
+    PushResult push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
+    PushResult push_data(const void* data, size_t size_bytes, size_t offset) {
         return push_data(std::span{ static_cast<const std::byte*>(data), size_bytes }, offset);
     }
-    template <typename T> bool push_data(const std::vector<T>& vec) { return push_data(vec, size); }
-    template <typename T> bool push_data(const std::vector<T>& vec, uint32_t offset) {
+    template <typename T> PushResult push_data(const std::vector<T>& vec) { return push_data(vec, size); }
+    template <typename T> PushResult push_data(const std::vector<T>& vec, uint32_t offset) {
         return push_data(std::as_bytes(std::span{ vec }), offset);
     }
     void clear() { size = 0; }
