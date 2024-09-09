@@ -70,84 +70,37 @@ template <typename Storage> struct HandleDispatcher<RenderMesh, Storage> {
 };
 
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
-    : name{ name }, usage{ usage }, capacity{ size } {
-    vks::BufferCreateInfo binfo;
-    VmaAllocationCreateInfo vinfo{};
-    const auto use_bda = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) > 0;
-
-    binfo.size = size;
-    binfo.usage = usage;
-
-    uint32_t queue_family_indices[]{ get_renderer().gqi, get_renderer().tqi1 };
-    if(queue_family_indices[0] != queue_family_indices[1]) {
-        binfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
-        binfo.queueFamilyIndexCount = 2;
-        binfo.pQueueFamilyIndices = queue_family_indices;
-    }
-
-    vinfo.usage = VMA_MEMORY_USAGE_AUTO;
-    if(map) {
-        vinfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    } else {
-        binfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    }
-    if(use_bda) { vinfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT; }
-
-    VmaAllocationInfo vainfo{};
-    if(vmaCreateBuffer(get_renderer().vma, &binfo, &vinfo, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
-        ENG_WARN("Could not create buffer {}", name);
-        return;
-    }
-
-    mapped = vainfo.pMappedData;
-
-    if(use_bda) {
-        vks::BufferDeviceAddressInfo bdainfo;
-        bdainfo.buffer = buffer;
-        bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
-    }
-
-    set_debug_name(buffer, name);
-
-    ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
-}
+    : Buffer(name, size, 1u, usage, map) {}
 
 Buffer::Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map)
-    : name{ name }, usage{ usage }, capacity{ size }, alignment{ alignment } {
-    vks::BufferCreateInfo binfo;
-    VmaAllocationCreateInfo vinfo{};
-    const auto use_bda = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) > 0;
+    : Buffer(name, VkBufferCreateInfo{ .size = size, .usage = usage },
+             VmaAllocationCreateInfo{
+                 .flags = (map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u),
+                 .usage = VMA_MEMORY_USAGE_AUTO,
+             },
+             alignment) {}
 
-    binfo.size = size;
-    binfo.usage = usage;
-
-    vinfo.usage = VMA_MEMORY_USAGE_AUTO;
-    if(map) {
-        vinfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+Buffer::Buffer(const std::string& name, vks::BufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, uint32_t alignment)
+    : name{ name }, capacity{ create_info.size }, alignment{ alignment } {
+    uint32_t queue_family_indices[]{ get_renderer().gqi, get_renderer().tqi1 };
+    if(queue_family_indices[0] != queue_family_indices[1]) {
+        create_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+        create_info.queueFamilyIndexCount = 2;
+        create_info.pQueueFamilyIndices = queue_family_indices;
     }
-    if(use_bda) { vinfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT; }
+    if(!(alloc_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
+        create_info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    }
+    if(create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+        alloc_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    }
 
     VmaAllocationInfo vainfo{};
-    if(vmaCreateBufferWithAlignment(get_renderer().vma, &binfo, &vinfo, alignment, &buffer, &alloc, &vainfo) != VK_SUCCESS) {
-        ENG_WARN("Could not create buffer {}", name);
-        return;
+    if(alignment > 1) {
+        VK_CHECK(vmaCreateBufferWithAlignment(get_renderer().vma, &create_info, &alloc_info, alignment, &buffer, &alloc, &vainfo));
+    } else {
+        VK_CHECK(vmaCreateBuffer(get_renderer().vma, &create_info, &alloc_info, &buffer, &alloc, &vainfo));
     }
-
-    mapped = vainfo.pMappedData;
-
-    if(use_bda) {
-        vks::BufferDeviceAddressInfo bdainfo;
-        bdainfo.buffer = buffer;
-        bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
-    }
-
-    set_debug_name(buffer, name);
-    ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
-}
-
-Buffer::Buffer(const std::string& name, const vks::BufferCreateInfo& create_info, const VmaAllocationCreateInfo& alloc_info) {
-    VmaAllocationInfo vainfo{};
-    VK_CHECK(vmaCreateBuffer(get_renderer().vma, &create_info, &alloc_info, &buffer, &alloc, &vainfo));
 
     if(vainfo.pMappedData) { mapped = vainfo.pMappedData; };
 
@@ -156,6 +109,8 @@ Buffer::Buffer(const std::string& name, const vks::BufferCreateInfo& create_info
         bdainfo.buffer = buffer;
         bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
     }
+
+    usage = create_info.usage;
 
     set_debug_name(buffer, name);
     ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
@@ -398,6 +353,8 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &allocator));
     vma = allocator;
 
+    staging = std::make_unique<GpuStagingManager>(tq1, tqi1, 1024 * 1024 * 64); // 64MB
+
     vks::CommandPoolCreateInfo cmdpi;
     cmdpi.queueFamilyIndex = gqi;
     VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
@@ -423,8 +380,6 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
     VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
-
-    staging = GpuStagingManager{ tq1, tqi1, 1024 * 1024 * 64 }; // 64MB
 }
 
 void RendererVulkan::create_swapchain() {
@@ -576,8 +531,7 @@ void RendererVulkan::render() {
 
     {
         const auto frame_num = Engine::frame_num();
-        staging.send_to(ddgi_buffer.buffer, offsetof(DDGI_Buffer, frame_num), &frame_num, sizeof(frame_num));
-        // static_cast<DDGI_Buffer*>(ddgi_buffer.mapped)->frame_num = Engine::frame_num();
+        ddgi_buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI_Buffer, frame_num));
 
         auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
@@ -1608,7 +1562,7 @@ void RendererVulkan::prepare_ddgi() {
     scheduler_gq.enqueue_wait_submit({ { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
-                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
     ddgi_debug_probe_offsets_buffer =
         Buffer{ "ddgi debug probe offsets buffer", sizeof(glm::vec3) * num_probes,
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
@@ -1638,7 +1592,8 @@ void RendererVulkan::prepare_ddgi() {
 
     if(ddgi.probe_counts.y == 1) { ddgi_gpu_settings.probe_start.y += ddgi.probe_walk.y * 0.5f; }
 
-    staging.send_to(ddgi_buffer.buffer, 0, &ddgi_gpu_settings, sizeof(ddgi_gpu_settings));
+    ddgi_buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI_Buffer));
+    // staging.send_to(ddgi_buffer.buffer, 0, &ddgi_gpu_settings, sizeof(ddgi_gpu_settings));
 
     vkQueueWaitIdle(gq);
 }

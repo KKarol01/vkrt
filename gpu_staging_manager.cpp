@@ -14,7 +14,7 @@ GpuStagingManager::GpuStagingManager(VkQueue queue, uint32_t queue_index, size_t
                                    .usage = VMA_MEMORY_USAGE_AUTO,
                                    .preferredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT };
 
-    pool_memory = new Buffer{ "staging buffer", binfo, vinfo };
+    pool_memory = new Buffer{ "staging buffer", binfo, vinfo, 1u };
     pool = new FreeListAllocator{ pool_memory->mapped, pool_size_bytes };
 
     assert(pool && "Pool creation failure");
@@ -56,25 +56,6 @@ GpuStagingManager::~GpuStagingManager() noexcept {
         vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
         vkDestroyCommandPool(renderer->dev, cmdpool, {});
     }
-}
-
-GpuStagingManager::GpuStagingManager(GpuStagingManager&& other) noexcept { *this = std::move(other); }
-
-GpuStagingManager& GpuStagingManager::operator=(GpuStagingManager&& other) noexcept {
-    pool_memory = std::exchange(other.pool_memory, nullptr);
-    pool = std::exchange(other.pool, nullptr);
-    transactions = std::move(other.transactions);
-    queue = std::move(other.queue);
-    uploads = std::move(other.uploads);
-    if(other.stage_thread.joinable() && other.stop_token.stop_possible()) {
-        other.stage_thread.request_stop();
-        other.stage_thread.join();
-    }
-    cmdpool = std::exchange(other.cmdpool, nullptr);
-    submit_queue = std::exchange(other.submit_queue, nullptr);
-    stage_thread = std::jthread{ &GpuStagingManager::submit_uploads, this };
-    stop_token = stage_thread.get_stop_token();
-    return *this;
 }
 
 void GpuStagingManager::send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes) {
@@ -178,7 +159,8 @@ void GpuStagingManager::submit_uploads() {
 
             submit_queue->enqueue({ { cmd } }, fence);
 
-            std::thread clear_thread{ [&mutex = this->queue_mutex, &pool = this->pool, &transactions = this->transactions,
+            std::thread clear_thread{ [&mutex = this->queue_mutex, &pool = this->pool,
+                                       &transactions = this->transactions, &thread_cvar = this->thread_cvar,
                                        &cmdpool = this->cmdpool, &background_task_count = this->background_task_count,
                                        uploads = std::move(uploads), cmd, fence, renderer = RendererVulkan::get()] {
                 ++background_task_count;
@@ -186,17 +168,20 @@ void GpuStagingManager::submit_uploads() {
                     renderer->dev, 1, &fence, true,
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{ 100 }).count()));
 
-                std::scoped_lock lock{ mutex };
-                for(const auto& e : uploads) {
-                    e.t->uploaded += pool->get_alloc_data_size(e.pool_alloc);
-                    pool->deallocate(e.pool_alloc);
-                }
-                for(auto it = transactions.begin(); it != transactions.end(); ++it) {
-                    if(auto n = std::next(it); n != transactions.end() && n->uploaded == n->data.size()) {
-                        transactions.erase_after(it);
+                {
+                    std::scoped_lock lock{ mutex };
+                    for(const auto& e : uploads) {
+                        e.t->uploaded += pool->get_alloc_data_size(e.pool_alloc);
+                        pool->deallocate(e.pool_alloc);
+                    }
+                    for(auto it = transactions.before_begin(); it != transactions.end(); ++it) {
+                        if(auto n = std::next(it); n != transactions.end() && n->uploaded == n->data.size()) {
+                            transactions.erase_after(it);
+                        }
                     }
                 }
                 --background_task_count;
+                thread_cvar.notify_one();
             } };
             clear_thread.detach();
         }
