@@ -1,11 +1,9 @@
 #pragma once
-#pragma once
 
 #include <span>
 #include <bitset>
 #include <unordered_set>
 #include <latch>
-#include <vulkan/vulkan.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <glm/mat4x3.hpp>
 #include "renderer.hpp"
@@ -233,6 +231,7 @@ class RendererPipelineLayoutBuilder {
     RendererPipelineLayoutBuilder& set_layout_flags(uint32_t set, VkDescriptorSetLayoutCreateFlags layout_flags) {
         ENG_ASSERT(set < descriptor_layouts.size(), "Trying to access out of bounds descriptor set layout with idx: {}", set);
         descriptor_layout_flags.at(set) = layout_flags;
+        return *this;
     }
 
     RendererPipelineLayout build();
@@ -473,6 +472,7 @@ class DescriptorSetWriter {
         for(uint32_t i = 0; i < count; ++i) {
             write(binding, array_element + i, imgs[i], sampler, layout);
         }
+        return *this;
     }
     bool update(VkDescriptorSet set, const RendererPipelineLayout& layout, uint32_t set_idx);
 
