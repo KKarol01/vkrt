@@ -1,13 +1,16 @@
+#include <numeric>
+#include <fstream>
+#include <utility>
 #include <volk/volk.h>
-#define GLFW_EXPOSE_NATIVE_WIN32
 #include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
 #include <shaderc/shaderc.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #define STB_INCLUDE_IMPLEMENTATION
 #define STB_INCLUDE_LINE_GLSL
 #include <stb/stb_include.h>
@@ -17,9 +20,6 @@
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
-#include <numeric>
-#include <fstream>
-#include <utility>
 
 RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
 
