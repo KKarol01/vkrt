@@ -58,21 +58,37 @@ GpuStagingManager::~GpuStagingManager() noexcept {
     }
 }
 
-std::shared_ptr<std::latch> GpuStagingManager::send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes) {
-    if(size_bytes == 0) { return std::make_shared<std::latch>(0u); }
+bool GpuStagingManager::send_to(VkBuffer dst, size_t dst_offset, std::span<const std::byte> src, VkSemaphore semaphore,
+                                std::atomic_flag* flag) {
+    return send_to_impl(dst, dst_offset, std::vector<std::byte>{ src.begin(), src.end() }, semaphore, flag);
+}
 
-    std::shared_ptr<std::latch> on_complete_latch = std::make_shared<std::latch>(1u);
+bool GpuStagingManager::send_to(VkBuffer dst, size_t dst_offset, const Buffer* src, VkSemaphore semaphore, std::atomic_flag* flag) {
+    return send_to_impl(dst, dst_offset, src, semaphore, flag);
+}
+
+bool GpuStagingManager::send_to_impl(VkBuffer dst, size_t dst_offset, std::variant<std::vector<std::byte>, const Buffer*>&& src,
+                                     VkSemaphore semaphore, std::atomic_flag* flag) {
+    if(src.index() == 1 && !std::get<1>(src)) { return false; }
+    if((src.index() == 0 && std::get<0>(src).size() == 0) || (src.index() == 1 && std::get<1>(src) && std::get<1>(src)->size == 0)) {
+        if(flag) { flag->test_and_set(std::memory_order_relaxed); }
+        return true;
+    }
+
+    if(flag) { flag->clear(); }
+
     std::scoped_lock lock{ queue_mutex };
     transactions.push_front(Transaction{
-        .on_upload_complete_latch = on_complete_latch,
-        .data = { static_cast<const std::byte*>(data), static_cast<const std::byte*>(data) + size_bytes },
-        .dst = dst_buffer,
+        .semaphore = semaphore,
+        .flag = flag,
+        .data = std::move(src),
+        .dst = dst,
         .dst_offset = dst_offset,
         .uploaded = 0,
     });
     queue.push(&transactions.front());
     thread_cvar.notify_one();
-    return on_complete_latch;
+    return true;
 }
 
 void GpuStagingManager::schedule_upload() {
@@ -84,6 +100,20 @@ void GpuStagingManager::schedule_upload() {
         size_t remaining = t.get_remaining();
         size_t offset = 0;
         for(;;) {
+            if(t.data.index() == 1) {
+                uploads.push_back(Upload{
+                    .t = &t,
+                    .region = { 
+                        .srcOffset = 0, 
+                        .dstOffset = t.dst_offset, 
+                        .size = t.get_size(),
+                    },
+                    .src = std::get<1>(t.data)
+                    });
+                queue.pop();
+                break;
+            }
+
             if(pool->get_total_free_memory() == 0) { return; }
 
             if(remaining == 0) {
@@ -102,12 +132,12 @@ void GpuStagingManager::schedule_upload() {
                 return;
             }
 
-            memcpy(alloc, t.data.data() + t.uploaded + offset, upload_size);
+            memcpy(alloc, std::get<0>(t.data).data() + t.uploaded + offset, upload_size);
 
             uploads.push_back(Upload{
                 .t = &t,
                 .region = { .srcOffset = pool->get_offset_bytes(alloc), .dstOffset = t.dst_offset + t.uploaded + offset, .size = upload_size },
-                .pool_alloc = alloc });
+                .src = alloc });
             remaining -= upload_size;
             offset += upload_size;
         }
@@ -123,19 +153,20 @@ void GpuStagingManager::submit_uploads() {
 
         auto* renderer = RendererVulkan::get();
 
-        if(allocated_command_buffers >= 1024) {
-            while(background_task_count > 0) {
-                background_task_count.wait(background_task_count);
-            }
-            VK_CHECK(vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
-            allocated_command_buffers = 0;
-        }
-
         schedule_upload();
         auto uploads = std::move(this->uploads);
         this->uploads.clear();
 
         lock.unlock();
+
+        if(allocated_command_buffers.load(std::memory_order_relaxed) >= 1024) {
+            int val;
+            while((val = background_task_count.load(std::memory_order_relaxed)) > 0) {
+                background_task_count.wait(val, std::memory_order_relaxed);
+            }
+            VK_CHECK(vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
+            allocated_command_buffers = 0;
+        }
 
         if(uploads.empty()) { continue; }
 
@@ -150,6 +181,9 @@ void GpuStagingManager::submit_uploads() {
             continue;
         }
 
+        std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signal_semaphores;
+        signal_semaphores.reserve(uploads.size());
+
         VkFence fence{};
         VkFenceCreateInfo fence_info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         VK_CHECK(vkCreateFence(renderer->dev, &fence_info, {}, &fence));
@@ -158,39 +192,63 @@ void GpuStagingManager::submit_uploads() {
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
         for(const auto& e : uploads) {
-            vkCmdCopyBuffer(cmd, pool_memory->buffer, e.t->dst, 1, &e.region);
+            if(e.src.index() == 0) {
+                vkCmdCopyBuffer(cmd, pool_memory->buffer, e.t->dst, 1, &e.region);
+            } else {
+                vkCmdCopyBuffer(cmd, std::get<1>(e.src)->buffer, e.t->dst, 1, &e.region);
+            }
+            e.t->uploaded += e.region.size;
+            if(e.t->get_remaining() == 0 && e.t->semaphore) {
+                signal_semaphores.emplace_back(e.t->semaphore, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            }
         }
         VK_CHECK(vkEndCommandBuffer(cmd));
 
         ++allocated_command_buffers;
 
-        submit_queue->enqueue({ { cmd } }, fence);
+        submit_queue->enqueue({ .buffers = { cmd }, .signals = signal_semaphores }, fence);
 
         ++background_task_count;
-        std::thread clear_thread{ [&mutex = this->queue_mutex, &pool = this->pool, &transactions = this->transactions,
-                                   &thread_cvar = this->thread_cvar, &cmdpool = this->cmdpool,
-                                   &background_task_count = this->background_task_count, uploads = std::move(uploads),
-                                   cmd, fence, renderer = RendererVulkan::get()] {
+        std::thread clear_thread{ [&queue_mutex = this->queue_mutex, &pool = this->pool,
+                                   &transactions = this->transactions, &thread_cvar = this->thread_cvar,
+                                   &cmdpool = this->cmdpool, &background_task_count = this->background_task_count,
+                                   uploads = std::move(uploads), cmd, fence, renderer = RendererVulkan::get()] {
             VK_CHECK(vkWaitForFences(
                 renderer->dev, 1, &fence, true,
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{ 100 }).count()));
 
             {
-                std::scoped_lock lock{ mutex };
+                std::scoped_lock lock{ queue_mutex };
                 for(const auto& e : uploads) {
-                    e.t->uploaded += pool->get_alloc_data_size(e.pool_alloc);
-                    pool->deallocate(e.pool_alloc);
+                    if(e.src.index() == 0) { pool->deallocate(std::get<0>(e.src)); }
                 }
                 for(auto it = transactions.before_begin(); it != transactions.end(); ++it) {
-                    if(auto n = std::next(it); n != transactions.end() && n->uploaded == n->data.size()) {
-                        n->on_upload_complete_latch->count_down();
+                    if(auto n = std::next(it); n != transactions.end() && n->get_remaining() == 0) {
+                        if(n->flag) {
+                            n->flag->test_and_set(std::memory_order_relaxed);
+                            n->flag->notify_all();
+                        }
                         transactions.erase_after(it);
                     }
                 }
             }
-            --background_task_count;
+
+            vkDestroyFence(renderer->dev, fence, nullptr);
+
+            background_task_count.fetch_sub(1, std::memory_order_relaxed);
+            background_task_count.notify_all();
             thread_cvar.notify_one();
         } };
         clear_thread.detach();
+    }
+}
+
+constexpr size_t GpuStagingManager::Transaction::get_remaining() const { return get_size() - uploaded; }
+
+constexpr size_t GpuStagingManager::Transaction::get_size() const {
+    if(data.index() == 0) {
+        return std::get<0>(data).size();
+    } else {
+        return std::get<1>(data)->size;
     }
 }

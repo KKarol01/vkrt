@@ -4,8 +4,7 @@
 #include <vector>
 #include <forward_list>
 #include <queue>
-#include <memory>
-#include <latch>
+#include <variant>
 #include <vulkan/vulkan.h>
 
 class FreeListAllocator;
@@ -14,10 +13,12 @@ class QueueScheduler;
 
 class GpuStagingManager {
     struct Transaction {
-        constexpr size_t get_remaining() const { return data.size() - uploaded; }
+        constexpr size_t get_remaining() const;
+        constexpr size_t get_size() const;
 
-        std::shared_ptr<std::latch> on_upload_complete_latch;
-        std::vector<std::byte> data;
+        VkSemaphore semaphore{};
+        std::atomic_flag* flag{};
+        std::variant<std::vector<std::byte>, const Buffer*> data;
         VkBuffer dst;
         size_t dst_offset;
         size_t uploaded;
@@ -25,7 +26,7 @@ class GpuStagingManager {
     struct Upload {
         Transaction* t;
         VkBufferCopy region;
-        void* pool_alloc;
+        std::variant<void*, const Buffer*> src;
     };
 
   public:
@@ -38,10 +39,14 @@ class GpuStagingManager {
     GpuStagingManager(GpuStagingManager&& other) noexcept = delete;
     GpuStagingManager& operator=(GpuStagingManager&& other) noexcept = delete;
 
-    std::shared_ptr<std::latch> send_to(VkBuffer dst_buffer, size_t dst_offset, const void* data, size_t size_bytes);
+    bool send_to(VkBuffer dst, size_t dst_offset, std::span<const std::byte> src, VkSemaphore semaphore = nullptr,
+                 std::atomic_flag* flag = nullptr);
+    bool send_to(VkBuffer dst, size_t dst_offset, const Buffer* src, VkSemaphore semaphore = nullptr, std::atomic_flag* flag = nullptr);
     bool empty() const { return transactions.empty(); }
 
   private:
+    bool send_to_impl(VkBuffer dst, size_t dst_offset, std::variant<std::vector<std::byte>, const Buffer*>&& src,
+                      VkSemaphore semaphore = nullptr, std::atomic_flag* flag = nullptr);
     void schedule_upload();
     void submit_uploads();
 

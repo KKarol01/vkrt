@@ -12,8 +12,12 @@
 #include "gpu_staging_manager.hpp"
 #include "engine.hpp"
 
+#ifndef NDEBUG
 #define VK_CHECK(func)                                                                                                 \
     if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
+#else
+#define VK_CHECK(func) func
+#endif
 
 template <class... Ts> struct Visitor : Ts... {
     using Ts::operator()...;
@@ -32,8 +36,6 @@ enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
 
 class Buffer {
   public:
-    using PushResult = std::pair<bool, std::shared_ptr<std::latch>>;
-
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
     Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
@@ -42,16 +44,17 @@ class Buffer {
     Buffer(Buffer&& other) noexcept;
     Buffer& operator=(Buffer&& other) noexcept;
 
-    PushResult push_data(std::span<const std::byte> data, uint32_t offset);
-    PushResult push_data(std::span<const std::byte> data) { return push_data(data, size); }
-    PushResult push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
-    PushResult push_data(const void* data, size_t size_bytes, size_t offset) {
+    bool push_data(std::span<const std::byte> data, uint32_t offset);
+    bool push_data(std::span<const std::byte> data) { return push_data(data, size); }
+    bool push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
+    bool push_data(const void* data, size_t size_bytes, size_t offset) {
         return push_data(std::span{ static_cast<const std::byte*>(data), size_bytes }, offset);
     }
-    template <typename T> PushResult push_data(const std::vector<T>& vec) { return push_data(vec, size); }
-    template <typename T> PushResult push_data(const std::vector<T>& vec, uint32_t offset) {
+    template <typename T> bool push_data(const std::vector<T>& vec) { return push_data(vec, size); }
+    template <typename T> bool push_data(const std::vector<T>& vec, uint32_t offset) {
         return push_data(std::as_bytes(std::span{ vec }), offset);
     }
+
     void clear() { size = 0; }
     bool resize(size_t new_size);
     constexpr size_t get_free_space() const { return capacity - size; }
@@ -494,13 +497,13 @@ class ImageStatefulBarrier {
   public:
     constexpr ImageStatefulBarrier(Image& img, VkImageAspectFlags aspect, uint32_t base_mip, uint32_t mips,
                                    uint32_t base_layer, uint32_t layers, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-                                   VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                   VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_NONE,
                                    VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
         : image{ &img }, current_range{ aspect, base_mip, mips, base_layer, layers }, current_layout{ start_layout },
           current_stage{ start_stage }, current_access{ start_access } {}
 
     constexpr ImageStatefulBarrier(Image& img, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-                                   VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                   VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_NONE,
                                    VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
         : image{ &img }, current_range{ img.aspect, 0, img.mips, 0, img.layers }, current_layout{ start_layout },
           current_stage{ start_stage }, current_access{ start_access } {}
@@ -634,6 +637,16 @@ class RendererVulkan : public Renderer {
         uint32_t mesh_instance_count{};
     };
 
+    struct RenderingPrimitives {
+        VkSemaphore sem_swapchain_image{};
+        VkSemaphore sem_rendering_finished{};
+        VkSemaphore sem_gui_start{};
+        VkSemaphore sem_copy_to_sw_img_done{};
+        VkFence fen_rendering_finished{};
+        VkCommandPool cmdpool{};
+        VkDescriptorPool desc_pool{};
+    };
+
   public:
     static RendererVulkan* get() { return static_cast<RendererVulkan*>(Engine::renderer()); }
 
@@ -666,6 +679,7 @@ class RendererVulkan : public Renderer {
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
     void end_recording(VkCommandBuffer buffer);
     void reset_command_pool(VkCommandPool pool);
+    RenderingPrimitives& get_primitives() { return primitives[Engine::frame_num() % 2]; }
 
     uint32_t get_total_vertices() const {
         return models.empty() ? 0u : models.back().first_vertex + models.back().vertex_count;
@@ -693,13 +707,6 @@ class RendererVulkan : public Renderer {
     VkFormat swapchain_format;
     Image depth_buffers[2]{};
 
-    VkCommandPool cmdpool;
-    struct CommandBuffer {
-        VkCommandBuffer command_buffer{};
-        bool used{ false };
-    };
-    std::vector<CommandBuffer> command_buffers;
-
     std::unique_ptr<GpuStagingManager> staging;
 
     SamplerStorage samplers;
@@ -718,7 +725,6 @@ class RendererVulkan : public Renderer {
     std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
     std::vector<RendererPipelineLayout> layouts;
     DescriptorPoolAllocator descriptor_pool_allocator;
-    VkDescriptorPool per_frame_desc_pool;
     VkDescriptorPool imgui_desc_pool;
 
     Buffer sbt;
@@ -756,12 +762,5 @@ class RendererVulkan : public Renderer {
     std::vector<UploadImage> upload_images;
     std::vector<std::pair<Handle<RenderModelInstance>, glm::mat4x3>> upload_positions;
 
-    uint32_t num_frame{ 0 };
-
-    struct RenderingPrimitives {
-        VkSemaphore sem_swapchain_image;
-        VkSemaphore sem_rendering_finished;
-        VkSemaphore sem_gui_start;
-        VkSemaphore sem_copy_to_sw_img_done;
-    } primitives;
+    RenderingPrimitives primitives[2];
 };
