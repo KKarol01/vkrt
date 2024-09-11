@@ -136,10 +136,15 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
     return *this;
 }
 
-Buffer::PushResult Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
+bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
+    if(!buffer) {
+        assert(false && "Buffer was not created correctly");
+        return false;
+    }
+
     if(offset > capacity) {
         ENG_WARN("Provided buffer offset is bigger than the capacity");
-        return std::make_pair(false, std::make_shared<std::latch>(0u));
+        return false;
     }
 
     const auto size_after = offset + data.size_bytes();
@@ -150,30 +155,38 @@ Buffer::PushResult Buffer::push_data(std::span<const std::byte> data, uint32_t o
         ENG_LOG("Resizing buffer {}", name);
         if(!resize(new_size)) {
             ENG_LOG("Failed to resize the buffer {}", name);
-            return std::make_pair(false, std::make_shared<std::latch>(0u));
+            return false;
         }
     }
-
-    std::shared_ptr<std::latch> return_latch = std::make_shared<std::latch>(0u);
 
     if(mapped) {
         memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
     } else {
-        return_latch = get_renderer().staging->send_to(buffer, offset, data.data(), data.size_bytes());
+        std::atomic_flag flag{};
+        if(!get_renderer().staging->send_to(buffer, offset, data, nullptr, &flag)) { return false; }
+        flag.wait(false, std::memory_order_relaxed);
     }
-
-    return_latch->wait();
 
     size = std::max(size, offset + data.size_bytes());
 
-    return std::make_pair(true, return_latch);
+    return true;
 }
 
 bool Buffer::resize(size_t new_size) {
     Buffer new_buffer{ name, new_size, alignment, usage, !!mapped };
-    const auto ret = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
-    if(!ret.first) { return false; }
-    ret.second->wait();
+
+    bool success = false;
+    std::atomic_flag flag{};
+    if(mapped) {
+        success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
+        flag.test_and_set(std::memory_order_relaxed);
+    } else {
+        success = get_renderer().staging->send_to(buffer, 0ull, this, nullptr, &flag);
+    }
+
+    if(!success) { return false; }
+    flag.wait(false, std::memory_order_relaxed);
+
     *this = std::move(new_buffer);
     return true;
 }
@@ -355,10 +368,6 @@ void RendererVulkan::initialize_vulkan() {
 
     staging = std::make_unique<GpuStagingManager>(tq1, tqi1, 1024 * 1024 * 64); // 64MB
 
-    vks::CommandPoolCreateInfo cmdpi;
-    cmdpi.queueFamilyIndex = gqi;
-    VK_CHECK(vkCreateCommandPool(device, &cmdpi, nullptr, &cmdpool));
-
     global_buffer =
         Buffer{ "globals", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     global_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_projection(), sizeof(glm::mat4), 1 * sizeof(glm::mat4));
@@ -374,11 +383,19 @@ void RendererVulkan::initialize_vulkan() {
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                            false };
 
-    vks::SemaphoreCreateInfo sem_swapchain_info;
-    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
-    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
-    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
-    VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
+    for(int i = 0; i < sizeof(primitives) / sizeof(primitives[0]); ++i) {
+        RenderingPrimitives& primitives = this->primitives[i];
+        vks::SemaphoreCreateInfo sem_swapchain_info;
+        vks::FenceCreateInfo fence_info{ VkFenceCreateInfo{ .flags = VK_FENCE_CREATE_SIGNALED_BIT } };
+        vks::CommandPoolCreateInfo cmdpool_info{ VkCommandPoolCreateInfo{ .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+                                                                          .queueFamilyIndex = gqi } };
+        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
+        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
+        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
+        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
+        VK_CHECK(vkCreateFence(dev, &fence_info, nullptr, &primitives.fen_rendering_finished));
+        VK_CHECK(vkCreateCommandPool(dev, &cmdpool_info, nullptr, &primitives.cmdpool));
+    }
 }
 
 void RendererVulkan::create_swapchain() {
@@ -453,7 +470,7 @@ void RendererVulkan::initialize_imgui() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
 
-    auto cmdimgui = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmdimgui = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ImGui_ImplVulkan_CreateFontsTexture();
     end_recording(cmdimgui);
     scheduler_gq.enqueue_wait_submit({ { cmdimgui } });
@@ -468,7 +485,6 @@ static std::vector<glm::mat4x3> original_transforms;
 static HandleBatchedModel sphere;
 
 void RendererVulkan::render() {
-    reset_command_pool(cmdpool);
     if(flags & RendererFlags::DIRTY_MODEL_BATCHES) {
         upload_staged_models();
         flags ^= RendererFlags::DIRTY_MODEL_BATCHES;
@@ -495,8 +511,21 @@ void RendererVulkan::render() {
         flags ^= RendererFlags::UPDATE_MESH_POSITIONS;
     }
 
+    const auto frame_num = Engine::frame_num();
+    const auto resource_idx = frame_num % 2;
+
+    RenderingPrimitives& primitives = this->primitives[resource_idx];
+
+    vkWaitForFences(dev, 1, &primitives.fen_rendering_finished, true, 16'000'000);
+    vkResetFences(dev, 1, &primitives.fen_rendering_finished);
+
+    reset_command_pool(get_primitives().cmdpool);
+    descriptor_pool_allocator.reset_pool(get_primitives().desc_pool);
+    get_primitives().desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2);
+
     VkDescriptorSet frame_desc_set =
-        descriptor_pool_allocator.allocate_set(per_frame_desc_pool, layouts.at(0).descriptor_layouts.at(0), textures.size());
+        descriptor_pool_allocator.allocate_set(get_primitives().desc_pool, layouts.at(0).descriptor_layouts.at(0),
+                                               textures.size());
 
     VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
 
@@ -529,16 +558,9 @@ void RendererVulkan::render() {
     ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
 
     {
-        const auto frame_num = Engine::frame_num();
         ddgi_buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI_Buffer, frame_num));
 
-        auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-        VkMemoryBarrier mem_barrier{ .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-                                     .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-                                     .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, {}, 1,
-                             &mem_barrier, 0, nullptr, 0, nullptr);
+        auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
@@ -634,7 +656,7 @@ void RendererVulkan::render() {
 
         VkRenderingAttachmentInfo r_dep_att{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = depth_buffers[sw_img_idx].view,
+            .imageView = depth_buffers[resource_idx].view,
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -650,7 +672,7 @@ void RendererVulkan::render() {
             .pDepthAttachment = &r_dep_att,
         };
 
-        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[sw_img_idx] };
+        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx] };
 
         VkDeviceSize vb_offsets[]{ 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
@@ -735,15 +757,17 @@ void RendererVulkan::render() {
         ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
         vkCmdEndRendering(cmd);
 
-        sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, VK_ACCESS_NONE);
+        sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_NONE);
 
         vkEndCommandBuffer(cmd);
 
-        scheduler_gq.enqueue_wait_submit(RecordingSubmitInfo{
-            .buffers = { cmd },
-            .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT } },
-            .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT } },
-        });
+        scheduler_gq.enqueue_wait_submit(
+            RecordingSubmitInfo{
+                .buffers = { cmd },
+                .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
+                .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
+            },
+            primitives.fen_rendering_finished);
 
         vks::PresentInfoKHR pinfo;
         pinfo.swapchainCount = 1;
@@ -752,12 +776,7 @@ void RendererVulkan::render() {
         pinfo.waitSemaphoreCount = 1;
         pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
         vkQueuePresentKHR(gq, &pinfo);
-        vkQueueWaitIdle(gq);
         vkDestroyImageView(dev, i_sw_view, nullptr);
-
-        descriptor_pool_allocator.reset_pool(per_frame_desc_pool);
-        reset_command_pool(cmdpool);
-        ++num_frame;
     }
 }
 
@@ -871,7 +890,7 @@ void RendererVulkan::upload_model_textures() {
     buffer_copies.reserve(upload_images.size());
 
     uint64_t texture_byte_offset = 0;
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     for(const auto& tex : upload_images) {
         auto& texture = textures.at(tex.image_index);
 
@@ -1206,7 +1225,6 @@ void RendererVulkan::build_pipelines() {
     layouts.push_back(default_layout);
     layouts.push_back(imgui_layout);
 
-    per_frame_desc_pool = descriptor_pool_allocator.allocate_pool(default_layout, 0, 2);
     imgui_desc_pool = descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 1);
 
     for(int i = 0; i < 2; ++i) {
@@ -1237,7 +1255,7 @@ void RendererVulkan::create_rt_output_image() {
         "rt_image", window->size[0], window->size[1], 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
     };
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
     end_recording(cmd);
@@ -1343,7 +1361,7 @@ void RendererVulkan::build_blas() {
         }
     }
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> poffsets(dirty_models.size());
     for(uint32_t i = 0, offset = 0; i < dirty_models.size(); ++i) {
         poffsets.at(i) = &ranges.at(offset);
@@ -1422,7 +1440,7 @@ void RendererVulkan::build_tlas() {
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     end_recording(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
@@ -1484,7 +1502,7 @@ void RendererVulkan::refit_tlas() {
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     end_recording(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
@@ -1542,7 +1560,7 @@ void RendererVulkan::prepare_ddgi() {
                                         VK_SAMPLE_COUNT_1_BIT,
                                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
 
-    auto cmd = begin_recording(cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     ddgi.radiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                             VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
@@ -1599,19 +1617,11 @@ void RendererVulkan::prepare_ddgi() {
 VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
     VkCommandBuffer cmd;
 
-    auto free_buffer_it =
-        std::find_if(command_buffers.begin(), command_buffers.end(), [](const CommandBuffer& b) { return !b.used; });
-    if(free_buffer_it == command_buffers.end()) {
-        vks::CommandBufferAllocateInfo alloc_info;
-        alloc_info.commandPool = pool;
-        alloc_info.commandBufferCount = 1;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        VK_CHECK(vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
-        command_buffers.emplace_back(cmd, true);
-    } else {
-        cmd = free_buffer_it->command_buffer;
-        free_buffer_it->used = true;
-    }
+    vks::CommandBufferAllocateInfo alloc_info;
+    alloc_info.commandPool = pool;
+    alloc_info.commandBufferCount = 1;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    VK_CHECK(vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
 
     vks::CommandBufferBeginInfo info;
     info.flags = usage;
@@ -1622,12 +1632,7 @@ VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBuf
 
 void RendererVulkan::end_recording(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
 
-void RendererVulkan::reset_command_pool(VkCommandPool pool) {
-    VK_CHECK(vkResetCommandPool(dev, pool, {}));
-    for(auto& e : command_buffers) {
-        e.used = false;
-    }
-}
+void RendererVulkan::reset_command_pool(VkCommandPool pool) { VK_CHECK(vkResetCommandPool(dev, pool, {})); }
 
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
              VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
@@ -2070,6 +2075,7 @@ VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkD
 }
 
 void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
+    if(!pool) { return; }
     VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
 }
 
