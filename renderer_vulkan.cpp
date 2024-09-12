@@ -163,7 +163,7 @@ bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
         memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
     } else {
         std::atomic_flag flag{};
-        if(!get_renderer().staging->send_to(buffer, offset, data, nullptr, &flag)) { return false; }
+        if(!get_renderer().staging->send_to(buffer, offset, data, &flag)) { return false; }
         flag.wait(false, std::memory_order_relaxed);
     }
 
@@ -181,7 +181,7 @@ bool Buffer::resize(size_t new_size) {
         success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
         flag.test_and_set(std::memory_order_relaxed);
     } else {
-        success = get_renderer().staging->send_to(buffer, 0ull, this, nullptr, &flag);
+        success = get_renderer().staging->send_to(buffer, 0ull, this, &flag);
     }
 
     if(!success) { return false; }
@@ -876,6 +876,63 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
 }
 
 void RendererVulkan::upload_model_textures() {
+    VkSemaphore release_sem, acquire_sem;
+    vks::SemaphoreCreateInfo sem_info;
+    VK_CHECK(vkCreateSemaphore(dev, &sem_info, nullptr, &release_sem));
+    VK_CHECK(vkCreateSemaphore(dev, &sem_info, nullptr, &acquire_sem));
+
+    VkCommandBuffer release_cmd;
+    VkCommandBuffer acquire_cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    {
+        std::scoped_lock lock{ staging->get_queue_mutex() };
+        release_cmd = begin_recording(staging->get_cmdpool(), VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    }
+
+    for(auto& tex : upload_images) {
+        Image& img = textures.at(tex.image_index);
+
+        std::atomic_flag flag{};
+        VkCommandBuffer cmd = allocate_buffer(get_primitives().cmdpool);
+        staging->send_to(&img, {}, std::span{ tex.rgba_data.begin(), tex.rgba_data.end() }, cmd, &scheduler_gq, gqi, &flag);
+
+        VkImageMemoryBarrier img_barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_NONE,
+            .oldLayout = img.current_layout,
+            .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = tqi1,
+            .dstQueueFamilyIndex = gqi,
+            .image = img.image,
+            .subresourceRange = { .aspectMask = img.aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+        };
+        vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, nullptr, 0, nullptr, 1, &img_barrier);
+        vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, nullptr, 0, nullptr, 1, &img_barrier);
+        flag.wait(false, std::memory_order_relaxed);
+    }
+
+    end_recording(release_cmd);
+    end_recording(acquire_cmd);
+
+    {
+        std::scoped_lock lock{ staging->get_queue_mutex() };
+        QueueScheduler{ tq1 }.enqueue_wait_submit({ .buffers = { release_cmd },
+                                                    .signals = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
+    }
+
+    vks::FenceCreateInfo fence_info{};
+    VkFence fence;
+    VK_CHECK(vkCreateFence(dev, &fence_info, {}, &fence));
+    scheduler_gq.enqueue_wait_submit({ .buffers = { acquire_cmd }, .waits = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } },
+                                     fence);
+
+    VK_CHECK(vkWaitForFences(dev, 1, &fence, true, 1'000'000));
+
+    vkDestroyFence(dev, fence, {});
+    vkDestroySemaphore(dev, release_sem, {});
+    vkDestroySemaphore(dev, acquire_sem, {});
+
+    return;
     const auto total_tex_size =
         std::accumulate(upload_images.begin(), upload_images.end(), 0ull, [this](uint64_t sum, const UploadImage& tex) {
             return sum + textures.at(tex.image_index).width * textures.at(tex.image_index).height * 4ull;
@@ -1614,19 +1671,21 @@ void RendererVulkan::prepare_ddgi() {
     vkQueueWaitIdle(gq);
 }
 
-VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
+VkCommandBuffer RendererVulkan::allocate_buffer(VkCommandPool pool) {
     VkCommandBuffer cmd;
-
     vks::CommandBufferAllocateInfo alloc_info;
     alloc_info.commandPool = pool;
     alloc_info.commandBufferCount = 1;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     VK_CHECK(vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
+    return cmd;
+}
 
+VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
+    auto cmd = allocate_buffer(pool);
     vks::CommandBufferBeginInfo info;
     info.flags = usage;
     VK_CHECK(vkBeginCommandBuffer(cmd, &info));
-
     return cmd;
 }
 
