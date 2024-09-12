@@ -676,6 +676,7 @@ class RendererVulkan : public Renderer {
     void refit_tlas();
     void prepare_ddgi();
 
+    VkCommandBuffer allocate_buffer(VkCommandPool pool);
     VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
     void end_recording(VkCommandBuffer buffer);
     void reset_command_pool(VkCommandPool pool);
