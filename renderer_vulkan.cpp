@@ -205,10 +205,13 @@ void RendererVulkan::initialize_vulkan() {
     if(volkInitialize() != VK_SUCCESS) { throw std::runtime_error{ "Volk loader not found. Stopping" }; }
 
     vkb::InstanceBuilder builder;
-    auto inst_ret = builder.set_app_name("Example Vulkan Application")
+    auto inst_ret = builder
+                        .set_app_name("Example Vulkan Application")
+#ifndef NDEBUG
                         .enable_validation_layers()
-                        .use_default_debug_messenger()
                         .enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
+                        .use_default_debug_messenger()
+#endif
                         .require_api_version(VK_MAKE_API_VERSION(0, 1, 3, 0))
                         .build();
 
@@ -387,14 +390,12 @@ void RendererVulkan::initialize_vulkan() {
         RenderingPrimitives& primitives = this->primitives[i];
         vks::SemaphoreCreateInfo sem_swapchain_info;
         vks::FenceCreateInfo fence_info{ VkFenceCreateInfo{ .flags = VK_FENCE_CREATE_SIGNALED_BIT } };
-        vks::CommandPoolCreateInfo cmdpool_info{ VkCommandPoolCreateInfo{ .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-                                                                          .queueFamilyIndex = gqi } };
         VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
         VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
         VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
         VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
         VK_CHECK(vkCreateFence(dev, &fence_info, nullptr, &primitives.fen_rendering_finished));
-        VK_CHECK(vkCreateCommandPool(dev, &cmdpool_info, nullptr, &primitives.cmdpool));
+        primitives.cmdpool = CommandPool{ gqi, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT };
     }
 }
 
@@ -470,9 +471,9 @@ void RendererVulkan::initialize_imgui() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
 
-    auto cmdimgui = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmdimgui = get_primitives().cmdpool.begin_onetime();
     ImGui_ImplVulkan_CreateFontsTexture();
-    end_recording(cmdimgui);
+    get_primitives().cmdpool.end(cmdimgui);
     scheduler_gq.enqueue_wait_submit({ { cmdimgui } });
     vkQueueWaitIdle(gq);
 }
@@ -483,6 +484,14 @@ template <std::integral T> static T align_up(T a, T b) { return (a + b - 1) & -b
 static std::vector<HandleInstancedModel> probe_visualizers;
 static std::vector<glm::mat4x3> original_transforms;
 static HandleBatchedModel sphere;
+
+static std::chrono::steady_clock::time_point ttime;
+static void start_time() { ttime = std::chrono::steady_clock::now(); }
+static void step_time(std::string_view label) {
+    const auto now = std::chrono::steady_clock::now();
+    ENG_LOG("{} TIME: {}", label, std::chrono::duration_cast<std::chrono::milliseconds>(now - ttime).count());
+    ttime = now;
+}
 
 void RendererVulkan::render() {
     if(flags & RendererFlags::DIRTY_MODEL_BATCHES) {
@@ -516,18 +525,20 @@ void RendererVulkan::render() {
 
     RenderingPrimitives& primitives = this->primitives[resource_idx];
 
+    // start_time();
     vkWaitForFences(dev, 1, &primitives.fen_rendering_finished, true, 16'000'000);
     vkResetFences(dev, 1, &primitives.fen_rendering_finished);
+    // step_time("Fence wait");
 
-    reset_command_pool(get_primitives().cmdpool);
-    descriptor_pool_allocator.reset_pool(get_primitives().desc_pool);
-    get_primitives().desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2);
+    primitives.cmdpool.reset();
+
+    if(!primitives.desc_pool) { primitives.desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2); }
+    descriptor_pool_allocator.reset_pool(primitives.desc_pool);
 
     VkDescriptorSet frame_desc_set =
-        descriptor_pool_allocator.allocate_set(get_primitives().desc_pool, layouts.at(0).descriptor_layouts.at(0),
-                                               textures.size());
+        descriptor_pool_allocator.allocate_set(primitives.desc_pool, layouts.at(0).descriptor_layouts.at(0), textures.size());
 
-    VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    static VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
 
     DescriptorSetWriter per_frame_set_writer;
     per_frame_set_writer.write(0, 0, tlas)
@@ -552,6 +563,7 @@ void RendererVulkan::render() {
     global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_view()), sizeof(glm::mat4),
                             2 * sizeof(glm::mat4));
     global_buffer.push_data(&rand_mat, sizeof(glm::mat3), 4 * sizeof(glm::mat4));
+    // step_time("Global 3 pushes");
 
     uint32_t sw_img_idx;
     vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
@@ -559,8 +571,8 @@ void RendererVulkan::render() {
 
     {
         ddgi_buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI_Buffer, frame_num));
-
-        auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+        // step_time("DDGI push");
+        auto cmd = get_primitives().cmdpool.begin_onetime();
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
@@ -721,45 +733,43 @@ void RendererVulkan::render() {
             .levelCount = 1,
             .layerCount = 1,
         };
-        VkImageView i_sw_view{};
-        VK_CHECK(vkCreateImageView(dev, &i_sw_img_view, nullptr, &i_sw_view));
+        // VkImageView i_sw_view{};
+        // VK_CHECK(vkCreateImageView(dev, &i_sw_img_view, nullptr, &i_sw_view));
 
-        VkRenderingAttachmentInfo i_col_atts[]{
-            VkRenderingAttachmentInfo{
-                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                .imageView = i_sw_view,
-                .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-            },
-        };
-        VkRenderingInfo imgui_rendering_info{
-            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = i_col_atts,
-        };
+        /* VkRenderingAttachmentInfo i_col_atts[]{
+             VkRenderingAttachmentInfo{
+                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                 .imageView = i_sw_view,
+                 .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                 .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                 .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+             },
+         };
+         VkRenderingInfo imgui_rendering_info{
+             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+             .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0],
+         Engine::window()->size[1] } }, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = i_col_atts,
+         };*/
 
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        ImGui::Begin("a");
-        ImGui::Text("asdf");
-        ImGui::End();
-        ImGui::Render();
-        ImDrawData* im_draw_data = ImGui::GetDrawData();
+        /* ImGui_ImplVulkan_NewFrame();
+         ImGui_ImplGlfw_NewFrame();
+         ImGui::NewFrame();
+         ImGui::Begin("a");
+         ImGui::Text("asdf");
+         ImGui::End();
+         ImGui::Render();
+         ImDrawData* im_draw_data = ImGui::GetDrawData();
 
-        vkCmdBeginRendering(cmd, &imgui_rendering_info);
-        vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
-        vkCmdSetViewport(cmd, 0, 1, &r_view_1);
-        ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
-        vkCmdEndRendering(cmd);
+         vkCmdBeginRendering(cmd, &imgui_rendering_info);
+         vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
+         vkCmdSetViewport(cmd, 0, 1, &r_view_1);
+         ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);*/
+        // vkCmdEndRendering(cmd);
 
         sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_NONE);
 
-        vkEndCommandBuffer(cmd);
+        get_primitives().cmdpool.end(cmd);
 
         scheduler_gq.enqueue_wait_submit(
             RecordingSubmitInfo{
@@ -776,7 +786,7 @@ void RendererVulkan::render() {
         pinfo.waitSemaphoreCount = 1;
         pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
         vkQueuePresentKHR(gq, &pinfo);
-        vkDestroyImageView(dev, i_sw_view, nullptr);
+        // vkDestroyImageView(dev, i_sw_view, nullptr);
     }
 }
 
@@ -882,17 +892,17 @@ void RendererVulkan::upload_model_textures() {
     VK_CHECK(vkCreateSemaphore(dev, &sem_info, nullptr, &acquire_sem));
 
     VkCommandBuffer release_cmd;
-    VkCommandBuffer acquire_cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBuffer acquire_cmd = get_primitives().cmdpool.begin_onetime();
     {
         std::scoped_lock lock{ staging->get_queue_mutex() };
-        release_cmd = begin_recording(staging->get_cmdpool(), VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+        release_cmd = staging->get_cmdpool()->begin_onetime();
     }
 
     for(auto& tex : upload_images) {
         Image& img = textures.at(tex.image_index);
 
         std::atomic_flag flag{};
-        VkCommandBuffer cmd = allocate_buffer(get_primitives().cmdpool);
+        VkCommandBuffer cmd = get_primitives().cmdpool.allocate();
         staging->send_to(&img, {}, std::span{ tex.rgba_data.begin(), tex.rgba_data.end() }, cmd, &scheduler_gq, gqi, &flag);
 
         VkImageMemoryBarrier img_barrier{
@@ -911,8 +921,8 @@ void RendererVulkan::upload_model_textures() {
         flag.wait(false, std::memory_order_relaxed);
     }
 
-    end_recording(release_cmd);
-    end_recording(acquire_cmd);
+    get_primitives().cmdpool.end(release_cmd);
+    get_primitives().cmdpool.end(acquire_cmd);
 
     {
         std::scoped_lock lock{ staging->get_queue_mutex() };
@@ -947,7 +957,7 @@ void RendererVulkan::upload_model_textures() {
     buffer_copies.reserve(upload_images.size());
 
     uint64_t texture_byte_offset = 0;
-    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = get_primitives().cmdpool.begin_onetime();
     for(const auto& tex : upload_images) {
         auto& texture = textures.at(tex.image_index);
 
@@ -979,7 +989,7 @@ void RendererVulkan::upload_model_textures() {
                                   false, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     }
 
-    end_recording(cmd);
+    get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkQueueWaitIdle(gq);
 }
@@ -1312,10 +1322,10 @@ void RendererVulkan::create_rt_output_image() {
         "rt_image", window->size[0], window->size[1], 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
     };
 
-    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = get_primitives().cmdpool.begin_onetime();
     rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    end_recording(cmd);
+    get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkQueueWaitIdle(gq);
 }
@@ -1418,14 +1428,14 @@ void RendererVulkan::build_blas() {
         }
     }
 
-    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = get_primitives().cmdpool.begin_onetime();
     std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> poffsets(dirty_models.size());
     for(uint32_t i = 0, offset = 0; i < dirty_models.size(); ++i) {
         poffsets.at(i) = &ranges.at(offset);
         offset += dirty_models.at(i)->mesh_count;
     }
     vkCmdBuildAccelerationStructuresKHR(cmd, build_geometries.size(), build_geometries.data(), poffsets.data());
-    end_recording(cmd);
+    get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
@@ -1497,9 +1507,9 @@ void RendererVulkan::build_tlas() {
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = get_primitives().cmdpool.begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    end_recording(cmd);
+    get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 
@@ -1559,9 +1569,9 @@ void RendererVulkan::refit_tlas() {
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = get_primitives().cmdpool.begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    end_recording(cmd);
+    get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
@@ -1617,7 +1627,7 @@ void RendererVulkan::prepare_ddgi() {
                                         VK_SAMPLE_COUNT_1_BIT,
                                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
 
-    auto cmd = begin_recording(get_primitives().cmdpool, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    auto cmd = get_primitives().cmdpool.begin_onetime();
     ddgi.radiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                             VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
@@ -1632,7 +1642,7 @@ void RendererVulkan::prepare_ddgi() {
                                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
 
-    end_recording(cmd);
+    get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
 
     ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
@@ -1670,28 +1680,6 @@ void RendererVulkan::prepare_ddgi() {
 
     vkQueueWaitIdle(gq);
 }
-
-VkCommandBuffer RendererVulkan::allocate_buffer(VkCommandPool pool) {
-    VkCommandBuffer cmd;
-    vks::CommandBufferAllocateInfo alloc_info;
-    alloc_info.commandPool = pool;
-    alloc_info.commandBufferCount = 1;
-    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    VK_CHECK(vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
-    return cmd;
-}
-
-VkCommandBuffer RendererVulkan::begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage) {
-    auto cmd = allocate_buffer(pool);
-    vks::CommandBufferBeginInfo info;
-    info.flags = usage;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &info));
-    return cmd;
-}
-
-void RendererVulkan::end_recording(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
-
-void RendererVulkan::reset_command_pool(VkCommandPool pool) { VK_CHECK(vkResetCommandPool(dev, pool, {})); }
 
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
              VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
@@ -2085,6 +2073,8 @@ VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
 
 VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RendererPipelineLayout& layout, uint32_t set,
                                                         uint32_t max_sets, VkDescriptorPoolCreateFlags flags) {
+    ENG_LOG("ALLOC POOL");
+
     const std::vector<VkDescriptorSetLayoutBinding>& bindings = layout.bindings.at(set);
     const std::vector<VkDescriptorBindingFlags>& binding_flags = layout.binding_flags.at(set);
 
@@ -2111,12 +2101,25 @@ VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RendererPipelineLa
     info.flags = flags;
     info.poolSizeCount = sizes.size();
     info.pPoolSizes = sizes.data();
-    VkDescriptorPool& pool = pools.emplace_back();
+    VkDescriptorPool pool;
     VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &info, nullptr, &pool));
+
+    pools.emplace(pool, PoolDescriptor{});
+
     return pool;
 }
 
 VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count) {
+    auto& pool_desc = pools.at(pool);
+    for(auto& set : pool_desc.sets) {
+        if(set.free && set.layout == layout) {
+            set.free = false;
+            return set.set;
+        }
+    }
+
+    ENG_LOG("Allocating new descriptor set")
+
     vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_info;
     variable_info.descriptorSetCount = 1;
     variable_info.pDescriptorCounts = &variable_count;
@@ -2130,12 +2133,17 @@ VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkD
     VkDescriptorSet set;
     VK_CHECK(vkAllocateDescriptorSets(get_renderer().dev, &info, &set));
 
+    pool_desc.sets.emplace_back(set, layout, false);
+
     return set;
 }
 
 void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
     if(!pool) { return; }
-    VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
+    for(auto& e : pools.at(pool).sets) {
+        e.free = true;
+    }
+    // VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
 }
 
 ThreadedQueueScheduler::ThreadedQueueScheduler(VkQueue queue) : scheduler{ queue } {
@@ -2239,3 +2247,63 @@ void QueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
 }
 
 void QueueScheduler::enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence) { enqueue(info, fence); }
+
+CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) {
+    vks::CommandPoolCreateInfo info;
+    info.flags = flags;
+    info.queueFamilyIndex = queue_index;
+    VK_CHECK(vkCreateCommandPool(RendererVulkan::get()->dev, &info, {}, &cmdpool));
+}
+
+CommandPool::~CommandPool() noexcept {
+    if(cmdpool) { vkDestroyCommandPool(RendererVulkan::get()->dev, cmdpool, nullptr); }
+}
+
+CommandPool::CommandPool(CommandPool&& other) noexcept { *this = std::move(other); }
+
+CommandPool& CommandPool::operator=(CommandPool&& other) noexcept {
+    cmdpool = std::exchange(other.cmdpool, nullptr);
+    return *this;
+}
+
+VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
+    auto it = buffers.begin();
+    if(it != buffers.end() && it->second) {
+        VkCommandBuffer buffer = it->first;
+        it->second = false;
+        std::sort(it, buffers.end(), [](auto&& a, auto&& b) { return a.second > b.second; });
+        return buffer;
+    }
+
+    ENG_LOG("Allocating new command buffer");
+
+    vks::CommandBufferAllocateInfo info;
+    info.commandBufferCount = 1;
+    info.commandPool = cmdpool;
+    info.level = level;
+    VkCommandBuffer buffer;
+    VK_CHECK(vkAllocateCommandBuffers(RendererVulkan::get()->dev, &info, &buffer));
+    buffers.emplace_back(buffer, false);
+    return buffer;
+}
+
+VkCommandBuffer CommandPool::begin(VkCommandBufferUsageFlags flags, VkCommandBufferLevel level) {
+    vks::CommandBufferBeginInfo info;
+    info.flags = flags;
+    VkCommandBuffer buffer = allocate(level);
+    VK_CHECK(vkBeginCommandBuffer(buffer, &info));
+    return buffer;
+}
+
+VkCommandBuffer CommandPool::begin_onetime(VkCommandBufferLevel level) {
+    return begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+}
+
+void CommandPool::end(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
+
+void CommandPool::reset() {
+    vkResetCommandPool(RendererVulkan::get()->dev, cmdpool, {});
+    for(auto& e : buffers) {
+        e.second = true;
+    }
+}

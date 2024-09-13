@@ -29,10 +29,7 @@ GpuStagingManager::GpuStagingManager(VkQueue queue, uint32_t queue_index, size_t
         stop_token = stage_thread.get_stop_token();
     }
 
-    vks::CommandPoolCreateInfo cmdpool_info;
-    cmdpool_info.queueFamilyIndex = queue_index;
-    VK_CHECK(vkCreateCommandPool(RendererVulkan::get()->dev, &cmdpool_info, {}, &cmdpool));
-    assert(cmdpool);
+    cmdpool = new CommandPool{ queue_index };
 }
 
 GpuStagingManager::~GpuStagingManager() noexcept {
@@ -52,10 +49,7 @@ GpuStagingManager::~GpuStagingManager() noexcept {
     delete submit_queue;
 
     auto* renderer = RendererVulkan::get();
-    if(cmdpool) {
-        vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
-        vkDestroyCommandPool(renderer->dev, cmdpool, {});
-    }
+    delete cmdpool;
 }
 
 bool GpuStagingManager::send_to(VkBuffer dst, size_t dst_offset, std::span<const std::byte> src, std::atomic_flag* flag) {
@@ -134,16 +128,10 @@ bool GpuStagingManager::send_to_impl(Image* dst_image, VkImageSubresourceLayers 
 
     std::scoped_lock lock{ queue_mutex };
 
-    VkCommandBuffer cmd{};
-    vks::CommandBufferAllocateInfo alloc_info;
-    alloc_info.commandPool = cmdpool;
-    alloc_info.commandBufferCount = 1;
-    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    VK_CHECK(vkAllocateCommandBuffers(RendererVulkan::get()->dev, &alloc_info, &cmd));
-
-    VK_CHECK(vkBeginCommandBuffer(cmd, &src_begin_info));
+    VkCommandBuffer cmd = cmdpool->begin_onetime();
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0, {}, 1, &src_image_barrier);
-    VK_CHECK(vkEndCommandBuffer(cmd));
+    cmdpool->end(cmd);
+
     submit_queue->enqueue_wait_submit({ .buffers = { cmd },
                                         .waits = { { image_src_release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } },
                                         .signals = { { image_dst_acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
@@ -261,29 +249,21 @@ void GpuStagingManager::submit_uploads() {
         auto uploads = std::move(this->uploads);
         this->uploads.clear();
 
-        lock.unlock();
 
-        if(allocated_command_buffers.load(std::memory_order_relaxed) >= 1024) {
+        if(allocated_command_buffers.load(std::memory_order_relaxed) >= 128) {
             int val;
             while((val = background_task_count.load(std::memory_order_relaxed)) > 0) {
                 background_task_count.wait(val, std::memory_order_relaxed);
             }
-            VK_CHECK(vkResetCommandPool(renderer->dev, cmdpool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT));
+            cmdpool->reset();
             allocated_command_buffers = 0;
         }
 
+        lock.unlock();
+
         if(uploads.empty()) { continue; }
 
-        VkCommandBuffer cmd{};
-        vks::CommandBufferAllocateInfo alloc_info;
-        alloc_info.commandPool = cmdpool;
-        alloc_info.commandBufferCount = 1;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        VK_CHECK(vkAllocateCommandBuffers(renderer->dev, &alloc_info, &cmd));
-        if(!cmd) {
-            ENG_WARN("GpuStagingManager could not allocate command buffer.");
-            continue;
-        }
+        VkCommandBuffer cmd = cmdpool->begin_onetime();
 
         std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> wait_sems;
 
@@ -291,9 +271,6 @@ void GpuStagingManager::submit_uploads() {
         VkFenceCreateInfo fence_info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         VK_CHECK(vkCreateFence(renderer->dev, &fence_info, {}, &fence));
 
-        vks::CommandBufferBeginInfo begin_info;
-        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
         for(const auto& e : uploads) {
             if(e.t->is_dst_vkbuffer()) {
                 if(e.is_src_allocation()) {
@@ -333,6 +310,7 @@ void GpuStagingManager::submit_uploads() {
             {
                 std::scoped_lock lock{ queue_mutex };
                 for(const auto& e : uploads) {
+                    const auto s = e.get_size(mgr);
                     e.t->uploaded += e.get_size(mgr);
                     if(e.src_storage.index() == 0) { pool->deallocate(std::get<0>(e.src_storage)); }
                 }
