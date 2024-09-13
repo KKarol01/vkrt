@@ -684,7 +684,7 @@ void RendererVulkan::render() {
             .pDepthAttachment = &r_dep_att,
         };
 
-        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx] };
+        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
 
         VkDeviceSize vb_offsets[]{ 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
@@ -2073,8 +2073,6 @@ VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
 
 VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RendererPipelineLayout& layout, uint32_t set,
                                                         uint32_t max_sets, VkDescriptorPoolCreateFlags flags) {
-    ENG_LOG("ALLOC POOL");
-
     const std::vector<VkDescriptorSetLayoutBinding>& bindings = layout.bindings.at(set);
     const std::vector<VkDescriptorBindingFlags>& binding_flags = layout.binding_flags.at(set);
 
@@ -2117,8 +2115,6 @@ VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkD
             return set.set;
         }
     }
-
-    ENG_LOG("Allocating new descriptor set")
 
     vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_info;
     variable_info.descriptorSetCount = 1;
@@ -2274,8 +2270,6 @@ VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
         std::sort(it, buffers.end(), [](auto&& a, auto&& b) { return a.second > b.second; });
         return buffer;
     }
-
-    ENG_LOG("Allocating new command buffer");
 
     vks::CommandBufferAllocateInfo info;
     info.commandBufferCount = 1;
