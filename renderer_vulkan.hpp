@@ -437,14 +437,22 @@ class RendererGraphicsPipelineBuilder {
 };
 
 class DescriptorPoolAllocator {
+    struct DescriptorSet {
+        VkDescriptorSet set;
+        VkDescriptorSetLayout layout;
+        bool free{ true };
+    };
+    struct PoolDescriptor {
+        std::vector<DescriptorSet> sets;
+    };
+
   public:
     VkDescriptorPool allocate_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
                                    VkDescriptorPoolCreateFlags flags = {});
     VkDescriptorSet allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count = 0);
     void reset_pool(VkDescriptorPool pool);
 
-  private:
-    std::vector<VkDescriptorPool> pools;
+    std::unordered_map<VkDescriptorPool, PoolDescriptor> pools;
 };
 
 class DescriptorSetWriter {
@@ -589,6 +597,27 @@ class ThreadedQueueScheduler {
     std::vector<QueueItem> submit_queue;
 };
 
+class CommandPool {
+  public:
+    constexpr CommandPool() noexcept = default;
+    CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags = {});
+    ~CommandPool() noexcept;
+
+    CommandPool(const CommandPool&) noexcept = delete;
+    CommandPool& operator=(const CommandPool&) noexcept = delete;
+    CommandPool(CommandPool&& other) noexcept;
+    CommandPool& operator=(CommandPool&& other) noexcept;
+
+    VkCommandBuffer allocate(VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkCommandBuffer begin(VkCommandBufferUsageFlags flags = {}, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkCommandBuffer begin_onetime(VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    void end(VkCommandBuffer buffer);
+    void reset();
+
+    std::vector<std::pair<VkCommandBuffer, bool>> buffers;
+    VkCommandPool cmdpool{};
+};
+
 class RendererVulkan : public Renderer {
     struct BoundingBox {
         glm::vec3 center() const { return (max + min) * 0.5f; }
@@ -643,8 +672,9 @@ class RendererVulkan : public Renderer {
         VkSemaphore sem_gui_start{};
         VkSemaphore sem_copy_to_sw_img_done{};
         VkFence fen_rendering_finished{};
-        VkCommandPool cmdpool{};
+        CommandPool cmdpool{};
         VkDescriptorPool desc_pool{};
+        Buffer constants;
     };
 
   public:
@@ -676,10 +706,6 @@ class RendererVulkan : public Renderer {
     void refit_tlas();
     void prepare_ddgi();
 
-    VkCommandBuffer allocate_buffer(VkCommandPool pool);
-    VkCommandBuffer begin_recording(VkCommandPool pool, VkCommandBufferUsageFlags usage);
-    void end_recording(VkCommandBuffer buffer);
-    void reset_command_pool(VkCommandPool pool);
     RenderingPrimitives& get_primitives() { return primitives[Engine::frame_num() % 2]; }
 
     uint32_t get_total_vertices() const {

@@ -11,6 +11,7 @@ class FreeListAllocator;
 class Buffer;
 class Image;
 class QueueScheduler;
+class CommandPool;
 
 class GpuStagingManager {
     struct Transaction {
@@ -59,7 +60,7 @@ class GpuStagingManager {
                  QueueScheduler* src_queue, uint32_t src_queue_idx, std::atomic_flag* flag = nullptr);
     bool empty() const { return transactions.empty(); }
     std::mutex& get_queue_mutex() { return queue_mutex; }
-    VkCommandPool get_cmdpool() { return cmdpool; }
+    CommandPool* get_cmdpool() { return cmdpool; }
 
   private:
     bool send_to_impl(VkBuffer dst, size_t dst_offset, std::variant<std::vector<std::byte>, const Buffer*>&& src,
@@ -70,7 +71,7 @@ class GpuStagingManager {
     void schedule_upload();
     void submit_uploads();
 
-    VkCommandPool cmdpool{};
+    CommandPool* cmdpool{};
     QueueScheduler* submit_queue;
     uint32_t queue_idx;
     Buffer* pool_memory;

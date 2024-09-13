@@ -17,7 +17,7 @@
 #include "probes.inc.glsl"
 #include "light.inc"
 
-#if 1
+#if 0
 const vec4 colors[] = vec4[](
 	vec4(0.0, 1.0, 0.0, 1.0),
 	vec4(1.0, 0.0, 0.0, 1.0),
@@ -111,16 +111,6 @@ void main() {
 
 	//direction = vec4(globals.randomRotation * direction.xyz, 0.0);
 
-#if 1
-	//const float t = float(ddgi.frame_num + 21500) * 0.0001;
-
-	/*direction.xyz = mat3(
-		vec3(cos(t), 0.0, -sin(t)),
-		vec3(0.0, 1.0, 0.0),
-		vec3(sin(t), 0.0, cos(t))
-	) * direction.xyz;*/
-#endif
-
     float tmin = 0.00001;
     float tmax = 15.0;
 
@@ -147,8 +137,6 @@ void main() {
 		vec3 irradiance = sample_irradiance(hit_pos, payload.normal, origin.xyz);
 		final_color += irradiance * payload.albedo;
 #endif
-
-	    //final_color = mix(calc_direct_lighting(hit_pos, payload.normal) * payload.albedo * max(payload.shadow, 1.0), final_color, 0.0);
 
 		imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(final_color, 1.0)); 
 	} else if (mode == 1) {
