@@ -24,12 +24,13 @@ template <class... Ts> struct Visitor : Ts... {
 };
 
 enum class RendererFlags : uint32_t {
-    DIRTY_MODEL_INSTANCES = 0x1,
-    DIRTY_MODEL_BATCHES = 0x2,
-    DIRTY_BLAS = 0x4,
-    DIRTY_TLAS = 0x8,
-    REFIT_TLAS = 0x10,
-    UPDATE_MESH_POSITIONS = 0x20,
+    DIRTY_MODEL_INSTANCES_BIT = 0x1,
+    DIRTY_MODEL_BATCHES_BIT = 0x2,
+    DIRTY_BLAS_BIT = 0x4,
+    DIRTY_TLAS_BIT = 0x8,
+    REFIT_TLAS_BIT = 0x10,
+    UPDATE_MESH_POSITIONS_BIT = 0x20,
+    RESIZE_SWAPCHAIN_BIT = 0x40,
 };
 
 enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
@@ -75,6 +76,8 @@ struct Image {
           VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
     Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
           uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
+    Image(Image&& other) noexcept;
+    Image& operator=(Image&& other) noexcept;
 
     void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                            VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout);
@@ -88,8 +91,11 @@ struct Image {
     VkFormat format{};
     VkImageAspectFlags aspect{};
     VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
-    uint32_t width{ 0 }, height{ 0 }, depth{ 0 };
-    uint32_t mips{ 0 }, layers{ 0 };
+    uint32_t width{ 0 };
+    uint32_t height{ 0 };
+    uint32_t depth{ 0 };
+    uint32_t mips{ 0 };
+    uint32_t layers{ 0 };
 };
 
 struct Vertex {
@@ -566,35 +572,6 @@ class QueueScheduler {
 
   private:
     VkQueue vkqueue;
-    friend class ThreadedQueueScheduler;
-};
-
-class ThreadedQueueScheduler {
-    struct QueueItem {
-        RecordingSubmitInfo info;
-        VkFence fence;
-        std::shared_ptr<std::latch> on_submit_latch;
-    };
-
-  public:
-    ThreadedQueueScheduler() = default;
-    ThreadedQueueScheduler(VkQueue queue);
-    ThreadedQueueScheduler(ThreadedQueueScheduler&& other) noexcept;
-    ThreadedQueueScheduler& operator=(ThreadedQueueScheduler&& other) noexcept;
-    ~ThreadedQueueScheduler() noexcept;
-
-    std::shared_ptr<std::latch> enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-    void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-
-  private:
-    void submit_thread_func();
-
-    QueueScheduler scheduler;
-    std::jthread submit_thread;
-    std::stop_token submit_thread_stop_token;
-    std::mutex submit_queue_mutex;
-    std::condition_variable submit_thread_cvar;
-    std::vector<QueueItem> submit_queue;
 };
 
 class CommandPool {
@@ -729,7 +706,7 @@ class RendererVulkan : public Renderer {
     uint32_t gqi, pqi, tqi1;
     VkQueue gq, pq, tq1;
 
-    VkSwapchainKHR swapchain;
+    VkSwapchainKHR swapchain{};
     std::vector<Image> swapchain_images;
     VkFormat swapchain_format;
     Image depth_buffers[2]{};

@@ -20,6 +20,7 @@
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
+#include "utils.hpp"
 
 RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
 
@@ -199,6 +200,10 @@ void RendererVulkan::init() {
     build_pipelines();
     build_sbt();
     initialize_imgui();
+    Engine::add_on_window_resize_callback([this] {
+        flags |= RendererFlags::RESIZE_SWAPCHAIN_BIT;
+        return true;
+    });
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -400,13 +405,22 @@ void RendererVulkan::initialize_vulkan() {
 }
 
 void RendererVulkan::create_swapchain() {
+    if(swapchain) {
+        vkDestroySwapchainKHR(dev, swapchain, nullptr);
+        for(auto& img : swapchain_images) {
+            img.image = nullptr;
+            vkDestroyImageView(dev, img.view, nullptr);
+        }
+        swapchain_images.clear();
+    }
+
     vks::SwapchainCreateInfoKHR sinfo;
     sinfo.surface = window_surface;
     sinfo.minImageCount = 2;
     sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
     sinfo.imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
     sinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    sinfo.imageExtent = VkExtent2D{ Engine::window()->size[0], Engine::window()->size[1] };
+    sinfo.imageExtent = VkExtent2D{ Engine::window()->width, Engine::window()->height };
     sinfo.imageArrayLayers = 1;
     sinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     sinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -439,6 +453,12 @@ void RendererVulkan::create_swapchain() {
                                           VK_SAMPLE_COUNT_1_BIT, sinfo.imageUsage });
     }
     swapchain_format = sinfo.imageFormat;
+
+    for(int i = 0; i < 2; ++i) {
+        depth_buffers[i] = Image{
+            std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+        };
+    }
 }
 
 void RendererVulkan::initialize_imgui() {
@@ -478,46 +498,38 @@ void RendererVulkan::initialize_imgui() {
     vkQueueWaitIdle(gq);
 }
 
-// aligns a to the nearest multiple any power of two
-template <std::integral T> static T align_up(T a, T b) { return (a + b - 1) & -b; }
-
-static std::vector<HandleInstancedModel> probe_visualizers;
-static std::vector<glm::mat4x3> original_transforms;
-static HandleBatchedModel sphere;
-
-static std::chrono::steady_clock::time_point ttime;
-static void start_time() { ttime = std::chrono::steady_clock::now(); }
-static void step_time(std::string_view label) {
-    const auto now = std::chrono::steady_clock::now();
-    ENG_LOG("{} TIME: {}", label, std::chrono::duration_cast<std::chrono::milliseconds>(now - ttime).count());
-    ttime = now;
-}
-
 void RendererVulkan::render() {
-    if(flags & RendererFlags::DIRTY_MODEL_BATCHES) {
+    if(flags & RendererFlags::DIRTY_MODEL_BATCHES_BIT) {
         upload_staged_models();
-        flags ^= RendererFlags::DIRTY_MODEL_BATCHES;
+        flags ^= RendererFlags::DIRTY_MODEL_BATCHES_BIT;
     }
-    if(flags & RendererFlags::DIRTY_MODEL_INSTANCES) {
+    if(flags & RendererFlags::DIRTY_MODEL_INSTANCES_BIT) {
         upload_instances();
-        flags ^= RendererFlags::DIRTY_MODEL_INSTANCES;
+        flags ^= RendererFlags::DIRTY_MODEL_INSTANCES_BIT;
     }
-    if(flags & RendererFlags::DIRTY_BLAS) {
+    if(flags & RendererFlags::DIRTY_BLAS_BIT) {
         build_blas();
-        flags ^= RendererFlags::DIRTY_BLAS;
+        flags ^= RendererFlags::DIRTY_BLAS_BIT;
     }
-    if(flags & RendererFlags::DIRTY_TLAS) {
+    if(flags & RendererFlags::DIRTY_TLAS_BIT) {
         build_tlas();
         prepare_ddgi();
-        flags ^= RendererFlags::DIRTY_TLAS;
+        flags ^= RendererFlags::DIRTY_TLAS_BIT;
     }
-    if(flags & RendererFlags::REFIT_TLAS) {
+    if(flags & RendererFlags::REFIT_TLAS_BIT) {
         refit_tlas();
-        flags ^= RendererFlags::REFIT_TLAS;
+        flags ^= RendererFlags::REFIT_TLAS_BIT;
     }
-    if(flags & RendererFlags::UPDATE_MESH_POSITIONS) {
+    if(flags & RendererFlags::UPDATE_MESH_POSITIONS_BIT) {
         upload_transforms();
-        flags ^= RendererFlags::UPDATE_MESH_POSITIONS;
+        flags ^= RendererFlags::UPDATE_MESH_POSITIONS_BIT;
+    }
+    if(flags & RendererFlags::RESIZE_SWAPCHAIN_BIT) {
+        vkQueueWaitIdle(gq);
+        create_swapchain();
+        Engine::camera()->update_projection(glm::perspectiveFov(glm::radians(90.0f), (float)Engine::window()->width,
+                                                                (float)Engine::window()->height, 0.0f, 10.0f));
+        flags ^= RendererFlags::RESIZE_SWAPCHAIN_BIT;
     }
 
     const auto frame_num = Engine::frame_num();
@@ -525,12 +537,20 @@ void RendererVulkan::render() {
 
     RenderingPrimitives& primitives = this->primitives[resource_idx];
 
-    // start_time();
     vkWaitForFences(dev, 1, &primitives.fen_rendering_finished, true, 16'000'000);
-    vkResetFences(dev, 1, &primitives.fen_rendering_finished);
-    // step_time("Fence wait");
-
     primitives.cmdpool.reset();
+
+    uint32_t sw_img_idx;
+    {
+        const auto ms16 = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{ 16 }).count();
+        const auto acquire_ret = vkAcquireNextImageKHR(dev, swapchain, ms16, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
+        if(acquire_ret != VK_SUCCESS) {
+            ENG_WARN("Acquire image failed with: {}", static_cast<uint32_t>(acquire_ret));
+            return;
+        }
+    }
+
+    vkResetFences(dev, 1, &primitives.fen_rendering_finished);
 
     if(!primitives.desc_pool) { primitives.desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2); }
     descriptor_pool_allocator.reset_pool(primitives.desc_pool);
@@ -563,15 +583,11 @@ void RendererVulkan::render() {
     global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_view()), sizeof(glm::mat4),
                             2 * sizeof(glm::mat4));
     global_buffer.push_data(&rand_mat, sizeof(glm::mat3), 4 * sizeof(glm::mat4));
-    // step_time("Global 3 pushes");
 
-    uint32_t sw_img_idx;
-    vkAcquireNextImageKHR(dev, swapchain, -1ULL, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
     ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
 
     {
         ddgi_buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI_Buffer, frame_num));
-        // step_time("DDGI push");
         auto cmd = get_primitives().cmdpool.begin_onetime();
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
@@ -677,14 +693,16 @@ void RendererVulkan::render() {
 
         VkRenderingInfo rendering_info{
             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0], Engine::window()->size[1] } },
+            .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width, Engine::window()->height } },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = r_col_atts,
             .pDepthAttachment = &r_dep_att,
         };
 
-        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
+        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                                                   VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
 
         VkDeviceSize vb_offsets[]{ 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
@@ -700,11 +718,11 @@ void RendererVulkan::render() {
                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->size[0], Engine::window()->size[1] } };
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->width, Engine::window()->height } };
         VkViewport r_view_1{ .x = 0.0f,
-                             .y = static_cast<float>(Engine::window()->size[1]),
-                             .width = static_cast<float>(Engine::window()->size[0]),
-                             .height = -static_cast<float>(Engine::window()->size[1]),
+                             .y = static_cast<float>(Engine::window()->height),
+                             .width = static_cast<float>(Engine::window()->width),
+                             .height = -static_cast<float>(Engine::window()->height),
                              .minDepth = 0.0f,
                              .maxDepth = 1.0f };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
@@ -748,8 +766,8 @@ void RendererVulkan::render() {
          };
          VkRenderingInfo imgui_rendering_info{
              .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-             .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->size[0],
-         Engine::window()->size[1] } }, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = i_col_atts,
+             .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width,
+         Engine::window()->height } }, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = i_col_atts,
          };*/
 
         /* ImGui_ImplVulkan_NewFrame();
@@ -799,7 +817,7 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
     const auto total_models = static_cast<uint32_t>(models.size());
     const auto rt_metadata_handle = rt_metadata.emplace_back();
 
-    flags |= RendererFlags::DIRTY_MODEL_BATCHES;
+    flags |= RendererFlags::DIRTY_MODEL_BATCHES_BIT;
 
     Handle<RenderModel> model_handle = models.push_back(RenderModel{
         .flags = {},
@@ -817,7 +835,7 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
     });
 
     if(settings.flags & BatchFlags::RAY_TRACED) {
-        flags |= RendererFlags::DIRTY_BLAS;
+        flags |= RendererFlags::DIRTY_BLAS_BIT;
         model_handle->flags |= RenderModelFlags::DIRTY_BLAS;
     }
 
@@ -879,8 +897,8 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
         });
     }
 
-    flags |= RendererFlags::DIRTY_MODEL_INSTANCES;
-    if(settings.flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::DIRTY_TLAS; }
+    flags |= RendererFlags::DIRTY_MODEL_INSTANCES_BIT;
+    if(settings.flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::DIRTY_TLAS_BIT; }
 
     return HandleInstancedModel{ *handle };
 }
@@ -1136,9 +1154,9 @@ void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 tr
     //  TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
     //  memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
     //        sizeof(transform));
-    if(model->flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::REFIT_TLAS; }
+    if(model->flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::REFIT_TLAS_BIT; }
     upload_positions.emplace_back(Handle<RenderModelInstance>{ *model }, transform);
-    flags |= RendererFlags::UPDATE_MESH_POSITIONS;
+    flags |= RendererFlags::UPDATE_MESH_POSITIONS_BIT;
 }
 
 void RendererVulkan::compile_shaders() {
@@ -1293,12 +1311,6 @@ void RendererVulkan::build_pipelines() {
     layouts.push_back(imgui_layout);
 
     imgui_desc_pool = descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 1);
-
-    for(int i = 0; i < 2; ++i) {
-        depth_buffers[i] = Image{
-            std::format("depth_buffer_{}", i), Engine::window()->size[0], Engine::window()->size[1], 1, 1, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-        };
-    }
 }
 
 void RendererVulkan::build_sbt() {
@@ -1319,7 +1331,7 @@ void RendererVulkan::build_sbt() {
 void RendererVulkan::create_rt_output_image() {
     const auto* window = Engine::window();
     rt_image = Image{
-        "rt_image", window->size[0], window->size[1], 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+        "rt_image", window->width, window->height, 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
     };
 
     auto cmd = get_primitives().cmdpool.begin_onetime();
@@ -1732,6 +1744,25 @@ Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t he
     set_debug_name(view, std::format("{}_default_view", name));
 }
 
+Image::Image(Image&& other) noexcept { *this = std::move(other); }
+
+Image& Image::operator=(Image&& other) noexcept {
+    if(image) { vkDestroyImage(RendererVulkan::get()->dev, image, nullptr); }
+    if(view) { vkDestroyImageView(RendererVulkan::get()->dev, view, nullptr); }
+    image = std::exchange(other.image, nullptr);
+    alloc = std::exchange(other.alloc, nullptr);
+    view = std::exchange(other.view, nullptr);
+    format = other.format;
+    aspect = other.aspect;
+    current_layout = other.current_layout;
+    width = other.width;
+    height = other.height;
+    depth = other.depth;
+    mips = other.mips;
+    layers = other.layers;
+    return *this;
+}
+
 void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                               VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined,
                               VkImageLayout dst_layout) {
@@ -2139,65 +2170,7 @@ void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
     for(auto& e : pools.at(pool).sets) {
         e.free = true;
     }
-    // VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
-}
-
-ThreadedQueueScheduler::ThreadedQueueScheduler(VkQueue queue) : scheduler{ queue } {
-    assert(queue);
-    submit_thread = std::jthread{ &ThreadedQueueScheduler::submit_thread_func, this };
-    submit_thread_stop_token = submit_thread.get_stop_token();
-}
-
-ThreadedQueueScheduler::ThreadedQueueScheduler(ThreadedQueueScheduler&& other) noexcept { *this = std::move(other); }
-
-ThreadedQueueScheduler& ThreadedQueueScheduler::operator=(ThreadedQueueScheduler&& other) noexcept {
-    if(scheduler.vkqueue) {
-        if(submit_thread_stop_token.stop_possible()) { submit_thread.request_stop(); }
-        submit_thread.join();
-    }
-
-    scheduler = std::move(other.scheduler);
-    submit_queue = std::move(other.submit_queue);
-    submit_thread = std::jthread{ &ThreadedQueueScheduler::submit_thread_func, this };
-    submit_thread_stop_token = submit_thread.get_stop_token();
-    return *this;
-}
-
-ThreadedQueueScheduler::~ThreadedQueueScheduler() noexcept { submit_thread_cvar.notify_one(); }
-
-std::shared_ptr<std::latch> ThreadedQueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
-    std::scoped_lock lock{ submit_queue_mutex };
-    submit_queue.push_back(QueueItem{ info, fence, std::make_shared<std::latch>(1) });
-    submit_thread_cvar.notify_one();
-    return submit_queue.back().on_submit_latch;
-}
-
-void ThreadedQueueScheduler::enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence) {
-    enqueue(info, fence)->wait();
-}
-
-void ThreadedQueueScheduler::submit_thread_func() {
-    while(!submit_thread_stop_token.stop_requested()) {
-        std::unique_lock lock{ submit_queue_mutex };
-        submit_thread_cvar.wait(lock,
-                                [this]() { return !submit_queue.empty() || submit_thread_stop_token.stop_requested(); });
-
-        if(submit_thread_stop_token.stop_requested()) {
-            lock.unlock();
-            return;
-        }
-
-        std::vector<QueueItem> submits = std::move(submit_queue);
-        submit_queue.clear();
-        lock.unlock();
-
-        for(uint32_t i = 0; i < submits.size(); ++i) {
-            scheduler.enqueue(submits.at(i).info, submits.at(i).fence);
-            submits.at(i).on_submit_latch->count_down();
-        }
-    }
-
-    ENG_LOG("Threaded queue scheduler safely stopping");
+    // VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {})); // resetting actualy makes descriptor sets invalid - as opposed to commandpool
 }
 
 QueueScheduler::QueueScheduler(VkQueue queue) : vkqueue{ queue } { assert(queue); }
