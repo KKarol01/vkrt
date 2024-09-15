@@ -5,8 +5,8 @@
 #include "engine.hpp"
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
-    : projection{ glm::perspectiveFov(fov_radians, static_cast<float>(Engine::window()->size[0]),
-                                      static_cast<float>(Engine::window()->size[1]), min_dist, max_dist) } {
+    : projection{ glm::perspectiveFov(fov_radians, static_cast<float>(Engine::window()->width),
+                                      static_cast<float>(Engine::window()->height), min_dist, max_dist) } {
     GLFWwindow* window = Engine::window()->window;
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 

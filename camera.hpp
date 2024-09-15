@@ -7,6 +7,7 @@ class Camera {
     Camera(float fov_radians, float min_dist, float max_dist);
 
     void update();
+    void update_projection(const glm::mat4& projection) { this->projection = projection; }
     glm::mat4 get_view() const { return view; }
     glm::mat4 get_projection() const { return projection; }
     void on_mouse_move(float px, float py);

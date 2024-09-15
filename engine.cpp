@@ -5,8 +5,13 @@
 #include "camera.hpp"
 
 static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::camera()->on_mouse_move(px, py); }
+static void on_window_resize(GLFWwindow* window, int w, int h) {
+    Engine::window()->width = w;
+    Engine::window()->height = h;
+    Engine::notify_on_window_resize();
+}
 
-Window::Window(uint32_t width, uint32_t height) {
+Window::Window(uint32_t width, uint32_t height) : width(width), height(height) {
     if(!Engine::window()) {
         if(glfwInit() != GLFW_TRUE) {
             ENG_WARN("Could not initialize GLFW");
@@ -15,9 +20,7 @@ Window::Window(uint32_t width, uint32_t height) {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     }
 
-    size[0] = width;
-    size[1] = height;
-    window = glfwCreateWindow(size[0], size[1], "window title", nullptr, nullptr);
+    window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
 
     if(!window) { ENG_WARN("Could not create glfw window"); }
 }
@@ -42,6 +45,7 @@ void Engine::init() {
     if(monitor_videomode) { _this->_refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
     glfwSetCursorPosCallback(_this->_window->window, on_mouse_move);
+    glfwSetFramebufferSizeCallback(_this->_window->window, on_window_resize);
 
     _this->_renderer->init(); // has to be lower for imgui callbacks to work
 }
@@ -67,6 +71,16 @@ void Engine::update() {
 
 void Engine::set_on_update_callback(const std::function<void()>& on_update_callback) {
     _this->_on_update_callback = on_update_callback;
+}
+
+void Engine::add_on_window_resize_callback(const std::function<bool()>& on_update_callback) {
+    _this->_on_window_resize_callbacks.push_back(on_update_callback);
+}
+
+void Engine::notify_on_window_resize() {
+    for(const auto& e : _this->_on_window_resize_callbacks) {
+        e();
+    }
 }
 
 double Engine::get_time_secs() { return glfwGetTime(); }

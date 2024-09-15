@@ -28,8 +28,11 @@ struct GLFWwindow;
 struct Window {
     Window(uint32_t width, uint32_t height);
     ~Window();
+
     bool should_close() const;
-    uint32_t size[2]{};
+
+    uint32_t width;
+    uint32_t height;
     GLFWwindow* window{ nullptr };
 };
 
@@ -51,6 +54,8 @@ class Engine {
     static void update();
 
     static void set_on_update_callback(const std::function<void()>& on_update_callback);
+    static void add_on_window_resize_callback(const std::function<bool()>& on_update_callback);
+    static void notify_on_window_resize();
 
     static Window* window() { return &*_this->_window; }
     static Renderer* renderer() { return &*_this->_renderer; }
@@ -70,4 +75,5 @@ class Engine {
     uint64_t _frame_num{};
     float _refresh_rate{ 60.0f };
     std::function<void()> _on_update_callback;
+    std::vector<std::function<bool()>> _on_window_resize_callbacks;
 };
