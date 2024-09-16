@@ -9,22 +9,33 @@ template <typename T> struct Flags {
     constexpr Flags(T t) noexcept : flags(static_cast<U>(t)) {}
     constexpr Flags(U t) noexcept : flags(t) {}
 
-    friend constexpr Flags<T> operator|(Flags<T> a, T b) { return Flags<T>{ a.flags | static_cast<U>(b) }; }
-    friend constexpr Flags<T> operator&(Flags<T> a, T b) { return Flags<T>{ a.flags & static_cast<U>(b) }; }
-    constexpr Flags<T>& operator|=(T f) {
-        flags = flags | static_cast<U>(f);
+    constexpr Flags<T> operator|(Flags<T> a) noexcept { return Flags<T>{ a.flags | flags }; }
+    constexpr Flags<T> operator&(Flags<T> a) noexcept { return Flags<T>{ a.flags & flags }; }
+    constexpr Flags<T> operator~() noexcept { return Flags<T>{ ~flags }; }
+    constexpr Flags<T>& operator|=(Flags<T> f) noexcept {
+        flags = flags | f.flags;
         return *this;
     }
-    constexpr Flags<T>& operator&=(T f) {
-        flags = flags & static_cast<U>(f);
+    constexpr Flags<T>& operator&=(Flags<T> f) noexcept {
+        flags = flags & f.flags;
         return *this;
     }
-    constexpr Flags<T>& operator^=(T f) {
-        flags = flags ^ static_cast<U>(f);
+    constexpr Flags<T>& operator^=(Flags<T> f) noexcept {
+        flags = flags ^ f.flags;
         return *this;
     }
 
-    constexpr operator bool() const { return flags > 0; }
+    constexpr operator bool() const noexcept { return flags != 0; }
+    constexpr explicit operator U() const noexcept { return flags; }
+
+    constexpr void set(Flags<T> f) noexcept { *this |= f; }
+    constexpr bool test(Flags<T> f) const noexcept { return (flags & f.flags) == f.flags; }
+    constexpr bool test_clear(Flags<T> f) {
+        const auto result = test(f);
+        clear(f);
+        return result;
+    }
+    constexpr void clear(Flags<T> f) noexcept { *this &= ~f; }
 
     U flags{ 0 };
 };
