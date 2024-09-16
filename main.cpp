@@ -17,7 +17,7 @@
 
 int main() {
     Engine::init();
-
+    
     {
         ImportedModel import_cornell = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
         // ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");

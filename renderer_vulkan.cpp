@@ -499,37 +499,20 @@ void RendererVulkan::initialize_imgui() {
 }
 
 void RendererVulkan::render() {
-    if(flags & RendererFlags::DIRTY_MODEL_BATCHES_BIT) {
-        upload_staged_models();
-        flags ^= RendererFlags::DIRTY_MODEL_BATCHES_BIT;
-    }
-    if(flags & RendererFlags::DIRTY_MODEL_INSTANCES_BIT) {
-        upload_instances();
-        flags ^= RendererFlags::DIRTY_MODEL_INSTANCES_BIT;
-    }
-    if(flags & RendererFlags::DIRTY_BLAS_BIT) {
-        build_blas();
-        flags ^= RendererFlags::DIRTY_BLAS_BIT;
-    }
-    if(flags & RendererFlags::DIRTY_TLAS_BIT) {
+    if(flags.test_clear(RendererFlags::DIRTY_MODEL_BATCHES_BIT)) { upload_staged_models(); }
+    if(flags.test_clear(RendererFlags::DIRTY_MODEL_INSTANCES_BIT)) { upload_instances(); }
+    if(flags.test_clear(RendererFlags::DIRTY_BLAS_BIT)) { build_blas(); }
+    if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
         prepare_ddgi();
-        flags ^= RendererFlags::DIRTY_TLAS_BIT;
     }
-    if(flags & RendererFlags::REFIT_TLAS_BIT) {
-        refit_tlas();
-        flags ^= RendererFlags::REFIT_TLAS_BIT;
-    }
-    if(flags & RendererFlags::UPDATE_MESH_POSITIONS_BIT) {
-        upload_transforms();
-        flags ^= RendererFlags::UPDATE_MESH_POSITIONS_BIT;
-    }
-    if(flags & RendererFlags::RESIZE_SWAPCHAIN_BIT) {
+    if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
+    if(flags.test_clear(RendererFlags::UPDATE_MESH_POSITIONS_BIT)) { upload_transforms(); }
+    if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         vkQueueWaitIdle(gq);
         create_swapchain();
         Engine::camera()->update_projection(glm::perspectiveFov(glm::radians(90.0f), (float)Engine::window()->width,
                                                                 (float)Engine::window()->height, 0.0f, 10.0f));
-        flags ^= RendererFlags::RESIZE_SWAPCHAIN_BIT;
     }
 
     const auto frame_num = Engine::frame_num();
