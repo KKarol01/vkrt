@@ -1,4 +1,5 @@
 #include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 #include "engine.hpp"
 #include "renderer.hpp"
 #include "renderer_vulkan.hpp"
@@ -8,6 +9,8 @@ static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::ca
 static void on_window_resize(GLFWwindow* window, int w, int h) {
     Engine::window()->width = w;
     Engine::window()->height = h;
+    Engine::renderer()->set_screen_rect({ .width = (uint32_t)w, .height = (uint32_t)h });
+    Engine::camera()->update_projection(glm::perspectiveFov(glm::radians(90.0f), (float)w, (float)h, 0.0f, 10.0f));
     Engine::notify_on_window_resize();
 }
 
@@ -36,10 +39,6 @@ void Engine::init() {
     _this = std::make_unique<Engine>();
 
     _this->_window = std::make_unique<Window>(1280, 768);
-    _this->_camera = std::make_unique<Camera>(glm::radians(90.0f), 0.01f, 100.0f);
-    _this->_renderer = std::make_unique<RendererVulkan>();
-
-    _this->_last_frame_time = get_time_secs();
 
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { _this->_refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
@@ -47,7 +46,11 @@ void Engine::init() {
     glfwSetCursorPosCallback(_this->_window->window, on_mouse_move);
     glfwSetFramebufferSizeCallback(_this->_window->window, on_window_resize);
 
-    _this->_renderer->init(); // has to be lower for imgui callbacks to work
+    _this->_camera = std::make_unique<Camera>(glm::radians(90.0f), 0.01f, 100.0f);
+    _this->_renderer = std::make_unique<RendererVulkan>();
+    _this->_renderer->init();
+    _this->_ui = std::make_unique<UI>();
+    _this->_last_frame_time = get_time_secs();
 }
 
 void Engine::destroy() { _this.reset(); }
@@ -63,6 +66,7 @@ void Engine::update() {
     const float now = get_time_secs();
     _this->_on_update_callback();
     _this->_camera->update();
+    _this->_ui->update();
     _this->_renderer->render();
     ++_this->_frame_num;
     _this->_last_frame_time = now;
@@ -84,8 +88,6 @@ void Engine::notify_on_window_resize() {
 }
 
 double Engine::get_time_secs() { return glfwGetTime(); }
-
-std::unique_ptr<Engine> Engine::_this = {};
 
 void FrameTime::update() {
     float time = static_cast<float>(glfwGetTime());

@@ -3,6 +3,15 @@
 #include <cstdint>
 #include <compare>
 
+#define CREATE_HANDLE_DISPATCHER2(Type, ReturnType)                                                                                 \
+    template <typename Storage> struct HandleDispatcher<Type, Storage> {                                               \
+        constexpr ReturnType* operator()(const Handle<Type, Storage>& h) const;                                              \
+    };                                                                                                                 \
+    template <typename Storage>                                                                                        \
+    constexpr ReturnType* HandleDispatcher<Type, Storage>::operator()(const Handle<Type, Storage>& h) const
+
+#define CREATE_HANDLE_DISPATCHER(Type) CREATE_HANDLE_DISPATCHER2(Type, Type)
+
 template <typename T, typename Storage = uint32_t> struct Handle;
 
 template <typename T, typename Storage = uint32_t> struct HandleDispatcher {
