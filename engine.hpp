@@ -4,6 +4,7 @@
 #include <print>
 #include <cstdint>
 #include <functional>
+#include "ui.hpp"
 #include "renderer.hpp"
 #include "camera.hpp"
 
@@ -66,10 +67,11 @@ class Engine {
     static uint64_t frame_num() { return _this->_frame_num; }
 
   private:
-    static std::unique_ptr<Engine> _this;
+    inline static std::unique_ptr<Engine> _this;
     std::unique_ptr<Window> _window;
     std::unique_ptr<Camera> _camera;
     std::unique_ptr<Renderer> _renderer;
+    std::unique_ptr<UI> _ui;
     double _last_frame_time{};
     double _delta_time{};
     uint64_t _frame_num{};

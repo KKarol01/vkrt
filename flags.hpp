@@ -2,6 +2,11 @@
 
 #include <type_traits>
 
+#define ENABLE_FLAGS_OPERATORS(Type)                                                                                   \
+    constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept {                                           \
+        return Flags<Type>{ a } | Flags<Type>{ b };                                                                    \
+    }
+
 template <typename T> struct Flags {
     using U = typename std::underlying_type_t<T>;
 
@@ -9,7 +14,7 @@ template <typename T> struct Flags {
     constexpr Flags(T t) noexcept : flags(static_cast<U>(t)) {}
     constexpr Flags(U t) noexcept : flags(t) {}
 
-    constexpr Flags<T> operator|(Flags<T> a) noexcept { return Flags<T>{ a.flags | flags }; }
+    constexpr Flags<T> operator|(Flags<T> a) noexcept { return Flags<T>{ flags | a.flags }; }
     constexpr Flags<T> operator&(Flags<T> a) noexcept { return Flags<T>{ a.flags & flags }; }
     constexpr Flags<T> operator~() noexcept { return Flags<T>{ ~flags }; }
     constexpr Flags<T>& operator|=(Flags<T> f) noexcept {

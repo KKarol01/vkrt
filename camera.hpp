@@ -19,5 +19,5 @@ class Camera {
     float pitch{ 0.0f }, yaw{ 0.0f };
     float lpx{ -1.0f }, lpy{ -1.0f };
     float last_press_time{ 0.0f };
-    bool enabled{ true };
+    bool enabled{ false };
 };

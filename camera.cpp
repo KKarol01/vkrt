@@ -8,7 +8,6 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
     : projection{ glm::perspectiveFov(fov_radians, static_cast<float>(Engine::window()->width),
                                       static_cast<float>(Engine::window()->height), min_dist, max_dist) } {
     GLFWwindow* window = Engine::window()->window;
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     double pos[2];
     glfwGetCursorPos(window, &pos[0], &pos[1]);
@@ -51,10 +50,11 @@ void Camera::update() {
 
 void Camera::on_mouse_move(float px, float py) {
     const float dt = Engine::delta_time();
-
-    pitch += glm::radians((lpy - py) * dt) * 20.0f;
-    yaw += glm::radians((lpx - px) * dt) * 20.0f;
-    pitch = glm::clamp(pitch, -glm::half_pi<float>(), glm::half_pi<float>());
+    if(enabled) {
+        pitch += glm::radians((lpy - py) * dt) * 20.0f;
+        yaw += glm::radians((lpx - px) * dt) * 20.0f;
+        pitch = glm::clamp(pitch, -glm::half_pi<float>(), glm::half_pi<float>());
+    }
     lpx = px;
     lpy = py;
 }

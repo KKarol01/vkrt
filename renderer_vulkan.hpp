@@ -31,6 +31,7 @@ enum class RendererFlags : uint32_t {
     REFIT_TLAS_BIT = 0x10,
     UPDATE_MESH_POSITIONS_BIT = 0x20,
     RESIZE_SWAPCHAIN_BIT = 0x40,
+    RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
 enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
@@ -73,7 +74,7 @@ class Buffer {
 struct Image {
     constexpr Image() = default;
     Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
-          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
+          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VkImageUsageFlags flags = {});
     Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
           uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
     Image(Image&& other) noexcept;
@@ -655,9 +656,11 @@ class RendererVulkan : public Renderer {
     };
 
   public:
+    void init() final;
+
     static RendererVulkan* get() { return static_cast<RendererVulkan*>(Engine::renderer()); }
 
-    void init() final;
+    void set_screen_rect(ScreenRect rect) final;
 
     void initialize_vulkan();
     void create_swapchain();
@@ -693,6 +696,8 @@ class RendererVulkan : public Renderer {
     }
     uint32_t get_total_triangles() const { return get_total_indices() / 3u; }
 
+    VkRect2D screen_rect{};
+
     VkInstance instance;
     VkDevice dev;
     VkPhysicalDevice pdev;
@@ -707,8 +712,10 @@ class RendererVulkan : public Renderer {
     VkQueue gq, pq, tq1;
 
     VkSwapchainKHR swapchain{};
-    std::vector<Image> swapchain_images;
+    Image swapchain_images[2]{};
+    VkImageView imgui_views[2]{};
     VkFormat swapchain_format;
+    Image output_images[2]{};
     Image depth_buffers[2]{};
 
     std::unique_ptr<GpuStagingManager> staging;

@@ -22,6 +22,9 @@
 #include "set_debug_name.hpp"
 #include "utils.hpp"
 
+ENABLE_FLAGS_OPERATORS(RendererFlags)
+ENABLE_FLAGS_OPERATORS(RenderModelFlags)
+
 RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
 
 // https://www.shadertoy.com/view/WlSSWc
@@ -39,36 +42,14 @@ static float halton(int i, int b) {
     return r;
 }
 
-template <typename Storage> struct HandleDispatcher<RenderModel, Storage> {
-    constexpr RenderModel* operator()(const Handle<RenderModel, Storage>& h) const {
-        return &get_renderer().models.at(h);
-    }
-};
-template <typename Storage> struct HandleDispatcher<BatchedModel, Storage> {
-    constexpr RenderModel* operator()(const Handle<BatchedModel, Storage>& h) const {
-        return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h });
-    }
-};
-template <typename Storage> struct HandleDispatcher<RenderModelRTMetadata, Storage> {
-    constexpr RenderModelRTMetadata* operator()(const Handle<RenderModelRTMetadata, Storage>& h) const {
-        return &get_renderer().rt_metadata.at(h);
-    }
-};
-template <typename Storage> struct HandleDispatcher<RenderModelInstance, Storage> {
-    constexpr RenderModelInstance* operator()(const Handle<RenderModelInstance, Storage>& h) const {
-        return &get_renderer().model_instances.at(h);
-    }
-};
-template <typename Storage> struct HandleDispatcher<InstancedModel, Storage> {
-    constexpr RenderModelInstance* operator()(const Handle<InstancedModel, Storage>& h) const {
-        return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h });
-    }
-};
-template <typename Storage> struct HandleDispatcher<RenderMesh, Storage> {
-    constexpr RenderMesh* operator()(const Handle<RenderMesh, Storage>& h) const {
-        return &get_renderer().meshes.at(*h);
-    }
-};
+// clang-format off
+CREATE_HANDLE_DISPATCHER2(BatchedModel, RenderModel) { return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h }); }
+CREATE_HANDLE_DISPATCHER2(InstancedModel, RenderModelInstance) { return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h }); }
+CREATE_HANDLE_DISPATCHER(RenderModel) { return &get_renderer().models.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderModelRTMetadata) { return &get_renderer().rt_metadata.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderModelInstance) { return &get_renderer().model_instances.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(*h); }
+// clang-format on
 
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
     : Buffer(name, size, 1u, usage, map) {}
@@ -194,7 +175,6 @@ bool Buffer::resize(size_t new_size) {
 
 void RendererVulkan::init() {
     initialize_vulkan();
-    create_swapchain();
     create_rt_output_image();
     compile_shaders();
     build_pipelines();
@@ -204,6 +184,16 @@ void RendererVulkan::init() {
         flags |= RendererFlags::RESIZE_SWAPCHAIN_BIT;
         return true;
     });
+    screen_rect = { .offset = { 150, 0 }, .extent = { 768, 576 } };
+    flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT | RendererFlags::RESIZE_SWAPCHAIN_BIT);
+}
+
+void RendererVulkan::set_screen_rect(ScreenRect rect) {
+    if(screen_rect.offset.x != rect.offset_x || screen_rect.offset.y != rect.offset_y ||
+       screen_rect.extent.width != rect.width || screen_rect.extent.height != rect.height) {
+        screen_rect = { .offset = { rect.offset_x, rect.offset_y }, .extent = { rect.width, rect.height } };
+        flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT);
+    }
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -405,28 +395,7 @@ void RendererVulkan::initialize_vulkan() {
 }
 
 void RendererVulkan::create_swapchain() {
-    if(swapchain) {
-        vkDestroySwapchainKHR(dev, swapchain, nullptr);
-        for(auto& img : swapchain_images) {
-            img.image = nullptr;
-            vkDestroyImageView(dev, img.view, nullptr);
-        }
-        swapchain_images.clear();
-    }
-
-    vks::SwapchainCreateInfoKHR sinfo;
-    sinfo.surface = window_surface;
-    sinfo.minImageCount = 2;
-    sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
-    sinfo.imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
-    sinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    sinfo.imageExtent = VkExtent2D{ Engine::window()->width, Engine::window()->height };
-    sinfo.imageArrayLayers = 1;
-    sinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    sinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    sinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    sinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    sinfo.clipped = true;
+    if(swapchain) { vkDestroySwapchainKHR(dev, swapchain, nullptr); }
 
     VkFormat view_formats[]{
         VK_FORMAT_R8G8B8A8_SRGB,
@@ -438,7 +407,22 @@ void RendererVulkan::create_swapchain() {
         .viewFormatCount = 2,
         .pViewFormats = view_formats,
     };
-    sinfo.pNext = &format_list_info;
+
+    vks::SwapchainCreateInfoKHR sinfo{ VkSwapchainCreateInfoKHR{
+        .pNext = &format_list_info,
+        .flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR,
+        .surface = window_surface,
+        .minImageCount = 2,
+        .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
+        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageExtent = VkExtent2D{ Engine::window()->width, Engine::window()->height },
+        .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .clipped = true,
+    } };
 
     VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
     uint32_t num_images;
@@ -447,17 +431,36 @@ void RendererVulkan::create_swapchain() {
     std::vector<VkImage> images(num_images);
     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, images.data());
 
-    for(uint32_t counter = 0; VkImage img : images) {
-        swapchain_images.push_back(Image{ std::format("swapchain_image_{}", counter), img, sinfo.imageExtent.width,
-                                          sinfo.imageExtent.height, 1u, 1u, sinfo.imageArrayLayers, sinfo.imageFormat,
-                                          VK_SAMPLE_COUNT_1_BIT, sinfo.imageUsage });
-    }
     swapchain_format = sinfo.imageFormat;
 
     for(int i = 0; i < 2; ++i) {
-        depth_buffers[i] = Image{
-            std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+        if(imgui_views[i]) { vkDestroyImageView(dev, imgui_views[i], nullptr); }
+        vkDestroyImageView(dev, std::exchange(swapchain_images[i].view, nullptr), nullptr);
+        swapchain_images[i].image = nullptr;
+
+        swapchain_images[i] = Image{ std::format("swapchain_image_{}", i),
+                                     images.at(i),
+                                     sinfo.imageExtent.width,
+                                     sinfo.imageExtent.height,
+                                     1u,
+                                     1u,
+                                     sinfo.imageArrayLayers,
+                                     sinfo.imageFormat,
+                                     VK_SAMPLE_COUNT_1_BIT,
+                                     sinfo.imageUsage };
+
+        vks::ImageViewCreateInfo imgui_image_view;
+        imgui_image_view.format = VK_FORMAT_R8G8B8A8_UNORM;
+        imgui_image_view.image = images[i];
+        imgui_image_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        imgui_image_view.subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
         };
+        VK_CHECK(vkCreateImageView(dev, &imgui_image_view, nullptr, &imgui_views[i]));
+        set_debug_name(images[i], std::format("swapchain_image_{}", i));
+        set_debug_name(imgui_views[i], std::format("imgui_image_view_{}", i));
     }
 }
 
@@ -477,8 +480,8 @@ void RendererVulkan::initialize_imgui() {
         .QueueFamily = gqi,
         .Queue = gq,
         .DescriptorPool = imgui_desc_pool,
-        .MinImageCount = (uint32_t)swapchain_images.size(),
-        .ImageCount = (uint32_t)swapchain_images.size(),
+        .MinImageCount = 2u,
+        .ImageCount = 2u,
         .UseDynamicRendering = true,
         .PipelineRenderingCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -511,8 +514,25 @@ void RendererVulkan::render() {
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         vkQueueWaitIdle(gq);
         create_swapchain();
-        Engine::camera()->update_projection(glm::perspectiveFov(glm::radians(90.0f), (float)Engine::window()->width,
-                                                                (float)Engine::window()->height, 0.0f, 10.0f));
+    }
+    if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) {
+        vkQueueWaitIdle(gq);
+        for(int i = 0; i < 2; ++i) {
+            output_images[i] =
+                Image{ std::format("render_output_image{}", i),
+                       screen_rect.extent.width,
+                       screen_rect.extent.height,
+                       1u,
+                       1u,
+                       1u,
+                       VK_FORMAT_R8G8B8A8_SRGB,
+                       VK_SAMPLE_COUNT_1_BIT,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
+
+            depth_buffers[i] = Image{
+                std::format("depth_buffer_{}", i), screen_rect.extent.width, screen_rect.extent.height, 1, 1, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+            };
+        }
     }
 
     const auto frame_num = Engine::frame_num();
@@ -567,11 +587,21 @@ void RendererVulkan::render() {
                             2 * sizeof(glm::mat4));
     global_buffer.push_data(&rand_mat, sizeof(glm::mat3), 4 * sizeof(glm::mat4));
 
-    ImageStatefulBarrier sw_img_barrier{ swapchain_images.at(sw_img_idx) };
+    ImageStatefulBarrier output_image_barrier{ output_images[sw_img_idx] };
+    ImageStatefulBarrier swapchain_image_barrier{ swapchain_images[sw_img_idx] };
 
     {
         ddgi_buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI_Buffer, frame_num));
         auto cmd = get_primitives().cmdpool.begin_onetime();
+        swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                                                   VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
+        depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
@@ -657,7 +687,7 @@ void RendererVulkan::render() {
 
         VkRenderingAttachmentInfo r_col_att_1{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = swapchain_images.at(sw_img_idx).view,
+            .imageView = output_images[resource_idx].view,
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -676,16 +706,12 @@ void RendererVulkan::render() {
 
         VkRenderingInfo rendering_info{
             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width, Engine::window()->height } },
+            .renderArea = { .extent = screen_rect.extent },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = r_col_atts,
             .pDepthAttachment = &r_dep_att,
         };
-
-        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                                                   VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
 
         VkDeviceSize vb_offsets[]{ 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
@@ -695,17 +721,12 @@ void RendererVulkan::render() {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, 0, 1, &frame_desc_set, 0, nullptr);
 
-        sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-        depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->width, Engine::window()->height } };
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { screen_rect.extent.width, screen_rect.extent.height } };
         VkViewport r_view_1{ .x = 0.0f,
-                             .y = static_cast<float>(Engine::window()->height),
-                             .width = static_cast<float>(Engine::window()->width),
-                             .height = -static_cast<float>(Engine::window()->height),
+                             .y = static_cast<float>(screen_rect.extent.height),
+                             .width = static_cast<float>(screen_rect.extent.width),
+                             .height = -static_cast<float>(screen_rect.extent.height),
                              .minDepth = 0.0f,
                              .maxDepth = 1.0f };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
@@ -725,50 +746,49 @@ void RendererVulkan::render() {
                                       sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cmd);
 
-        vks::ImageViewCreateInfo i_sw_img_view;
-        i_sw_img_view.format = VK_FORMAT_R8G8B8A8_UNORM;
-        i_sw_img_view.image = swapchain_images.at(sw_img_idx).image;
-        i_sw_img_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        i_sw_img_view.subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .levelCount = 1,
-            .layerCount = 1,
+        ImDrawData* im_draw_data = ImGui::GetDrawData();
+        if(im_draw_data) {
+            VkRenderingAttachmentInfo i_col_atts[]{
+                VkRenderingAttachmentInfo{
+                    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                    .imageView = imgui_views[sw_img_idx],
+                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+                },
+            };
+            VkRenderingInfo imgui_rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width, Engine::window()->height } },
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = i_col_atts,
+            };
+            vkCmdBeginRendering(cmd, &imgui_rendering_info);
+            vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
+            vkCmdSetViewport(cmd, 0, 1, &r_view_1);
+            ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
+            vkCmdEndRendering(cmd);
+        }
+
+        output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                            VK_ACCESS_TRANSFER_READ_BIT);
+        swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+        VkImageBlit imgui_blit_to_swapchain{
+            .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+            .srcOffsets = { {}, { (int)output_images[sw_img_idx].width, (int)output_images[sw_img_idx].height, 1 } },
+            .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+            .dstOffsets = { { screen_rect.offset.x, screen_rect.offset.y },
+                            { (int)screen_rect.extent.width, (int)screen_rect.extent.height, 1 } }
         };
-        // VkImageView i_sw_view{};
-        // VK_CHECK(vkCreateImageView(dev, &i_sw_img_view, nullptr, &i_sw_view));
+        vkCmdBlitImage(cmd, output_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapchain_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                       &imgui_blit_to_swapchain, VK_FILTER_LINEAR);
 
-        /* VkRenderingAttachmentInfo i_col_atts[]{
-             VkRenderingAttachmentInfo{
-                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                 .imageView = i_sw_view,
-                 .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                 .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                 .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-             },
-         };
-         VkRenderingInfo imgui_rendering_info{
-             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-             .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width,
-         Engine::window()->height } }, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = i_col_atts,
-         };*/
-
-        /* ImGui_ImplVulkan_NewFrame();
-         ImGui_ImplGlfw_NewFrame();
-         ImGui::NewFrame();
-         ImGui::Begin("a");
-         ImGui::Text("asdf");
-         ImGui::End();
-         ImGui::Render();
-         ImDrawData* im_draw_data = ImGui::GetDrawData();
-
-         vkCmdBeginRendering(cmd, &imgui_rendering_info);
-         vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
-         vkCmdSetViewport(cmd, 0, 1, &r_view_1);
-         ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);*/
-        // vkCmdEndRendering(cmd);
-
-        sw_img_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_NONE);
+        swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
 
         get_primitives().cmdpool.end(cmd);
 
@@ -787,7 +807,6 @@ void RendererVulkan::render() {
         pinfo.waitSemaphoreCount = 1;
         pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
         vkQueuePresentKHR(gq, &pinfo);
-        // vkDestroyImageView(dev, i_sw_view, nullptr);
     }
 }
 
@@ -817,7 +836,7 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
         .texture_count = (uint32_t)model.textures.size(),
     });
 
-    if(settings.flags & BatchFlags::RAY_TRACED) {
+    if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
         flags |= RendererFlags::DIRTY_BLAS_BIT;
         model_handle->flags |= RenderModelFlags::DIRTY_BLAS;
     }
@@ -881,7 +900,7 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
     }
 
     flags |= RendererFlags::DIRTY_MODEL_INSTANCES_BIT;
-    if(settings.flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::DIRTY_TLAS_BIT; }
+    if(settings.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= RendererFlags::DIRTY_TLAS_BIT; }
 
     return HandleInstancedModel{ *handle };
 }
@@ -1137,7 +1156,7 @@ void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 tr
     //  TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
     //  memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
     //        sizeof(transform));
-    if(model->flags & InstanceFlags::RAY_TRACED) { flags |= RendererFlags::REFIT_TLAS_BIT; }
+    if(model->flags & InstanceFlags::RAY_TRACED_BIT) { flags |= RendererFlags::REFIT_TLAS_BIT; }
     upload_positions.emplace_back(Handle<RenderModelInstance>{ *model }, transform);
     flags |= RendererFlags::UPDATE_MESH_POSITIONS_BIT;
 }
@@ -1293,7 +1312,7 @@ void RendererVulkan::build_pipelines() {
     layouts.push_back(default_layout);
     layouts.push_back(imgui_layout);
 
-    imgui_desc_pool = descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 1);
+    imgui_desc_pool = descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 16);
 }
 
 void RendererVulkan::build_sbt() {
@@ -1440,7 +1459,7 @@ void RendererVulkan::build_tlas() {
     render_model_instances.reserve(model_instances.size());
 
     for(auto& i : model_instances) {
-        if(i.flags & InstanceFlags::RAY_TRACED) { render_model_instances.push_back(&i); }
+        if(i.flags & InstanceFlags::RAY_TRACED_BIT) { render_model_instances.push_back(&i); }
     }
 
     std::vector<vks::AccelerationStructureInstanceKHR> instances(render_model_instances.size());
@@ -1516,7 +1535,7 @@ void RendererVulkan::refit_tlas() {
     render_model_instances.reserve(model_instances.size());
 
     for(auto& i : model_instances) {
-        if(i.flags & InstanceFlags::RAY_TRACED) { render_model_instances.push_back(&i); }
+        if(i.flags & InstanceFlags::RAY_TRACED_BIT) { render_model_instances.push_back(&i); }
     }
 
     std::vector<vks::AccelerationStructureInstanceKHR> instances(render_model_instances.size());
@@ -1677,7 +1696,7 @@ void RendererVulkan::prepare_ddgi() {
 }
 
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
-             VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
+             VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VkImageUsageFlags flags)
     : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
     vks::ImageCreateInfo iinfo;
 
@@ -1689,6 +1708,7 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     VkImageType types[]{ VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
 
     iinfo.imageType = types[dims];
+    iinfo.flags = flags;
     iinfo.format = format;
     iinfo.extent = { width, height, depth };
     iinfo.mipLevels = mips;
