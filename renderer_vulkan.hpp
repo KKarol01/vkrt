@@ -105,6 +105,17 @@ struct Vertex {
     glm::vec2 uv;
 };
 
+struct RenderModelMetadata {
+    std::string name;
+    VkAccelerationStructureKHR blas{};
+    Buffer blas_buffer{};
+};
+
+struct RenderMeshMetadata {
+    std::string name;
+    std::string material_name;
+};
+
 struct RenderMaterial {
     uint32_t color_texture;
     uint32_t normal_texture;
@@ -113,6 +124,7 @@ struct RenderMaterial {
 // offsets and material are offsets relative to the model, not whole array
 // thus, to calculate correct global vector index, do: mesh->model.first_vertex + mesh.vertex_offset
 struct RenderMesh {
+    Handle<RenderMeshMetadata> metadata;
     uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t index_offset{ 0 };
@@ -120,14 +132,9 @@ struct RenderMesh {
     uint32_t material{ 0 };
 };
 
-struct RenderModelRTMetadata {
-    VkAccelerationStructureKHR blas{};
-    Buffer blas_buffer{};
-};
-
 struct RenderModel {
     Flags<RenderModelFlags> flags{};
-    Handle<RenderModelRTMetadata> rt_metadata;
+    Handle<RenderModelMetadata> metadata;
     uint32_t first_vertex{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t first_index{ 0 };
@@ -757,7 +764,8 @@ class RendererVulkan : public Renderer {
     std::vector<RenderMaterial> materials;
     std::vector<Image> textures;
     std::vector<BoundingBox> model_bbs;
-    HandleVector<RenderModelRTMetadata> rt_metadata;
+    HandleVector<RenderModelMetadata> render_model_mt;
+    HandleVector<RenderMeshMetadata> render_mesh_mt;
 
     HandleVector<RenderModelInstance> model_instances;
     std::vector<RenderMeshInstance> mesh_instances;
@@ -775,3 +783,15 @@ class RendererVulkan : public Renderer {
 
     RenderingPrimitives primitives[2];
 };
+
+// clang-format off
+inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
+
+CREATE_HANDLE_DISPATCHER2(BatchedModel, RenderModel) { return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h }); }
+CREATE_HANDLE_DISPATCHER2(InstancedModel, RenderModelInstance) { return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h }); }
+CREATE_HANDLE_DISPATCHER(RenderModel) { return &get_renderer().models.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderModelMetadata) { return &get_renderer().render_model_mt.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderModelInstance) { return &get_renderer().model_instances.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(*h); }
+CREATE_HANDLE_DISPATCHER(RenderMeshMetadata) { return &get_renderer().render_mesh_mt.at(h); }
+// clang-format on
