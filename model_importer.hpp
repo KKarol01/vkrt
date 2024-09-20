@@ -26,6 +26,7 @@ struct ImportedModel {
     };
 
     struct Mesh {
+        std::string name;
         uint32_t vertex_offset{ 0 };
         uint32_t index_offset{ 0 };
         uint32_t vertex_count{ 0 };

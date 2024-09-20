@@ -5,70 +5,177 @@
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 
-static VkDescriptorSet output_image_set[2]{};
+struct WidgetPos {
+    int x{}, y{};
+    int w{}, h{};
+};
 
-void UI::update() {
-    if(Engine::frame_num() < 6) { return; }
+class InstancedModelListWidget {
+  public:
+    void draw() {
+        auto& renderer = get_renderer();
+        ImGui::PushItemWidth(pos.w);
+        for(const auto& mi : renderer.model_instances) {
+            ImGui::PushID(&mi);
+            if(ImGui::TreeNode(mi.model->metadata->name.c_str())) {
+                for(auto i = mi.model->first_mesh; i < mi.model->first_mesh + mi.model->mesh_count; ++i) {
+                    const auto& msi = renderer.meshes.at(i);
+                    ImGui::PushID(&msi);
+                    if(ImGui::TreeNode(msi.metadata->name.c_str())) { ImGui::TreePop(); }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+        }
+        ImGui::PopItemWidth();
+    }
 
-    auto renderer = ((RendererVulkan*)Engine::renderer());
+    WidgetPos pos;
+};
 
-    if(!output_image_set[0]) {
-        auto sampler = renderer->samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-        for(int i = 0; i < 2; ++i) {
-            if(!renderer->output_images[Engine::frame_num()].view) { return; }
-            output_image_set[i] =
-                ImGui_ImplVulkan_AddTexture(sampler, renderer->output_images[i].view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+class RenderOutputWidget {
+  public:
+    void draw() {
+        auto& renderer = get_renderer();
+        renderer.set_screen_rect({
+            .offset_x = pos.x,
+            .offset_y = pos.y,
+            .width = (uint32_t)pos.w,
+            .height = (uint32_t)pos.h,
+        });
+    }
+
+    WidgetPos pos;
+};
+
+class EngineLogWidget {
+  public:
+    void draw() {
+        for(const auto& e : Engine::get()->msg_log) {
+            ImGui::Text(e.c_str());
         }
     }
+
+    WidgetPos pos;
+};
+
+class InvisibleResizingButton {
+  public:
+    InvisibleResizingButton(bool vertical, WidgetPos pos, WidgetPos* output_pos)
+        : is_vertical{ vertical }, pos{ pos }, output_pos{ output_pos } {}
+    void draw() {
+        ImGui::PushClipRect({}, { (float)Engine::window()->width, (float)Engine::window()->height }, false);
+        ImGui::InvisibleButton("IMList Resize EW", { (float)pos.w, (float)pos.h });
+        if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlapped) && !resizing_instance) {
+            if(is_vertical) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            } else {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            }
+        }
+        if(ImGui::IsItemActive() && (!resizing_instance || resizing_instance == this)) {
+            resizing_instance = this;
+            if(is_vertical) {
+                output_pos->w += ImGui::GetMouseDragDelta(0, 0.0f).x;
+            } else {
+                output_pos->h -= ImGui::GetMouseDragDelta(0, 0.0f).y;
+            }
+            ImGui::ResetMouseDragDelta();
+        } else if(resizing_instance == this) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+            resizing_instance = nullptr;
+        }
+        ImGui::PopClipRect();
+    }
+
+    inline static InvisibleResizingButton* resizing_instance{};
+    bool is_vertical;
+    WidgetPos pos;
+    WidgetPos* output_pos;
+};
+
+static InstancedModelListWidget imlist_widget{};
+static RenderOutputWidget render_output_widget{};
+static EngineLogWidget engine_log_widget{};
+static InvisibleResizingButton imlist_resizing_btn{ true, {}, &imlist_widget.pos };
+static InvisibleResizingButton engine_log_resizing_btn{ false, {}, &engine_log_widget.pos };
+
+UI::UI() {
+    imlist_widget.pos.w = 200;
+    engine_log_widget.pos.h = 250;
+}
+
+void UI::update() {
+    auto renderer = ((RendererVulkan*)Engine::renderer());
 
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+    ImGui::SetNextWindowPos({});
+    ImGui::SetNextWindowSize({ (float)Engine::window()->width, (float)Engine::window()->height });
     ImGui::Begin("##a", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
 
-    if(ImGui::BeginTable("table", 2)) {
-        ImGui::TableSetupColumn("l1", ImGuiTableColumnFlags_WidthFixed, 150.0f);
-        ImGui::TableSetupColumn("l2");
+    const auto table_pos = ImGui::GetCursorScreenPos();
+
+    if(ImGui::BeginTable("table", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV,
+                         { -1.0f, ImGui::GetContentRegionMax().y - engine_log_widget.pos.h })) {
+        ImGui::TableSetupColumn("l1", ImGuiTableColumnFlags_WidthFixed, imlist_widget.pos.w);
+        ImGui::TableSetupColumn("l2", ImGuiTableColumnFlags_WidthStretch);
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         {
-            for(int i = 0; i < 10; ++i) {
-                ImGui::PushID(i);
-                if(ImGui::TreeNode("gugu")) {
-                    ImGui::Text("asdf");
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-            }
+            const auto cpos = ImGui::GetCursorScreenPos();
+            ImGui::SetCursorScreenPos({ cpos.x + imlist_widget.pos.w, cpos.y });
+            imlist_resizing_btn.pos.w = ImGui::GetStyle().ItemSpacing.y * 2.0f;
+            imlist_resizing_btn.pos.h = ImGui::GetContentRegionMax().y - engine_log_widget.pos.h;
+            imlist_resizing_btn.draw();
+            ImGui::SetCursorScreenPos(cpos);
         }
+
+        { imlist_widget.draw(); }
 
         ImGui::TableSetColumnIndex(1);
         {
-            static constexpr auto ASPECT = 768.0 / 1280.0;
-            renderer->set_screen_rect({ .offset_x = 150,
-                                        .offset_y = 0,
-                                        .width = (uint32_t)ImGui::GetContentRegionAvail().x,
-                                        .height = (uint32_t)(ImGui::GetContentRegionAvail().x * ASPECT) });
+            WidgetPos output_pos{ ImGui::GetCursorScreenPos().x,
+                                  ImGui::GetCursorScreenPos().y + ImGui::GetStyle().ItemSpacing.y,
+                                  ImGui::GetContentRegionAvail().x,
+                                  ImGui::GetContentRegionAvail().y - engine_log_widget.pos.h };
+
+            static constexpr float RATIO = 16.0f / 9.0f;
+
+            if(output_pos.w / RATIO <= output_pos.h) {
+                output_pos.h = output_pos.w / RATIO;
+            } else {
+                output_pos.w = output_pos.h * RATIO;
+            }
+
+            output_pos.x += (ImGui::GetContentRegionAvail().x - output_pos.w) * 0.5f;
+            output_pos.y += (ImGui::GetContentRegionAvail().y - engine_log_widget.pos.h - output_pos.h) * 0.5f;
+            render_output_widget.pos = output_pos;
+            render_output_widget.draw();
         }
     }
     ImGui::EndTable();
 
-    /*ImGui::SetNextWindowPos({});
-    ImGui::SetNextWindowSize({ (float)Engine::window()->width, (float)Engine::window()->height });
-    auto cpos = ImGui::GetCursorPos();
+    {
+        const auto cpos = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos({ cpos.x, cpos.y - ImGui::GetStyle().ItemSpacing.y });
+        engine_log_resizing_btn.pos.w = ImGui::GetContentRegionAvail().x;
+        engine_log_resizing_btn.pos.h = ImGui::GetStyle().ItemSpacing.y * 2.0f;
+        engine_log_resizing_btn.draw();
+        ImGui::SetCursorScreenPos(cpos);
+    }
 
-    if(ImGui::BeginChild("project view", { 150, ImGui::GetContentRegionAvail().y })) { ImGui::Text("asdf"); }
-    ImGui::EndChild();
-
-    ImGui::SetNextWindowPos({ cpos.x + 150, cpos.y });
-
-    if(ImGui::BeginChild("project view 1", { 150, ImGui::GetContentRegionAvail().y })) { ImGui::Text("asdf"); }
-    ImGui::EndChild();*/
-
-    /*
-
-    ImGui::Image(output_image_set[Engine::frame_num() % 2], { 500, 500 });*/
+    {
+        if(ImGui::BeginChild("Engine output log", { -1.0f, (float)engine_log_widget.pos.h - ImGui::GetTextLineHeight() },
+                             ImGuiChildFlags_Border, ImGuiWindowFlags_HorizontalScrollbar)) {
+            engine_log_widget.draw();
+        }
+        ImGui::EndChild();
+    }
 
     ImGui::End();
     ImGui::Render();

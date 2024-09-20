@@ -25,8 +25,6 @@
 ENABLE_FLAGS_OPERATORS(RendererFlags)
 ENABLE_FLAGS_OPERATORS(RenderModelFlags)
 
-RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
-
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
     /* Creates a halton sequence of values between 0 and 1.
@@ -41,15 +39,6 @@ static float halton(int i, int b) {
     }
     return r;
 }
-
-// clang-format off
-CREATE_HANDLE_DISPATCHER2(BatchedModel, RenderModel) { return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h }); }
-CREATE_HANDLE_DISPATCHER2(InstancedModel, RenderModelInstance) { return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h }); }
-CREATE_HANDLE_DISPATCHER(RenderModel) { return &get_renderer().models.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderModelRTMetadata) { return &get_renderer().rt_metadata.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderModelInstance) { return &get_renderer().model_instances.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(*h); }
-// clang-format on
 
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
     : Buffer(name, size, 1u, usage, map) {}
@@ -779,11 +768,16 @@ void RendererVulkan::render() {
 
         VkImageBlit imgui_blit_to_swapchain{
             .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
-            .srcOffsets = { {}, { (int)output_images[sw_img_idx].width, (int)output_images[sw_img_idx].height, 1 } },
+            .srcOffsets = { {}, { (int)screen_rect.extent.width, (int)screen_rect.extent.height, 1 } },
             .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
             .dstOffsets = { { screen_rect.offset.x, screen_rect.offset.y },
-                            { (int)screen_rect.extent.width, (int)screen_rect.extent.height, 1 } }
+                            { std::min(screen_rect.offset.x + (int)screen_rect.extent.width,
+                                       (int)swapchain_images[sw_img_idx].width),
+                              std::min(screen_rect.offset.y + (int)screen_rect.extent.height,
+                                       (int)swapchain_images[sw_img_idx].height),
+                              1 } }
         };
+
         vkCmdBlitImage(cmd, output_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        swapchain_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                        &imgui_blit_to_swapchain, VK_FILTER_LINEAR);
@@ -817,13 +811,15 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
     const auto total_materials = static_cast<uint32_t>(materials.size());
     const auto total_textures = static_cast<uint32_t>(textures.size());
     const auto total_models = static_cast<uint32_t>(models.size());
-    const auto rt_metadata_handle = rt_metadata.emplace_back();
+    const auto rt_metadata_handle = render_model_mt.emplace_back();
+
+    rt_metadata_handle->name = model.name;
 
     flags |= RendererFlags::DIRTY_MODEL_BATCHES_BIT;
 
     Handle<RenderModel> model_handle = models.push_back(RenderModel{
         .flags = {},
-        .rt_metadata = rt_metadata_handle,
+        .metadata = rt_metadata_handle,
         .first_vertex = total_vertices,
         .vertex_count = (uint32_t)model.vertices.size(),
         .first_index = total_indices,
@@ -842,11 +838,13 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
     }
 
     for(auto& mesh : model.meshes) {
-        meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
-                                     .vertex_count = mesh.vertex_count,
-                                     .index_offset = mesh.index_offset,
-                                     .index_count = mesh.index_count,
-                                     .material = mesh.material.value_or(0) });
+        meshes.push_back(RenderMesh{
+            .metadata = render_mesh_mt.emplace_back(mesh.name, model.materials.at(mesh.material.value_or(0)).name),
+            .vertex_offset = mesh.vertex_offset,
+            .vertex_count = mesh.vertex_count,
+            .index_offset = mesh.index_offset,
+            .index_count = mesh.index_count,
+            .material = mesh.material.value_or(0) });
     }
 
     for(auto& mat : model.materials) {
@@ -1346,7 +1344,7 @@ void RendererVulkan::create_rt_output_image() {
 
 void RendererVulkan::build_blas() {
     std::vector<const RenderModel*> dirty_models;
-    std::vector<Handle<RenderModelRTMetadata>> dirty_rt_metadatas;
+    std::vector<Handle<RenderModelMetadata>> dirty_rt_metadatas;
     uint32_t total_dirty_meshes = 0;
 
     // TODO: Right now it is wrong to iterate over elements inside
@@ -1355,7 +1353,7 @@ void RendererVulkan::build_blas() {
         if(model.flags & RenderModelFlags::DIRTY_BLAS) {
             // TODO: Maybe move it to the end, when the building is finished
             dirty_models.push_back(&model);
-            dirty_rt_metadatas.push_back(model.rt_metadata);
+            dirty_rt_metadatas.push_back(model.metadata);
             total_dirty_meshes += model.mesh_count;
             model.flags ^= RenderModelFlags::DIRTY_BLAS;
         }
@@ -1384,7 +1382,7 @@ void RendererVulkan::build_blas() {
 
     for(uint32_t i = 0; i < dirty_models.size(); ++i) {
         const RenderModel& model = *dirty_models.at(i);
-        Handle<RenderModelRTMetadata> meta = dirty_rt_metadatas.at(i);
+        Handle<RenderModelMetadata> meta = dirty_rt_metadatas.at(i);
 
         for(uint32_t j = 0; j < model.mesh_count; ++j) {
             const RenderMesh& mesh = meshes.at(model.first_mesh + j);
@@ -1426,7 +1424,7 @@ void RendererVulkan::build_blas() {
 
     for(uint32_t i = 0, offset = 0; i < dirty_models.size(); ++i) {
         const RenderModel& model = *dirty_models.at(i);
-        Handle<RenderModelRTMetadata> meta = dirty_rt_metadatas.at(i);
+        Handle<RenderModelMetadata> meta = dirty_rt_metadatas.at(i);
 
         build_geometries.at(i).scratchData.deviceAddress = scratch_buffer.bda + offset;
         build_geometries.at(i).dstAccelerationStructure = meta->blas;
@@ -1470,7 +1468,7 @@ void RendererVulkan::build_tlas() {
         instance.mask = render_model_instances.at(i)->tlas_instance_mask;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = render_model_instances.at(i)->model->rt_metadata->blas_buffer.bda;
+        instance.accelerationStructureReference = render_model_instances.at(i)->model->metadata->blas_buffer.bda;
     }
 
     tlas_instance_buffer =
@@ -1546,7 +1544,7 @@ void RendererVulkan::refit_tlas() {
         instance.mask = render_model_instances.at(i)->tlas_instance_mask;
         instance.instanceShaderBindingTableRecordOffset = 0;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = render_model_instances.at(i)->model->rt_metadata->blas_buffer.bda;
+        instance.accelerationStructureReference = render_model_instances.at(i)->model->metadata->blas_buffer.bda;
     }
 
     if(tlas_instance_buffer.capacity != instances.size() * sizeof(instances[0])) {

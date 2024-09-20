@@ -3,6 +3,7 @@
 #include <memory>
 #include <print>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include "ui.hpp"
 #include "renderer.hpp"
@@ -11,7 +12,13 @@
 #ifndef NDEBUG
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
 
-#define ENG_LOG(fmt, ...) std::println("[LOG][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
+#define ENG_LOG(fmt, ...)                                                                                              \
+    do {                                                                                                               \
+        const std::string str = std::format("[LOG][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);                  \
+        std::println("{}", str);                                                                                       \
+        if(Engine::get()->msg_log.size() >= 512) { Engine::get()->msg_log.pop_back(); }                                \
+        Engine::get()->msg_log.push_front(str);                                                                        \
+    } while(0)
 
 #define ENG_ASSERT(expr, fmt, ...)                                                                                     \
     if(!(expr)) {                                                                                                      \
@@ -58,6 +65,7 @@ class Engine {
     static void add_on_window_resize_callback(const std::function<bool()>& on_update_callback);
     static void notify_on_window_resize();
 
+    static Engine* get() { return &*_this; }
     static Window* window() { return &*_this->_window; }
     static Renderer* renderer() { return &*_this->_renderer; }
     static Camera* camera() { return &*_this->_camera; }
@@ -65,6 +73,8 @@ class Engine {
     static double last_frame_time() { return _this->_last_frame_time; }
     static double delta_time() { return _this->_delta_time; }
     static uint64_t frame_num() { return _this->_frame_num; }
+
+    std::deque<std::string> msg_log;
 
   private:
     inline static std::unique_ptr<Engine> _this;

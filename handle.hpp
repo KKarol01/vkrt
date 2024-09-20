@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <compare>
 
-#define CREATE_HANDLE_DISPATCHER2(Type, ReturnType)                                                                                 \
+#define CREATE_HANDLE_DISPATCHER2(Type, ReturnType)                                                                    \
     template <typename Storage> struct HandleDispatcher<Type, Storage> {                                               \
-        constexpr ReturnType* operator()(const Handle<Type, Storage>& h) const;                                              \
+        constexpr ReturnType* operator()(const Handle<Type, Storage>& h) const;                                        \
     };                                                                                                                 \
     template <typename Storage>                                                                                        \
     constexpr ReturnType* HandleDispatcher<Type, Storage>::operator()(const Handle<Type, Storage>& h) const
@@ -15,7 +15,7 @@
 template <typename T, typename Storage = uint32_t> struct Handle;
 
 template <typename T, typename Storage = uint32_t> struct HandleDispatcher {
-    constexpr T* operator()(const Handle<T, Storage>& h) const = delete;
+    constexpr T* operator()(const Handle<T, Storage>& h) const;
 };
 
 template <typename T, typename Storage> struct Handle {
