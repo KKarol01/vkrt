@@ -34,7 +34,6 @@ struct ImportedModel {
         std::optional<uint32_t> material;
     };
 
-    std::string name;
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<Texture> textures;
@@ -44,5 +43,5 @@ struct ImportedModel {
 
 class ModelImporter {
   public:
-    static ImportedModel import_model(const std::string& name, const std::filesystem::path& path);
+    static ImportedModel import_model(const std::filesystem::path& path);
 };

@@ -34,7 +34,7 @@ enum class RendererFlags : uint32_t {
     RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class RenderModelFlags : uint32_t { DIRTY_BLAS = 0x1 };
+enum class RenderModelFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
 
 class Buffer {
   public:
@@ -106,14 +106,8 @@ struct Vertex {
 };
 
 struct RenderModelMetadata {
-    std::string name;
     VkAccelerationStructureKHR blas{};
     Buffer blas_buffer{};
-};
-
-struct RenderMeshMetadata {
-    std::string name;
-    std::string material_name;
 };
 
 struct RenderMaterial {
@@ -124,7 +118,6 @@ struct RenderMaterial {
 // offsets and material are offsets relative to the model, not whole array
 // thus, to calculate correct global vector index, do: mesh->model.first_vertex + mesh.vertex_offset
 struct RenderMesh {
-    Handle<RenderMeshMetadata> metadata;
     uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t index_offset{ 0 };
@@ -675,14 +668,15 @@ class RendererVulkan : public Renderer {
 
     void render() final;
 
-    HandleBatchedModel batch_model(const ImportedModel& model, BatchSettings settings) final;
-    HandleInstancedModel instance_model(HandleBatchedModel model, InstanceSettings settings) final;
+    Handle<BatchedRenderModel> batch_model(const ImportedModel& model, BatchSettings settings) final;
+    Handle<InstancedRenderModel> instance_model(Handle<BatchedRenderModel> model, InstanceSettings settings) final;
+
     void upload_model_textures();
     void upload_staged_models();
     void upload_instances();
     void upload_transforms();
 
-    void update_transform(HandleInstancedModel model, glm::mat4x3 transform);
+    void update_transform(Handle<RenderModelInstance> model, glm::mat4x3 transform);
 
     void compile_shaders();
     void build_pipelines();
@@ -764,8 +758,7 @@ class RendererVulkan : public Renderer {
     std::vector<RenderMaterial> materials;
     std::vector<Image> textures;
     std::vector<BoundingBox> model_bbs;
-    HandleVector<RenderModelMetadata> render_model_mt;
-    HandleVector<RenderMeshMetadata> render_mesh_mt;
+    HandleVector<RenderModelMetadata> model_metadatas;
 
     HandleVector<RenderModelInstance> model_instances;
     std::vector<RenderMeshInstance> mesh_instances;
@@ -787,11 +780,10 @@ class RendererVulkan : public Renderer {
 // clang-format off
 inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
 
-CREATE_HANDLE_DISPATCHER2(BatchedModel, RenderModel) { return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h }); }
-CREATE_HANDLE_DISPATCHER2(InstancedModel, RenderModelInstance) { return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h }); }
+CREATE_HANDLE_DISPATCHER2(BatchedRenderModel, RenderModel) { return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h }); }
+CREATE_HANDLE_DISPATCHER2(InstancedRenderModel, RenderModelInstance) { return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h }); }
 CREATE_HANDLE_DISPATCHER(RenderModel) { return &get_renderer().models.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderModelMetadata) { return &get_renderer().render_model_mt.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderModelMetadata) { return &get_renderer().model_metadatas.at(h); }
 CREATE_HANDLE_DISPATCHER(RenderModelInstance) { return &get_renderer().model_instances.at(h); }
 CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(*h); }
-CREATE_HANDLE_DISPATCHER(RenderMeshMetadata) { return &get_renderer().render_mesh_mt.at(h); }
 // clang-format on

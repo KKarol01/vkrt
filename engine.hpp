@@ -8,6 +8,7 @@
 #include "ui.hpp"
 #include "renderer.hpp"
 #include "camera.hpp"
+#include "scene.hpp"
 
 #ifndef NDEBUG
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
@@ -65,23 +66,26 @@ class Engine {
     static void add_on_window_resize_callback(const std::function<bool()>& on_update_callback);
     static void notify_on_window_resize();
 
-    static Engine* get() { return &*_this; }
-    static Window* window() { return &*_this->_window; }
-    static Renderer* renderer() { return &*_this->_renderer; }
-    static Camera* camera() { return &*_this->_camera; }
+    static Engine* get() { return &*self; }
+    static Window* window() { return &*self->_window; }
+    static Renderer* renderer() { return &*self->_renderer; }
+    static Camera* camera() { return &*self->_camera; }
+    static Scene* scene() { return &*self->_scene; }
+    static UI* ui() { return &*self->_ui; }
     static double get_time_secs();
-    static double last_frame_time() { return _this->_last_frame_time; }
-    static double delta_time() { return _this->_delta_time; }
-    static uint64_t frame_num() { return _this->_frame_num; }
+    static double last_frame_time() { return self->_last_frame_time; }
+    static double delta_time() { return self->_delta_time; }
+    static uint64_t frame_num() { return self->_frame_num; }
 
     std::deque<std::string> msg_log;
 
   private:
-    inline static std::unique_ptr<Engine> _this;
+    static std::unique_ptr<Engine> self;
     std::unique_ptr<Window> _window;
     std::unique_ptr<Camera> _camera;
     std::unique_ptr<Renderer> _renderer;
     std::unique_ptr<UI> _ui;
+    std::unique_ptr<Scene> _scene;
     double _last_frame_time{};
     double _delta_time{};
     uint64_t _frame_num{};
