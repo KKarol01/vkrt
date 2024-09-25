@@ -122,7 +122,7 @@ static void load_mesh(ImportedModel& model, fastgltf::Asset& asset, fastgltf::Me
     }
 }
 
-ImportedModel ModelImporter::import_model(const std::string& name, const std::filesystem::path& path) {
+ImportedModel ModelImporter::import_model(const std::filesystem::path& path) {
     constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                  fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
 
@@ -135,7 +135,6 @@ ImportedModel ModelImporter::import_model(const std::string& name, const std::fi
     auto asset = parser.loadGltfBinary(glbbuffer.get(), full_path.parent_path(), gltfOptions);
 
     ImportedModel model;
-    model.name = name;
 
     for(auto& img : asset->images) {
         load_image(model, asset.get(), img);

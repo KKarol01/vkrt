@@ -23,10 +23,8 @@ struct ScreenRect {
     uint32_t width, height;
 };
 
-struct BatchedModel;
-typedef Handle<BatchedModel> HandleBatchedModel;
-struct InstancedModel;
-typedef Handle<InstancedModel> HandleInstancedModel;
+struct BatchedRenderModel;
+struct InstancedRenderModel;
 
 class Renderer {
   public:
@@ -34,6 +32,6 @@ class Renderer {
     virtual void init() = 0;
     virtual void render() = 0;
     virtual void set_screen_rect(ScreenRect rect) = 0;
-    virtual HandleBatchedModel batch_model(const ImportedModel& model, BatchSettings settings) = 0;
-    virtual HandleInstancedModel instance_model(HandleBatchedModel model, InstanceSettings settings) = 0;
+    virtual Handle<BatchedRenderModel> batch_model(const ImportedModel& model, BatchSettings settings) = 0;
+    virtual Handle<InstancedRenderModel> instance_model(Handle<BatchedRenderModel> model, InstanceSettings settings) = 0;
 };

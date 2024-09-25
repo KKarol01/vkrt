@@ -804,22 +804,20 @@ void RendererVulkan::render() {
     }
 }
 
-HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, BatchSettings settings) {
+Handle<BatchedRenderModel> RendererVulkan::batch_model(const ImportedModel& model, BatchSettings settings) {
     const auto total_vertices = get_total_vertices();
     const auto total_indices = get_total_indices();
     const auto total_meshes = static_cast<uint32_t>(meshes.size());
     const auto total_materials = static_cast<uint32_t>(materials.size());
     const auto total_textures = static_cast<uint32_t>(textures.size());
     const auto total_models = static_cast<uint32_t>(models.size());
-    const auto rt_metadata_handle = render_model_mt.emplace_back();
-
-    rt_metadata_handle->name = model.name;
+    const auto model_metadata = model_metadatas.emplace_back();
 
     flags |= RendererFlags::DIRTY_MODEL_BATCHES_BIT;
 
     Handle<RenderModel> model_handle = models.push_back(RenderModel{
         .flags = {},
-        .metadata = rt_metadata_handle,
+        .metadata = model_metadata,
         .first_vertex = total_vertices,
         .vertex_count = (uint32_t)model.vertices.size(),
         .first_index = total_indices,
@@ -834,17 +832,15 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
 
     if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
         flags |= RendererFlags::DIRTY_BLAS_BIT;
-        model_handle->flags |= RenderModelFlags::DIRTY_BLAS;
+        model_handle->flags |= RenderModelFlags::DIRTY_BLAS_BIT;
     }
 
     for(auto& mesh : model.meshes) {
-        meshes.push_back(RenderMesh{
-            .metadata = render_mesh_mt.emplace_back(mesh.name, model.materials.at(mesh.material.value_or(0)).name),
-            .vertex_offset = mesh.vertex_offset,
-            .vertex_count = mesh.vertex_count,
-            .index_offset = mesh.index_offset,
-            .index_count = mesh.index_count,
-            .material = mesh.material.value_or(0) });
+        meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
+                                     .vertex_count = mesh.vertex_count,
+                                     .index_offset = mesh.index_offset,
+                                     .index_count = mesh.index_count,
+                                     .material = mesh.material.value_or(0) });
     }
 
     for(auto& mat : model.materials) {
@@ -874,17 +870,17 @@ HandleBatchedModel RendererVulkan::batch_model(const ImportedModel& model, Batch
                    [](const auto& i) { return i; });
 
     // clang-format off
-    ENG_LOG("Batching model {}: [VXS: {:.2f} KB, IXS: {:.2f} KB, Textures: {:.2f} KB]", 
-            model.name,
+    ENG_LOG("Batching model {{}}: [VXS: {:.2f} KB, IXS: {:.2f} KB, Textures: {:.2f} KB]", 
+            // TODO: model.name,
             static_cast<float>(model.vertices.size() * sizeof(model.vertices[0])) / 1000.0f,
             static_cast<float>(model.indices.size() * sizeof(model.indices[0]) / 1000.0f),
             static_cast<float>(std::accumulate(model.textures.begin(), model.textures.end(), 0ull, [](uint64_t sum, const ImportedModel::Texture& tex) { return sum + tex.size.first * tex.size.second * 4u; })) / 1000.0f);
     // clang-format on
 
-    return HandleBatchedModel{ *model_handle };
+    return Handle<BatchedRenderModel>{ *model_handle };
 }
 
-HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, InstanceSettings settings) {
+Handle<InstancedRenderModel> RendererVulkan::instance_model(Handle<BatchedRenderModel> model, InstanceSettings settings) {
     auto handle = model_instances.push_back(RenderModelInstance{ .model = Handle<RenderModel>{ *model },
                                                                  .flags = settings.flags,
                                                                  .transform = settings.transform,
@@ -900,7 +896,7 @@ HandleInstancedModel RendererVulkan::instance_model(HandleBatchedModel model, In
     flags |= RendererFlags::DIRTY_MODEL_INSTANCES_BIT;
     if(settings.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= RendererFlags::DIRTY_TLAS_BIT; }
 
-    return HandleInstancedModel{ *handle };
+    return Handle<InstancedRenderModel>{ *handle };
 }
 
 void RendererVulkan::upload_model_textures() {
@@ -1148,7 +1144,7 @@ void RendererVulkan::upload_transforms() {
     std::swap(mesh_instance_transform_buffer[0], mesh_instance_transform_buffer[1]);
 }
 
-void RendererVulkan::update_transform(HandleInstancedModel model, glm::mat4x3 transform) {
+void RendererVulkan::update_transform(Handle<RenderModelInstance> model, glm::mat4x3 transform) {
     model->transform = transform;
     // ENG_WARN("FIX THIS METHOD");
     //  TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
@@ -1350,12 +1346,12 @@ void RendererVulkan::build_blas() {
     // TODO: Right now it is wrong to iterate over elements inside
     // HandleVector, if any element was removed from it.
     for(auto& model : models) {
-        if(model.flags & RenderModelFlags::DIRTY_BLAS) {
+        if(model.flags & RenderModelFlags::DIRTY_BLAS_BIT) {
             // TODO: Maybe move it to the end, when the building is finished
             dirty_models.push_back(&model);
             dirty_rt_metadatas.push_back(model.metadata);
             total_dirty_meshes += model.mesh_count;
-            model.flags ^= RenderModelFlags::DIRTY_BLAS;
+            model.flags ^= RenderModelFlags::DIRTY_BLAS_BIT;
         }
     }
 

@@ -17,18 +17,20 @@
 
 int main() {
     Engine::init();
-    
-    {
-        ImportedModel import_cornell = ModelImporter::import_model("cornell_box", "cornell/cornell2.glb");
-        // ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
-        ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
 
-        HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED_BIT });
-        // HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
+    {
+        // ImportedModel import_bunny = ModelImporter::import_model("bunny", "cornell/bunny.glb");
+        // ImportedModel import_gallery = ModelImporter::import_model("the picture gallery", "the_picture_gallery.glb");
+
+        // HandleBatchedModel gallery = Engine::renderer()->batch_model(import_gallery, { .flags = BatchFlags::RAY_TRACED_BIT });
+        //  HandleBatchedModel cornell = Engine::renderer()->batch_model(import_cornell, { .flags = BatchFlags::RAY_TRACED });
 
         /*HandleInstancedModel cornell_i1 =
             Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });*/
-        Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+        // Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
+
+        const auto picture_gallery_handle = Engine::scene()->load_from_file("the_picture_gallery.glb");
+        Engine::scene()->instance_model(picture_gallery_handle, { InstanceFlags::RAY_TRACED_BIT });
 
         Engine::set_on_update_callback([&] {
             const glm::mat4x3 T = glm::rotate(glm::mat4{ 1.0f }, (float)Engine::get_time_secs(), glm::vec3{ 0.0f, 1.0f, 0.0f });
