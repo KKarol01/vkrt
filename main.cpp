@@ -13,7 +13,7 @@
 #include "model_importer.hpp"
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
-#include "handle_vector.hpp"
+#include "handle_vec.hpp"
 
 int main() {
     Engine::init();

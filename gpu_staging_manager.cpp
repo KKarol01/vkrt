@@ -249,7 +249,6 @@ void GpuStagingManager::submit_uploads() {
         auto uploads = std::move(this->uploads);
         this->uploads.clear();
 
-
         if(allocated_command_buffers.load(std::memory_order_relaxed) >= 128) {
             int val;
             while((val = background_task_count.load(std::memory_order_relaxed)) > 0) {
@@ -321,7 +320,7 @@ void GpuStagingManager::submit_uploads() {
                             vkDestroySemaphore(renderer->dev, n->image_dst_acquire_sem, nullptr);
                         }
                         if(n->flag) {
-                            n->flag->test_and_set(std::memory_order_relaxed);
+                            n->flag->test_and_set();
                             n->flag->notify_all();
                         }
                         transactions.erase_after(it);
@@ -331,7 +330,7 @@ void GpuStagingManager::submit_uploads() {
 
             vkDestroyFence(renderer->dev, fence, nullptr);
 
-            background_task_count.fetch_sub(1, std::memory_order_relaxed);
+            background_task_count.fetch_sub(1);
             background_task_count.notify_all();
             thread_cvar.notify_one();
         } };

@@ -8,7 +8,7 @@
 #include <glm/mat4x3.hpp>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
-#include "handle_vector.hpp"
+#include "handle_vec.hpp"
 #include "gpu_staging_manager.hpp"
 #include "engine.hpp"
 
@@ -24,9 +24,9 @@ template <class... Ts> struct Visitor : Ts... {
 };
 
 enum class RendererFlags : uint32_t {
-    DIRTY_MODEL_INSTANCES_BIT = 0x1,
-    DIRTY_MODEL_BATCHES_BIT = 0x2,
-    DIRTY_BLAS_BIT = 0x4,
+    DIRTY_MESH_INSTANCES = 0x1,
+    DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
+    DIRTY_GEOMETRY_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
     REFIT_TLAS_BIT = 0x10,
     UPDATE_MESH_POSITIONS_BIT = 0x20,
@@ -34,7 +34,7 @@ enum class RendererFlags : uint32_t {
     RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class RenderModelFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
+enum class GeometryFlags : uint32_t { DIRTY_GEOMETRY_BLAS_BIT = 0x1 };
 
 class Buffer {
   public:
@@ -74,7 +74,7 @@ class Buffer {
 struct Image {
     constexpr Image() = default;
     Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
-          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VkImageUsageFlags flags = {});
+          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage = {});
     Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
           uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
     Image(Image&& other) noexcept;
@@ -99,57 +99,36 @@ struct Image {
     uint32_t layers{ 0 };
 };
 
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 nor;
-    glm::vec2 uv;
+struct RenderMaterial {
+    Handle<TextureBatch> color_texture;
 };
 
-struct RenderModelMetadata {
+struct GeometryMetadata {
     VkAccelerationStructureKHR blas{};
     Buffer blas_buffer{};
 };
 
-struct RenderMaterial {
-    uint32_t color_texture;
-    uint32_t normal_texture;
-};
-
-// offsets and material are offsets relative to the model, not whole array
-// thus, to calculate correct global vector index, do: mesh->model.first_vertex + mesh.vertex_offset
-struct RenderMesh {
+struct GeometryBatch {
+    Flags<GeometryFlags> flags;
+    Handle<GeometryMetadata> metadata;
     uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t index_offset{ 0 };
     uint32_t index_count{ 0 };
-    uint32_t material{ 0 };
 };
 
-struct RenderModel {
-    Flags<RenderModelFlags> flags{};
-    Handle<RenderModelMetadata> metadata;
-    uint32_t first_vertex{ 0 };
+struct MeshBatch {
+    Handle<GeometryBatch> geometry;
+    uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
-    uint32_t first_index{ 0 };
+    uint32_t index_offset{ 0 };
     uint32_t index_count{ 0 };
-    uint32_t first_mesh{ 0 };
-    uint32_t mesh_count{ 0 };
-    uint32_t first_material{ 0 };
-    uint32_t material_count{ 0 };
-    uint32_t first_texture{ 0 };
-    uint32_t texture_count{ 0 };
 };
 
-struct RenderModelInstance {
-    Handle<RenderModel> model{};
-    Flags<InstanceFlags> flags{};
-    glm::mat4x3 transform{ 1.0f };
-    uint32_t tlas_instance_mask : 8 { 0xFF };
-};
-
-struct RenderMeshInstance {
-    Handle<RenderModelInstance> model_instance;
-    Handle<RenderMesh> mesh;
+struct MeshInstance {
+    Handle<MeshInstance> handle;
+    Handle<MeshBatch> mesh;
+    Handle<MaterialBatch> material;
 };
 
 struct RecordingSubmitInfo {
@@ -158,10 +137,17 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
 
-struct GPURenderMeshData {
+struct GPUMeshInstance {
     uint32_t vertex_offset{};
     uint32_t index_offset{};
-    uint32_t color_texture_idx{};
+    uint32_t color_texture_idx;
+};
+
+struct BLASInstance {
+    Handle<BLASInstance> handle;
+    Handle<GeometryBatch> geometry;
+    std::vector<Handle<MeshInstance>> mesh_materials;
+    VkAccelerationStructureKHR blas;
 };
 
 enum class ShaderModuleType {
@@ -641,7 +627,7 @@ class RendererVulkan : public Renderer {
 
     struct IndirectDrawCommandBufferHeader {
         uint32_t draw_count{};
-        uint32_t mesh_instance_count{};
+        uint32_t geometry_instance_count{};
     };
 
     struct RenderingPrimitives {
@@ -668,15 +654,19 @@ class RendererVulkan : public Renderer {
 
     void render() final;
 
-    Handle<BatchedRenderModel> batch_model(const ImportedModel& model, BatchSettings settings) final;
-    Handle<InstancedRenderModel> instance_model(Handle<BatchedRenderModel> model, InstanceSettings settings) final;
+    Handle<TextureBatch> batch_texture(const TextureBatch& batch) final;
+    Handle<MaterialBatch> batch_material(const MaterialBatch& batch) final;
+    Handle<GeometryBatch> batch_geometry(const GeometryDescriptor& batch) final;
+    Handle<MeshBatch> batch_mesh(const MeshDescriptor& batch) final;
+    Handle<MeshInstance> instance_mesh(const InstanceSettings& settings) final;
+    Handle<BLASInstance> instance_blas(const BLASInstanceSettings& settings) final;
 
     void upload_model_textures();
     void upload_staged_models();
     void upload_instances();
     void upload_transforms();
 
-    void update_transform(Handle<RenderModelInstance> model, glm::mat4x3 transform);
+    // void update_transform(Handle<RenderModelInstance> model, glm::mat4x3 transform);
 
     void compile_shaders();
     void build_pipelines();
@@ -690,10 +680,12 @@ class RendererVulkan : public Renderer {
     RenderingPrimitives& get_primitives() { return primitives[Engine::frame_num() % 2]; }
 
     uint32_t get_total_vertices() const {
-        return models.empty() ? 0u : models.back().first_vertex + models.back().vertex_count;
+        return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
+        // return models.empty() ? 0u : models.back().first_vertex + models.back().vertex_count;
     }
     uint32_t get_total_indices() const {
-        return models.empty() ? 0u : models.back().first_index + models.back().index_count;
+        return geometries.empty() ? 0u : geometries.back().index_offset + geometries.back().index_count;
+        // return models.empty() ? 0u : models.back().first_index + models.back().index_count;
     }
     uint32_t get_total_triangles() const { return get_total_indices() / 3u; }
 
@@ -723,7 +715,8 @@ class RendererVulkan : public Renderer {
 
     SamplerStorage samplers;
 
-    BoundingBox scene_bounding_box;
+    // BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f, -1.0f, -2.0f }, .max = glm::vec3{ 1.0f, 1.0f, 2.0f} };
+    BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f }, .max = glm::vec3{ 1.0f } };
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
@@ -744,8 +737,8 @@ class RendererVulkan : public Renderer {
     Buffer tlas_mesh_offsets_buffer;
     Buffer tlas_transform_buffer;
     Buffer blas_mesh_offsets_buffer;
-    Buffer triangle_mesh_ids_buffer;
-    Buffer mesh_datas_buffer;
+    Buffer triangle_geo_inst_id_buffer;
+    Buffer mesh_instances_buffer;
 
     DDGI_Settings ddgi;
     Image rt_image;
@@ -753,26 +746,25 @@ class RendererVulkan : public Renderer {
     Buffer ddgi_buffer;
     Buffer ddgi_debug_probe_offsets_buffer;
 
-    HandleVector<RenderModel> models;
-    std::vector<RenderMesh> meshes;
-    std::vector<RenderMaterial> materials;
-    std::vector<Image> textures;
-    std::vector<BoundingBox> model_bbs;
-    HandleVector<RenderModelMetadata> model_metadatas;
-
-    HandleVector<RenderModelInstance> model_instances;
-    std::vector<RenderMeshInstance> mesh_instances;
+    HandleVector<GeometryBatch> geometries;
+    HandleVector<GeometryMetadata> geometry_metadatas;
+    HandleVector<MeshBatch> mesh_batches;
+    HandleVector<Image> textures;
+    std::vector<MeshInstance> mesh_instances;
+    HandleVector<RenderMaterial> materials;
+    std::vector<BLASInstance> blas_instances;
+    std::unordered_map<Handle<GeometryBatch>, std::vector<MeshBatch>> geometry_mesh_batches;
 
     Flags<RendererFlags> flags;
     struct UploadImage {
-        uint64_t image_index;
+        Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
     };
 
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<std::pair<Handle<RenderModelInstance>, glm::mat4x3>> upload_positions;
+    std::vector<std::pair<Handle<MeshInstance>, glm::mat4x3>> upload_positions;
 
     RenderingPrimitives primitives[2];
 };
@@ -780,10 +772,6 @@ class RendererVulkan : public Renderer {
 // clang-format off
 inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
 
-CREATE_HANDLE_DISPATCHER2(BatchedRenderModel, RenderModel) { return &get_renderer().models.at(Handle<RenderModel, Storage>{ *h }); }
-CREATE_HANDLE_DISPATCHER2(InstancedRenderModel, RenderModelInstance) { return &get_renderer().model_instances.at(Handle<RenderModelInstance, Storage>{ *h }); }
-CREATE_HANDLE_DISPATCHER(RenderModel) { return &get_renderer().models.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderModelMetadata) { return &get_renderer().model_metadatas.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderModelInstance) { return &get_renderer().model_instances.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(*h); }
+CREATE_HANDLE_DISPATCHER(GeometryBatch) { return &get_renderer().geometries.at(h); }
+CREATE_HANDLE_DISPATCHER(GeometryMetadata) { return &get_renderer().geometry_metadatas.at(h); }
 // clang-format on

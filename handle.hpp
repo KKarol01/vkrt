@@ -29,13 +29,13 @@ inline constexpr HandleGenerate_T generate_handle{};
 
 template <typename T, typename Storage> struct Handle {
     constexpr Handle() = default;
-    constexpr explicit Handle(Storage handle) : _handle{ handle } {}
-    constexpr explicit Handle(HandleGenerate_T) : _handle{ HandleGenerator<T, Storage>::gen() } {}
-    constexpr Storage operator*() const { return _handle; }
+    constexpr explicit Handle(Storage handle) : handle{ handle } {}
+    constexpr explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage>::gen() } {}
+    constexpr Storage operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;
     constexpr auto* operator->() const { return HandleDispatcher<T>{}(*this); }
-    constexpr explicit operator bool() const { return _handle != ~Storage{}; }
-    Storage _handle{ ~Storage{} };
+    constexpr explicit operator bool() const { return handle != ~Storage{}; }
+    Storage handle{ ~Storage{} };
 };
 
 namespace std {
