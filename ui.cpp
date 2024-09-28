@@ -112,6 +112,8 @@ void InstancedModelListWidget::draw() {
 }
 
 void InstancedModelListWidget::draw_selectable_expandable_label(const Scene::ModelInstance& mi) {
+    //assert(false && "TODO");
+    #if 0
     const auto& asset = Engine::scene()->model_assets.at(mi.asset);
     ImGui::PushID(&mi);
     ImGui::SetCursorPos(ImGui::GetCursorPos() - ImGui::GetStyle().FramePadding);
@@ -133,6 +135,7 @@ void InstancedModelListWidget::draw_selectable_expandable_label(const Scene::Mod
     }
     if(selected) { Engine::ui()->mesh_inspector_widget.inspected = mi.handle; }
     ImGui::PopID();
+    #endif
 }
 
 void RenderOutputWidget::draw() {
