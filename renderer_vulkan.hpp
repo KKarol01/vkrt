@@ -715,8 +715,8 @@ class RendererVulkan : public Renderer {
 
     SamplerStorage samplers;
 
-    // BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f, -1.0f, -2.0f }, .max = glm::vec3{ 1.0f, 1.0f, 2.0f} };
-    BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f }, .max = glm::vec3{ 1.0f } };
+     //BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f, -1.0f, -2.0f }, .max = glm::vec3{ 1.0f, 1.0f, 2.0f} };
+    BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.2f }, .max = glm::vec3{ 1.2f } };
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
