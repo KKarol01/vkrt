@@ -29,7 +29,7 @@ int main() {
             Engine::renderer()->instance_model(cornell, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED });*/
         // Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
 
-        const auto picture_gallery_handle = Engine::scene()->load_from_file("the_picture_gallery.glb");
+        const auto picture_gallery_handle = Engine::scene()->load_from_file("cornell/cornell2.glb");
         Engine::scene()->instance_model(picture_gallery_handle, { InstanceFlags::RAY_TRACED_BIT });
 
         Engine::set_on_update_callback([&] {

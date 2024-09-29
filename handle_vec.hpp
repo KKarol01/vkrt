@@ -14,8 +14,8 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
         constexpr friend auto operator<=>(const Data& a, Handle b) { return a.handle <=> b; }
         constexpr friend auto operator<=>(Handle a, const Data& b) { return a <=> b.handle; }
 
-        Handle handle;
         T data;
+        Handle handle;
     };
 
   public:
@@ -86,10 +86,10 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
     constexpr auto& operator[](size_t idx) { return (storage.data() + idx)->data; }
 
     template <typename T> constexpr Handle insert(T&& t) {
-        return storage.insert(Data{ Handle{ generate_handle }, std::forward<T>(t) }).handle;
+        return storage.insert(Data{ std::forward<T>(t), Handle{ generate_handle } }).handle;
     }
     template <typename... ARGS> constexpr Handle emplace(ARGS&&... args) {
-        return storage.insert(Data{ Handle{ generate_handle }, T{ std::forward<ARGS>(args)... } }).handle;
+        return storage.insert(Data{ T{ std::forward<ARGS>(args)... }, Handle{ generate_handle } }).handle;
     }
     constexpr void erase(const T& t) { storage.erase(t); }
     constexpr T* try_find(Handle handle) {

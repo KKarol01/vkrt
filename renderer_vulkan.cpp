@@ -724,13 +724,7 @@ void RendererVulkan::render() {
                            0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        /*
-        REMOVE THIS
-        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_mesh_id_buffer.bda);*/
-        /*
-        FIX THIS
-        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+        /*vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffer[0]->bda);*/
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
@@ -807,105 +801,6 @@ void RendererVulkan::render() {
         vkQueuePresentKHR(gq, &pinfo);
     }
 }
-
-#if 0
-Handle<BatchedModel> RendererVulkan::batch_model(const ImportedModel& model, BatchSettings settings) {
-    const auto total_vertices = get_total_vertices();
-    const auto total_indices = get_total_indices();
-    const auto total_meshes = static_cast<uint32_t>(meshes.size());
-    const auto total_materials = static_cast<uint32_t>(materials.size());
-    const auto total_textures = static_cast<uint32_t>(textures.size());
-    const auto total_models = static_cast<uint32_t>(models.size());
-    const auto model_metadata = model_metadatas.emplace_back();
-
-    flags |= RendererFlags::DIRTY_MODEL_BATCHES_BIT;
-
-    Handle<RenderModel> model_handle = models.push_back(RenderModel{
-        .flags = {},
-        .metadata = model_metadata,
-        .first_vertex = total_vertices,
-        .vertex_count = (uint32_t)model.vertices.size(),
-        .first_index = total_indices,
-        .index_count = (uint32_t)model.indices.size(),
-        .first_mesh = total_meshes,
-        .mesh_count = (uint32_t)model.meshes.size(),
-        .first_material = total_materials,
-        .material_count = (uint32_t)model.materials.size(),
-        .first_texture = total_textures,
-        .texture_count = (uint32_t)model.textures.size(),
-    });
-
-    if(settings.flags & BatchFlags::RAY_TRACED_BIT) {
-        flags |= RendererFlags::DIRTY_BLAS_BIT;
-        model_handle->flags |= RenderModelFlags::DIRTY_BLAS_BIT;
-    }
-
-    for(auto& mesh : model.meshes) {
-        meshes.push_back(RenderMesh{ .vertex_offset = mesh.vertex_offset,
-                                     .vertex_count = mesh.vertex_count,
-                                     .index_offset = mesh.index_offset,
-                                     .index_count = mesh.index_count,
-                                     .material = mesh.material.value_or(0) });
-    }
-
-    for(auto& mat : model.materials) {
-        materials.push_back(RenderMaterial{ .color_texture = mat.color_texture.value_or(0),
-                                            .normal_texture = mat.normal_texture.value_or(0) });
-    }
-
-    VkSampler default_linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-
-    for(auto& tex : model.textures) {
-        textures.push_back(Image{ tex.name, tex.size.first, tex.size.second, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB,
-                                  VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        upload_images.push_back(UploadImage{ .image_handle = textures.size() - 1u, .rgba_data = tex.rgba_data });
-    }
-
-    upload_vertices.resize(upload_vertices.size() + model.vertices.size());
-    upload_indices.resize(upload_indices.size() + model.indices.size());
-
-    std::transform(model.vertices.begin(), model.vertices.end(), upload_vertices.end() - model.vertices.size(),
-                   [&aabb = model_bbs.emplace_back()](const ImportedModel::Vertex& v) {
-                       aabb.min = glm::min(aabb.min, v.pos);
-                       aabb.max = glm::max(aabb.max, v.pos);
-                       return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv };
-                   });
-
-    std::transform(model.indices.begin(), model.indices.end(), upload_indices.end() - model.indices.size(),
-                   [](const auto& i) { return i; });
-
-    // clang-format off
-    ENG_LOG("Batching model {{}}: [VXS: {:.2f} KB, IXS: {:.2f} KB, Textures: {:.2f} KB]", 
-            // TODO: model.name,
-            static_cast<float>(model.vertices.size() * sizeof(model.vertices[0])) / 1000.0f,
-            static_cast<float>(model.indices.size() * sizeof(model.indices[0]) / 1000.0f),
-            static_cast<float>(std::accumulate(model.textures.begin(), model.textures.end(), 0ull, [](uint64_t sum, const ImportedModel::Texture& tex) { return sum + tex.size.first * tex.size.second * 4u; })) / 1000.0f);
-    // clang-format on
-
-    return Handle<BatchedModel>{ *model_handle };
-}
-#endif
-
-#if 0
-Handle<InstancedGeometry> RendererVulkan::instance_model(Handle<BatchedModel> model, InstanceSettings settings) {
-    auto handle = model_instances.push_back(RenderModelInstance{ .model = Handle<RenderModel>{ *model },
-                                                                 .flags = settings.flags,
-                                                                 .transform = settings.transform,
-                                                                 .tlas_instance_mask = settings.tlas_instance_mask });
-
-    for(uint32_t i = 0; i < model->mesh_count; ++i) {
-        mesh_instances.push_back(RenderMeshInstance{
-            .model_instance = handle,
-            .mesh = Handle<RenderMesh>{ model->first_mesh + i },
-        });
-    }
-
-    flags |= RendererFlags::DIRTY_MODEL_INSTANCES_BIT;
-    if(settings.flags & InstanceFlags::RAY_TRACED_BIT) { flags |= RendererFlags::DIRTY_TLAS_BIT; }
-
-    return Handle<InstancedGeometry>{ *handle };
-}
-#endif
 
 Handle<TextureBatch> RendererVulkan::batch_texture(const TextureBatch& batch) {
     Handle<Image> handle =
@@ -1036,59 +931,6 @@ void RendererVulkan::upload_model_textures() {
     vkDestroySemaphore(dev, acquire_sem, {});
 
     upload_images.clear();
-
-#if 0
-    return;
-    const auto total_tex_size =
-        std::accumulate(upload_images.begin(), upload_images.end(), 0ull, [this](uint64_t sum, const UploadImage& tex) {
-            return sum + textures.at(tex.image_handle).width * textures.at(tex.image_handle).height * 4ull;
-        });
-
-    Buffer texture_staging_buffer{ "texture staging buffer", total_tex_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true };
-
-    std::vector<vks::CopyBufferToImageInfo2> texture_copy_datas;
-    std::vector<vks::BufferImageCopy2> buffer_copies;
-
-    texture_copy_datas.reserve(upload_images.size());
-    buffer_copies.reserve(upload_images.size());
-
-    uint64_t texture_byte_offset = 0;
-    auto cmd = get_primitives().cmdpool.begin_onetime();
-    for(const auto& tex : upload_images) {
-        auto& texture = textures.at(tex.image_handle);
-
-        vks::BufferImageCopy2& region = buffer_copies.emplace_back();
-        region.bufferOffset = texture_byte_offset;
-        region.imageExtent = { .width = texture.width, .height = texture.height, .depth = 1 };
-        region.imageSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        };
-
-        vks::CopyBufferToImageInfo2& copy = texture_copy_datas.emplace_back();
-        copy.srcBuffer = texture_staging_buffer.buffer;
-        copy.dstImage = texture.image;
-        copy.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        copy.regionCount = 1;
-        copy.pRegions = &region;
-
-        texture_staging_buffer.push_data(std::as_bytes(std::span{ tex.rgba_data }));
-        texture_byte_offset += texture.width * texture.height * 4ull;
-
-        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                  VK_ACCESS_2_TRANSFER_WRITE_BIT, true, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        vkCmdCopyBufferToImage2(cmd, &copy);
-        texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-                                  false, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
-    }
-
-    get_primitives().cmdpool.end(cmd);
-    scheduler_gq.enqueue_wait_submit({ { cmd } });
-    vkQueueWaitIdle(gq);
-#endif
 }
 void RendererVulkan::upload_staged_models() {
     upload_model_textures();
@@ -1123,7 +965,8 @@ void RendererVulkan::upload_instances() {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = mb.index_count,
                                                                       .instanceCount = 1,
                                                                       .firstIndex = geom.index_offset + mb.index_offset,
-                                                                      .vertexOffset = (int32_t)(geom.vertex_offset + mb.vertex_offset) });
+                                                                      .vertexOffset = (int32_t)(geom.vertex_offset + mb.vertex_offset),
+                                                                      .firstInstance = i });
         } else {
             ++gpu_draw_commands.back().instanceCount;
         }
@@ -1140,93 +983,6 @@ void RendererVulkan::upload_instances() {
     mesh_instances_buffer = Buffer{"mesh instances", gpu_mesh_instances.size() * sizeof(gpu_mesh_instances[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
     mesh_instances_buffer.push_data(gpu_mesh_instances);
     // clang-format on
-
-#if 0
-    for(const RenderModel& model : models) {
-        for(uint32_t i = 0u; i < model.mesh_count; ++i) {
-            const RenderMesh& mesh = meshes.at(model.first_mesh + i);
-            const RenderMaterial& material = materials.at(model.first_material + mesh.material);
-
-            gpu_render_geometry.push_back(GPURenderGeometry{
-                .vertex_offset = model.first_vertex + mesh.vertex_offset,
-                .index_offset = model.first_index + mesh.index_offset,
-                .color_texture_idx = model.first_texture + material.color_texture,
-            });
-
-            for(uint32_t j = 0u; j < mesh.index_count / 3u; ++j) {
-                triangle_mesh_ids.push_back(model.first_mesh + i);
-            }
-
-            blas_mesh_offsets.push_back((model.first_index + mesh.index_offset) / 3u);
-        }
-    }
-
-    for(const RenderModelInstance& instance : model_instances) {
-        tlas_mesh_offsets.push_back(instance.model->first_mesh);
-        tlas_transforms.push_back(instance.transform);
-    }
-
-    {
-        const RenderMeshInstance* mi = &mesh_instances.at(0);
-        VkDrawIndexedIndirectCommand* cmd = &gpu_draw_commands.emplace_back();
-        cmd->firstIndex = mi->model_instance->model->first_index + mi->mesh->index_offset;
-        cmd->indexCount = mi->mesh->index_count;
-        cmd->instanceCount = 1;
-        cmd->vertexOffset = mi->model_instance->model->first_vertex + mi->mesh->vertex_offset;
-        mesh_instance_mesh_ids.push_back(*mi->mesh);
-        mesh_instance_transforms.push_back(mi->model_instance->transform);
-        for(uint32_t i = 1; i < mesh_instances.size(); ++i) {
-            const RenderMeshInstance& cmi = mesh_instances.at(i);
-
-            if(mi->mesh != cmi.mesh) {
-                mi = &cmi;
-                cmd = &gpu_draw_commands.emplace_back();
-                cmd->indexCount = mi->mesh->index_count;
-                cmd->instanceCount = 1;
-                cmd->firstIndex = mi->mesh->index_offset + mi->model_instance->model->first_index;
-                cmd->firstInstance = i;
-                cmd->vertexOffset = mi->model_instance->model->first_vertex + mi->mesh->vertex_offset;
-            } else {
-                ++cmd->instanceCount;
-            }
-
-            mesh_instance_mesh_ids.push_back(*mi->mesh);
-            mesh_instance_transforms.push_back(mi->model_instance->transform);
-        }
-
-        gpu_draw_header.draw_count = gpu_draw_commands.size();
-        gpu_draw_header.mesh_instance_count = mesh_instances.size();
-    }
-
-    // clang-format off
-    indirect_draw_buffer = Buffer{"indirect draw", sizeof(IndirectDrawCommandBufferHeader) + gpu_draw_commands.size() * sizeof(gpu_draw_commands[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false};
-    indirect_draw_buffer.push_data(&gpu_draw_header, sizeof(IndirectDrawCommandBufferHeader));
-    indirect_draw_buffer.push_data(gpu_draw_commands);
-
-    mesh_instance_transform_buffer[0] = new Buffer{"mesh instance transforms 1", mesh_instance_transforms.size() * sizeof(mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    mesh_instance_transform_buffer[1] = new Buffer{"mesh instance transforms 0", mesh_instance_transforms.size() * sizeof(mesh_instance_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true};
-    mesh_instance_transform_buffer[0]->push_data(mesh_instance_transforms);
-    mesh_instance_transform_buffer[1]->push_data(mesh_instance_transforms);
-
-    mesh_instance_mesh_id_buffer = Buffer{"mesh instance mesh id", mesh_instance_mesh_ids.size() * sizeof(mesh_instance_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
-    mesh_instance_mesh_id_buffer.push_data(mesh_instance_mesh_ids);
-
-    tlas_mesh_offsets_buffer = Buffer{"tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
-    tlas_mesh_offsets_buffer.push_data(tlas_mesh_offsets);
-    
-    tlas_transform_buffer = Buffer{"tlas transform", tlas_transforms.size() * sizeof(tlas_transforms[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
-    tlas_transform_buffer.push_data(tlas_transforms);
-
-    blas_mesh_offsets_buffer = Buffer{"blas mesh offsets", blas_mesh_offsets.size() * sizeof(blas_mesh_offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
-    blas_mesh_offsets_buffer.push_data(blas_mesh_offsets);
-
-    triangle_mesh_ids_buffer = Buffer{"triangle mesh id buffer", triangle_mesh_ids.size() * sizeof(triangle_mesh_ids[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
-    triangle_mesh_ids_buffer.push_data(triangle_mesh_ids);
-
-    mesh_datas_buffer = Buffer{"render mesh data", gpu_render_geometry.size() * sizeof(gpu_render_geometry[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false};
-    mesh_datas_buffer.push_data(gpu_render_geometry);
-    // clang-format on
-#endif
 }
 
 void RendererVulkan::upload_transforms() {
@@ -1573,27 +1329,6 @@ void RendererVulkan::build_tlas() {
         tlas_instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
         tlas_instance.accelerationStructureReference = geom.metadata->blas_buffer.bda;
     }
-
-    /* for(uint32_t i = 0, bidx = 0, voff = 0; i < geometries.size(); ++i) {
-         const GeometryBatch& geom = geometries.at(i);
-         const GeometryMetadata& meta = geometry_metadatas.at(geom.metadata);
-         if(!meta.blas) { continue; }
-         batch_offsets.emplace(&geom, GeometryOffsets{ bidx, voff });
-         ++bidx;
-         voff += geom.index_count / 3u;
-     }*/
-
-    /*for(uint32_t i = 0; i < blas_instances.size(); ++i) {
-        const GeometryInstance& gi = geometry_instances.at(i);
-        if(!gi.flags.test(InstanceFlags::RAY_TRACED_BIT)) { continue; }
-        const GeometryBatch& geom = geometries.at(gi.geometry);
-        const GeometryOffsets& offsets = batch_offsets.at(&geom);
-        blas_mesh_offsets.push_back(offsets.triangle_offset);
-        tlas_mesh_offsets.push_back(offsets.idx);
-        for(uint32_t j = 0; j < geom.index_count / 3u; ++j) {
-            triangle_geo_inst_ids.push_back(i);
-        }
-    }*/
 
     tlas_mesh_offsets_buffer = Buffer{ "tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]),
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
