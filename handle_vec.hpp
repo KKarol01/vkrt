@@ -1,8 +1,8 @@
 #pragma once
 
 #include <vector>
-#include <utility>
 #include <algorithm>
+#include <type_traits>
 #include "handle.hpp"
 
 template <typename T, typename Storage = uint32_t> class HandleVector {
@@ -23,13 +23,22 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
     constexpr auto& at(Handle handle) { return at(find_idx(handle)); }
     constexpr auto& operator[](size_t idx) { return storage.at(idx); }
 
-    template <typename T> constexpr Handle insert(T&& t) {
-        const Handle h{ generate_handle };
-        const auto it = find_insertion_it(h);
-        const auto idx = std::distance(handles.begin(), it);
-        handles.insert(it, h);
-        storage.insert(storage.begin() + idx, std::forward<T>(t));
-        return h;
+    template <typename K> constexpr Handle insert(K&& t) {
+        if(std::is_constant_evaluated()) {
+            const Handle h{ static_cast<Storage>(handles.size()) };
+            const auto it = find_insertion_it(h);
+            const auto idx = std::distance(handles.begin(), it);
+            handles.insert(it, h);
+            storage.insert(storage.begin() + idx, std::forward<T>(t));
+            return h;
+        } else {
+            const Handle h{ generate_handle };
+            const auto it = find_insertion_it(h);
+            const auto idx = std::distance(handles.begin(), it);
+            handles.insert(it, h);
+            storage.insert(storage.begin() + idx, std::forward<K>(t));
+            return h;
+        }
     }
     template <typename... ARGS> constexpr Handle emplace(ARGS&&... args) {
         const Handle h{ generate_handle };
