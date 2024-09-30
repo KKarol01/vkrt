@@ -1091,7 +1091,6 @@ void RendererVulkan::compile_shaders() {
 }
 
 void RendererVulkan::build_pipelines() {
-
     RendererPipelineLayout default_layout = RendererPipelineLayoutBuilder{}
                                                 .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
                                                 .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)

@@ -30,7 +30,7 @@ inline constexpr HandleGenerate_T generate_handle{};
 template <typename T, typename Storage> struct Handle {
     constexpr Handle() = default;
     constexpr explicit Handle(Storage handle) : handle{ handle } {}
-    constexpr explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage>::gen() } {}
+    explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage>::gen() } {}
     constexpr Storage operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;
     constexpr auto* operator->() const { return HandleDispatcher<T>{}(*this); }
