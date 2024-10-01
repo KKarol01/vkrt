@@ -29,7 +29,7 @@ enum class RendererFlags : uint32_t {
     DIRTY_GEOMETRY_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
     REFIT_TLAS_BIT = 0x10,
-    UPDATE_MESH_POSITIONS_BIT = 0x20,
+    UPDATE_MESH_INSTANCE_TRANSFORMS_BIT = 0x20,
     RESIZE_SWAPCHAIN_BIT = 0x40,
     RESIZE_SCREEN_RECT_BIT = 0x80,
 };
@@ -666,8 +666,6 @@ class RendererVulkan : public Renderer {
     void upload_instances();
     void upload_transforms();
 
-    // void update_transform(Handle<RenderModelInstance> model, glm::mat4x3 transform);
-
     void compile_shaders();
     void build_pipelines();
     void build_sbt();
@@ -681,13 +679,14 @@ class RendererVulkan : public Renderer {
 
     uint32_t get_total_vertices() const {
         return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
-        // return models.empty() ? 0u : models.back().first_vertex + models.back().vertex_count;
     }
     uint32_t get_total_indices() const {
         return geometries.empty() ? 0u : geometries.back().index_offset + geometries.back().index_count;
-        // return models.empty() ? 0u : models.back().first_index + models.back().index_count;
     }
     uint32_t get_total_triangles() const { return get_total_indices() / 3u; }
+
+    VkSemaphore create_semaphore();
+    void destroy_semaphore(VkSemaphore sem);
 
     VkRect2D screen_rect{};
 
@@ -715,15 +714,17 @@ class RendererVulkan : public Renderer {
 
     SamplerStorage samplers;
 
-     //BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f, -1.0f, -2.0f }, .max = glm::vec3{ 1.0f, 1.0f, 2.0f} };
-    BoundingBox scene_bounding_box{ .min = glm::vec3{ -0.944428f, -0.7f, -0.9f }, .max = glm::vec3{ 0.952864f, 0.7f, 1.01583f } };
+    // BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f, -1.0f, -2.0f }, .max = glm::vec3{ 1.0f, 1.0f, 2.0f} };
+    BoundingBox scene_bounding_box{ .min = glm::vec3{ -0.944428f, -0.7f, -0.9f },
+                                    .max = glm::vec3{ 0.952864f, 0.7f, 1.01583f } }; // for cornell2.glb
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer* mesh_instance_transform_buffer[2]; // memory leak
+    // Buffer* mesh_instance_transform_buffer[2]; // memory leak
+    Buffer mesh_instance_transforms_buffer;
     Buffer mesh_instance_mesh_id_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
