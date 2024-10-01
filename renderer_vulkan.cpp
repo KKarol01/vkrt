@@ -134,7 +134,7 @@ bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
     } else {
         std::atomic_flag flag{};
         if(!get_renderer().staging->send_to(buffer, offset, data, &flag)) { return false; }
-        flag.wait(false, std::memory_order_relaxed);
+        flag.wait(false);
     }
 
     size = std::max(size, offset + data.size_bytes());
@@ -498,7 +498,7 @@ void RendererVulkan::render() {
         prepare_ddgi();
     }
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
-    if(flags.test_clear(RendererFlags::UPDATE_MESH_POSITIONS_BIT)) { upload_transforms(); }
+    if(flags.test_clear(RendererFlags::UPDATE_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         vkQueueWaitIdle(gq);
         create_swapchain();
@@ -854,8 +854,9 @@ Handle<MeshBatch> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
 Handle<MeshInstance> RendererVulkan::instance_mesh(const InstanceSettings& settings) {
     const auto handle = Handle<MeshInstance>{ generate_handle };
     mesh_instances.push_back(MeshInstance{ .handle = handle, .mesh = settings.mesh, .material = settings.material });
+    upload_positions.emplace_back(handle, settings.transform);
 
-    flags.set(RendererFlags::DIRTY_MESH_INSTANCES);
+    flags.set(RendererFlags::DIRTY_MESH_INSTANCES | RendererFlags::UPDATE_MESH_INSTANCE_TRANSFORMS_BIT);
     if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) { flags.set(RendererFlags::DIRTY_TLAS_BIT); }
 
     return handle;
@@ -873,63 +874,79 @@ Handle<BLASInstance> RendererVulkan::instance_blas(const BLASInstanceSettings& s
 }
 
 void RendererVulkan::upload_model_textures() {
-    VkSemaphore release_sem, acquire_sem;
-    vks::SemaphoreCreateInfo sem_info;
-    VK_CHECK(vkCreateSemaphore(dev, &sem_info, nullptr, &release_sem));
-    VK_CHECK(vkCreateSemaphore(dev, &sem_info, nullptr, &acquire_sem));
-
-    VkCommandBuffer release_cmd;
+    VkSemaphore acquire_sem = create_semaphore();
     VkCommandBuffer acquire_cmd = get_primitives().cmdpool.begin_onetime();
-    {
-        std::scoped_lock lock{ staging->get_queue_mutex() };
-        release_cmd = staging->get_cmdpool()->begin_onetime();
-    }
+    VkCommandBuffer cmd = get_primitives().cmdpool.begin_onetime();
+    std::vector<std::atomic_flag> flags(upload_images.size());
+    std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> release_sems;
+    release_sems.reserve(upload_images.size());
+    uint32_t flags_idx = 0;
 
     for(auto& tex : upload_images) {
         Image* img = textures.try_find(tex.image_handle);
-        assert(img && "Image should've existed by now");
-
-        std::atomic_flag flag{};
-        VkCommandBuffer cmd = get_primitives().cmdpool.allocate();
-        staging->send_to(img, {}, std::span{ tex.rgba_data.begin(), tex.rgba_data.end() }, cmd, &scheduler_gq, gqi, &flag);
-
         VkImageMemoryBarrier img_barrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_NONE,
             .dstAccessMask = VK_ACCESS_NONE,
             .oldLayout = img->current_layout,
-            .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .srcQueueFamilyIndex = gqi,
+            .dstQueueFamilyIndex = tqi1,
+            .image = img->image,
+            .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+        };
+        VkCommandBuffer release_cmd = get_primitives().cmdpool.begin_onetime();
+        vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0, {}, 1, &img_barrier);
+        const auto& release_sem = release_sems.emplace_back(create_semaphore(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+        get_primitives().cmdpool.end(release_cmd);
+        scheduler_gq.enqueue_wait_submit({ .buffers = { release_cmd }, .signals = { release_sem } });
+    }
+
+    for(auto& tex : upload_images) {
+        Image* img = textures.try_find(tex.image_handle);
+        assert(img && "Image should've existed by now");
+        staging->send_to(img, {}, std::span{ tex.rgba_data.begin(), tex.rgba_data.end() },
+                         release_sems.at(flags_idx).first, gqi, &flags.at(flags_idx));
+        VkImageMemoryBarrier img_barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .srcQueueFamilyIndex = tqi1,
             .dstQueueFamilyIndex = gqi,
             .image = img->image,
             .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
         };
-        vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, nullptr, 0, nullptr, 1, &img_barrier);
-        vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, nullptr, 0, nullptr, 1, &img_barrier);
-        flag.wait(false);
+        vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
+
+        img_barrier.dstAccessMask = VK_ACCESS_NONE;
+        img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        img_barrier.newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+        img_barrier.srcQueueFamilyIndex = img_barrier.dstQueueFamilyIndex;
+        img->current_layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
+        ++flags_idx;
     }
-
-    get_primitives().cmdpool.end(release_cmd);
     get_primitives().cmdpool.end(acquire_cmd);
+    get_primitives().cmdpool.end(cmd);
 
-    {
-        std::scoped_lock lock{ staging->get_queue_mutex() };
-        QueueScheduler{ tq1 }.enqueue_wait_submit({ .buffers = { release_cmd },
-                                                    .signals = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
+    for(const auto& flag : flags) {
+        flag.wait(false);
     }
 
     vks::FenceCreateInfo fence_info{};
     VkFence fence;
     VK_CHECK(vkCreateFence(dev, &fence_info, {}, &fence));
-    scheduler_gq.enqueue_wait_submit({ .buffers = { acquire_cmd }, .waits = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } },
-                                     fence);
-
+    scheduler_gq.enqueue_wait_submit({ .buffers = { acquire_cmd },
+                                       .signals = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
+    scheduler_gq.enqueue_wait_submit({ .buffers = { cmd }, .waits = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } }, fence);
     VK_CHECK(vkWaitForFences(dev, 1, &fence, true, 1'000'000));
-
     vkDestroyFence(dev, fence, {});
-    vkDestroySemaphore(dev, release_sem, {});
-    vkDestroySemaphore(dev, acquire_sem, {});
-
+    for(const auto& [sem, _] : release_sems) {
+        destroy_semaphore(sem);
+    }
+    destroy_semaphore(acquire_sem);
     upload_images.clear();
 }
 void RendererVulkan::upload_staged_models() {
@@ -986,7 +1003,8 @@ void RendererVulkan::upload_instances() {
 }
 
 void RendererVulkan::upload_transforms() {
-    assert(false && "TODO");
+
+    // assert(false && "TODO");
 #if 0
     std::vector<glm::mat4x3> transforms;
     transforms.reserve(mesh_instances.size());
@@ -1556,6 +1574,15 @@ void RendererVulkan::prepare_ddgi() {
 
     vkQueueWaitIdle(gq);
 }
+
+VkSemaphore RendererVulkan::create_semaphore() {
+    VkSemaphore sem;
+    vks::SemaphoreCreateInfo info;
+    VK_CHECK(vkCreateSemaphore(dev, &info, {}, &sem));
+    return sem;
+}
+
+void RendererVulkan::destroy_semaphore(VkSemaphore sem) { vkDestroySemaphore(dev, sem, {}); }
 
 Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
              VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)

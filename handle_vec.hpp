@@ -10,13 +10,13 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
     using Handle = Handle<T, Storage>;
 
     constexpr auto& back() { return storage.back(); }
-    constexpr auto begin() { return storage.begin(); }
+    constexpr auto begin(this auto&& self) { return self.storage.begin(); }
     constexpr const auto& back() const { return storage.back(); }
     constexpr auto cbegin() { return storage.cbegin(); }
     constexpr auto cend() { return storage.cend(); }
     constexpr auto empty() const { return storage.empty(); }
     constexpr const auto& front() const { return storage.front(); }
-    constexpr auto end() { return storage.end(); }
+    constexpr auto end(this auto&& self) { return self.storage.end(); }
     constexpr auto& front() { return storage.front(); }
     constexpr auto size() const { return storage.size(); }
     constexpr auto& at(size_t idx) { return storage.at(idx); }
@@ -54,13 +54,13 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
         if(it == handles.end()) { return nullptr; }
         return &at(std::distance(handles.begin(), it));
     }
-    constexpr size_t find_idx(Handle handle) { return std::distance(handles.begin(), find_handle_it(handle)); }
+    constexpr size_t find_idx(Handle handle) const { return std::distance(handles.begin(), find_handle_it(handle)); }
     constexpr Handle handle_at(size_t idx) const { return handles.at(idx); }
 
   private:
-    constexpr auto find_handle_it(Handle h) {
-        auto it = std::lower_bound(handles.begin(), handles.end(), h);
-        if(*it != h) { return handles.end(); }
+    constexpr auto find_handle_it(this auto&& self, Handle h) {
+        auto it = std::lower_bound(self.handles.begin(), self.handles.end(), h);
+        if(*it != h) { return self.handles.end(); }
         return it;
     }
     constexpr auto find_insertion_it(Handle h) { return std::upper_bound(handles.begin(), handles.end(), h); }

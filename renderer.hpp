@@ -51,6 +51,7 @@ struct InstanceSettings {
     Flags<InstanceFlags> flags;
     Handle<MeshBatch> mesh;
     Handle<MaterialBatch> material;
+    glm::mat4x3 transform{ 1.0f };
 };
 
 struct BLASInstanceSettings {

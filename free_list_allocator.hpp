@@ -180,6 +180,7 @@ class FreeListAllocator {
         assert(size > 0);
         assert((any_pow_2 & (any_pow_2 - 1)) == 0 && "any_pow_2 must be non negative power of two");
         return (size + any_pow_2 - 1) & ~(any_pow_2 - 1);
+        /*             -------------    ----------------                                                         */
         /*                ^                  ^-- removes the surplus past the nearest next multiple of alignment */
         /*                |--- only overflows to the next multiple if it's not already one of */
     }
