@@ -379,6 +379,9 @@ void RendererVulkan::initialize_vulkan() {
         VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
         VK_CHECK(vkCreateFence(dev, &fence_info, nullptr, &primitives.fen_rendering_finished));
         primitives.cmdpool = CommandPool{ gqi, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT };
+        mesh_instance_transform_buffers[i] =
+            new Buffer{ "mesh instance transforms", 0ull,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     }
 }
 
@@ -492,7 +495,7 @@ void RendererVulkan::initialize_imgui() {
 void RendererVulkan::render() {
     if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) { upload_instances(); }
-    if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BLAS_BIT)) { build_blas(); }
+    if(flags.test_clear(RendererFlags::DIRTY_MESH_BLAS_BIT)) { build_blas(); }
     if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
         prepare_ddgi();
@@ -724,8 +727,8 @@ void RendererVulkan::render() {
                            0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        /*vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffer[0]->bda);*/
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
+                           2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
         vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
@@ -843,18 +846,17 @@ Handle<GeometryBatch> RendererVulkan::batch_geometry(const GeometryDescriptor& b
 
 Handle<MeshBatch> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
     MeshBatch mesh_batch{ .geometry = batch.geometry,
+                          .metadata = mesh_metadatas.emplace(),
                           .vertex_offset = batch.vertex_offset,
                           .vertex_count = batch.vertex_count,
                           .index_offset = batch.index_offset,
                           .index_count = batch.index_count };
-    geometry_mesh_batches[batch.geometry].push_back(mesh_batch);
     return mesh_batches.insert(mesh_batch);
 }
 
 Handle<MeshInstance> RendererVulkan::instance_mesh(const InstanceSettings& settings) {
     const auto handle = Handle<MeshInstance>{ generate_handle };
     mesh_instances.push_back(MeshInstance{ .handle = handle, .mesh = settings.mesh, .material = settings.material });
-    upload_positions.emplace_back(handle, settings.transform);
 
     flags.set(RendererFlags::DIRTY_MESH_INSTANCES | RendererFlags::UPDATE_MESH_INSTANCE_TRANSFORMS_BIT);
     if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) { flags.set(RendererFlags::DIRTY_TLAS_BIT); }
@@ -864,11 +866,13 @@ Handle<MeshInstance> RendererVulkan::instance_mesh(const InstanceSettings& setti
 
 Handle<BLASInstance> RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
     Handle<BLASInstance> handle{ generate_handle };
-    blas_instances.push_back(BLASInstance{ .handle = handle, .geometry = settings.geometry, .mesh_materials = settings.mesh_instances });
+    auto it = std::find_if(mesh_instances.begin(), mesh_instances.end(),
+                           [&settings](const MeshInstance& e) { return e.handle == settings.mesh_instance; });
+    blas_instances.push_back(BLASInstance{ .handle = handle, .mesh_instance = settings.mesh_instance, .mesh_batch = it->mesh });
     flags.set(RendererFlags::DIRTY_TLAS_BIT);
-    if(!settings.geometry->metadata->blas) {
-        settings.geometry->flags.set(GeometryFlags::DIRTY_GEOMETRY_BLAS_BIT);
-        flags.set(RendererFlags::DIRTY_GEOMETRY_BLAS_BIT);
+    if(!mesh_batches.at(it->mesh).metadata->blas) {
+        mesh_batches.at(it->mesh).flags.set(MeshBatchFlags::DIRTY_BLAS_BIT);
+        flags.set(RendererFlags::DIRTY_MESH_BLAS_BIT);
     }
     return handle;
 }
@@ -1003,43 +1007,19 @@ void RendererVulkan::upload_instances() {
 }
 
 void RendererVulkan::upload_transforms() {
-    return;
-
-    std::unordered_set<Handle<MeshInstance>> upload_instance_handles;
-    upload_instance_handles.reserve(upload_positions.size());
-    for(const auto& e : upload_positions) {
-        upload_instance_handles.insert(e.instance);
-    }
-
-    const auto ridx = get_resource_idx();
-    const auto nridx = get_resource_idx(1);
-    Buffer* src_transforms = mesh_instance_transform_buffers[ridx];
-    Buffer* dst_transforms = mesh_instance_transform_buffers[nridx];
-    size_t src_offset = 0;
+    Buffer* dst_transforms = mesh_instance_transform_buffers[1];
+    std::vector<glm::mat4x3> transforms(mesh_instances.size());
     for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
-        if(!upload_instance_handles.contains(mesh_instances.at(i).handle)) { continue; }
-
-        const auto src_offset_bytes = src_offset * sizeof(glm::mat4x3);
-        if(src_offset_bytes < src_transforms->size) {
-            const auto src_copy_size = std::min(src_transforms->size, (i - src_offset) * sizeof(glm::mat4x3));
-            if(src_copy_size > 0) {
-                // staging->send_to(dst_transforms->buffer, src_offset, src_transforms, src_offset);
+        const MeshInstance& mi = mesh_instances.at(i);
+        for(uint32_t j = 0; j < Engine::scene()->mesh_instances.size(); ++j) {
+            if(Engine::scene()->mesh_instances.at(j).renderer_handle == mi.handle) {
+                transforms.at(i) = Engine::scene()->transforms.at(j);
+                break;
             }
         }
-        // if(src_offset * safe_cast)
     }
-
-    assert(false && "TODO");
-#if 0
-    std::vector<glm::mat4x3> transforms;
-    transforms.reserve(mesh_instances.size());
-
-    std::transform(mesh_instances.begin(), mesh_instances.end(), std::back_inserter(transforms),
-                   [this](const RenderMeshInstance& inst) { return inst.model_instance->transform; });
-
-    mesh_instance_transform_buffer[1]->push_data(transforms, 0);
-    std::swap(mesh_instance_transform_buffer[0], mesh_instance_transform_buffer[1]);
-#endif
+    dst_transforms->push_data(transforms, 0ull);
+    std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
 }
 
 #if 0
@@ -1246,41 +1226,37 @@ void RendererVulkan::build_blas() {
     triangles.indexData.deviceAddress = index_buffer.bda;
     triangles.maxVertex = get_total_vertices() - 1u;
 
-    std::unordered_map<Handle<GeometryBatch>, std::vector<vks::AccelerationStructureGeometryKHR>> blas_geos;
+    std::vector<const MeshBatch*> dirty_batches;
+    std::vector<vks::AccelerationStructureGeometryKHR> blas_geos;
     std::vector<vks::AccelerationStructureBuildGeometryInfoKHR> blas_geo_build_infos;
     std::vector<uint32_t> scratch_sizes;
-    std::vector<std::vector<vks::AccelerationStructureBuildRangeInfoKHR>> ranges;
+    std::vector<vks::AccelerationStructureBuildRangeInfoKHR> ranges;
     Buffer scratch_buffer;
 
-    for(const auto& [h, meshes] : geometry_mesh_batches) {
-        if(!h->flags.test_clear(GeometryFlags::DIRTY_GEOMETRY_BLAS_BIT)) { continue; }
-        blas_geos[h].reserve(meshes.size());
-    }
+    blas_geos.reserve(mesh_batches.size());
 
-    for(const auto& [geom_handle, geom_meshes] : blas_geos) {
-        GeometryBatch& geom = geometries.at(geom_handle);
-        GeometryMetadata& meta = geometry_metadatas.at(geom.metadata);
+    for(auto& mb : mesh_batches) {
+        if(!mb.flags.test_clear(MeshBatchFlags::DIRTY_BLAS_BIT)) { continue; }
+        GeometryBatch& geom = geometries.at(mb.geometry);
+        MeshMetadata& meta = mesh_metadatas.at(mb.metadata);
+        dirty_batches.push_back(&mb);
 
-        std::vector<uint32_t> primitive_counts;
-        primitive_counts.reserve(geom_meshes.size());
-        for(const auto& mb : geometry_mesh_batches.at(geom_handle)) {
-            vks::AccelerationStructureGeometryKHR& blas_geo = blas_geos.at(geom_handle).emplace_back();
-            blas_geo.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-            blas_geo.geometry.triangles = triangles;
-            blas_geo.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-            primitive_counts.push_back(mb.index_count / 3u);
-        }
+        vks::AccelerationStructureGeometryKHR& blas_geo = blas_geos.emplace_back();
+        blas_geo.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        blas_geo.geometry.triangles = triangles;
+        blas_geo.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
         vks::AccelerationStructureBuildGeometryInfoKHR& build_geometry = blas_geo_build_infos.emplace_back();
         build_geometry.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
         build_geometry.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
         build_geometry.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-        build_geometry.geometryCount = geom_meshes.size();
-        build_geometry.pGeometries = geom_meshes.data();
+        build_geometry.geometryCount = 1;
+        build_geometry.pGeometries = &blas_geo;
 
+        const uint32_t primitive_count = mb.index_count / 3u;
         vks::AccelerationStructureBuildSizesInfoKHR build_size_info;
         vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_geometry,
-                                                primitive_counts.data(), &build_size_info);
+                                                &primitive_count, &build_size_info);
 
         meta.blas_buffer =
             Buffer{ "blas_buffer", build_size_info.accelerationStructureSize,
@@ -1299,21 +1275,18 @@ void RendererVulkan::build_blas() {
     scratch_buffer = Buffer{ "blas_scratch_buffer", total_scratch_size, rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    for(uint32_t i = 0, scratch_offset = 0; const auto& [handle, acc_geoms] : blas_geos) {
-        const GeometryBatch& geom = geometries.at(handle);
-        const GeometryMetadata& meta = geometry_metadatas.at(geom.metadata);
-
+    for(uint32_t i = 0, scratch_offset = 0; const auto& acc_geoms : blas_geos) {
+        const MeshBatch& mb = *dirty_batches.at(i);
+        const GeometryBatch& geom = geometries.at(mb.geometry);
+        const MeshMetadata& meta = mesh_metadatas.at(mb.metadata);
         blas_geo_build_infos.at(i).scratchData.deviceAddress = scratch_buffer.bda + scratch_offset;
         blas_geo_build_infos.at(i).dstAccelerationStructure = meta.blas;
 
-        std::vector<vks::AccelerationStructureBuildRangeInfoKHR>& range_infos = ranges.emplace_back();
-        for(const auto& mb : geometry_mesh_batches.at(handle)) {
-            vks::AccelerationStructureBuildRangeInfoKHR& range_info = range_infos.emplace_back();
-            range_info.primitiveCount = mb.index_count / 3u;
-            range_info.primitiveOffset = (uint32_t)((geom.index_offset + mb.index_offset) * sizeof(uint32_t));
-            range_info.firstVertex = geom.vertex_offset + mb.vertex_offset;
-            range_info.transformOffset = 0;
-        }
+        vks::AccelerationStructureBuildRangeInfoKHR& range_info = ranges.emplace_back();
+        range_info.primitiveCount = mb.index_count / 3u;
+        range_info.primitiveOffset = (uint32_t)((geom.index_offset + mb.index_offset) * sizeof(uint32_t));
+        range_info.firstVertex = geom.vertex_offset + mb.vertex_offset;
+        range_info.transformOffset = 0;
 
         scratch_offset += scratch_sizes.at(i);
         ++i;
@@ -1321,7 +1294,7 @@ void RendererVulkan::build_blas() {
 
     std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> poffsets(ranges.size());
     for(uint32_t i = 0; i < ranges.size(); ++i) {
-        poffsets.at(i) = ranges.at(i).data();
+        poffsets.at(i) = &ranges.at(i);
     }
 
     auto cmd = get_primitives().cmdpool.begin_onetime();
@@ -1338,38 +1311,42 @@ void RendererVulkan::build_tlas() {
     std::vector<vks::AccelerationStructureInstanceKHR> tlas_instances;
 
     std::sort(blas_instances.begin(), blas_instances.end(),
-              [](const BLASInstance& a, const BLASInstance& b) { return a.geometry >= b.geometry; });
+              [](const BLASInstance& a, const BLASInstance& b) { return a.mesh_batch < b.mesh_batch; });
 
     // TODO : Compress mesh ids per triangle for identical blases with identical materials
     for(uint32_t i = 0, toff = 0; i < blas_instances.size(); ++i) {
         const BLASInstance& bi = blas_instances.at(i);
-        const GeometryBatch& geom = geometries.at(bi.geometry);
-        tlas_mesh_offsets.push_back(toff);
-        toff += geometry_mesh_batches.at(bi.geometry).size();
-
-        for(const auto& mb : geometry_mesh_batches.at(bi.geometry)) {
-            blas_mesh_offsets.push_back((geom.index_offset + mb.index_offset) / 3u);
+        const MeshBatch& mb = mesh_batches.at(bi.mesh_batch);
+        const GeometryBatch& geom = geometries.at(mb.geometry);
+        const uint32_t mi_idx =
+            std::distance(mesh_instances.begin(),
+                          std::find_if(mesh_instances.begin(), mesh_instances.end(),
+                                       [&bi](const MeshInstance& e) { return e.handle == bi.mesh_instance; }));
+        triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + mb.index_count / 3u);
+        for(uint32_t j = 0; j < mb.index_count / 3u; ++j) {
+            triangle_geo_inst_ids.push_back(mi_idx);
         }
 
-        for(const auto& e : bi.mesh_materials) {
-            auto mi_it = std::find_if(mesh_instances.begin(), mesh_instances.end(),
-                                      [&e](const MeshInstance& mi) { return mi.handle == e; });
-            const uint32_t mi_idx = std::distance(mesh_instances.begin(), mi_it);
-            const MeshInstance& mi = *mi_it;
-            const MeshBatch& mb = mesh_batches.at(mi.mesh);
-            triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + mb.index_count / 3u);
-            for(uint32_t j = 0; j < mb.index_count / 3u; ++j) {
-                triangle_geo_inst_ids.push_back(mi_idx);
-            }
-        }
+        const uint32_t scene_mi_idx =
+            std::distance(Engine::scene()->mesh_instances.begin(),
+                          std::find_if(Engine::scene()->mesh_instances.begin(), Engine::scene()->mesh_instances.end(),
+                                       [&bi](const Scene::MeshInstance& e) {
+                                           return e.renderer_handle == bi.mesh_instance;
+                                       }));
 
         vks::AccelerationStructureInstanceKHR& tlas_instance = tlas_instances.emplace_back();
-        tlas_instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::identity<glm::mat3x4>());
+        tlas_instance.transform =
+            std::bit_cast<VkTransformMatrixKHR>(glm::transpose(Engine::scene()->transforms.at(scene_mi_idx)));
         tlas_instance.instanceCustomIndex = 0;
         tlas_instance.mask = 0xFF;
         tlas_instance.instanceShaderBindingTableRecordOffset = 0;
         tlas_instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        tlas_instance.accelerationStructureReference = geom.metadata->blas_buffer.bda;
+        tlas_instance.accelerationStructureReference = mb.metadata->blas_buffer.bda;
+
+        tlas_mesh_offsets.push_back(toff);
+        blas_mesh_offsets.push_back((geom.index_offset + mb.index_offset) / 3u);
+
+        ++toff;
     }
 
     tlas_mesh_offsets_buffer = Buffer{ "tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]),

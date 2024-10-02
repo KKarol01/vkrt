@@ -45,30 +45,39 @@ Handle<Scene::ModelAsset> Scene::load_from_file(const std::filesystem::path& pat
             .material = e.material.value_or(0) });
     }
 
-    ModelAsset asset{ .name = path.filename().replace_extension().string(),
-                      .path = path,
-                      .geometry = geometry_handle,
-                      .meshes = std::move(meshes),
-                      .materials = std::move(materials),
-                      .textures = std::move(textures) };
     Handle<ModelAsset> asset_handle{ generate_handle };
-    model_assets.emplace(asset_handle, std::move(asset));
-
+    model_assets.push_back(ModelAsset{ .name = path.filename().replace_extension().string(),
+                                       .path = path,
+                                       .geometry = geometry_handle,
+                                       .meshes = std::move(meshes),
+                                       .materials = std::move(materials),
+                                       .textures = std::move(textures) });
+    model_asset_handles[asset_handle] = &model_assets.back();
     return asset_handle;
 }
 
 Handle<Scene::ModelInstance> Scene::instance_model(Handle<ModelAsset> asset, InstanceSettings settings) {
-    ModelAsset& ma = model_assets.at(asset);
-    ModelInstance instance{ .asset = asset };
-    for(const auto& e : ma.meshes) {
-        instance.mesh_instance_handles.push_back(Engine::renderer()->instance_mesh(InstanceSettings{
-            .flags = settings.flags, .mesh = e.mesh_handle, .material = ma.materials.at(e.material).material_handle }));
+    ModelAsset& ma = *model_asset_handles.at(asset);
+    ModelInstance m_instance{ .handle = Handle<ModelInstance>{ generate_handle },
+                              .model = &ma,
+                              .instance_offset = model_instances.size(),
+                              .instance_count = ma.meshes.size() };
+    std::vector<Handle<::MeshInstance>> mi_handles;
+    mi_handles.reserve(m_instance.instance_count);
+    transforms.reserve(transforms.size() + m_instance.instance_count);
+
+    for(auto& e : ma.meshes) {
+        mesh_instances.push_back(MeshInstance{
+            .mesh = &e,
+            .renderer_handle = Engine::renderer()->instance_mesh(InstanceSettings{
+                .flags = settings.flags, .mesh = e.mesh_handle, .material = ma.materials.at(e.material).material_handle }) });
+        mi_handles.push_back(mesh_instances.back().renderer_handle);
+        transforms.push_back(settings.transform);
+        if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) {
+            Engine::renderer()->instance_blas(BLASInstanceSettings{ .mesh_instance = mesh_instances.back().renderer_handle });
+        }
     }
 
-    if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) {
-        Engine::renderer()->instance_blas(BLASInstanceSettings{ .geometry = ma.geometry,
-                                                                .mesh_instances = instance.mesh_instance_handles });
-    }
-
-    return model_instances.insert(std::move(instance));
+    model_instances.push_back(std::move(m_instance));
+    return model_instances.back().handle;
 }
