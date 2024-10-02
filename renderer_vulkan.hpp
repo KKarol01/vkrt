@@ -26,7 +26,7 @@ template <class... Ts> struct Visitor : Ts... {
 enum class RendererFlags : uint32_t {
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
-    DIRTY_GEOMETRY_BLAS_BIT = 0x4,
+    DIRTY_MESH_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
     REFIT_TLAS_BIT = 0x10,
     UPDATE_MESH_INSTANCE_TRANSFORMS_BIT = 0x20,
@@ -34,7 +34,8 @@ enum class RendererFlags : uint32_t {
     RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class GeometryFlags : uint32_t { DIRTY_GEOMETRY_BLAS_BIT = 0x1 };
+enum class GeometryFlags : uint32_t {};
+enum class MeshBatchFlags { DIRTY_BLAS_BIT = 0x1 };
 
 class Buffer {
   public:
@@ -103,7 +104,9 @@ struct RenderMaterial {
     Handle<TextureBatch> color_texture;
 };
 
-struct GeometryMetadata {
+struct GeometryMetadata {};
+
+struct MeshMetadata {
     VkAccelerationStructureKHR blas{};
     Buffer blas_buffer{};
 };
@@ -118,7 +121,9 @@ struct GeometryBatch {
 };
 
 struct MeshBatch {
+    Flags<MeshBatchFlags> flags;
     Handle<GeometryBatch> geometry;
+    Handle<MeshMetadata> metadata;
     uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
     uint32_t index_offset{ 0 };
@@ -145,8 +150,8 @@ struct GPUMeshInstance {
 
 struct BLASInstance {
     Handle<BLASInstance> handle;
-    Handle<GeometryBatch> geometry;
-    std::vector<Handle<MeshInstance>> mesh_materials;
+    Handle<MeshInstance> mesh_instance;
+    Handle<MeshBatch> mesh_batch;
     VkAccelerationStructureKHR blas;
 };
 
@@ -750,11 +755,11 @@ class RendererVulkan : public Renderer {
     HandleVector<GeometryBatch> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
     HandleVector<MeshBatch> mesh_batches;
+    HandleVector<MeshMetadata> mesh_metadatas;
     HandleVector<Image> textures;
     std::vector<MeshInstance> mesh_instances;
     HandleVector<RenderMaterial> materials;
     std::vector<BLASInstance> blas_instances;
-    std::unordered_map<Handle<GeometryBatch>, std::vector<MeshBatch>> geometry_mesh_batches;
 
     Flags<RendererFlags> flags;
     struct UploadImage {
@@ -771,7 +776,6 @@ class RendererVulkan : public Renderer {
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<UploadPosition> upload_positions;
 
     RenderingPrimitives primitives[2];
 };
@@ -781,4 +785,6 @@ inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Eng
 
 CREATE_HANDLE_DISPATCHER(GeometryBatch) { return &get_renderer().geometries.at(h); }
 CREATE_HANDLE_DISPATCHER(GeometryMetadata) { return &get_renderer().geometry_metadatas.at(h); }
+CREATE_HANDLE_DISPATCHER(MeshBatch) { return &get_renderer().mesh_batches.at(h); }
+CREATE_HANDLE_DISPATCHER(MeshMetadata) { return &get_renderer().mesh_metadatas.at(h); }
 // clang-format on

@@ -55,8 +55,7 @@ struct InstanceSettings {
 };
 
 struct BLASInstanceSettings {
-    Handle<GeometryBatch> geometry;
-    std::vector<Handle<MeshInstance>> mesh_instances;
+    Handle<MeshInstance> mesh_instance;
 };
 
 struct ScreenRect {

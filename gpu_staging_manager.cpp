@@ -116,6 +116,7 @@ bool GpuStagingManager::send_to_impl(Image* dst_image, VkImageSubresourceLayers 
 
     std::scoped_lock lock{ queue_mutex, cmdpool_mutex };
     VkCommandBuffer cmd = cmdpool->begin_onetime();
+    ++allocated_command_buffers;
     VkImageMemoryBarrier src_image_barrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_NONE,
@@ -133,7 +134,6 @@ bool GpuStagingManager::send_to_impl(Image* dst_image, VkImageSubresourceLayers 
     submit_queue->enqueue_wait_submit({ .buffers = { cmd },
                                         .waits = { { src_release_semaphore, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } },
                                         .signals = { { image_dst_acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
-    ++allocated_command_buffers;
 
     dst_image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     std::byte* byte_span = static_cast<std::byte*>(malloc(src.size_bytes()));
