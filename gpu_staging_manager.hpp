@@ -28,13 +28,17 @@ class GpuStagingManager {
         } dst;
         union {
             std::pair<std::byte*, size_t> byte_span;
-            const Buffer* buffer;
+            VkBuffer buffer;
         } src;
         union {
             size_t buffer_offset;
             VkOffset3D image_offset;
         } dst_offset;
+        union {
+            size_t buffer_offset;
+        } src_offset;
         size_t uploaded{};
+        size_t upload_size{};
         uint32_t src_queue_idx;
         uint32_t image_block_size{};
         VkExtent3D image_extent{};
@@ -48,7 +52,6 @@ class GpuStagingManager {
         constexpr bool is_src_allocation() const { return src_storage.index() == 0; }
         constexpr bool is_src_vkbuffer() const { return src_storage.index() == 1; }
         constexpr size_t get_size(const GpuStagingManager& mgr) const;
-
         Transaction* t;
         union {
             VkBufferCopy buffer;
@@ -68,14 +71,14 @@ class GpuStagingManager {
     GpuStagingManager& operator=(GpuStagingManager&& other) noexcept = delete;
 
     bool send_to(VkBuffer dst, size_t dst_offset, std::span<const std::byte> src, std::atomic_flag* flag = nullptr);
-    bool send_to(VkBuffer dst, size_t dst_offset, const Buffer* src, std::atomic_flag* flag = nullptr);
+    bool send_to(VkBuffer dst, size_t dst_offset, VkBuffer src, size_t src_offset, size_t size, std::atomic_flag* flag = nullptr);
     bool send_to(Image* dst, VkOffset3D dst_offset, std::span<const std::byte> src, VkSemaphore src_release_sem,
                  uint32_t src_queue_idx, std::atomic_flag* flag = nullptr);
     bool empty() const { return transactions.empty(); }
 
   private:
-    bool send_to_impl(VkBuffer dst, size_t dst_offset, std::variant<std::span<const std::byte>, const Buffer*>&& src,
-                      std::atomic_flag* flag);
+    bool send_to_impl(VkBuffer dst, size_t dst_offset, std::variant<std::span<const std::byte>, VkBuffer>&& src,
+                      size_t src_offset, size_t size, std::atomic_flag* flag);
     bool send_to_impl(Image* dst_image, VkImageSubresourceLayers dst_subresource, VkOffset3D dst_offset, VkExtent3D dst_extent,
                       std::span<const std::byte> src, uint32_t src_row_length, uint32_t src_image_height,
                       VkSemaphore src_release_semaphore, uint32_t src_queue_idx, std::atomic_flag* flag);

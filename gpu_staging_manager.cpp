@@ -53,11 +53,12 @@ GpuStagingManager::~GpuStagingManager() noexcept {
 }
 
 bool GpuStagingManager::send_to(VkBuffer dst, size_t dst_offset, std::span<const std::byte> src, std::atomic_flag* flag) {
-    return send_to_impl(dst, dst_offset, std::vector<std::byte>{ src.begin(), src.end() }, flag);
+    return send_to_impl(dst, dst_offset, std::vector<std::byte>{ src.begin(), src.end() }, 0ull, src.size_bytes(), flag);
 }
 
-bool GpuStagingManager::send_to(VkBuffer dst, size_t dst_offset, const Buffer* src, std::atomic_flag* flag) {
-    return send_to_impl(dst, dst_offset, src, flag);
+bool GpuStagingManager::send_to(VkBuffer dst, size_t dst_offset, VkBuffer src, size_t src_offset, size_t size,
+                                std::atomic_flag* flag) {
+    return send_to_impl(dst, dst_offset, src, src_offset, size, flag);
 }
 
 bool GpuStagingManager::send_to(Image* dst, VkOffset3D dst_offset, std::span<const std::byte> src,
@@ -67,19 +68,16 @@ bool GpuStagingManager::send_to(Image* dst, VkOffset3D dst_offset, std::span<con
                         0, 0, src_release_sem, src_queue_idx, flag);
 }
 
-bool GpuStagingManager::send_to_impl(VkBuffer dst, size_t dst_offset,
-                                     std::variant<std::span<const std::byte>, const Buffer*>&& src, std::atomic_flag* flag) {
+bool GpuStagingManager::send_to_impl(VkBuffer dst, size_t dst_offset, std::variant<std::span<const std::byte>, VkBuffer>&& src,
+                                     size_t src_offset, size_t size, std::atomic_flag* flag) {
     if(flag) { flag->clear(); }
-
-    if(src.index() == 1 && !std::get<1>(src)) { return false; }
-    if((src.index() == 0 && std::get<0>(src).size() == 0) || (src.index() == 1 && std::get<1>(src)->size == 0)) {
+    if(!dst || (src.index() == 1 && !std::get<1>(src))) { return false; }
+    if(size == 0) {
         if(flag) { flag->test_and_set(); }
         return true;
     }
-
     ResourceType dst_type = BUFFER;
     ResourceType src_type = src.index() == 0 ? BYTE_SPAN : BUFFER;
-
     std::scoped_lock lock{ queue_mutex };
     transactions.push_front(Transaction{ .on_complete_flag = flag,
                                          .dst = { .buffer = dst },
@@ -95,7 +93,9 @@ bool GpuStagingManager::send_to_impl(VkBuffer dst, size_t dst_offset,
                                              }
                                          }(),
                                          .dst_offset{ .buffer_offset = dst_offset },
-                                         .uploaded = 0,
+                                         .src_offset = { .buffer_offset = src_offset },
+                                         .uploaded = 0ull,
+                                         .upload_size = size,
                                          .dst_type = dst_type,
                                          .src_type = src_type });
     queue.push(&transactions.front());
@@ -144,6 +144,7 @@ bool GpuStagingManager::send_to_impl(Image* dst_image, VkImageSubresourceLayers 
                                          .src = { .byte_span = std::make_pair(byte_span, src.size_bytes()) },
                                          .dst_offset = { .image_offset = dst_offset },
                                          .uploaded = 0,
+                                         .upload_size = src.size_bytes(),
                                          .src_queue_idx = src_queue_idx,
                                          .image_block_size = 4,
                                          .image_extent = dst_extent,
@@ -165,7 +166,9 @@ void GpuStagingManager::schedule_upload() {
             if(t.src_type == BUFFER) {
                 uploads.push_back(Upload{
                     .t = &t,
-                    .copy_region = { .buffer = { .srcOffset = 0, .dstOffset = t.dst_offset.buffer_offset, .size = t.get_size() } },
+                    .copy_region = { .buffer = { .srcOffset = t.src_offset.buffer_offset,
+                                                 .dstOffset = t.dst_offset.buffer_offset,
+                                                 .size = t.get_size() } },
                     .src_storage = t.src.buffer,
                 });
                 queue.pop();
@@ -281,7 +284,8 @@ void GpuStagingManager::submit_uploads() {
                                                                         .levelCount = 1,
                                                                         .baseArrayLayer = 0,
                                                                         .layerCount = 1 } };
-                    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0, {}, 1, &barrier);
+                    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0,
+                                         {}, 1, &barrier);
                 }
                 if(e.t->wait_on_sem) {
                     e.t->wait_on_sem = false;
@@ -331,13 +335,7 @@ void GpuStagingManager::submit_uploads() {
 
 constexpr size_t GpuStagingManager::Transaction::get_remaining() const { return get_size() - uploaded; }
 
-constexpr size_t GpuStagingManager::Transaction::get_size() const {
-    if(src_type == BYTE_SPAN) {
-        return src.byte_span.second;
-    } else {
-        return src.buffer->size;
-    }
-}
+constexpr size_t GpuStagingManager::Transaction::get_size() const { return upload_size; }
 
 constexpr size_t GpuStagingManager::Upload::get_size(const GpuStagingManager& mgr) const {
     if(is_src_allocation()) {
