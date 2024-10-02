@@ -151,7 +151,7 @@ bool Buffer::resize(size_t new_size) {
         success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
         flag.test_and_set();
     } else {
-        success = get_renderer().staging->send_to(buffer, 0ull, this, &flag);
+        success = get_renderer().staging->send_to(new_buffer.buffer, 0ull, buffer, 0ull, size, &flag);
     }
 
     if(!success) { return false; }
@@ -1003,8 +1003,33 @@ void RendererVulkan::upload_instances() {
 }
 
 void RendererVulkan::upload_transforms() {
+    return;
 
-    // assert(false && "TODO");
+    std::unordered_set<Handle<MeshInstance>> upload_instance_handles;
+    upload_instance_handles.reserve(upload_positions.size());
+    for(const auto& e : upload_positions) {
+        upload_instance_handles.insert(e.instance);
+    }
+
+    const auto ridx = get_resource_idx();
+    const auto nridx = get_resource_idx(1);
+    Buffer* src_transforms = mesh_instance_transform_buffers[ridx];
+    Buffer* dst_transforms = mesh_instance_transform_buffers[nridx];
+    size_t src_offset = 0;
+    for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
+        if(!upload_instance_handles.contains(mesh_instances.at(i).handle)) { continue; }
+
+        const auto src_offset_bytes = src_offset * sizeof(glm::mat4x3);
+        if(src_offset_bytes < src_transforms->size) {
+            const auto src_copy_size = std::min(src_transforms->size, (i - src_offset) * sizeof(glm::mat4x3));
+            if(src_copy_size > 0) {
+                // staging->send_to(dst_transforms->buffer, src_offset, src_transforms, src_offset);
+            }
+        }
+        // if(src_offset * safe_cast)
+    }
+
+    assert(false && "TODO");
 #if 0
     std::vector<glm::mat4x3> transforms;
     transforms.reserve(mesh_instances.size());

@@ -675,7 +675,8 @@ class RendererVulkan : public Renderer {
     void refit_tlas();
     void prepare_ddgi();
 
-    RenderingPrimitives& get_primitives() { return primitives[Engine::frame_num() % 2]; }
+    uint32_t get_resource_idx(int offset = 0) const { return (Engine::frame_num() + offset) % 2; }
+    RenderingPrimitives& get_primitives() { return primitives[get_resource_idx()]; }
 
     uint32_t get_total_vertices() const {
         return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
@@ -723,8 +724,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    // Buffer* mesh_instance_transform_buffer[2]; // memory leak
-    Buffer mesh_instance_transforms_buffer;
+    Buffer* mesh_instance_transform_buffers[2]; // memory leak
     Buffer mesh_instance_mesh_id_buffer;
 
     std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
@@ -761,11 +761,17 @@ class RendererVulkan : public Renderer {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
     };
+    struct UploadPosition {
+        enum Mode { INSERT, UPDATE };
+        Handle<MeshInstance> instance;
+        glm::mat4x3 position;
+        Mode mode;
+    };
 
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<std::pair<Handle<MeshInstance>, glm::mat4x3>> upload_positions;
+    std::vector<UploadPosition> upload_positions;
 
     RenderingPrimitives primitives[2];
 };
