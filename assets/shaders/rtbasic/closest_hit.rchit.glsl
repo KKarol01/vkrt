@@ -126,6 +126,7 @@ void main()
   const uint32_t triangle_offset = blas_mesh_offsets.at[tlas_mesh_offsets.at[gl_InstanceID] + gl_GeometryIndexEXT];
   const uint32_t mesh_id = triangle_mesh_ids.at[triangle_offset + gl_PrimitiveID];
   const MeshData mesh_data = mesh_datas.at[mesh_id];
+  const mat4 mesh_transform = transforms.at[mesh_id];
 
   const uint32_t i0 = index_buffer.at[mesh_data.index_offset + gl_PrimitiveID * 3 + 0] + mesh_data.vertex_offset;
   const uint32_t i1 = index_buffer.at[mesh_data.index_offset + gl_PrimitiveID * 3 + 1] + mesh_data.vertex_offset;
@@ -138,9 +139,9 @@ void main()
   const float c = barycentric_weights.y;
   const float a = 1.0 - b - c;
 
-  const vec3 pos = v0.pos * a + v1.pos * b + v2.pos * c;
+  const vec3 pos = vec3(mesh_transform * vec4(v0.pos * a + v1.pos * b + v2.pos * c, 1.0));
   const vec2 uvs = v0.uv * a + v1.uv * b + v2.uv * c;
-  const vec3 nor = v0.nor * a + v1.nor * b + v2.nor * c;
+  const vec3 nor = normalize(vec3(transpose(inverse(mesh_transform)) * vec4(v0.nor * a + v1.nor * b + v2.nor * c, 0.0)));
 
   const vec3 color_value = texture(textures[nonuniformEXT(mesh_data.color_texture)], uvs).rgb;
   const float shadow = calc_shadow(pos, nor);

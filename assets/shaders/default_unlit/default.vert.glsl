@@ -20,10 +20,10 @@ layout(location = 0) out VertexOutput {
 #include "push_constants.inc.glsl"
 
 void main() {
-   vec3 tpos = transforms.at[gl_InstanceIndex] * vec4(pos, 1.0);
+   vec3 tpos = vec3(transforms.at[gl_InstanceIndex] * vec4(pos, 1.0));
    vert.mesh_id = gl_InstanceIndex;
    vert.pos = tpos;
-   vert.nor = nor;
+   vert.nor = normalize(vec3(transpose(inverse(transforms.at[gl_InstanceIndex])) * vec4(nor, 0.0)));
    vert.uv = uv;
    gl_Position = globals.proj * globals.view * vec4(tpos, 1.0);
 }

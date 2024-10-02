@@ -588,14 +588,6 @@ class CommandPool {
 };
 
 class RendererVulkan : public Renderer {
-    struct BoundingBox {
-        glm::vec3 center() const { return (max + min) * 0.5f; }
-        glm::vec3 size() const { return (max - min); }
-        glm::vec3 extent() const { return glm::abs(size() * 0.5f); }
-
-        glm::vec3 min{ FLT_MAX }, max{ -FLT_MAX };
-    };
-
     struct DDGI_Settings {
         BoundingBox probe_dims;
         float probe_distance{ 0.4f };
@@ -720,9 +712,6 @@ class RendererVulkan : public Renderer {
 
     SamplerStorage samplers;
 
-    // BoundingBox scene_bounding_box{ .min = glm::vec3{ -1.0f, -1.0f, -2.0f }, .max = glm::vec3{ 1.0f, 1.0f, 2.0f} };
-    BoundingBox scene_bounding_box{ .min = glm::vec3{ -0.944428f, -0.7f, -0.9f },
-                                    .max = glm::vec3{ 0.952864f, 0.7f, 1.01583f } }; // for cornell2.glb
     VkAccelerationStructureKHR tlas;
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;

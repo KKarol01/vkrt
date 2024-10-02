@@ -35,7 +35,7 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Per
 };
 
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerMeshInstanceTransformBuffer {
-    mat4x3 at[];
+    mat4 at[];
 };
 
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer PerTlasInstanceBlasGeometryOffsetBuffer {
