@@ -7,6 +7,13 @@
 #include "handle_vec.hpp"
 #include "renderer.hpp"
 
+struct BoundingBox {
+    glm::vec3 center() const { return (max + min) * 0.5f; }
+    glm::vec3 size() const { return (max - min); }
+    glm::vec3 extent() const { return glm::abs(size() * 0.5f); }
+    glm::vec3 min{ FLT_MAX }, max{ -FLT_MAX };
+};
+
 class Scene {
   public:
     struct ModelAsset {
@@ -14,6 +21,7 @@ class Scene {
             std::string name;
             Handle<MeshBatch> mesh_handle;
             uint32_t material;
+            BoundingBox aabb;
         };
         struct Material {
             std::string name;

@@ -7,5 +7,6 @@ layout(scalar, push_constant) uniform Constants {
     PerTlasInstanceBlasGeometryOffsetBuffer tlas_mesh_offsets;
     PerBlasGeometryTriangleOffsetBuffer blas_mesh_offsets;
     PerTriangleMeshIdBuffer triangle_mesh_ids;
+    PerMeshInstanceTransformBuffer transforms;
     uint32_t mode;
 };

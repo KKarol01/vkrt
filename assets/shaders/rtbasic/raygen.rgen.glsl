@@ -109,7 +109,7 @@ void main() {
     vec4 target = globals.projInverse * vec4(vec3(vec4(d.x, -d.y, 1, 1).xyz), 1.0);
     vec4 direction = globals.viewInverse * vec4(normalize(target.xyz), 0);
 
-	//direction = vec4(globals.randomRotation * direction.xyz, 0.0);
+	direction = vec4(globals.randomRotation * direction.xyz, 0.0);
 
     float tmin = 0.00001;
     float tmax = 15.0;

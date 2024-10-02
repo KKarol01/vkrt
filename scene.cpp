@@ -35,6 +35,12 @@ Handle<Scene::ModelAsset> Scene::load_from_file(const std::filesystem::path& pat
 
     std::vector<ModelAsset::Mesh> meshes;
     for(const auto& e : model.meshes) {
+        BoundingBox aabb;
+        for(uint32_t i = e.vertex_offset; i < e.vertex_offset + e.vertex_count; ++i) {
+            aabb.min = glm::min(aabb.min, vertices.at(i).pos);
+            aabb.max = glm::max(aabb.max, vertices.at(i).pos);
+        }
+
         meshes.push_back(ModelAsset::Mesh{
             .name = e.name,
             .mesh_handle = Engine::renderer()->batch_mesh(MeshDescriptor{ .geometry = geometry_handle,
@@ -42,7 +48,8 @@ Handle<Scene::ModelAsset> Scene::load_from_file(const std::filesystem::path& pat
                                                                           .index_offset = e.index_offset,
                                                                           .vertex_count = e.vertex_count,
                                                                           .index_count = e.index_count }),
-            .material = e.material.value_or(0) });
+            .material = e.material.value_or(0),
+            .aabb = aabb });
     }
 
     Handle<ModelAsset> asset_handle{ generate_handle };

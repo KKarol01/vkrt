@@ -625,6 +625,7 @@ void RendererVulkan::render() {
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_geo_inst_id_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
         // clang-format on
 
         ImageStatefulBarrier radiance_image_barrier{ ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
@@ -644,7 +645,7 @@ void RendererVulkan::render() {
         // radiance pass
         mode = 1;
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                           8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
         vkCmdTraceRaysKHR(cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
                           ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
@@ -657,14 +658,14 @@ void RendererVulkan::render() {
         // irradiance pass, only need radiance texture
         mode = 0;
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                           8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
         vkCmdDispatch(cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
                       std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
 
         // visibility pass, only need radiance texture
         mode = 1;
         vkCmdPushConstants(cmd, pipelines.at(RendererPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                           8 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
         vkCmdDispatch(cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
                       std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
 
@@ -1008,7 +1009,7 @@ void RendererVulkan::upload_instances() {
 
 void RendererVulkan::upload_transforms() {
     Buffer* dst_transforms = mesh_instance_transform_buffers[1];
-    std::vector<glm::mat4x3> transforms(mesh_instances.size());
+    std::vector<glm::mat4> transforms(mesh_instances.size());
     for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
         const MeshInstance& mi = mesh_instances.at(i);
         for(uint32_t j = 0; j < Engine::scene()->mesh_instances.size(); ++j) {
@@ -1479,7 +1480,16 @@ void RendererVulkan::refit_tlas() {
 }
 
 void RendererVulkan::prepare_ddgi() {
-    ddgi.probe_dims = scene_bounding_box;
+    BoundingBox scene_aabb;
+    for(uint32_t i = 0; i < Engine::scene()->mesh_instances.size(); ++i) {
+        BoundingBox m = Engine::scene()->mesh_instances.at(i).mesh->aabb;
+        m.min = m.min * Engine::scene()->transforms.at(i);
+        m.max = m.max * Engine::scene()->transforms.at(i);
+        scene_aabb.min = glm::min(scene_aabb.min, m.min);
+        scene_aabb.max = glm::max(scene_aabb.max, m.max);
+    }
+
+    ddgi.probe_dims = scene_aabb;
     ddgi.probe_distance = 0.3f;
     ddgi.probe_dims.min *= glm::vec3{ 0.9, 0.7, 0.9 };
     ddgi.probe_dims.max *= glm::vec3{ 0.9, 0.7, 0.9 };
@@ -1487,8 +1497,8 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
+    ddgi.probe_counts = { 16, 4, 16 };
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
-    // ddgi.probe_counts = { 16, 4, 16 };
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 
