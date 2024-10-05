@@ -493,6 +493,7 @@ void RendererVulkan::initialize_imgui() {
 }
 
 void RendererVulkan::render() {
+    if(Engine::window()->width == 0 || Engine::window()->height == 0) { return; }
     if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) { upload_instances(); }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_BLAS_BIT)) { build_blas(); }
@@ -573,10 +574,19 @@ void RendererVulkan::render() {
     const glm::mat3 rand_mat =
         glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-    global_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_view(), sizeof(glm::mat4), 0);
-    global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_view()), sizeof(glm::mat4),
-                            2 * sizeof(glm::mat4));
-    global_buffer.push_data(&rand_mat, sizeof(glm::mat3), 4 * sizeof(glm::mat4));
+    {
+        float globals[16 * 4 + 12];
+        const auto view = Engine::camera()->get_view();
+        const auto proj = Engine::camera()->get_projection();
+        const auto inv_view = glm::inverse(view);
+        const auto inv_proj = glm::inverse(proj);
+        memcpy(&globals[0], &view, sizeof(glm::mat4));
+        memcpy(&globals[16], &proj, sizeof(glm::mat4));
+        memcpy(&globals[32], &inv_view, sizeof(glm::mat4));
+        memcpy(&globals[48], &inv_proj, sizeof(glm::mat4));
+        memcpy(&globals[64], &rand_mat, sizeof(glm::mat3));
+        global_buffer.push_data(globals, sizeof(globals), 0ull);
+    }
 
     ImageStatefulBarrier output_image_barrier{ output_images[sw_img_idx] };
     ImageStatefulBarrier swapchain_image_barrier{ swapchain_images[sw_img_idx] };
@@ -1497,7 +1507,7 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
-    ddgi.probe_counts = { 16, 4, 16 };
+    // ddgi.probe_counts = { 16, 4, 16 };
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
