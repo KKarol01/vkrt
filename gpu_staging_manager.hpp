@@ -57,7 +57,7 @@ class GpuStagingManager {
             VkBufferCopy buffer;
             VkBufferImageCopy image;
         } copy_region;
-        std::variant<void*, const Buffer*> src_storage;
+        std::variant<void*, VkBuffer> src_storage;
     };
 
   public:

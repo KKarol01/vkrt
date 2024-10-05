@@ -261,7 +261,7 @@ void GpuStagingManager::submit_uploads() {
                 if(e.is_src_allocation()) {
                     vkCmdCopyBuffer(cmd, pool_memory->buffer, e.t->dst.buffer, 1, &e.copy_region.buffer);
                 } else if(e.is_src_vkbuffer()) {
-                    vkCmdCopyBuffer(cmd, std::get<1>(e.src_storage)->buffer, e.t->dst.buffer, 1, &e.copy_region.buffer);
+                    vkCmdCopyBuffer(cmd, std::get<1>(e.src_storage), e.t->dst.buffer, 1, &e.copy_region.buffer);
                 }
             } else if(e.t->dst_type == IMAGE) {
                 if(!e.is_src_allocation()) {
@@ -341,6 +341,6 @@ constexpr size_t GpuStagingManager::Upload::get_size(const GpuStagingManager& mg
     if(is_src_allocation()) {
         return mgr.pool->get_alloc_data_size(std::get<0>(src_storage));
     } else if(is_src_vkbuffer()) {
-        return std::get<1>(src_storage)->size;
+        return copy_region.buffer.size;
     }
 }
