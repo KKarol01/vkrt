@@ -53,8 +53,7 @@ Handle<Scene::ModelAsset> Scene::load_from_file(const std::filesystem::path& pat
     }
 
     Handle<ModelAsset> asset_handle{ generate_handle };
-    model_assets.push_back(ModelAsset{ .name = path.filename().replace_extension().string(),
-                                       .path = path,
+    model_assets.push_back(ModelAsset{ .path = path,
                                        .geometry = geometry_handle,
                                        .meshes = std::move(meshes),
                                        .materials = std::move(materials),
@@ -65,26 +64,27 @@ Handle<Scene::ModelAsset> Scene::load_from_file(const std::filesystem::path& pat
 
 Handle<Scene::ModelInstance> Scene::instance_model(Handle<ModelAsset> asset, InstanceSettings settings) {
     ModelAsset& ma = *model_asset_handles.at(asset);
-    ModelInstance m_instance{ .handle = Handle<ModelInstance>{ generate_handle },
-                              .model = &ma,
+    ModelInstance m_instance{ .name = settings.name.empty() ? ma.path.filename().replace_extension().string()
+                                                            : std::move(settings.name),
                               .instance_offset = model_instances.size(),
-                              .instance_count = ma.meshes.size() };
-    std::vector<Handle<::MeshInstance>> mi_handles;
-    mi_handles.reserve(m_instance.instance_count);
+                              .instance_count = ma.meshes.size(),
+                              .model = &ma,
+                              .transform = settings.transform };
     transforms.reserve(transforms.size() + m_instance.instance_count);
+
+    Handle<Scene::ModelInstance> mi_handle = model_instances.insert(std::move(m_instance));
 
     for(auto& e : ma.meshes) {
         mesh_instances.push_back(MeshInstance{
             .mesh = &e,
+            .model_instance = mi_handle,
             .renderer_handle = Engine::renderer()->instance_mesh(InstanceSettings{
                 .flags = settings.flags, .mesh = e.mesh_handle, .material = ma.materials.at(e.material).material_handle }) });
-        mi_handles.push_back(mesh_instances.back().renderer_handle);
-        transforms.push_back(settings.transform);
+        transforms.push_back(glm::mat4{ 1.0f });
         if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) {
             Engine::renderer()->instance_blas(BLASInstanceSettings{ .mesh_instance = mesh_instances.back().renderer_handle });
         }
     }
 
-    model_instances.push_back(std::move(m_instance));
-    return model_instances.back().handle;
+    return mi_handle;
 }

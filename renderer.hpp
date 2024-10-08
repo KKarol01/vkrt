@@ -48,6 +48,7 @@ struct MeshDescriptor {
 };
 
 struct InstanceSettings {
+    std::string name;
     Flags<InstanceFlags> flags;
     Handle<MeshBatch> mesh;
     Handle<MaterialBatch> material;
@@ -75,4 +76,5 @@ class Renderer {
     virtual Handle<MeshBatch> batch_mesh(const MeshDescriptor& batch) = 0;
     virtual Handle<MeshInstance> instance_mesh(const InstanceSettings& settings) = 0;
     virtual Handle<BLASInstance> instance_blas(const BLASInstanceSettings& settings) = 0;
+    virtual void update_transform(Handle<MeshInstance> handle) = 0;
 };

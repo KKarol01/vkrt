@@ -5,6 +5,7 @@
 #include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <vulkan/vulkan_core.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
@@ -59,7 +60,7 @@ Buffer::Buffer(const std::string& name, vks::BufferCreateInfo create_info, VmaAl
         create_info.pQueueFamilyIndices = queue_family_indices;
     }
     if(!(alloc_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
-        create_info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        create_info.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
     if(create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
         alloc_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
@@ -133,7 +134,10 @@ bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
         memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
     } else {
         std::atomic_flag flag{};
-        if(!get_renderer().staging->send_to(buffer, offset, data, &flag)) { return false; }
+        if(!get_renderer().staging->send_to(GpuStagingUpload{ .dst = buffer, .src = data, .dst_offset = offset, .size_bytes = data.size_bytes() },
+                                            {}, {}, &flag)) {
+            return false;
+        }
         flag.wait(false);
     }
 
@@ -151,7 +155,8 @@ bool Buffer::resize(size_t new_size) {
         success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
         flag.test_and_set();
     } else {
-        success = get_renderer().staging->send_to(new_buffer.buffer, 0ull, buffer, 0ull, size, &flag);
+        success = get_renderer().staging->send_to(GpuStagingUpload{ .dst = new_buffer.buffer, .src = buffer, .size_bytes = size },
+                                                  {}, {}, &flag);
     }
 
     if(!success) { return false; }
@@ -159,6 +164,10 @@ bool Buffer::resize(size_t new_size) {
 
     *this = std::move(new_buffer);
     return true;
+}
+
+void Buffer::deallocate() {
+    if(buffer && alloc) { vmaDestroyBuffer(get_renderer().vma, buffer, alloc); }
 }
 
 void RendererVulkan::init() {
@@ -172,7 +181,7 @@ void RendererVulkan::init() {
         flags |= RendererFlags::RESIZE_SWAPCHAIN_BIT;
         return true;
     });
-    screen_rect = { .offset = { 150, 0 }, .extent = { 768, 576 } };
+    // screen_rect = { .offset = { 150, 0 }, .extent = { 768, 576 } };
     flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT | RendererFlags::RESIZE_SWAPCHAIN_BIT);
 }
 
@@ -181,6 +190,8 @@ void RendererVulkan::set_screen_rect(ScreenRect rect) {
        screen_rect.extent.width != rect.width || screen_rect.extent.height != rect.height) {
         screen_rect = { .offset = { rect.offset_x, rect.offset_y }, .extent = { rect.width, rect.height } };
         flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT);
+        // const auto proj = glm::perspective(190.0f, (float)1024.0f / (float)768.0f, 0.0f, 10.0f);
+        // Engine::camera()->update_projection(proj);
     }
 }
 
@@ -354,11 +365,7 @@ void RendererVulkan::initialize_vulkan() {
 
     staging = std::make_unique<GpuStagingManager>(tq1, tqi1, 1024 * 1024 * 64); // 64MB
 
-    global_buffer =
-        Buffer{ "globals", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-    global_buffer.push_data(&(const glm::mat4&)Engine::camera()->get_projection(), sizeof(glm::mat4), 1 * sizeof(glm::mat4));
-    global_buffer.push_data(&(const glm::mat4&)glm::inverse(Engine::camera()->get_projection()), sizeof(glm::mat4),
-                            3 * sizeof(glm::mat4));
+    global_buffer = Buffer{ "globals", 512, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     vertex_buffer = Buffer{ "vertex_buffer", 0ull,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -499,10 +506,10 @@ void RendererVulkan::render() {
     if(flags.test_clear(RendererFlags::DIRTY_MESH_BLAS_BIT)) { build_blas(); }
     if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
-        prepare_ddgi();
+        if(Engine::frame_num() < 100) { prepare_ddgi(); }
     }
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
-    if(flags.test_clear(RendererFlags::UPDATE_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
+    if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         vkQueueWaitIdle(gq);
         create_swapchain();
@@ -577,7 +584,7 @@ void RendererVulkan::render() {
     {
         float globals[16 * 4 + 12];
         const auto view = Engine::camera()->get_view();
-        const auto proj = Engine::camera()->get_projection();
+        const auto proj = glm::perspective(glm::radians(90.0f), 2560.0f / 1440.0f, 0.01f, 10.0f); // Engine::camera()->get_projection();
         const auto inv_view = glm::inverse(view);
         const auto inv_proj = glm::inverse(proj);
         memcpy(&globals[0], &view, sizeof(glm::mat4));
@@ -591,10 +598,43 @@ void RendererVulkan::render() {
     ImageStatefulBarrier output_image_barrier{ output_images[sw_img_idx] };
     ImageStatefulBarrier swapchain_image_barrier{ swapchain_images[sw_img_idx] };
 
+    auto cmd = get_primitives().cmdpool.begin_onetime();
+
+    {
+        if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCE_TRANSFORMS_BIT)) {
+            if(mesh_instance_transform_buffers[1]->capacity < mesh_instance_transform_buffers[0]->size) {
+                mesh_instance_transform_buffers[1]->deallocate();
+                delete mesh_instance_transform_buffers[1];
+                mesh_instance_transform_buffers[1] =
+                    new Buffer("mesh instance transforms", mesh_instance_transform_buffers[0]->size,
+                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+            }
+            std::atomic_flag f1;
+            staging->send_to(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
+                                               .src = mesh_instance_transform_buffers[0]->buffer,
+                                               .size_bytes = mesh_instance_transform_buffers[0]->size },
+                             {}, {}, &f1);
+
+            std::vector<GpuStagingUpload> uploads;
+            uploads.reserve(update_positions.size());
+            for(const auto& e : update_positions) {
+                uploads.push_back(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
+                                                    .src = std::as_bytes(std::span{ &e.transform, sizeof(e.transform) }),
+                                                    .dst_offset = e.idx * sizeof(e.transform),
+                                                    .size_bytes = sizeof(e.transform) });
+            }
+            f1.wait(false);
+            staging->send_to(uploads, {}, {}, &f1);
+            update_positions.clear();
+            mesh_instance_transform_buffers[1]->size = mesh_instance_transform_buffers[0]->size;
+            std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
+            f1.wait(false);
+        }
+    }
+
     {
         ddgi_buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI_Buffer, frame_num));
-        auto cmd = get_primitives().cmdpool.begin_onetime();
-#if 1
+
         swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
         output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -687,7 +727,7 @@ void RendererVulkan::render() {
         irradiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         visibility_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         offset_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-#endif
+
         VkRenderingAttachmentInfo r_col_att_1{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = output_images[resource_idx].view,
@@ -869,7 +909,7 @@ Handle<MeshInstance> RendererVulkan::instance_mesh(const InstanceSettings& setti
     const auto handle = Handle<MeshInstance>{ generate_handle };
     mesh_instances.push_back(MeshInstance{ .handle = handle, .mesh = settings.mesh, .material = settings.material });
 
-    flags.set(RendererFlags::DIRTY_MESH_INSTANCES | RendererFlags::UPDATE_MESH_INSTANCE_TRANSFORMS_BIT);
+    flags.set(RendererFlags::DIRTY_MESH_INSTANCES | RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT);
     if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) { flags.set(RendererFlags::DIRTY_TLAS_BIT); }
 
     return handle;
@@ -888,82 +928,106 @@ Handle<BLASInstance> RendererVulkan::instance_blas(const BLASInstanceSettings& s
     return handle;
 }
 
+void RendererVulkan::update_transform(Handle<MeshInstance> handle) {
+    Scene* scene = Engine::scene();
+    uint32_t idx = mesh_instance_idxs.at(handle);
+    const auto scene_it = std::find_if(scene->mesh_instances.begin(), scene->mesh_instances.end(),
+                                       [handle](const Scene::MeshInstance& mi) { return mi.renderer_handle == handle; });
+    const auto scene_idx = std::distance(scene->mesh_instances.begin(), scene_it);
+    glm::mat4 transform = scene->transforms.at(scene_idx) * scene->model_instances.at(scene_it->model_instance).transform;
+    update_positions.push_back(UpdatePosition{ .idx = idx, .transform = transform });
+    flags.set(RendererFlags::DIRTY_MESH_INSTANCE_TRANSFORMS_BIT | RendererFlags::DIRTY_TLAS_BIT);
+}
+
 void RendererVulkan::upload_model_textures() {
     VkSemaphore acquire_sem = create_semaphore();
+    VkSemaphore release_sem = create_semaphore();
+    VkSemaphore transfer_done_sem = create_semaphore();
     VkCommandBuffer acquire_cmd = get_primitives().cmdpool.begin_onetime();
+    VkCommandBuffer release_cmd = get_primitives().cmdpool.begin_onetime();
     VkCommandBuffer cmd = get_primitives().cmdpool.begin_onetime();
-    std::vector<std::atomic_flag> flags(upload_images.size());
-    std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> release_sems;
-    release_sems.reserve(upload_images.size());
-    uint32_t flags_idx = 0;
+    std::vector<GpuStagingUpload> uploads;
+    uploads.reserve(upload_images.size());
 
     for(auto& tex : upload_images) {
         Image* img = textures.try_find(tex.image_handle);
-        VkImageMemoryBarrier img_barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_NONE,
-            .dstAccessMask = VK_ACCESS_NONE,
-            .oldLayout = img->current_layout,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .srcQueueFamilyIndex = gqi,
-            .dstQueueFamilyIndex = tqi1,
-            .image = img->image,
-            .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
-        };
-        VkCommandBuffer release_cmd = get_primitives().cmdpool.begin_onetime();
-        vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0, {}, 1, &img_barrier);
-        const auto& release_sem = release_sems.emplace_back(create_semaphore(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-        get_primitives().cmdpool.end(release_cmd);
-        scheduler_gq.enqueue_wait_submit({ .buffers = { release_cmd }, .signals = { release_sem } });
+        {
+            VkImageMemoryBarrier img_barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_NONE,
+                .dstAccessMask = VK_ACCESS_NONE,
+                .oldLayout = img->current_layout,
+                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .srcQueueFamilyIndex = gqi,
+                .dstQueueFamilyIndex = tqi1,
+                .image = img->image,
+                .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+            };
+            vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0,
+                                 {}, 1, &img_barrier);
+        }
+        {
+            VkImageMemoryBarrier img_barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_NONE,
+                .dstAccessMask = VK_ACCESS_NONE,
+                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .srcQueueFamilyIndex = tqi1,
+                .dstQueueFamilyIndex = gqi,
+                .image = img->image,
+                .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+            };
+            vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0,
+                                 {}, 1, &img_barrier);
+        }
+        {
+            VkImageMemoryBarrier img_barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_NONE,
+                .dstAccessMask = VK_ACCESS_NONE,
+                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                .srcQueueFamilyIndex = gqi,
+                .dstQueueFamilyIndex = gqi,
+                .image = img->image,
+                .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+            };
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
+        }
+        uploads.push_back(GpuStagingUpload{ .src_queue_idx = gqi,
+                                            .dst = img,
+                                            .src = std::span{ tex.rgba_data.begin(), tex.rgba_data.end() },
+                                            .dst_offset = VkOffset3D{},
+                                            .dst_img_rel_sem = release_sem,
+                                            .size_bytes = tex.rgba_data.size() });
     }
-
-    for(auto& tex : upload_images) {
-        Image* img = textures.try_find(tex.image_handle);
-        assert(img && "Image should've existed by now");
-        staging->send_to(img, {}, std::span{ tex.rgba_data.begin(), tex.rgba_data.end() },
-                         release_sems.at(flags_idx).first, gqi, &flags.at(flags_idx));
-        VkImageMemoryBarrier img_barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_NONE,
-            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .srcQueueFamilyIndex = tqi1,
-            .dstQueueFamilyIndex = gqi,
-            .image = img->image,
-            .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
-        };
-        vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
-
-        img_barrier.dstAccessMask = VK_ACCESS_NONE;
-        img_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        img_barrier.newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-        img_barrier.srcQueueFamilyIndex = img_barrier.dstQueueFamilyIndex;
-        img->current_layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
-        ++flags_idx;
-    }
+    get_primitives().cmdpool.end(release_cmd);
     get_primitives().cmdpool.end(acquire_cmd);
     get_primitives().cmdpool.end(cmd);
 
-    for(const auto& flag : flags) {
-        flag.wait(false);
-    }
+    scheduler_gq.enqueue_wait_submit({ .buffers = { release_cmd },
+                                       .signals = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
+
+    std::atomic_flag flag;
+    staging->send_to(std::span{ uploads.data(), uploads.size() }, release_sem, transfer_done_sem, &flag);
+    flag.wait(false);
 
     vks::FenceCreateInfo fence_info{};
     VkFence fence;
     VK_CHECK(vkCreateFence(dev, &fence_info, {}, &fence));
     scheduler_gq.enqueue_wait_submit({ .buffers = { acquire_cmd },
+                                       .waits = { { transfer_done_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } },
                                        .signals = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
     scheduler_gq.enqueue_wait_submit({ .buffers = { cmd }, .waits = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } }, fence);
     VK_CHECK(vkWaitForFences(dev, 1, &fence, true, 1'000'000));
     vkDestroyFence(dev, fence, {});
-    for(const auto& [sem, _] : release_sems) {
-        destroy_semaphore(sem);
-    }
+    destroy_semaphore(release_sem);
     destroy_semaphore(acquire_sem);
+    destroy_semaphore(transfer_done_sem);
     upload_images.clear();
 }
+
 void RendererVulkan::upload_staged_models() {
     upload_model_textures();
     vertex_buffer.push_data(upload_vertices);
@@ -978,6 +1042,12 @@ void RendererVulkan::upload_instances() {
         if(a.mesh >= b.mesh) { return false; }
         return true;
     });
+
+    mesh_instance_idxs.clear();
+    mesh_instance_idxs.reserve(mesh_instances.size());
+    for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
+        mesh_instance_idxs[mesh_instances.at(i).handle] = i;
+    }
 
     const auto total_triangles = get_total_triangles();
     std::vector<GPUMeshInstance> gpu_mesh_instances;
@@ -1023,8 +1093,10 @@ void RendererVulkan::upload_transforms() {
     for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
         const MeshInstance& mi = mesh_instances.at(i);
         for(uint32_t j = 0; j < Engine::scene()->mesh_instances.size(); ++j) {
-            if(Engine::scene()->mesh_instances.at(j).renderer_handle == mi.handle) {
-                transforms.at(i) = Engine::scene()->transforms.at(j);
+            const auto& smsi = Engine::scene()->mesh_instances.at(j);
+            if(smsi.renderer_handle == mi.handle) {
+                transforms.at(i) =
+                    Engine::scene()->transforms.at(j) * Engine::scene()->model_instances.at(smsi.model_instance).transform;
                 break;
             }
         }
@@ -1032,19 +1104,6 @@ void RendererVulkan::upload_transforms() {
     dst_transforms->push_data(transforms, 0ull);
     std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
 }
-
-#if 0
-void RendererVulkan::update_transform(Handle<RenderModelInstance> model, glm::mat4x3 transform) {
-    model->transform = transform;
-    // ENG_WARN("FIX THIS METHOD");
-    //  TODO: this can index out of bounds if the instance is new and upload_instances didn't run yet (the buffer was not resized)
-    //  memcpy(static_cast<glm::mat4x3*>(per_tlas_transform_buffer.mapped) + model_instances.index(handle), &transform,
-    //        sizeof(transform));
-    if(model->flags & InstanceFlags::RAY_TRACED_BIT) { flags |= RendererFlags::REFIT_TLAS_BIT; }
-    upload_positions.emplace_back(Handle<RenderModelInstance>{ *model }, transform);
-    flags |= RendererFlags::UPDATE_MESH_POSITIONS_BIT;
-}
-#endif
 
 void RendererVulkan::compile_shaders() {
     shaderc::Compiler c;
@@ -1346,8 +1405,9 @@ void RendererVulkan::build_tlas() {
                                        }));
 
         vks::AccelerationStructureInstanceKHR& tlas_instance = tlas_instances.emplace_back();
-        tlas_instance.transform =
-            std::bit_cast<VkTransformMatrixKHR>(glm::transpose(Engine::scene()->transforms.at(scene_mi_idx)));
+        tlas_instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(glm::mat4x3{
+            Engine::scene()->transforms.at(scene_mi_idx) *
+            Engine::scene()->model_instances.at(Engine::scene()->mesh_instances.at(scene_mi_idx).model_instance).transform }));
         tlas_instance.instanceCustomIndex = 0;
         tlas_instance.mask = 0xFF;
         tlas_instance.instanceShaderBindingTableRecordOffset = 0;
@@ -1492,9 +1552,11 @@ void RendererVulkan::refit_tlas() {
 void RendererVulkan::prepare_ddgi() {
     BoundingBox scene_aabb;
     for(uint32_t i = 0; i < Engine::scene()->mesh_instances.size(); ++i) {
+        const Scene::MeshInstance& msi = Engine::scene()->mesh_instances.at(i);
+        const Scene::ModelInstance& mi = Engine::scene()->model_instances.at(msi.model_instance);
         BoundingBox m = Engine::scene()->mesh_instances.at(i).mesh->aabb;
-        m.min = m.min * Engine::scene()->transforms.at(i);
-        m.max = m.max * Engine::scene()->transforms.at(i);
+        m.min = m.min * glm::mat4x3{ Engine::scene()->transforms.at(i) * mi.transform };
+        m.max = m.max * glm::mat4x3{ Engine::scene()->transforms.at(i) * mi.transform };
         scene_aabb.min = glm::min(scene_aabb.min, m.min);
         scene_aabb.max = glm::max(scene_aabb.max, m.max);
     }
@@ -1680,7 +1742,6 @@ Image& Image::operator=(Image&& other) noexcept {
 void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                               VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined,
                               VkImageLayout dst_layout) {
-
     vks::ImageMemoryBarrier2 imgb;
     imgb.image = image;
     imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;

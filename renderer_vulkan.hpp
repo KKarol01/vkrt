@@ -29,9 +29,10 @@ enum class RendererFlags : uint32_t {
     DIRTY_MESH_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
     REFIT_TLAS_BIT = 0x10,
-    UPDATE_MESH_INSTANCE_TRANSFORMS_BIT = 0x20,
-    RESIZE_SWAPCHAIN_BIT = 0x40,
-    RESIZE_SCREEN_RECT_BIT = 0x80,
+    UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT = 0x20,
+    DIRTY_MESH_INSTANCE_TRANSFORMS_BIT = 0x40,
+    RESIZE_SWAPCHAIN_BIT = 0x80,
+    RESIZE_SCREEN_RECT_BIT = 0x100,
 };
 
 enum class GeometryFlags : uint32_t {};
@@ -61,6 +62,7 @@ class Buffer {
     void clear() { size = 0; }
     bool resize(size_t new_size);
     constexpr size_t get_free_space() const { return capacity - size; }
+    void deallocate();
 
     std::string name;
     VkBufferUsageFlags usage{};
@@ -657,6 +659,7 @@ class RendererVulkan : public Renderer {
     Handle<MeshBatch> batch_mesh(const MeshDescriptor& batch) final;
     Handle<MeshInstance> instance_mesh(const InstanceSettings& settings) final;
     Handle<BLASInstance> instance_blas(const BLASInstanceSettings& settings) final;
+    void update_transform(Handle<MeshInstance> handle) final;
 
     void upload_model_textures();
     void upload_staged_models();
@@ -749,22 +752,22 @@ class RendererVulkan : public Renderer {
     std::vector<MeshInstance> mesh_instances;
     HandleVector<RenderMaterial> materials;
     std::vector<BLASInstance> blas_instances;
+    std::unordered_map<Handle<MeshInstance>, uint32_t> mesh_instance_idxs;
 
     Flags<RendererFlags> flags;
     struct UploadImage {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
     };
-    struct UploadPosition {
-        enum Mode { INSERT, UPDATE };
-        Handle<MeshInstance> instance;
-        glm::mat4x3 position;
-        Mode mode;
+    struct UpdatePosition {
+        uint32_t idx;
+        glm::mat4 transform;
     };
 
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
+    std::vector<UpdatePosition> update_positions;
 
     RenderingPrimitives primitives[2];
 };

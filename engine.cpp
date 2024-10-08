@@ -9,8 +9,6 @@ static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::ca
 static void on_window_resize(GLFWwindow* window, int w, int h) {
     Engine::window()->width = w;
     Engine::window()->height = h;
-    Engine::renderer()->set_screen_rect({ .width = (uint32_t)w, .height = (uint32_t)h });
-    Engine::camera()->update_projection(glm::perspectiveFov(glm::radians(90.0f), (float)w, (float)h, 0.0f, 10.0f));
     Engine::notify_on_window_resize();
 }
 
