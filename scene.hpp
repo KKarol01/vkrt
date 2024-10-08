@@ -29,7 +29,6 @@ class Scene {
             Handle<TextureBatch> color_texture_handle;
         };
 
-        std::string name;
         std::filesystem::path path;
         Handle<GeometryBatch> geometry;
         std::vector<Mesh> meshes;
@@ -37,16 +36,18 @@ class Scene {
         std::vector<Handle<TextureBatch>> textures;
     };
 
-    struct MeshInstance {
-        ModelAsset::Mesh* mesh{};
-        Handle<::MeshInstance> renderer_handle;
-    };
-
     struct ModelInstance {
-        Handle<ModelInstance> handle;
-        ModelAsset* model{};
+        std::string name;
         size_t instance_offset{};
         size_t instance_count{};
+        ModelAsset* model{};
+        glm::mat4 transform{ 1.0f };
+    };
+
+    struct MeshInstance {
+        ModelAsset::Mesh* mesh{};
+        Handle<ModelInstance> model_instance;
+        Handle<::MeshInstance> renderer_handle;
     };
 
     Handle<ModelAsset> load_from_file(const std::filesystem::path& path);
@@ -54,7 +55,7 @@ class Scene {
 
     std::deque<ModelAsset> model_assets;
     std::unordered_map<Handle<ModelAsset>, ModelAsset*> model_asset_handles;
-    std::vector<ModelInstance> model_instances;
+    HandleVector<ModelInstance> model_instances;
     std::vector<MeshInstance> mesh_instances;
-    std::vector<glm::mat4x3> transforms;
+    std::vector<glm::mat4> transforms;
 };
