@@ -16,4 +16,8 @@ class UI {
     enum SelectedType { MESH_INSTANCE };
     void* draw_scene_selected{};
     SelectedType draw_scene_selected_type;
+    float output_offset_x;
+    float output_offset_y;
+    float output_offset_w;
+    float output_offset_h;
 };

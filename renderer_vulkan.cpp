@@ -469,7 +469,7 @@ void RendererVulkan::initialize_imgui() {
 
     ImGui_ImplGlfw_InitForVulkan(Engine::window()->window, true);
 
-    VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_UNORM };
+    VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
 
     ImGui_ImplVulkan_InitInfo init_info = { 
         .Instance = instance,
@@ -787,12 +787,15 @@ void RendererVulkan::render() {
                                       sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cmd);
 
+        output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+
         ImDrawData* im_draw_data = ImGui::GetDrawData();
         if(im_draw_data) {
             VkRenderingAttachmentInfo i_col_atts[]{
                 VkRenderingAttachmentInfo{
                     .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                    .imageView = imgui_views[sw_img_idx],
+                    .imageView = swapchain_images[sw_img_idx].view,
                     .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -813,26 +816,21 @@ void RendererVulkan::render() {
             vkCmdEndRendering(cmd);
         }
 
-        output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                            VK_ACCESS_TRANSFER_READ_BIT);
-        swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        /*  swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);*/
 
-        VkImageBlit imgui_blit_to_swapchain{
-            .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
-            .srcOffsets = { {}, { (int)screen_rect.extent.width, (int)screen_rect.extent.height, 1 } },
-            .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
-            .dstOffsets = { { screen_rect.offset.x, screen_rect.offset.y },
-                            { std::min(screen_rect.offset.x + (int)screen_rect.extent.width,
-                                       (int)swapchain_images[sw_img_idx].width),
-                              std::min(screen_rect.offset.y + (int)screen_rect.extent.height,
-                                       (int)swapchain_images[sw_img_idx].height),
-                              1 } }
-        };
+        /*  VkImageBlit imgui_blit_to_swapchain{
+              .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
+          .layerCount = 1 }, .srcOffsets = { {}, { (int)screen_rect.extent.width, (int)screen_rect.extent.height, 1 } },
+              .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
+          .layerCount = 1 }, .dstOffsets = { { screen_rect.offset.x, screen_rect.offset.y }, {
+          std::min(screen_rect.offset.x + (int)screen_rect.extent.width, (int)swapchain_images[sw_img_idx].width), std::min(screen_rect.offset.y
+          + (int)screen_rect.extent.height, (int)swapchain_images[sw_img_idx].height), 1 } }
+          };
 
-        vkCmdBlitImage(cmd, output_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapchain_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                       &imgui_blit_to_swapchain, VK_FILTER_LINEAR);
+          vkCmdBlitImage(cmd, output_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         swapchain_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                         &imgui_blit_to_swapchain, VK_FILTER_LINEAR);*/
 
         swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
 
@@ -1255,7 +1253,8 @@ void RendererVulkan::build_pipelines() {
     layouts.push_back(default_layout);
     layouts.push_back(imgui_layout);
 
-    imgui_desc_pool = descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 16);
+    imgui_desc_pool =
+        descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 16, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 }
 
 void RendererVulkan::build_sbt() {

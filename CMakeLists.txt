@@ -74,6 +74,14 @@ target_compile_definitions(imgui
         IMGUI_IMPL_VULKAN_USE_VOLK
 )
 
+add_library(imguizmo STATIC
+    "third_party/ImGuizmo/ImGuizmo.cpp"
+)
+target_include_directories(imguizmo
+    PRIVATE
+        "third_party/imgui"
+)
+
 add_executable(vkrt 
     "main.cpp"
     "model_importer.cpp" 
@@ -95,6 +103,7 @@ target_link_libraries(vkrt
     volk
     stb
     imgui
+    imguizmo
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
