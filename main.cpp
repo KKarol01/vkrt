@@ -14,6 +14,7 @@
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "handle_vec.hpp"
+#include "ecs.hpp"
 
 int main() {
     Engine::init();

@@ -9,6 +9,7 @@
 #include "renderer.hpp"
 #include "camera.hpp"
 #include "scene.hpp"
+#include "ecs.hpp"
 
 #ifndef NDEBUG
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__);
@@ -72,6 +73,7 @@ class Engine {
     static Camera* camera() { return &*self->_camera; }
     static Scene* scene() { return &*self->_scene; }
     static UI* ui() { return &*self->_ui; }
+    static EntityComponents* ec();
     static double get_time_secs();
     static double last_frame_time() { return self->_last_frame_time; }
     static double delta_time() { return self->_delta_time; }

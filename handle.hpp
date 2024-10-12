@@ -20,7 +20,7 @@ template <typename T, typename Storage = uint32_t> struct HandleDispatcher {
 };
 
 template <typename T, typename Storage> struct HandleGenerator {
-    static Storage gen() { return counter.fetch_add(1); }
+    static Storage gen() { return counter++; }
     inline static std::atomic<Storage> counter{ 0 };
 };
 
