@@ -6,16 +6,18 @@
 #include "handle.hpp"
 #include "handle_vec.hpp"
 #include "renderer.hpp"
-
-struct BoundingBox {
-    glm::vec3 center() const { return (max + min) * 0.5f; }
-    glm::vec3 size() const { return (max - min); }
-    glm::vec3 extent() const { return glm::abs(size() * 0.5f); }
-    glm::vec3 min{ FLT_MAX }, max{ -FLT_MAX };
-};
+#include "common/types.hpp"
+#include "common/spatial.hpp"
 
 class Scene {
   public:
+    struct Node {
+        Handle<Entity> handle;
+        u32 parent;
+        Span<u32> children;
+
+    };
+
     struct ModelAsset {
         struct Mesh {
             std::string name;
@@ -52,6 +54,8 @@ class Scene {
 
     Handle<ModelAsset> load_from_file(const std::filesystem::path& path);
     Handle<ModelInstance> instance_model(Handle<ModelAsset> asset, InstanceSettings settings);
+
+    std::vector<Node> nodes;
 
     std::deque<ModelAsset> model_assets;
     std::unordered_map<Handle<ModelAsset>, ModelAsset*> model_asset_handles;

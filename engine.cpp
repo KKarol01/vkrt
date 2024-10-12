@@ -86,6 +86,11 @@ void Engine::notify_on_window_resize() {
     }
 }
 
+EntityComponents* Engine::ec() {
+    static EntityComponents* _ec = new EntityComponents{};
+    return _ec;
+}
+
 double Engine::get_time_secs() { return glfwGetTime(); }
 
 void FrameTime::update() {

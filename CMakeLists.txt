@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.6)
 project(vkrt)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(Vulkan REQUIRED)
 
 add_subdirectory(third_party/glm SYSTEM)
@@ -89,7 +91,11 @@ add_executable(vkrt
     "renderer_vulkan.cpp" 
     "camera.cpp"
     "gpu_staging_manager.cpp"
- "ui.cpp" "scene.cpp" "linear_allocator.cpp")
+    "ui.cpp" 
+    "scene.cpp"
+    "linear_allocator.cpp"
+    "ecs.cpp"
+)
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
