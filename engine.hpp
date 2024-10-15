@@ -69,10 +69,10 @@ class Engine {
 
     static Engine* get() { return &*self; }
     static Window* window() { return &*self->_window; }
-    static Renderer* renderer() { return &*self->_renderer; }
     static Camera* camera() { return &*self->_camera; }
-    static Scene* scene() { return &*self->_scene; }
+    static Renderer* renderer() { return &*self->_renderer; }
     static UI* ui() { return &*self->_ui; }
+    static Scene* scene() { return &*self->_scene; }
     static EntityComponents* ec();
     static double get_time_secs();
     static double last_frame_time() { return self->_last_frame_time; }

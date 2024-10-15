@@ -13,8 +13,8 @@ using f32 = float;
 using f64 = double;
 using cstring = const char*;
 
-template<typename T> struct Span {
-    T offset{}, count{};
+template <class... Ts> struct Visitor : Ts... {
+    using Ts::operator()...;
 };
 
 struct Entity;

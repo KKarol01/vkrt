@@ -3,16 +3,17 @@
 #include <glm/mat4x3.hpp>
 #include "model_importer.hpp"
 #include "handle.hpp"
-#include "flags.hpp"
+#include "common/flags.hpp"
+#include "common/types.hpp"
 
 enum class BatchFlags {};
 enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };
 
-struct GeometryBatch;
-struct TextureBatch;
-struct MeshBatch;
+struct RenderGeometry;
+struct RenderTexture;
+struct RenderMesh;
 struct MeshInstance;
-struct BLASBatch;
+struct RenderBLAS;
 struct BLASInstance;
 
 struct Vertex {
@@ -26,7 +27,7 @@ struct GeometryDescriptor {
     std::span<const uint32_t> indices;
 };
 
-struct TextureBatch {
+struct RenderTexture {
     std::string name;
     uint32_t width{};
     uint32_t height{};
@@ -36,11 +37,11 @@ struct TextureBatch {
 };
 
 struct MaterialBatch {
-    Handle<TextureBatch> color_texture;
+    Handle<RenderTexture> color_texture;
 };
 
 struct MeshDescriptor {
-    Handle<GeometryBatch> geometry;
+    Handle<RenderGeometry> geometry;
     uint32_t vertex_offset;
     uint32_t index_offset;
     uint32_t vertex_count;
@@ -50,13 +51,14 @@ struct MeshDescriptor {
 struct InstanceSettings {
     std::string name;
     Flags<InstanceFlags> flags;
-    Handle<MeshBatch> mesh;
+    Handle<Entity> entity;
+    Handle<RenderMesh> mesh;
     Handle<MaterialBatch> material;
     glm::mat4x3 transform{ 1.0f };
 };
 
 struct BLASInstanceSettings {
-    Handle<MeshInstance> mesh_instance;
+    Handle<MeshInstance> render_instance;
 };
 
 struct ScreenRect {
@@ -70,10 +72,10 @@ class Renderer {
     virtual void init() = 0;
     virtual void render() = 0;
     virtual void set_screen_rect(ScreenRect rect) = 0;
-    virtual Handle<TextureBatch> batch_texture(const TextureBatch& batch) = 0;
+    virtual Handle<RenderTexture> batch_texture(const RenderTexture& batch) = 0;
     virtual Handle<MaterialBatch> batch_material(const MaterialBatch& batch) = 0;
-    virtual Handle<GeometryBatch> batch_geometry(const GeometryDescriptor& batch) = 0;
-    virtual Handle<MeshBatch> batch_mesh(const MeshDescriptor& batch) = 0;
+    virtual Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) = 0;
+    virtual Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) = 0;
     virtual Handle<MeshInstance> instance_mesh(const InstanceSettings& settings) = 0;
     virtual Handle<BLASInstance> instance_blas(const BLASInstanceSettings& settings) = 0;
     virtual void update_transform(Handle<MeshInstance> handle) = 0;

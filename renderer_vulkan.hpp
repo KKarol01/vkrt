@@ -19,10 +19,6 @@
 #define VK_CHECK(func) func
 #endif
 
-template <class... Ts> struct Visitor : Ts... {
-    using Ts::operator()...;
-};
-
 enum class RendererFlags : uint32_t {
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
@@ -66,8 +62,9 @@ class Buffer {
 
     std::string name;
     VkBufferUsageFlags usage{};
-    size_t size{ 0 }, capacity{ 0 };
-    uint32_t alignment{ 1 };
+    u64 size{ 0 };
+    u64 capacity{ 0 };
+    u32 alignment{ 1 };
     VkBuffer buffer{};
     VmaAllocation alloc{};
     void* mapped{};
@@ -103,7 +100,7 @@ struct Image {
 };
 
 struct RenderMaterial {
-    Handle<TextureBatch> color_texture;
+    Handle<RenderTexture> color_texture;
 };
 
 struct GeometryMetadata {};
@@ -113,7 +110,7 @@ struct MeshMetadata {
     Buffer blas_buffer{};
 };
 
-struct GeometryBatch {
+struct RenderGeometry {
     Flags<GeometryFlags> flags;
     Handle<GeometryMetadata> metadata;
     uint32_t vertex_offset{ 0 };
@@ -122,9 +119,9 @@ struct GeometryBatch {
     uint32_t index_count{ 0 };
 };
 
-struct MeshBatch {
+struct RenderMesh {
     Flags<MeshBatchFlags> flags;
-    Handle<GeometryBatch> geometry;
+    Handle<RenderGeometry> geometry;
     Handle<MeshMetadata> metadata;
     uint32_t vertex_offset{ 0 };
     uint32_t vertex_count{ 0 };
@@ -134,7 +131,8 @@ struct MeshBatch {
 
 struct MeshInstance {
     Handle<MeshInstance> handle;
-    Handle<MeshBatch> mesh;
+    Handle<Entity> entity;
+    Handle<RenderMesh> mesh;
     Handle<MaterialBatch> material;
 };
 
@@ -152,8 +150,8 @@ struct GPUMeshInstance {
 
 struct BLASInstance {
     Handle<BLASInstance> handle;
-    Handle<MeshInstance> mesh_instance;
-    Handle<MeshBatch> mesh_batch;
+    Handle<MeshInstance> render_handle;
+    Handle<RenderMesh> mesh_batch;
     VkAccelerationStructureKHR blas;
 };
 
@@ -170,7 +168,7 @@ enum class ShaderModuleType {
     DEFAULT_UNLIT_FRAGMENT,
 };
 
-enum class RendererPipelineType {
+enum class RenderPipelineType {
     DEFAULT_UNLIT,
     DDGI_PROBE_RAYCAST,
     DDGI_PROBE_UPDATE,
@@ -182,13 +180,13 @@ struct ShaderModuleWrapper {
     VkShaderStageFlagBits stage{};
 };
 
-struct RendererPipelineWrapper {
+struct RenderPipelineWrapper {
     VkPipeline pipeline{};
     VkPipelineLayout layout{};
     uint32_t rt_shader_group_count{ 0 };
 };
 
-struct RendererPipelineLayout {
+struct RenderPipelineLayout {
     VkPipelineLayout layout{};
     std::vector<VkDescriptorSetLayout> descriptor_layouts;
     std::vector<VkDescriptorSetLayoutCreateFlags> layout_flags;
@@ -237,7 +235,7 @@ class RendererPipelineLayoutBuilder {
         return *this;
     }
 
-    RendererPipelineLayout build();
+    RenderPipelineLayout build();
 
   private:
     uint32_t push_constants_size{ 0 };
@@ -447,7 +445,7 @@ class DescriptorPoolAllocator {
     };
 
   public:
-    VkDescriptorPool allocate_pool(const RendererPipelineLayout& layout, uint32_t set, uint32_t max_sets,
+    VkDescriptorPool allocate_pool(const RenderPipelineLayout& layout, uint32_t set, uint32_t max_sets,
                                    VkDescriptorPoolCreateFlags flags = {});
     VkDescriptorSet allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, uint32_t variable_count = 0);
     void reset_pool(VkDescriptorPool pool);
@@ -485,7 +483,7 @@ class DescriptorSetWriter {
         }
         return *this;
     }
-    bool update(VkDescriptorSet set, const RendererPipelineLayout& layout, uint32_t set_idx);
+    bool update(VkDescriptorSet set, const RenderPipelineLayout& layout, uint32_t set_idx);
 
   private:
     std::vector<WriteData> writes;
@@ -653,10 +651,10 @@ class RendererVulkan : public Renderer {
 
     void render() final;
 
-    Handle<TextureBatch> batch_texture(const TextureBatch& batch) final;
+    Handle<RenderTexture> batch_texture(const RenderTexture& batch) final;
     Handle<MaterialBatch> batch_material(const MaterialBatch& batch) final;
-    Handle<GeometryBatch> batch_geometry(const GeometryDescriptor& batch) final;
-    Handle<MeshBatch> batch_mesh(const MeshDescriptor& batch) final;
+    Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) final;
+    Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) final;
     Handle<MeshInstance> instance_mesh(const InstanceSettings& settings) final;
     Handle<BLASInstance> instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(Handle<MeshInstance> handle) final;
@@ -689,49 +687,53 @@ class RendererVulkan : public Renderer {
     VkSemaphore create_semaphore();
     void destroy_semaphore(VkSemaphore sem);
 
-    VkRect2D screen_rect{};
-
     VkInstance instance;
     VkDevice dev;
     VkPhysicalDevice pdev;
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
-
-    vks::PhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
-    vks::PhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
+    Flags<RendererFlags> flags;
+    VkRect2D screen_rect{};
+    std::unique_ptr<GpuStagingManager> staging;
+    SamplerStorage samplers;
 
     QueueScheduler scheduler_gq;
     uint32_t gqi, pqi, tqi1;
     VkQueue gq, pq, tq1;
-
     VkSwapchainKHR swapchain{};
     Image swapchain_images[2]{};
     VkImageView imgui_views[2]{};
     VkFormat swapchain_format;
     Image output_images[2]{};
     Image depth_buffers[2]{};
+    vks::PhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
+    vks::PhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
-    std::unique_ptr<GpuStagingManager> staging;
+    std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
+    std::unordered_map<RenderPipelineType, RenderPipelineWrapper> pipelines;
+    std::vector<RenderPipelineLayout> layouts;
+    DescriptorPoolAllocator descriptor_pool_allocator;
+    VkDescriptorPool imgui_desc_pool;
 
-    SamplerStorage samplers;
+    HandleVector<RenderGeometry> geometries;
+    HandleVector<GeometryMetadata> geometry_metadatas;
+    HandleVector<RenderMesh> meshes;
+    HandleVector<MeshMetadata> mesh_metadatas;
+    HandleVector<Image> images;
+    std::vector<MeshInstance> mesh_instances;
+    std::unordered_map<Handle<MeshInstance>, uint32_t> render_instance_idxs;
+    HandleVector<RenderMaterial> materials;
+    std::vector<BLASInstance> blas_instances;
 
-    VkAccelerationStructureKHR tlas;
+    VkAccelerationStructureKHR tlas{};
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer* mesh_instance_transform_buffers[2]; // memory leak
+    Buffer* mesh_instance_transform_buffers[2]{};
     Buffer mesh_instance_mesh_id_buffer;
-
-    std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
-    std::unordered_map<RendererPipelineType, RendererPipelineWrapper> pipelines;
-    std::vector<RendererPipelineLayout> layouts;
-    DescriptorPoolAllocator descriptor_pool_allocator;
-    VkDescriptorPool imgui_desc_pool;
-
     Buffer sbt;
-
     Buffer tlas_mesh_offsets_buffer;
     Buffer tlas_transform_buffer;
     Buffer blas_mesh_offsets_buffer;
@@ -744,17 +746,6 @@ class RendererVulkan : public Renderer {
     Buffer ddgi_buffer;
     Buffer ddgi_debug_probe_offsets_buffer;
 
-    HandleVector<GeometryBatch> geometries;
-    HandleVector<GeometryMetadata> geometry_metadatas;
-    HandleVector<MeshBatch> mesh_batches;
-    HandleVector<MeshMetadata> mesh_metadatas;
-    HandleVector<Image> textures;
-    std::vector<MeshInstance> mesh_instances;
-    HandleVector<RenderMaterial> materials;
-    std::vector<BLASInstance> blas_instances;
-    std::unordered_map<Handle<MeshInstance>, uint32_t> mesh_instance_idxs;
-
-    Flags<RendererFlags> flags;
     struct UploadImage {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
@@ -775,8 +766,8 @@ class RendererVulkan : public Renderer {
 // clang-format off
 inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
 
-CREATE_HANDLE_DISPATCHER(GeometryBatch) { return &get_renderer().geometries.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderGeometry) { return &get_renderer().geometries.at(h); }
 CREATE_HANDLE_DISPATCHER(GeometryMetadata) { return &get_renderer().geometry_metadatas.at(h); }
-CREATE_HANDLE_DISPATCHER(MeshBatch) { return &get_renderer().mesh_batches.at(h); }
+CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(h); }
 CREATE_HANDLE_DISPATCHER(MeshMetadata) { return &get_renderer().mesh_metadatas.at(h); }
 // clang-format on

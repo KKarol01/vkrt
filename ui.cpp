@@ -19,6 +19,7 @@ void UI::update() {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
     ImGui::SetNextWindowPos({});
@@ -67,6 +68,38 @@ void UI::update() {
                 if(oi && oi->view) {
                     ImGui::Image((ImTextureID)output_images[fn].second, ImGui::GetContentRegionAvail());
                 }
+
+                if(draw_scene_selected) {
+                    ScreenRect srect{ .offset_x = (int)output_offset_x,
+                                      .offset_y = (int)output_offset_y,
+                                      .width = (uint32_t)output_offset_w,
+                                      .height = (uint32_t)output_offset_h };
+                    ImGuizmo::SetRect(srect.offset_x, srect.offset_y, srect.width, srect.height);
+                    ImGuizmo::SetDrawlist();
+                    auto& io = ImGui::GetIO();
+                    const auto viewmat = Engine::camera()->get_view();
+                    const auto projmat = Engine::camera()->get_projection();
+                    ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
+                    ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
+
+                    // TODO: MAKE BOUNDING BOX UNRELATED TO RENDER MESH
+                    if(draw_scene_selected->has_component<cmps::RenderMesh>()) {
+                        cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(draw_scene_selected->handle);
+                        glm::mat4 tt = glm::translate(Engine::scene()->final_transforms.at(
+                                                          Engine::scene()->entity_node_idxs.at(draw_scene_selected->handle)),
+                                                      rm.mesh->aabb.center());
+                        glm::mat4 delta;
+                        ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
+                        glm::vec3 t, r, s;
+                        ImGuizmo::DecomposeMatrixToComponents(&delta[0][0], &t.x, &r.x, &s.x);
+                        if(ImGuizmo::IsUsing()) {
+                            glm::mat4& cmps_transform = Engine::ec()->get<cmps::Transform>(draw_scene_selected->handle).transform;
+                            cmps_transform = glm::translate(cmps_transform, t);
+                            Engine::scene()->update_transform(draw_scene_selected->handle);
+                            Engine::renderer()->update_transform(rm.render_handle);
+                        }
+                    }
+                }
             }
             ImGui::EndChild();
 
@@ -98,10 +131,9 @@ void UI::update() {
 
         ImGui::TableSetColumnIndex(2);
         { draw_right_column(); }
+        ImGui::EndTable();
     }
-    ImGui::EndTable();
     ImGui::End();
-
     ImGui::Render();
 }
 
@@ -112,16 +144,18 @@ void UI::draw_left_column() {
         ImGui::EndTabBar();
     }
     ImGui::BeginChild("scene hierarchy");
-    for(auto& mi : scene->model_instances) {
-        ImGui::PushID(&mi);
-        bool& expanded = draw_scene_expanded[&mi];
-        bool selected = &mi == draw_scene_selected;
+    for(auto rn : scene->root_nodes) {
+        Node& node = scene->nodes.at(rn);
+        ImGui::PushID(&node);
+        bool& expanded = draw_scene_expanded[&node];
+        bool selected = &node == draw_scene_selected;
         auto cposx = ImGui::GetCursorPosX();
-        if(ImGui::CollapsingHeader(mi.name.c_str())) {
+        if(ImGui::CollapsingHeader(node.name.c_str())) {
             ImGui::Indent();
-            for(auto& msi : std::span{ scene->mesh_instances.data() + mi.instance_offset, mi.instance_count }) {
-                ImGui::PushID(&msi);
-                if(ImGui::Selectable(msi.mesh->name.c_str(), &msi == draw_scene_selected)) { set_selected(&msi); }
+            // TODO: traverse the children
+            for(auto& n : std::span{ scene->nodes.data() + rn + node.children_offset, node.children_count }) {
+                ImGui::PushID(&n);
+                if(ImGui::Selectable(n.name.c_str(), &n == draw_scene_selected)) { set_selected(&n); }
                 ImGui::PopID();
             }
             ImGui::Unindent();
@@ -162,43 +196,19 @@ void UI::draw_bottom_shelf() {
 }
 
 void UI::draw_right_column() {
-    if(!draw_scene_selected) { return; }
-    Scene::MeshInstance* data = static_cast<Scene::MeshInstance*>(draw_scene_selected);
-    Scene::ModelInstance& msi = Engine::scene()->model_instances.at(data->model_instance);
-    if(ImGui::CollapsingHeader("Parent transform")) {
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        if(ImGui::SliderFloat3("##transform", &msi.transform[3].x, -1.0f, 1.0f)) {
-            for(auto& e : std::span{ Engine::scene()->mesh_instances.data() + msi.instance_offset, msi.instance_count }) {
-                Engine::renderer()->update_transform(e.renderer_handle);
-            }
+    Node* node = draw_scene_selected;
+    if(!node) { return; }
+    glm::mat4& t = Engine::ec()->get<cmps::Transform>(node->handle).transform;
+    ImGui::PushID(node);
+    ImGui::Text(node->name.c_str());
+    if(ImGui::SliderFloat3("##transform", &t[3].x, -1.0f, 1.0f)) {
+        if(node->has_component<cmps::RenderMesh>()) {
+            cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(node->handle);
+            Engine::scene()->update_transform(node->handle);
+            Engine::renderer()->update_transform(rm.render_handle);
         }
     }
-    ImGui::Separator();
-
-    const auto data_idx = std::distance(Engine::scene()->mesh_instances.data(), data);
-    auto& t = Engine::scene()->transforms.at(data_idx);
-    ImGui::PushID(data);
-    ImGui::Text(data->mesh->name.c_str());
-    if(ImGui::SliderFloat3("##transform", &t[3].x, -1.0f, 1.0f)) {
-        Engine::renderer()->update_transform(data->renderer_handle);
-    }
     ImGui::PopID();
-
-    ScreenRect srect{ .offset_x = (int)output_offset_x,
-                      .offset_y = (int)output_offset_y,
-                      .width = (uint32_t)output_offset_w,
-                      .height = (uint32_t)output_offset_h };
-    ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
-    ImGuizmo::SetRect(srect.offset_x, srect.offset_y, srect.width, srect.height);
-    const auto viewmat = Engine::camera()->get_view();
-    const auto projmat = Engine::camera()->get_projection();
-    static ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
-    static ImGuizmo::MODE mode = ImGuizmo::MODE::WORLD;
-    static glm::mat4 tt = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ -0.194f, -0.280f - 0.054f, 0.362f - 0.054f});
-    ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0]);
 }
 
-void UI::set_selected(Scene::MeshInstance* ptr) {
-    draw_scene_selected = ptr;
-    draw_scene_selected_type = MESH_INSTANCE;
-}
+void UI::set_selected(Node* ptr) { draw_scene_selected = ptr; }
