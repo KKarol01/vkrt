@@ -1,7 +1,8 @@
 #pragma once
 
-#include "scene.hpp"
 #include <unordered_map>
+
+struct Node;
 
 class UI {
   public:
@@ -9,13 +10,11 @@ class UI {
     void draw_left_column();
     void draw_bottom_shelf();
     void draw_right_column();
-    void set_selected(Scene::MeshInstance* ptr);
+    void set_selected(Node* ptr);
 
     std::unordered_map<const void*, bool> draw_scene_expanded;
 
-    enum SelectedType { MESH_INSTANCE };
-    void* draw_scene_selected{};
-    SelectedType draw_scene_selected_type;
+    Node* draw_scene_selected{};
     float output_offset_x;
     float output_offset_y;
     float output_offset_w;

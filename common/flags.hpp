@@ -30,7 +30,7 @@ template <typename T> struct Flags {
         return *this;
     }
 
-    constexpr operator bool() const noexcept { return flags != 0; }
+    constexpr operator bool() const noexcept { return flags != U{}; }
     constexpr explicit operator U() const noexcept { return flags; }
 
     constexpr void set(Flags<T> f) noexcept { *this |= f; }

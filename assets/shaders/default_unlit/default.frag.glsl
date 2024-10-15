@@ -102,7 +102,7 @@ float calc_shadow() {
 		float len_vl = length(vl);
 		vl /= len_vl;
 
-		rayQueryInitializeEXT(rqs[i], topLevelAS, gl_RayFlagsOpaqueEXT, 0xFE, vert.pos, 0.1, vl, len_vl);
+		rayQueryInitializeEXT(rqs[i], topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, vert.pos, 0.01, vl, len_vl);
 		rayQueryProceedEXT(rqs[i]);
 	}
 
@@ -123,7 +123,7 @@ void main() {
 	vec3 irr = sample_irradiance(vert.pos, vert.nor, cam_pos);
 	vec3 col1 = texture(textures[nonuniformEXT(md.color_texture)], vert.uv).rgb;
 
-	float shadow = 1.0; //calc_shadow();
+	float shadow = calc_shadow(); // 1.0;
 
 	vec3 final_color = (calc_direct_lighting(vert.pos, vert.nor) * shadow + irr) * col1;
 

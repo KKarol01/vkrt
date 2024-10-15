@@ -94,7 +94,7 @@ add_executable(vkrt
     "ui.cpp" 
     "scene.cpp"
     "linear_allocator.cpp"
-    "ecs.cpp"
+    
 )
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
@@ -125,7 +125,7 @@ target_compile_definitions(vkrt
 target_precompile_headers(vkrt
     PRIVATE
     <volk/volk.h>
-    "vulkan_structs.hpp"
+    vulkan_structs.hpp
     <GLFW/glfw3.h>
     <glm/glm.hpp>
     <VulkanMemoryAllocator/include/vk_mem_alloc.h>

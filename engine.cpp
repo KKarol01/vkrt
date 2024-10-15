@@ -50,6 +50,9 @@ void Engine::init() {
     self->_ui = std::make_unique<UI>();
     self->_scene = std::make_unique<Scene>();
     self->_last_frame_time = get_time_secs();
+
+    ec()->register_component_array<cmps::Transform>();
+    ec()->register_component_array<cmps::RenderMesh>();
 }
 
 void Engine::destroy() { self.reset(); }
