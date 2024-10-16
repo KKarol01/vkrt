@@ -40,136 +40,6 @@ static float halton(int i, int b) {
     return r;
 }
 
-Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
-    : Buffer(name, size, 1u, usage, map) {}
-
-Buffer::Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsageFlags usage, bool map)
-    : Buffer(name, VkBufferCreateInfo{ .size = size, .usage = usage },
-             VmaAllocationCreateInfo{
-                 .flags = (map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u),
-                 .usage = VMA_MEMORY_USAGE_AUTO,
-             },
-             alignment) {}
-
-Buffer::Buffer(const std::string& name, vks::BufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment)
-    : name{ name }, capacity{ create_info.size }, alignment{ alignment } {
-    u32 queue_family_indices[]{ get_renderer().gqi, get_renderer().tqi1 };
-    if(queue_family_indices[0] != queue_family_indices[1]) {
-        create_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
-        create_info.queueFamilyIndexCount = 2;
-        create_info.pQueueFamilyIndices = queue_family_indices;
-    }
-    if(!(alloc_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
-        create_info.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    }
-    if(create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        alloc_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-    }
-
-    create_info.size = std::max(create_info.size, 1ull);
-
-    VmaAllocationInfo vainfo{};
-    if(alignment > 1) {
-        VK_CHECK(vmaCreateBufferWithAlignment(get_renderer().vma, &create_info, &alloc_info, alignment, &buffer, &alloc, &vainfo));
-    } else {
-        VK_CHECK(vmaCreateBuffer(get_renderer().vma, &create_info, &alloc_info, &buffer, &alloc, &vainfo));
-    }
-
-    if(vainfo.pMappedData) { mapped = vainfo.pMappedData; };
-
-    if(create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        vks::BufferDeviceAddressInfo bdainfo;
-        bdainfo.buffer = buffer;
-        bda = vkGetBufferDeviceAddress(get_renderer().dev, &bdainfo);
-    }
-
-    usage = create_info.usage;
-
-    set_debug_name(buffer, name);
-    ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(capacity) / 1024.0f);
-}
-
-Buffer::Buffer(Buffer&& other) noexcept { *this = std::move(other); }
-
-Buffer& Buffer::operator=(Buffer&& other) noexcept {
-    vmaDestroyBuffer(get_renderer().vma, buffer, alloc);
-
-    name = std::move(other.name);
-    usage = other.usage;
-    size = other.size;
-    capacity = other.capacity;
-    alignment = other.alignment;
-    buffer = std::exchange(other.buffer, nullptr);
-    alloc = std::exchange(other.alloc, nullptr);
-    mapped = std::exchange(other.mapped, nullptr);
-    bda = std::exchange(other.bda, VkDeviceAddress{});
-
-    return *this;
-}
-
-bool Buffer::push_data(std::span<const std::byte> data, u32 offset) {
-    if(!buffer) {
-        assert(false && "Buffer was not created correctly");
-        return false;
-    }
-
-    if(offset > capacity) {
-        ENG_WARN("Provided buffer offset is bigger than the capacity");
-        return false;
-    }
-
-    const auto size_after = offset + data.size_bytes();
-
-    if(size_after > capacity) {
-        size_t new_size = std::ceill(static_cast<long double>(capacity) * 1.5l);
-        if(new_size < size_after) { new_size = size_after; }
-        ENG_LOG("Resizing buffer {}", name);
-        if(!resize(new_size)) {
-            ENG_LOG("Failed to resize the buffer {}", name);
-            return false;
-        }
-    }
-
-    if(mapped) {
-        memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
-    } else {
-        std::atomic_flag flag{};
-        if(!get_renderer().staging->send_to(GpuStagingUpload{ .dst = buffer, .src = data, .dst_offset = offset, .size_bytes = data.size_bytes() },
-                                            {}, {}, &flag)) {
-            return false;
-        }
-        flag.wait(false);
-    }
-
-    size = std::max(size, offset + data.size_bytes());
-
-    return true;
-}
-
-bool Buffer::resize(size_t new_size) {
-    Buffer new_buffer{ name, new_size, alignment, usage, !!mapped };
-
-    bool success = false;
-    std::atomic_flag flag{};
-    if(mapped) {
-        success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
-        flag.test_and_set();
-    } else {
-        success = get_renderer().staging->send_to(GpuStagingUpload{ .dst = new_buffer.buffer, .src = buffer, .size_bytes = size },
-                                                  {}, {}, &flag);
-    }
-
-    if(!success) { return false; }
-    flag.wait(false);
-
-    *this = std::move(new_buffer);
-    return true;
-}
-
-void Buffer::deallocate() {
-    if(buffer && alloc) { vmaDestroyBuffer(get_renderer().vma, buffer, alloc); }
-}
-
 void RendererVulkan::init() {
     initialize_vulkan();
     create_rt_output_image();
@@ -177,6 +47,8 @@ void RendererVulkan::init() {
     build_pipelines();
     build_sbt();
     initialize_imgui();
+    build_tlas();
+    prepare_ddgi();
     Engine::add_on_window_resize_callback([this] {
         flags |= RendererFlags::RESIZE_SWAPCHAIN_BIT;
         return true;
@@ -499,13 +371,14 @@ void RendererVulkan::initialize_imgui() {
     vkQueueWaitIdle(gq);
 }
 
-void RendererVulkan::render() {
+void RendererVulkan::update() {
     if(Engine::window()->width == 0 || Engine::window()->height == 0) { return; }
     if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) { upload_instances(); }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_BLAS_BIT)) { build_blas(); }
     if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
+        // TODO: prepare ddgi on scene update
         if(Engine::frame_num() < 100) { prepare_ddgi(); }
     }
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
@@ -632,8 +505,8 @@ void RendererVulkan::render() {
         }
     }
 
-    {
-        ddgi_buffer.push_data(&frame_num, sizeof(u32), offsetof(DDGI_Buffer, frame_num));
+    if(tlas && ddgi.buffer.buffer) {
+        ddgi.buffer.push_data(&frame_num, sizeof(u32), offsetof(DDGI::GPULayout, frame_num));
 
         swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
@@ -671,7 +544,7 @@ void RendererVulkan::render() {
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_geo_inst_id_buffer.bda);
@@ -727,7 +600,10 @@ void RendererVulkan::render() {
         irradiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         visibility_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         offset_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+    }
 
+    // default pass
+    {
         VkRenderingAttachmentInfo r_col_att_1{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = output_images[resource_idx].view,
@@ -781,7 +657,7 @@ void RendererVulkan::render() {
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi_buffer.bda);
+                           3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
         vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
                                       indirect_draw_buffer.buffer, 0ull, mesh_instances.size(),
                                       sizeof(VkDrawIndexedIndirectCommand));
@@ -815,49 +691,32 @@ void RendererVulkan::render() {
             ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
             vkCmdEndRendering(cmd);
         }
-
-        /*  swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);*/
-
-        /*  VkImageBlit imgui_blit_to_swapchain{
-              .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
-          .layerCount = 1 }, .srcOffsets = { {}, { (int)screen_rect.extent.width, (int)screen_rect.extent.height, 1 } },
-              .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
-          .layerCount = 1 }, .dstOffsets = { { screen_rect.offset.x, screen_rect.offset.y }, {
-          std::min(screen_rect.offset.x + (int)screen_rect.extent.width, (int)swapchain_images[sw_img_idx].width), std::min(screen_rect.offset.y
-          + (int)screen_rect.extent.height, (int)swapchain_images[sw_img_idx].height), 1 } }
-          };
-
-          vkCmdBlitImage(cmd, output_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                         swapchain_images[sw_img_idx].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                         &imgui_blit_to_swapchain, VK_FILTER_LINEAR);*/
-
-        swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
-
-        get_primitives().cmdpool.end(cmd);
-
-        scheduler_gq.enqueue_wait_submit(
-            RecordingSubmitInfo{
-                .buffers = { cmd },
-                .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
-                .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
-            },
-            primitives.fen_rendering_finished);
-
-        vks::PresentInfoKHR pinfo;
-        pinfo.swapchainCount = 1;
-        pinfo.pSwapchains = &swapchain;
-        pinfo.pImageIndices = &sw_img_idx;
-        pinfo.waitSemaphoreCount = 1;
-        pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
-        vkQueuePresentKHR(gq, &pinfo);
     }
+
+    swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
+    get_primitives().cmdpool.end(cmd);
+
+    scheduler_gq.enqueue_wait_submit(
+        RecordingSubmitInfo{
+            .buffers = { cmd },
+            .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
+            .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
+        },
+        primitives.fen_rendering_finished);
+
+    vks::PresentInfoKHR pinfo;
+    pinfo.swapchainCount = 1;
+    pinfo.pSwapchains = &swapchain;
+    pinfo.pImageIndices = &sw_img_idx;
+    pinfo.waitSemaphoreCount = 1;
+    pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
+    vkQueuePresentKHR(gq, &pinfo);
 }
 
 Handle<RenderTexture> RendererVulkan::batch_texture(const RenderTexture& batch) {
     Handle<Image> handle =
         images.insert(Image{ batch.name, batch.width, batch.height, batch.depth, batch.mips, 1u, VK_FORMAT_R8G8B8A8_SRGB,
-                               VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+                             VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
     upload_images.push_back(UploadImage{ handle, { batch.data.begin(), batch.data.end() } });
     return Handle<RenderTexture>{ *handle };
 }
@@ -871,10 +730,10 @@ Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& 
     const auto total_indices = get_total_indices();
 
     RenderGeometry geometry{ .metadata = geometry_metadatas.emplace(),
-                            .vertex_offset = total_vertices,
-                            .vertex_count = (u32)batch.vertices.size(),
-                            .index_offset = total_indices,
-                            .index_count = (u32)batch.indices.size() };
+                             .vertex_offset = total_vertices,
+                             .vertex_count = (u32)batch.vertices.size(),
+                             .index_offset = total_indices,
+                             .index_count = (u32)batch.indices.size() };
 
     upload_vertices.insert(upload_vertices.end(), batch.vertices.begin(), batch.vertices.end());
     upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
@@ -894,11 +753,11 @@ Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& 
 
 Handle<RenderMesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
     RenderMesh mesh_batch{ .geometry = batch.geometry,
-                          .metadata = mesh_metadatas.emplace(),
-                          .vertex_offset = batch.vertex_offset,
-                          .vertex_count = batch.vertex_count,
-                          .index_offset = batch.index_offset,
-                          .index_count = batch.index_count };
+                           .metadata = mesh_metadatas.emplace(),
+                           .vertex_offset = batch.vertex_offset,
+                           .vertex_count = batch.vertex_count,
+                           .index_offset = batch.index_offset,
+                           .index_count = batch.index_count };
     return meshes.insert(mesh_batch);
 }
 
@@ -934,8 +793,8 @@ Handle<BLASInstance> RendererVulkan::instance_blas(const BLASInstanceSettings& s
 
 void RendererVulkan::update_transform(Handle<MeshInstance> handle) {
     Scene* scene = Engine::scene();
-    u32 idx = render_instance_idxs.at(handle);
-    glm::mat4 transform = scene->get_final_transform(mesh_instances.at(render_instance_idxs.at(handle)).entity);
+    u32 idx = mesh_instance_idxs.at(handle);
+    glm::mat4 transform = scene->get_final_transform(mesh_instances.at(mesh_instance_idxs.at(handle)).entity);
     update_positions.push_back(UpdatePosition{ .idx = idx, .transform = transform });
     flags.set(RendererFlags::DIRTY_MESH_INSTANCE_TRANSFORMS_BIT | RendererFlags::DIRTY_TLAS_BIT);
 }
@@ -1044,10 +903,10 @@ void RendererVulkan::upload_instances() {
         return true;
     });
 
-    render_instance_idxs.clear();
-    render_instance_idxs.reserve(mesh_instances.size());
+    mesh_instance_idxs.clear();
+    mesh_instance_idxs.reserve(mesh_instances.size());
     for(u32 i = 0; i < mesh_instances.size(); ++i) {
-        render_instance_idxs[mesh_instances.at(i).handle] = i;
+        mesh_instance_idxs[mesh_instances.at(i).handle] = i;
     }
 
     const auto total_triangles = get_total_triangles();
@@ -1062,8 +921,7 @@ void RendererVulkan::upload_instances() {
         const RenderMaterial& mat = materials.at(Handle<RenderMaterial>{ *mi.material });
         gpu_mesh_instances.push_back(GPUMeshInstance{ .vertex_offset = geom.vertex_offset + mb.vertex_offset,
                                                       .index_offset = geom.index_offset + mb.index_offset,
-                                                      .color_texture_idx =
-                                                          (u32)images.find_idx(Handle<Image>{ *mat.color_texture }) });
+                                                      .color_texture_idx = (u32)images.find_idx(Handle<Image>{ *mat.color_texture }) });
         if(i == 0 || mesh_instances.at(i - 1).mesh != mi.mesh) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = mb.index_count,
                                                                       .instanceCount = 1,
@@ -1180,18 +1038,18 @@ void RendererVulkan::compile_shaders() {
 
 void RendererVulkan::build_pipelines() {
     RenderPipelineLayout default_layout = RendererPipelineLayoutBuilder{}
-                                                .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-                                                .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                                .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                                .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                                .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                                .add_variable_descriptor_count(0)
-                                                .set_push_constants(128)
-                                                .build();
+                                              .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                                              .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                              .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                              .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                              .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                              .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                              .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                              .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                              .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                              .add_variable_descriptor_count(0)
+                                              .set_push_constants(128)
+                                              .build();
     RenderPipelineLayout imgui_layout =
         RendererPipelineLayoutBuilder{}
             .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {}, VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -1560,7 +1418,6 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
-    // ddgi.probe_counts = { 16, 4, 16 };
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
@@ -1606,21 +1463,19 @@ void RendererVulkan::prepare_ddgi() {
     ddgi.visibility_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                               VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-
     ddgi.probe_offsets_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-
     get_primitives().cmdpool.end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
 
-    ddgi_buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI_Buffer),
+    ddgi.buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI::GPULayout),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-    ddgi_debug_probe_offsets_buffer =
-        Buffer{ "ddgi debug probe offsets buffer", sizeof(glm::vec3) * num_probes,
+    ddgi.debug_probe_offsets_buffer =
+        Buffer{ "ddgi debug probe offsets buffer", sizeof(DDGI::GPUProbeOffsetsLayout) * num_probes,
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
-    DDGI_Buffer ddgi_gpu_settings{
+    DDGI::GPULayout ddgi_gpu_settings{
         .radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height },
         .irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture.width, ddgi.irradiance_texture.height },
         .visibility_tex_size = glm::ivec2{ ddgi.visibility_texture.width, ddgi.visibility_texture.height },
@@ -1645,7 +1500,7 @@ void RendererVulkan::prepare_ddgi() {
 
     if(ddgi.probe_counts.y == 1) { ddgi_gpu_settings.probe_start.y += ddgi.probe_walk.y * 0.5f; }
 
-    ddgi_buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI_Buffer));
+    ddgi.buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI::GPULayout));
 
     vkQueueWaitIdle(gq);
 }
@@ -1658,584 +1513,3 @@ VkSemaphore RendererVulkan::create_semaphore() {
 }
 
 void RendererVulkan::destroy_semaphore(VkSemaphore sem) { vkDestroySemaphore(dev, sem, {}); }
-
-Image::Image(const std::string& name, u32 width, u32 height, u32 depth, u32 mips, u32 layers, VkFormat format,
-             VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
-    vks::ImageCreateInfo iinfo;
-
-    int dims = -1;
-    if(width > 1) { ++dims; }
-    if(height > 1) { ++dims; }
-    if(depth > 1) { ++dims; }
-    if(dims == -1) { dims = 1; }
-    VkImageType types[]{ VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
-
-    iinfo.imageType = types[dims];
-    iinfo.flags = {};
-    iinfo.format = format;
-    iinfo.extent = { width, height, depth };
-    iinfo.mipLevels = mips;
-    iinfo.arrayLayers = layers;
-    iinfo.samples = samples;
-    iinfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    iinfo.usage = usage;
-    iinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    iinfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo vmainfo{};
-    vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    VK_CHECK(vmaCreateImage(get_renderer().vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
-
-    _deduce_aspect(usage);
-    _create_default_view(dims, usage);
-
-    set_debug_name(image, name);
-    set_debug_name(view, std::format("{}_default_view", name));
-}
-
-Image::Image(const std::string& name, VkImage image, u32 width, u32 height, u32 depth, u32 mips, u32 layers,
-             VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
-    int dims = -1;
-    if(width > 1) { ++dims; }
-    if(height > 1) { ++dims; }
-    if(depth > 1) { ++dims; }
-    if(dims == -1) { dims = 1; }
-
-    _deduce_aspect(usage);
-    _create_default_view(dims, usage);
-
-    set_debug_name(image, name);
-    set_debug_name(view, std::format("{}_default_view", name));
-}
-
-Image::Image(Image&& other) noexcept { *this = std::move(other); }
-
-Image& Image::operator=(Image&& other) noexcept {
-    if(image) { vkDestroyImage(RendererVulkan::get()->dev, image, nullptr); }
-    if(view) { vkDestroyImageView(RendererVulkan::get()->dev, view, nullptr); }
-    image = std::exchange(other.image, nullptr);
-    alloc = std::exchange(other.alloc, nullptr);
-    view = std::exchange(other.view, nullptr);
-    format = other.format;
-    aspect = other.aspect;
-    current_layout = other.current_layout;
-    width = other.width;
-    height = other.height;
-    depth = other.depth;
-    mips = other.mips;
-    layers = other.layers;
-    return *this;
-}
-
-void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                              VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined,
-                              VkImageLayout dst_layout) {
-    vks::ImageMemoryBarrier2 imgb;
-    imgb.image = image;
-    imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
-    imgb.newLayout = dst_layout;
-    imgb.srcStageMask = src_stage;
-    imgb.srcAccessMask = src_access;
-    imgb.dstStageMask = dst_stage;
-    imgb.dstAccessMask = dst_access;
-    imgb.subresourceRange = {
-        .aspectMask = aspect,
-        .baseMipLevel = 0,
-        .levelCount = mips,
-        .baseArrayLayer = 0,
-        .layerCount = layers,
-    };
-
-    vks::DependencyInfo dep;
-    dep.pImageMemoryBarriers = &imgb;
-    dep.imageMemoryBarrierCount = 1;
-    vkCmdPipelineBarrier2(cmd, &dep);
-
-    current_layout = dst_layout;
-}
-
-void Image::_deduce_aspect(VkImageUsageFlags usage) {
-    aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-
-    if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-        if(format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D16_UNORM) {
-            aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-        } else if(format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
-            aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-        } else if(format == VK_FORMAT_S8_UINT) {
-            aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
-        } else {
-            ENG_WARN("Unrecognized format for view aspect");
-        }
-    }
-}
-
-void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
-    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
-
-    vks::ImageViewCreateInfo ivinfo;
-    ivinfo.image = image;
-    ivinfo.viewType = view_types[dims];
-    ivinfo.components = {};
-    ivinfo.format = format;
-    ivinfo.subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = mips, .baseArrayLayer = 0, .layerCount = 1 };
-
-    VK_CHECK(vkCreateImageView(get_renderer().dev, &ivinfo, nullptr, &view));
-}
-
-RenderPipelineLayout RendererPipelineLayoutBuilder::build() {
-    std::vector<VkDescriptorSetLayout> vk_layouts;
-    std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
-    std::vector<std::vector<VkDescriptorBindingFlags>> binding_flags;
-    for(u32 i = 0; i < descriptor_layouts.size(); ++i) {
-        DescriptorLayout& desc_layout = descriptor_layouts.at(i);
-
-        if(desc_layout.bindings.empty()) { break; }
-
-        if(desc_layout.last_binding_of_variable_count) {
-            desc_layout.binding_flags.back() |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-        }
-
-        vks::DescriptorSetLayoutBindingFlagsCreateInfo flags_info;
-        flags_info.bindingCount = desc_layout.binding_flags.size();
-        flags_info.pBindingFlags = desc_layout.binding_flags.data();
-
-        vks::DescriptorSetLayoutCreateInfo info;
-        info.bindingCount = desc_layout.bindings.size();
-        info.pBindings = desc_layout.bindings.data();
-        info.flags = descriptor_layout_flags.at(i);
-        info.pNext = &flags_info;
-
-        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &info, nullptr, &desc_layout.layout));
-
-        vk_layouts.push_back(desc_layout.layout);
-        bindings.push_back(desc_layout.bindings);
-        binding_flags.push_back(desc_layout.binding_flags);
-    }
-
-    vks::PipelineLayoutCreateInfo layout_info;
-    VkPushConstantRange push_constant_range;
-    if(push_constants_size > 0) {
-        push_constant_range.stageFlags = push_constants_stage;
-        push_constant_range.offset = 0;
-        push_constant_range.size = push_constants_size;
-        layout_info.pushConstantRangeCount = 1;
-        layout_info.pPushConstantRanges = &push_constant_range;
-    }
-    layout_info.setLayoutCount = vk_layouts.size();
-    layout_info.pSetLayouts = vk_layouts.data();
-
-    VkPipelineLayout layout;
-    VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &layout_info, nullptr, &layout));
-
-    return RenderPipelineLayout{ layout,
-                                   { vk_layouts.begin(), vk_layouts.end() },
-                                   { descriptor_layout_flags.begin(), descriptor_layout_flags.end() },
-                                   bindings,
-                                   binding_flags };
-}
-
-VkPipeline RendererComputePipelineBuilder::build() {
-    vks::ComputePipelineCreateInfo info;
-    info.stage = vks::PipelineShaderStageCreateInfo{};
-    info.stage.module = module;
-    info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    info.stage.pName = "main";
-    info.layout = layout;
-
-    VkPipeline pipeline;
-    VK_CHECK(vkCreateComputePipelines(static_cast<RendererVulkan*>(Engine::renderer())->dev, nullptr, 1, &info, nullptr, &pipeline));
-    return pipeline;
-}
-
-VkPipeline RendererRaytracingPipelineBuilder::build() {
-    vks::RayTracingPipelineCreateInfoKHR info;
-    info.stageCount = stages.size();
-    info.pStages = stages.data();
-    info.groupCount = shader_groups.size();
-    info.pGroups = shader_groups.data();
-    info.maxPipelineRayRecursionDepth = recursion_depth;
-    info.layout = layout;
-
-    VkPipeline pipeline;
-    VK_CHECK(vkCreateRayTracingPipelinesKHR(static_cast<RendererVulkan*>(Engine::renderer())->dev, nullptr, nullptr, 1,
-                                            &info, nullptr, &pipeline));
-    return pipeline;
-}
-
-VkPipeline RendererGraphicsPipelineBuilder::build() {
-    std::vector<vks::PipelineShaderStageCreateInfo> pStages;
-    pStages.reserve(shader_stages.size());
-    for(const auto& [stage, module] : shader_stages) {
-        auto& info = pStages.emplace_back();
-        info.stage = stage;
-        info.module = module;
-        info.pName = "main";
-    }
-
-    vks::PipelineVertexInputStateCreateInfo pVertexInputState;
-    pVertexInputState.vertexAttributeDescriptionCount = vertex_inputs.size();
-    pVertexInputState.pVertexAttributeDescriptions = vertex_inputs.data();
-    pVertexInputState.vertexBindingDescriptionCount = vertex_bindings.size();
-    pVertexInputState.pVertexBindingDescriptions = vertex_bindings.data();
-
-    vks::PipelineInputAssemblyStateCreateInfo pInputAssemblyState;
-    pInputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    pInputAssemblyState.primitiveRestartEnable = false;
-
-    vks::PipelineTessellationStateCreateInfo pTessellationState;
-
-    vks::PipelineViewportStateCreateInfo pViewportState;
-    pViewportState.scissorCount = scissor_count;
-    pViewportState.viewportCount = viewport_count;
-
-    vks::PipelineRasterizationStateCreateInfo pRasterizationState;
-    pRasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
-    pRasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
-    pRasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    pRasterizationState.lineWidth = 1.0f;
-
-    vks::PipelineMultisampleStateCreateInfo pMultisampleState;
-    pMultisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    vks::PipelineDepthStencilStateCreateInfo pDepthStencilState;
-    pDepthStencilState.depthTestEnable = depth_test;
-    pDepthStencilState.depthWriteEnable = depth_write;
-    pDepthStencilState.depthCompareOp = depth_op;
-    pDepthStencilState.depthBoundsTestEnable = false;
-    pDepthStencilState.stencilTestEnable = stencil_test;
-    pDepthStencilState.front = stencil_front;
-    pDepthStencilState.back = stencil_back;
-
-    vks::PipelineColorBlendStateCreateInfo pColorBlendState;
-    if(color_blending_attachments.empty()) {
-        auto& att = color_blending_attachments.emplace_back();
-        att.blendEnable = false;
-        att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    }
-    pColorBlendState.logicOpEnable = false;
-    pColorBlendState.attachmentCount = color_blending_attachments.size();
-    pColorBlendState.pAttachments = color_blending_attachments.data();
-
-    vks::PipelineDynamicStateCreateInfo pDynamicState;
-    pDynamicState.dynamicStateCount = dynamic_states.size();
-    pDynamicState.pDynamicStates = dynamic_states.data();
-
-    vks::PipelineRenderingCreateInfo pDynamicRendering;
-    pDynamicRendering.colorAttachmentCount = color_attachment_formats.size();
-    pDynamicRendering.pColorAttachmentFormats = color_attachment_formats.data();
-    pDynamicRendering.depthAttachmentFormat = depth_attachment_format;
-    pDynamicRendering.stencilAttachmentFormat = stencil_attachment_format;
-
-    vks::GraphicsPipelineCreateInfo info;
-    info.stageCount = pStages.size();
-    info.pStages = pStages.data();
-    info.pVertexInputState = &pVertexInputState;
-    info.pInputAssemblyState = &pInputAssemblyState;
-    info.pTessellationState = &pTessellationState;
-    info.pViewportState = &pViewportState;
-    info.pRasterizationState = &pRasterizationState;
-    info.pMultisampleState = &pMultisampleState;
-    info.pDepthStencilState = &pDepthStencilState;
-    info.pColorBlendState = &pColorBlendState;
-    info.pDynamicState = &pDynamicState;
-    info.layout = layout;
-    info.pNext = &pDynamicRendering;
-
-    VkPipeline pipeline;
-    VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
-
-    return pipeline;
-}
-
-DescriptorSetWriter& DescriptorSetWriter::write(u32 binding, u32 array_element, const Image& image, VkImageLayout layout) {
-    writes.emplace_back(binding, array_element, WriteImage{ image.view, layout, VkSampler{} });
-    return *this;
-}
-
-DescriptorSetWriter& DescriptorSetWriter::write(u32 binding, u32 array_element, const Image& image, VkSampler sampler,
-                                                VkImageLayout layout) {
-    writes.emplace_back(binding, array_element, WriteImage{ image.view, layout, sampler });
-    return *this;
-}
-
-DescriptorSetWriter& DescriptorSetWriter::write(u32 binding, u32 array_element, VkImageView image, VkSampler sampler,
-                                                VkImageLayout layout) {
-    writes.emplace_back(binding, array_element, WriteImage{ image, layout, sampler });
-    return *this;
-}
-
-DescriptorSetWriter& DescriptorSetWriter::write(u32 binding, u32 array_element, const Buffer& buffer, u32 offset, u32 range) {
-    writes.emplace_back(binding, array_element, WriteBuffer{ buffer.buffer, offset, range });
-    return *this;
-}
-
-DescriptorSetWriter& DescriptorSetWriter::write(u32 binding, u32 array_element, const VkAccelerationStructureKHR ac) {
-    writes.emplace_back(binding, array_element, ac);
-    return *this;
-}
-
-bool DescriptorSetWriter::update(VkDescriptorSet set, const RenderPipelineLayout& layout, u32 set_idx) {
-    const std::vector<VkDescriptorSetLayoutBinding>& set_bindings = layout.bindings.at(set_idx);
-
-    std::vector<std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, vks::WriteDescriptorSetAccelerationStructureKHR>> write_infos;
-    std::vector<vks::WriteDescriptorSet> write_sets;
-    write_sets.reserve(writes.size());
-    write_infos.reserve(writes.size());
-
-    for(const WriteData& wd : writes) {
-        vks::WriteDescriptorSet& write_set = write_sets.emplace_back();
-        write_set.dstSet = set;
-        write_set.dstBinding = wd.binding;
-        write_set.descriptorCount = 1;
-        write_set.dstArrayElement = wd.array_element;
-        write_set.descriptorType =
-            std::find_if(set_bindings.begin(), set_bindings.end(), [&wd](const VkDescriptorSetLayoutBinding& b) {
-                return b.binding == wd.binding;
-            })->descriptorType;
-        std::visit(Visitor{ [&](const WriteImage& p) {
-                               write_set.pImageInfo = &std::get<0>(write_infos.emplace_back(VkDescriptorImageInfo{
-                                   .sampler = p.sampler,
-                                   .imageView = p.view,
-                                   .imageLayout = p.layout,
-                               }));
-                           },
-                            [&](const WriteBuffer& p) {
-                                write_set.pBufferInfo = &std::get<1>(write_infos.emplace_back(VkDescriptorBufferInfo{
-                                    .buffer = p.buffer,
-                                    .offset = p.offset,
-                                    .range = p.range,
-                                }));
-                            },
-                            [&](const VkAccelerationStructureKHR& p) {
-                                vks::WriteDescriptorSetAccelerationStructureKHR write_acc;
-                                write_acc.accelerationStructureCount = 1;
-                                write_acc.pAccelerationStructures = &p;
-                                write_set.pNext = &std::get<2>(write_infos.emplace_back(write_acc));
-                            } },
-                   wd.payload);
-    }
-
-    vkUpdateDescriptorSets(get_renderer().dev, write_sets.size(), write_sets.data(), 0, nullptr);
-    return true;
-}
-
-VkSampler SamplerStorage::get_sampler() {
-    vks::SamplerCreateInfo sampler_info;
-    return get_sampler(sampler_info);
-}
-
-VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode address) {
-    vks::SamplerCreateInfo sampler_info;
-    sampler_info.addressModeU = address;
-    sampler_info.addressModeV = address;
-    sampler_info.addressModeW = address;
-    sampler_info.minFilter = filter;
-    sampler_info.magFilter = filter;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_info.maxLod = sampler_info.minLod + 1.0f;
-    return get_sampler(sampler_info);
-}
-
-VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
-    for(const auto& [c, s] : samplers) {
-        if(c.magFilter != info.magFilter) { continue; }
-        if(c.minFilter != info.minFilter) { continue; }
-        if(c.mipmapMode != info.mipmapMode) { continue; }
-        if(c.addressModeU != info.addressModeU) { continue; }
-        if(c.addressModeV != info.addressModeV) { continue; }
-        if(c.addressModeW != info.addressModeW) { continue; }
-        if(c.mipLodBias != info.mipLodBias) { continue; }
-        if(c.anisotropyEnable != info.anisotropyEnable) { continue; }
-        if(c.maxAnisotropy != info.maxAnisotropy) { continue; }
-        if(c.compareEnable != info.compareEnable) { continue; }
-        if(c.compareOp != info.compareOp) { continue; }
-        if(c.minLod != info.minLod) { continue; }
-        if(c.maxLod != info.maxLod) { continue; }
-        if(c.borderColor != info.borderColor) { continue; }
-        if(c.unnormalizedCoordinates != info.unnormalizedCoordinates) { continue; }
-        return s;
-    }
-
-    VkSampler sampler;
-    VK_CHECK(vkCreateSampler(get_renderer().dev, &info, nullptr, &sampler));
-
-    samplers.emplace_back(info, sampler);
-    return sampler;
-}
-
-VkDescriptorPool DescriptorPoolAllocator::allocate_pool(const RenderPipelineLayout& layout, u32 set, u32 max_sets,
-                                                        VkDescriptorPoolCreateFlags flags) {
-    const std::vector<VkDescriptorSetLayoutBinding>& bindings = layout.bindings.at(set);
-    const std::vector<VkDescriptorBindingFlags>& binding_flags = layout.binding_flags.at(set);
-
-    std::vector<VkDescriptorPoolSize> sizes;
-    sizes.reserve(bindings.size());
-
-    const auto find_size_of_type = [&sizes](VkDescriptorType type) -> VkDescriptorPoolSize& {
-        for(auto& s : sizes) {
-            if(s.type == type) { return s; }
-        }
-        return sizes.emplace_back(VkDescriptorPoolSize{ .type = type, .descriptorCount = 0u });
-    };
-
-    for(u32 i = 0; i < bindings.size(); ++i) {
-        if(binding_flags.at(i) & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-            find_size_of_type(bindings.at(i).descriptorType).descriptorCount += bindings.at(i).descriptorCount;
-        } else {
-            find_size_of_type(bindings.at(i).descriptorType).descriptorCount += bindings.at(i).descriptorCount * max_sets;
-        }
-    }
-
-    vks::DescriptorPoolCreateInfo info;
-    info.maxSets = max_sets;
-    info.flags = flags;
-    info.poolSizeCount = sizes.size();
-    info.pPoolSizes = sizes.data();
-    VkDescriptorPool pool;
-    VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &info, nullptr, &pool));
-
-    pools.emplace(pool, PoolDescriptor{});
-
-    return pool;
-}
-
-VkDescriptorSet DescriptorPoolAllocator::allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, u32 variable_count) {
-    auto& pool_desc = pools.at(pool);
-    for(auto& set : pool_desc.sets) {
-        if(set.free && set.layout == layout) {
-            set.free = false;
-            return set.set;
-        }
-    }
-
-    vks::DescriptorSetVariableDescriptorCountAllocateInfo variable_info;
-    variable_info.descriptorSetCount = 1;
-    variable_info.pDescriptorCounts = &variable_count;
-
-    vks::DescriptorSetAllocateInfo info;
-    info.descriptorPool = pool;
-    info.descriptorSetCount = 1;
-    info.pSetLayouts = &layout;
-    if(variable_count > 0) { info.pNext = &variable_info; }
-
-    VkDescriptorSet set;
-    VK_CHECK(vkAllocateDescriptorSets(get_renderer().dev, &info, &set));
-
-    pool_desc.sets.emplace_back(set, layout, false);
-
-    return set;
-}
-
-void DescriptorPoolAllocator::reset_pool(VkDescriptorPool pool) {
-    if(!pool) { return; }
-    for(auto& e : pools.at(pool).sets) {
-        e.free = true;
-    }
-    // VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {})); // resetting actualy makes descriptor sets invalid - as opposed to commandpool
-}
-
-QueueScheduler::QueueScheduler(VkQueue queue) : vkqueue{ queue } { assert(queue); }
-
-void QueueScheduler::enqueue(const RecordingSubmitInfo& info, VkFence fence) {
-    struct BatchedSubmits {
-        std::vector<vks::CommandBufferSubmitInfo> info_submits;
-        std::vector<vks::SemaphoreSubmitInfo> info_waits;
-        std::vector<vks::SemaphoreSubmitInfo> info_signals;
-    };
-
-    BatchedSubmits batch;
-    batch.info_submits.reserve(info.buffers.size());
-    batch.info_waits.reserve(info.waits.size());
-    batch.info_signals.reserve(info.signals.size());
-
-    for(auto& e : info.buffers) {
-        vks::CommandBufferSubmitInfo info;
-        info.commandBuffer = e;
-        batch.info_submits.push_back(info);
-    }
-    for(auto& e : info.waits) {
-        vks::SemaphoreSubmitInfo info;
-        info.semaphore = e.first;
-        info.stageMask = e.second;
-        batch.info_waits.push_back(info);
-    }
-    for(auto& e : info.signals) {
-        vks::SemaphoreSubmitInfo info;
-        info.semaphore = e.first;
-        info.stageMask = e.second;
-        batch.info_signals.push_back(info);
-    }
-
-    VkSubmitInfo2 submit_info{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-                               .waitSemaphoreInfoCount = (u32)batch.info_waits.size(),
-                               .pWaitSemaphoreInfos = batch.info_waits.data(),
-                               .commandBufferInfoCount = (u32)batch.info_submits.size(),
-                               .pCommandBufferInfos = batch.info_submits.data(),
-                               .signalSemaphoreInfoCount = (u32)batch.info_signals.size(),
-                               .pSignalSemaphoreInfos = batch.info_signals.data() };
-    VK_CHECK(vkQueueSubmit2(vkqueue, 1, &submit_info, fence));
-}
-
-void QueueScheduler::enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence) { enqueue(info, fence); }
-
-CommandPool::CommandPool(u32 queue_index, VkCommandPoolCreateFlags flags) {
-    vks::CommandPoolCreateInfo info;
-    info.flags = flags;
-    info.queueFamilyIndex = queue_index;
-    VK_CHECK(vkCreateCommandPool(RendererVulkan::get()->dev, &info, {}, &cmdpool));
-}
-
-CommandPool::~CommandPool() noexcept {
-    if(cmdpool) { vkDestroyCommandPool(RendererVulkan::get()->dev, cmdpool, nullptr); }
-}
-
-CommandPool::CommandPool(CommandPool&& other) noexcept { *this = std::move(other); }
-
-CommandPool& CommandPool::operator=(CommandPool&& other) noexcept {
-    cmdpool = std::exchange(other.cmdpool, nullptr);
-    return *this;
-}
-
-VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
-    auto it = buffers.begin();
-    if(it != buffers.end() && it->second) {
-        VkCommandBuffer buffer = it->first;
-        it->second = false;
-        std::sort(it, buffers.end(), [](auto&& a, auto&& b) { return a.second > b.second; });
-        return buffer;
-    }
-
-    vks::CommandBufferAllocateInfo info;
-    info.commandBufferCount = 1;
-    info.commandPool = cmdpool;
-    info.level = level;
-    VkCommandBuffer buffer;
-    VK_CHECK(vkAllocateCommandBuffers(RendererVulkan::get()->dev, &info, &buffer));
-    buffers.emplace_back(buffer, false);
-    return buffer;
-}
-
-VkCommandBuffer CommandPool::begin(VkCommandBufferUsageFlags flags, VkCommandBufferLevel level) {
-    vks::CommandBufferBeginInfo info;
-    info.flags = flags;
-    VkCommandBuffer buffer = allocate(level);
-    VK_CHECK(vkBeginCommandBuffer(buffer, &info));
-    return buffer;
-}
-
-VkCommandBuffer CommandPool::begin_onetime(VkCommandBufferLevel level) {
-    return begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-}
-
-void CommandPool::end(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
-
-void CommandPool::reset() {
-    vkResetCommandPool(RendererVulkan::get()->dev, cmdpool, {});
-    for(auto& e : buffers) {
-        e.second = true;
-    }
-}

@@ -31,7 +31,7 @@ int main() {
         // Engine::renderer()->instance_model(gallery, InstanceSettings{ .flags = InstanceFlags::RAY_TRACED_BIT });
 
         const auto picture_gallery_handle = Engine::scene()->load_from_file("cornell/cornell1.glb");
-        Engine::scene()->instance_model(picture_gallery_handle, { .flags = InstanceFlags::RAY_TRACED_BIT,
+        Engine::scene()->instance_model(picture_gallery_handle, { .flags = {},
                                                                   .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) });
 
         Engine::set_on_update_callback([&] {
