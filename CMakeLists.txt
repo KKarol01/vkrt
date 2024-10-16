@@ -94,7 +94,7 @@ add_executable(vkrt
     "ui.cpp" 
     "scene.cpp"
     "linear_allocator.cpp"
-    
+    "renderer_vulkan_wrappers.cpp"   
 )
 
 target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)

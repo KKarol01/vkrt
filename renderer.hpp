@@ -70,7 +70,7 @@ class Renderer {
   public:
     virtual ~Renderer() = default;
     virtual void init() = 0;
-    virtual void render() = 0;
+    virtual void update() = 0;
     virtual void set_screen_rect(ScreenRect rect) = 0;
     virtual Handle<RenderTexture> batch_texture(const RenderTexture& batch) = 0;
     virtual Handle<MaterialBatch> batch_material(const MaterialBatch& batch) = 0;

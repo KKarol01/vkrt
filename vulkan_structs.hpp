@@ -1,5 +1,4 @@
 #pragma once
-
 #include <vulkan/vulkan.h>
 
 // clang-format off
@@ -81,6 +80,5 @@ namespace vks {
 	INIT_VK_STRUCT(RayTracingPipelineCreateInfoKHR, VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR);
 	INIT_VK_STRUCT(RayTracingShaderGroupCreateInfoKHR, VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR);
 	INIT_VK_STRUCT(PipelineRenderingCreateInfo, VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO);
-	
 }
 // clang-format on
