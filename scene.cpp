@@ -6,6 +6,8 @@
 #include "common/components.hpp"
 
 Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
+    if(auto it = path_model_assets.find(path); it != path_model_assets.end()) { return it->second; }
+
     ImportedModel model = ModelImporter::import_model(path);
 
     std::vector<Vertex> vertices;
@@ -65,6 +67,7 @@ Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
                                        .materials = std::move(materials),
                                        .textures = std::move(textures) });
     model_asset_handles[asset_handle] = &model_assets.back();
+    path_model_assets[path] = asset_handle;
     return asset_handle;
 }
 
@@ -96,11 +99,12 @@ Handle<Node> Scene::instance_model(Handle<ModelAsset> asset, InstanceSettings se
             .material = e.material->material_handle,
         });
 
-        attach_component<cmps::Transform>(&child, {});
-        attach_component<cmps::RenderMesh>(&child, cmps::RenderMesh{ .asset = &ma, .mesh = &e, .render_handle = render_handle });
+        cmps::RenderMesh render_mesh{ .asset = &ma, .mesh = &e, .render_handle = render_handle };
         if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) {
-            Engine::renderer()->instance_blas(BLASInstanceSettings{ .render_instance = render_handle });
+            render_mesh.blas_handle = Engine::renderer()->instance_blas(BLASInstanceSettings{ .render_instance = render_handle });
         }
+        attach_component<cmps::Transform>(&child, {});
+        attach_component<cmps::RenderMesh>(&child, std::move(render_mesh));
         entity_node_idxs[child.handle] = nodes.size();
         nodes.push_back(child);
         final_transforms.push_back(settings.transform);
@@ -120,6 +124,9 @@ void Scene::_update_transform(u32 idx, glm::mat4 t) {
     Node& node = nodes.at(idx);
     cmps::Transform& tr = Engine::ec()->get<cmps::Transform>(node.handle);
     final_transforms.at(idx) = tr.transform * t;
+    if(node.has_component<cmps::RenderMesh>()) {
+        Engine::renderer()->update_transform(Engine::ec()->get<cmps::RenderMesh>(node.handle).render_handle);
+    }
     for(u32 i = 0; i < node.children_count; ++i) {
         _update_transform(node.children_offset + i, final_transforms.at(idx));
     }

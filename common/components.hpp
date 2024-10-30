@@ -5,6 +5,7 @@
 struct ModelAsset;
 struct Mesh;
 struct MeshInstance;
+struct BLASInstance;
 
 namespace cmps {
 
@@ -16,6 +17,7 @@ struct RenderMesh {
     ModelAsset* asset;
     Mesh* mesh;
     Handle<MeshInstance> render_handle;
+    Handle<BLASInstance> blas_handle;
 };
 
 } // namespace cmps

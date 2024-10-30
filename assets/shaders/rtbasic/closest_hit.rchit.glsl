@@ -8,6 +8,12 @@
 
 #define RAYTRACING
 
+layout(location = 1) rayPayloadEXT struct RayPayloadShadow {
+    float distance;
+} payload_shadow;
+
+hitAttributeEXT vec2 barycentric_weights;
+
 #include "common.inc.glsl"
 #include "../global_common.inc.glsl"
 #include "ray_payload.inc"
@@ -16,11 +22,6 @@
 #include "light.inc"
 #include "probes.inc.glsl"
 
-layout(location = 1) rayPayloadEXT struct RayPayloadShadow {
-    float distance;
-} payload_shadow;
-
-hitAttributeEXT vec2 barycentric_weights;
 
 vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	vec3 V = normalize(cam_pos - world_pos);
@@ -92,6 +93,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	return (irr / sum_weight) * 0.5 * PI;
 }
 
+#if 0
 float calc_shadow(vec3 o, vec3 n) {
     float tmin = 0.00001;
     float tmax = 5.0;
@@ -111,6 +113,7 @@ float calc_shadow(vec3 o, vec3 n) {
 	}
 	return shadow;
 }
+#endif
 
 void main()
 {
@@ -143,18 +146,18 @@ void main()
   const vec2 uvs = v0.uv * a + v1.uv * b + v2.uv * c;
   const vec3 nor = normalize(vec3(transpose(inverse(mesh_transform)) * vec4(v0.nor * a + v1.nor * b + v2.nor * c, 0.0)));
 
-  const vec3 color_value = texture(textures[nonuniformEXT(mesh_data.color_texture)], uvs).rgb;
-  const float shadow = calc_shadow(pos, nor);
-  payload.radiance = color_value * calc_direct_lighting(pos, nor) * shadow;
-
+  vec3 indirect = vec3(0.0);
 #if GLOBAL_ILLUMINATION && TEMPORAL_ACCUMULATION
-	payload.radiance += color_value * sample_irradiance(pos, nor, gl_ObjectRayOriginEXT.xyz) * 0.75;
+	indirect = sample_irradiance(pos, nor, gl_WorldRayOriginEXT.xyz) * 0.75;
 #endif
+
+  const vec3 color_value = texture(textures[nonuniformEXT(mesh_data.color_texture)], uvs).rgb;
+  payload.radiance = calc_direct_lighting(pos, nor, gl_WorldRayOriginEXT.xyz, color_value, indirect, 1.0);
 
   payload.albedo = color_value;
   payload.normal = nor;
   payload.distance = gl_RayTminEXT + gl_HitTEXT;
-  payload.shadow = shadow;
+  payload.shadow = 0.0;
 }
 
 /*

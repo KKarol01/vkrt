@@ -17,6 +17,7 @@ layout(location = 0) in VertexOutput {
 } vert;
 
 #define RAYTRACING
+#define RAYQUERY
 
 #include "../global_common.inc.glsl"
 #include "../global_layout.inc.glsl"
@@ -50,11 +51,9 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 		
 		float weight = 1.0;
 
-		// TODO: Use smooth backfaces (?)
-
+		vec3 probe_to_biased_point_dir = biased_world_pos - probe_pos;
 #if CHEBYSHEV
 		{
-			vec3 probe_to_biased_point_dir = biased_world_pos - probe_pos;
 			float dist_to_biased_point = length(probe_to_biased_point_dir);
 			probe_to_biased_point_dir *= 1.0 / dist_to_biased_point;
 
@@ -79,7 +78,7 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 			weight *= (weight * weight) * (1.0 / (crush_threshold * crush_threshold));
 		}
 
-		weight *= trilinear;
+		weight *= trilinear * max(0.05, dot(probe_to_biased_point_dir, normal));
 
 #if 0
 		vec3 probe_irr = colors[probe_idx].xyz;
@@ -95,37 +94,13 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	return (irr / sum_weight) * 0.5 * PI;
 }
 
-float calc_shadow() {
-	rayQueryEXT rqs[num_lights];
-	for(int i=0; i<num_lights; ++i) {
-		vec3 vl = lights[i] - vert.pos;
-		float len_vl = length(vl);
-		vl /= len_vl;
-
-		rayQueryInitializeEXT(rqs[i], topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, vert.pos, 0.01, vl, len_vl);
-		rayQueryProceedEXT(rqs[i]);
-	}
-
-	float shadow = 0.0;
-	for(int i=0; i<num_lights; ++i) {
-		if(rayQueryGetIntersectionTypeEXT(rqs[i], true) == gl_RayQueryCommittedIntersectionNoneEXT) {
-			shadow += 1.0;
-		}
-	}
-	shadow *= 1.0 / float(num_lights);
-	return shadow;
-}
-
 void main() {
 	MeshData md = mesh_datas.at[vert.mesh_id];
 
 	vec3 cam_pos = vec3(globals.view * vec4(0.0, 0.0, 0.0, 1.0));
 	vec3 irr = sample_irradiance(vert.pos, vert.nor, cam_pos);
 	vec3 col1 = texture(textures[nonuniformEXT(md.color_texture)], vert.uv).rgb;
-
-	float shadow = calc_shadow(); // 1.0;
-
-	vec3 final_color = (calc_direct_lighting(vert.pos, vert.nor) * shadow + irr) * col1;
-
+	vec3 final_color = calc_direct_lighting(vert.pos, vert.nor, cam_pos, col1, irr, 1.0);
+	//final_color = irr * 2.0 * col1;
 	FRAG_COL = vec4(final_color, 1.0);
 }

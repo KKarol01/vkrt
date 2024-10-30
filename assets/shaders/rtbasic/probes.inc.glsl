@@ -184,11 +184,11 @@ vec2 get_probe_uv(vec3 normal, ivec3 probe_coords, int probe_res) {
 #else 
 // Utility methods ///////////////////////////////////////////////////////
 vec3 spherical_fibonacci(float i, float n) {
-    const float PHI = sqrt(5.0f) * 0.5 + 0.5;
+    const float PHI = sqrt(5.0) * 0.5 + 0.5;
 #define madfrac(A, B) ((A) * (B)-floor((A) * (B)))
     float phi       = 2.0 * PI * madfrac(i, PHI - 1);
     float cos_theta = 1.0 - (2.0 * i + 1.0) * (1.0 / n);
-    float sin_theta = sqrt(clamp(1.0 - cos_theta * cos_theta, 0.0f, 1.0f));
+    float sin_theta = sqrt(clamp(1.0 - cos_theta * cos_theta, 0.0, 1.0));
 
     return vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
 
@@ -231,9 +231,9 @@ vec2 normalized_oct_coord(ivec2 fragCoord, int probe_side_length) {
     int probe_with_border_side = probe_side_length + 2;
     vec2 octahedral_texel_coordinates = ivec2((fragCoord.x - 1) % probe_with_border_side, (fragCoord.y - 1) % probe_with_border_side);
 
-    octahedral_texel_coordinates += vec2(0.5f);
-    octahedral_texel_coordinates *= (2.0f / float(probe_side_length));
-    octahedral_texel_coordinates -= vec2(1.0f);
+    octahedral_texel_coordinates += vec2(0.5);
+    octahedral_texel_coordinates *= (2.0 / float(probe_side_length));
+    octahedral_texel_coordinates -= vec2(1.0);
 
     return octahedral_texel_coordinates;
 }
@@ -243,7 +243,7 @@ vec2 get_probe_uv(vec3 direction, int probe_index, int full_texture_width, int f
     // Get octahedral coordinates (-1,1)
     const vec2 octahedral_coordinates = oct_encode(normalize(direction));
     // TODO: use probe index for this.
-    const float probe_with_border_side = float(probe_side_length) + 2.0f;
+    const float probe_with_border_side = float(probe_side_length) + 2.0;
     const int probes_per_row = (full_texture_width) / int(probe_with_border_side);
     // Get probe indices in the atlas
     ivec2 probe_indices = ivec2((probe_index % probes_per_row), 
@@ -252,11 +252,11 @@ vec2 get_probe_uv(vec3 direction, int probe_index, int full_texture_width, int f
     // Get top left atlas texels
     vec2 atlas_texels = vec2( probe_indices.x * probe_with_border_side, probe_indices.y * probe_with_border_side );
     // Account for 1 pixel border
-    atlas_texels += vec2(1.0f);
+    atlas_texels += vec2(1.0);
     // Move to center of the probe area
-    atlas_texels += vec2(probe_side_length * 0.5f);
+    atlas_texels += vec2(probe_side_length * 0.5);
     // Use octahedral coordinates (-1,1) to move between internal pixels, no border
-    atlas_texels += octahedral_coordinates * (probe_side_length * 0.5f);
+    atlas_texels += octahedral_coordinates * (probe_side_length * 0.5);
     // Calculate final uvs
     const vec2 uv = atlas_texels / vec2(float(full_texture_width), float(full_texture_height));
     return uv;
@@ -266,10 +266,10 @@ vec2 texture_coord_from_direction(vec3 dir, int probe_index, int full_texture_wi
     // Get encoded [-1,1] octahedral coordinate
     vec2 normalized_oct_coord = oct_encode(normalize(dir));
     // Map it to [0,1]
-    vec2 normalized_oct_coord_zero_one = (normalized_oct_coord * 0.5) + 0.5f;
+    vec2 normalized_oct_coord_zero_one = (normalized_oct_coord * 0.5) + 0.5;
 
     // Length of a probe side, plus one pixel on each edge for the border
-    float probe_with_border_side = float(probe_side_length) + 2.0f;
+    float probe_with_border_side = float(probe_side_length) + 2.0;
 
     vec2 oct_coord_normalized_to_texture_dimensions = (normalized_oct_coord_zero_one * float(probe_side_length)) 
                                                     / vec2(float(full_texture_width), float(full_texture_height));
@@ -278,7 +278,7 @@ vec2 texture_coord_from_direction(vec3 dir, int probe_index, int full_texture_wi
 
     // Add (1,1) back to texCoord within larger texture. Compensates for 1 pix border around top left probe.
     vec2 probe_top_left_position = vec2((probe_index % probes_per_row) * probe_with_border_side,
-        (probe_index / probes_per_row) * probe_with_border_side) + vec2(1.0f, 1.0f);
+        (probe_index / probes_per_row) * probe_with_border_side) + vec2(1.0, 1.0);
 
     vec2 normalized_probe_top_left_position = vec2(probe_top_left_position) / vec2(float(full_texture_width), float(full_texture_height));
 

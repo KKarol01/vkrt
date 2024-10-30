@@ -50,6 +50,10 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer Per
     uint32_t at[];
 };
 
+layout(scalar, buffer_reference, buffer_reference_align = 8) writeonly buffer DebugDDGIProbeOffsetsBuffer {
+    vec3 at[];
+};
+
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer DDGIBuffer {
     ivec2 radiance_tex_size;
     ivec2 irradiance_tex_size;
@@ -68,4 +72,5 @@ layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer DDG
 	int irr_res;
 	int vis_res;
     uint rays_per_probe;
+    DebugDDGIProbeOffsetsBuffer debug_probe_offsets;
 };

@@ -96,7 +96,7 @@ void UI::update() {
                             glm::mat4& cmps_transform = Engine::ec()->get<cmps::Transform>(draw_scene_selected->handle).transform;
                             cmps_transform = glm::translate(cmps_transform, t);
                             Engine::scene()->update_transform(draw_scene_selected->handle);
-                            Engine::renderer()->update_transform(rm.render_handle);
+                            //Engine::renderer()->update_transform(rm.render_handle);
                         }
                     }
                 }
@@ -205,7 +205,7 @@ void UI::draw_right_column() {
         if(node->has_component<cmps::RenderMesh>()) {
             cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(node->handle);
             Engine::scene()->update_transform(node->handle);
-            Engine::renderer()->update_transform(rm.render_handle);
+            //Engine::renderer()->update_transform(rm.render_handle);
         }
     }
     ImGui::PopID();

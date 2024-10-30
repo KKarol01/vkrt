@@ -51,15 +51,17 @@ class Scene {
     glm::mat4 get_final_transform(Handle<Entity> handle) const {
         return final_transforms.at(entity_node_idxs.at(handle));
     }
-    
+    Node& get_node(Handle<Entity> handle) { return nodes.at(entity_node_idxs.at(handle)); }
+
     void update_transform(Handle<Entity> entity);
-    void _update_transform(u32 idx, glm::mat4 t = {1.0f});
+    void _update_transform(u32 idx, glm::mat4 t = { 1.0f });
 
   public:
     std::vector<Node> nodes;
     std::vector<u32> root_nodes;
     std::vector<glm::mat4> final_transforms;
     std::deque<ModelAsset> model_assets;
-    std::unordered_map<Handle<Entity>, u32> entity_node_idxs;
+    std::unordered_map<std::filesystem::path, Handle<ModelAsset>> path_model_assets;
     std::unordered_map<Handle<ModelAsset>, ModelAsset*> model_asset_handles;
+    std::unordered_map<Handle<Entity>, u32> entity_node_idxs;
 };

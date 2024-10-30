@@ -47,8 +47,8 @@ void RendererVulkan::init() {
     build_pipelines();
     build_sbt();
     initialize_imgui();
-    build_tlas();
-    prepare_ddgi();
+    /*build_tlas();
+    prepare_ddgi();*/
     Engine::add_on_window_resize_callback([this] {
         flags |= RendererFlags::RESIZE_SWAPCHAIN_BIT;
         return true;
@@ -374,15 +374,18 @@ void RendererVulkan::initialize_imgui() {
 void RendererVulkan::update() {
     if(Engine::window()->width == 0 || Engine::window()->height == 0) { return; }
     if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
-    if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) { upload_instances(); }
+    if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) {
+        upload_instances();
+        upload_transforms();
+    }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_BLAS_BIT)) { build_blas(); }
     if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
         // TODO: prepare ddgi on scene update
-        if(Engine::frame_num() < 100) { prepare_ddgi(); }
+        if(Engine::frame_num() < 100) { initialize_ddgi(); }
     }
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
-    if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
+    // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         vkQueueWaitIdle(gq);
         create_swapchain();
@@ -425,6 +428,20 @@ void RendererVulkan::update() {
         }
     }
 
+    if(Engine::frame_num() > 0) {
+        for(u32 i = 0; i < ddgi.debug_probes.size(); ++i) {
+            auto h = Handle<Entity>{ *ddgi.debug_probes.at(i) };
+            auto& t = Engine::ec()->get<cmps::Transform>(h);
+            const auto tv =
+                ddgi.probe_start +
+                ddgi.probe_walk * glm::vec3{ i % ddgi.probe_counts.x, (i / ddgi.probe_counts.x) % ddgi.probe_counts.y,
+                                             i / (ddgi.probe_counts.x * ddgi.probe_counts.y) } +
+                ((glm::vec3*)ddgi.debug_probe_offsets_buffer.mapped)[i];
+            t.transform = glm::translate(glm::mat4{ 1.0f }, tv) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f });
+            Engine::scene()->update_transform(h);
+        }
+    }
+
     vkResetFences(dev, 1, &primitives.fen_rendering_finished);
 
     if(!primitives.desc_pool) { primitives.desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2); }
@@ -457,7 +474,7 @@ void RendererVulkan::update() {
     {
         float globals[16 * 4 + 12];
         const auto view = Engine::camera()->get_view();
-        const auto proj = glm::perspective(glm::radians(90.0f), 2560.0f / 1440.0f, 0.01f, 10.0f); // Engine::camera()->get_projection();
+        const auto proj = glm::perspective(glm::radians(45.0f), 1024.0f/768.0f, 0.01f, 20.0f); // Engine::camera()->get_projection();
         const auto inv_view = glm::inverse(view);
         const auto inv_proj = glm::inverse(proj);
         memcpy(&globals[0], &view, sizeof(glm::mat4));
@@ -473,36 +490,51 @@ void RendererVulkan::update() {
 
     auto cmd = get_primitives().cmdpool.begin_onetime();
 
-    {
-        if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCE_TRANSFORMS_BIT)) {
-            if(mesh_instance_transform_buffers[1]->capacity < mesh_instance_transform_buffers[0]->size) {
-                mesh_instance_transform_buffers[1]->deallocate();
-                delete mesh_instance_transform_buffers[1];
-                mesh_instance_transform_buffers[1] =
-                    new Buffer("mesh instance transforms", mesh_instance_transform_buffers[0]->size,
-                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+    if(flags.test_clear(RendererFlags::DIRTY_TRANSFORMS_BIT)) {
+        for(const auto& e : update_positions) {
+            const auto idx = mesh_instance_idxs.at(e);
+            const auto& mi = mesh_instances.at(idx);
+            const auto offset = idx * sizeof(glm::mat4);
+            const auto& t = Engine::scene()->get_final_transform(mi.entity);
+            vkCmdUpdateBuffer(cmd, mesh_instance_transform_buffers[0]->buffer, offset, sizeof(glm::mat4), &t);
+            if(Engine::ec()->get<cmps::RenderMesh>(mi.entity).blas_handle) {
+                flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
             }
-            std::atomic_flag f1;
-            staging->send_to(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
-                                               .src = mesh_instance_transform_buffers[0]->buffer,
-                                               .size_bytes = mesh_instance_transform_buffers[0]->size },
-                             {}, {}, &f1);
-
-            std::vector<GpuStagingUpload> uploads;
-            uploads.reserve(update_positions.size());
-            for(const auto& e : update_positions) {
-                uploads.push_back(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
-                                                    .src = std::as_bytes(std::span{ &e.transform, sizeof(e.transform) }),
-                                                    .dst_offset = e.idx * sizeof(e.transform),
-                                                    .size_bytes = sizeof(e.transform) });
-            }
-            f1.wait(false);
-            staging->send_to(uploads, {}, {}, &f1);
-            update_positions.clear();
-            mesh_instance_transform_buffers[1]->size = mesh_instance_transform_buffers[0]->size;
-            std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
-            f1.wait(false);
         }
+        update_positions.clear();
+
+        /* TODO:
+            for later: put appropriate barriers for transform buffer[0] (it's being used by the previous frame)
+            either that or use second buffer if it matches the first one (how to make it match efficiently)
+        */
+
+        /*if(mesh_instance_transform_buffers[1]->capacity < mesh_instance_transform_buffers[0]->size) {
+            mesh_instance_transform_buffers[1]->deallocate();
+            delete mesh_instance_transform_buffers[1];
+            mesh_instance_transform_buffers[1] =
+                new Buffer("mesh instance transforms", mesh_instance_transform_buffers[0]->size,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+        }
+        std::atomic_flag f1;
+        staging->send_to(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
+                                           .src = mesh_instance_transform_buffers[0]->buffer,
+                                           .size_bytes = mesh_instance_transform_buffers[0]->size },
+                         {}, {}, &f1);
+
+        std::vector<GpuStagingUpload> uploads;
+        uploads.reserve(update_positions.size());
+        for(const auto& e : update_positions) {
+            uploads.push_back(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
+                                                .src = std::as_bytes(std::span{ &e.transform, sizeof(e.transform) }),
+                                                .dst_offset = e.idx * sizeof(e.transform),
+                                                .size_bytes = sizeof(e.transform) });
+        }
+        f1.wait(false);
+        staging->send_to(uploads, {}, {}, &f1);
+        update_positions.clear();
+        mesh_instance_transform_buffers[1]->size = mesh_instance_transform_buffers[0]->size;
+        std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
+        f1.wait(false);*/
     }
 
     if(tlas && ddgi.buffer.buffer) {
@@ -659,8 +691,7 @@ void RendererVulkan::update() {
         vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
                            3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
         vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
-                                      indirect_draw_buffer.buffer, 0ull, mesh_instances.size(),
-                                      sizeof(VkDrawIndexedIndirectCommand));
+                                      indirect_draw_buffer.buffer, 0ull, max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cmd);
 
         output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -772,7 +803,7 @@ Handle<MeshInstance> RendererVulkan::instance_mesh(const InstanceSettings& setti
         .material = settings.material,
     });
 
-    flags.set(RendererFlags::DIRTY_MESH_INSTANCES | RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT);
+    flags.set(RendererFlags::DIRTY_MESH_INSTANCES);
     if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) { flags.set(RendererFlags::DIRTY_TLAS_BIT); }
 
     return handle;
@@ -792,11 +823,8 @@ Handle<BLASInstance> RendererVulkan::instance_blas(const BLASInstanceSettings& s
 }
 
 void RendererVulkan::update_transform(Handle<MeshInstance> handle) {
-    Scene* scene = Engine::scene();
-    u32 idx = mesh_instance_idxs.at(handle);
-    glm::mat4 transform = scene->get_final_transform(mesh_instances.at(mesh_instance_idxs.at(handle)).entity);
-    update_positions.push_back(UpdatePosition{ .idx = idx, .transform = transform });
-    flags.set(RendererFlags::DIRTY_MESH_INSTANCE_TRANSFORMS_BIT | RendererFlags::DIRTY_TLAS_BIT);
+    update_positions.push_back(handle);
+    flags.set(RendererFlags::DIRTY_TRANSFORMS_BIT);
 }
 
 void RendererVulkan::upload_model_textures() {
@@ -935,6 +963,7 @@ void RendererVulkan::upload_instances() {
 
     gpu_draw_header.draw_count = gpu_draw_commands.size();
     gpu_draw_header.geometry_instance_count = mesh_instances.size();
+    max_draw_count = gpu_draw_commands.size();
 
     // clang-format off
     indirect_draw_buffer = Buffer{"indirect draw", sizeof(IndirectDrawCommandBufferHeader) + gpu_draw_commands.size() * sizeof(gpu_draw_commands[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, false};
@@ -1238,7 +1267,7 @@ void RendererVulkan::build_tlas() {
               [](const BLASInstance& a, const BLASInstance& b) { return a.mesh_batch < b.mesh_batch; });
 
     // TODO : Compress mesh ids per triangle for identical blases with identical materials
-    for(u32 i = 0, toff = 0; i < blas_instances.size(); ++i) {
+    for(u32 i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
         const BLASInstance& bi = blas_instances.at(i);
         const RenderMesh& mb = meshes.at(bi.mesh_batch);
         const RenderGeometry& geom = geometries.at(mb.geometry);
@@ -1263,9 +1292,10 @@ void RendererVulkan::build_tlas() {
         tlas_instance.accelerationStructureReference = mb.metadata->blas_buffer.bda;
 
         tlas_mesh_offsets.push_back(toff);
-        blas_mesh_offsets.push_back((geom.index_offset + mb.index_offset) / 3u);
+        blas_mesh_offsets.push_back(boff / 3u);
 
         ++toff;
+        boff += mb.index_count; // TODO: validate this
     }
 
     tlas_mesh_offsets_buffer = Buffer{ "tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]),
@@ -1397,7 +1427,9 @@ void RendererVulkan::refit_tlas() {
 #endif
 }
 
-void RendererVulkan::prepare_ddgi() {
+void RendererVulkan::initialize_ddgi() {
+    if(!ddgi.debug_probes.empty()) { return; }
+
     BoundingBox scene_aabb;
     for(const Node& node : Engine::scene()->nodes) {
         if(!node.has_component<cmps::RenderMesh>()) { continue; }
@@ -1411,16 +1443,19 @@ void RendererVulkan::prepare_ddgi() {
     }
 
     ddgi.probe_dims = scene_aabb;
-    ddgi.probe_dims.min *= glm::vec3{ 0.9, 0.7, 0.9 };
-    ddgi.probe_dims.max *= glm::vec3{ 0.9, 0.7, 0.9 };
-    ddgi.probe_distance = glm::max(ddgi.probe_dims.size().x, glm::max(ddgi.probe_dims.size().y, ddgi.probe_dims.size().z)) / 2.0f;
+    const auto dim_scaling = glm::vec3{0.95, 0.8, 0.95};
+    ddgi.probe_dims.min *= dim_scaling;
+    ddgi.probe_dims.max *= dim_scaling;
+    ddgi.probe_distance = 1.3;
 
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
+    //ddgi.probe_counts = {16, 4, 8};
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
+    //ddgi.probe_walk = {ddgi.probe_walk.x, 4.0f, ddgi.probe_walk.z};
 
     const u32 irradiance_texture_width = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
     const u32 irradiance_texture_height = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.z;
@@ -1470,10 +1505,10 @@ void RendererVulkan::prepare_ddgi() {
     scheduler_gq.enqueue_wait_submit({ { cmd } });
 
     ddgi.buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI::GPULayout),
-                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
     ddgi.debug_probe_offsets_buffer =
         Buffer{ "ddgi debug probe offsets buffer", sizeof(DDGI::GPUProbeOffsetsLayout) * num_probes,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
 
     DDGI::GPULayout ddgi_gpu_settings{
         .radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height },
@@ -1493,14 +1528,21 @@ void RendererVulkan::prepare_ddgi() {
         .irradiance_probe_side = ddgi.irradiance_probe_side,
         .visibility_probe_side = ddgi.visibility_probe_side,
         .rays_per_probe = ddgi.rays_per_probe,
+        .debug_probe_offsets = ddgi.debug_probe_offsets_buffer.bda
     };
-#if 0
-    ddgi_buffer_mapped->debug_probe_offsets_buffer = ddgi_debug_probe_offsets_buffer.bda;
-#endif
 
-    if(ddgi.probe_counts.y == 1) { ddgi_gpu_settings.probe_start.y += ddgi.probe_walk.y * 0.5f; }
+    if(ddgi.probe_counts.y == 1) {
+        ddgi_gpu_settings.probe_start.y += ddgi.probe_walk.y * 0.5f;
+        ddgi.probe_start.y += ddgi.probe_walk.y * 0.5f;
+    }
 
-    ddgi.buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI::GPULayout));
+    ddgi.buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI::GPULayout), 0);
+
+    Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
+    ddgi.debug_probes.clear(); // TODO: also remove from the scene
+    for(int i = 0; i < ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z; ++i) {
+        // ddgi.debug_probes.push_back(Engine::scene()->instance_model(sphere_handle, { .transform = glm::mat4{ 1.0f } }));
+    }
 
     vkQueueWaitIdle(gq);
 }

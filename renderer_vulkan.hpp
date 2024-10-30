@@ -20,17 +20,16 @@
 #define VK_CHECK(func) func
 #endif
 
-/* Control renderer's behavior */
+/* Controls renderer's behavior */
 enum class RendererFlags : u32 {
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
     DIRTY_MESH_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
     REFIT_TLAS_BIT = 0x10,
-    UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT = 0x20,
-    DIRTY_MESH_INSTANCE_TRANSFORMS_BIT = 0x40,
-    RESIZE_SWAPCHAIN_BIT = 0x80,
-    RESIZE_SCREEN_RECT_BIT = 0x100,
+    DIRTY_TRANSFORMS_BIT = 0x20,
+    RESIZE_SWAPCHAIN_BIT = 0x40,
+    RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
 enum class GeometryFlags : u32 {};
@@ -142,6 +141,7 @@ struct DDGI {
         i32 irradiance_probe_side;
         i32 visibility_probe_side;
         u32 rays_per_probe;
+        VkDeviceAddress debug_probe_offsets;
     };
     using GPUProbeOffsetsLayout = glm::vec3;
 
@@ -149,6 +149,7 @@ struct DDGI {
     f32 probe_distance{ 0.4f };
     glm::uvec3 probe_counts;
     glm::vec3 probe_walk;
+    glm::vec3 probe_start;
     i32 irradiance_probe_side{ 6 };
     i32 visibility_probe_side{ 14 };
     u32 rays_per_probe{ 64 };
@@ -158,6 +159,7 @@ struct DDGI {
     Image irradiance_texture;
     Image visibility_texture;
     Image probe_offsets_texture;
+    std::vector<Handle<Node>> debug_probes;
 };
 
 struct IndirectDrawCommandBufferHeader {
@@ -211,7 +213,7 @@ class RendererVulkan : public Renderer {
     void build_blas();
     void build_tlas();
     void refit_tlas();
-    void prepare_ddgi();
+    void initialize_ddgi();
 
     u32 get_resource_idx(int offset = 0) const { return (Engine::frame_num() + offset) % 2; }
     RenderingPrimitives& get_primitives() { return primitives[get_resource_idx()]; }
@@ -264,6 +266,7 @@ class RendererVulkan : public Renderer {
     std::unordered_map<Handle<MeshInstance>, u32> mesh_instance_idxs;
     HandleVector<RenderMaterial> materials;
     std::vector<BLASInstance> blas_instances;
+    u32 max_draw_count{};
 
     VkAccelerationStructureKHR tlas{};
     Buffer tlas_buffer;
@@ -296,7 +299,7 @@ class RendererVulkan : public Renderer {
     std::vector<Vertex> upload_vertices;
     std::vector<u32> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<UpdatePosition> update_positions;
+    std::vector<Handle<MeshInstance>> update_positions;
 
     RenderingPrimitives primitives[2];
 };

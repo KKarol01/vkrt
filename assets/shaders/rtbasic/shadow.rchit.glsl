@@ -6,12 +6,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
-#include "../global_common.inc.glsl"
-#include "common.inc.glsl"
-#include "push_constants.inc.glsl"
-#include "../global_layout.inc.glsl"
-#include "light.inc"
-#include "probes.inc.glsl"
+#define RAYTRACING
 
 layout(location = 1) rayPayloadInEXT struct RayPayloadShadow {
     float distance;
@@ -19,8 +14,14 @@ layout(location = 1) rayPayloadInEXT struct RayPayloadShadow {
 
 hitAttributeEXT vec2 barycentric_weights;
 
-void main()
-{
+#include "../global_common.inc.glsl"
+#include "common.inc.glsl"
+#include "push_constants.inc.glsl"
+#include "../global_layout.inc.glsl"
+#include "light.inc"
+#include "probes.inc.glsl"
+
+void main() {
   payload_shadow.distance = gl_HitTEXT;
 }
 

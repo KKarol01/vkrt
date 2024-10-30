@@ -128,11 +128,11 @@ void main() {
 
     const int probe_pixel_x = coords.x % probe_with_border;
     const int probe_pixel_y = coords.y % probe_with_border;
-    bool is_corner_pixel = (
+    const bool is_corner_pixel = (
            (probe_pixel_x == 0 || probe_pixel_x == probe_last_pixel)
         && (probe_pixel_y == 0 || probe_pixel_y == probe_last_pixel)
     );
-    bool is_row_pixel = (probe_pixel_x > 0 && probe_pixel_x < probe_last_pixel);
+    const bool is_row_pixel = (probe_pixel_x > 0 && probe_pixel_x < probe_last_pixel);
     ivec2 source_pixel_coord = coords;
 
     if(is_corner_pixel) {
@@ -140,7 +140,6 @@ void main() {
         source_pixel_coord.y += probe_pixel_y == 0 ? probe_res : -probe_res;
     } else if(is_row_pixel) {
 		if(mode == MODE_IRRADIANCE) source_pixel_coord.x += k_read_table[probe_pixel_x - 1];
-		// TODO: RIGHT NOW VIS AND IRR ASSUMED TO BE THE SAME SIZE
 		else if(mode == MODE_VISIBILITY) source_pixel_coord.x += k_read_table_vis[probe_pixel_x - 1];
         source_pixel_coord.y += (probe_pixel_y > 0) ? -1 : 1;
     } else {

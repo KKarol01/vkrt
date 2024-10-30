@@ -48,7 +48,7 @@ void Engine::start() {
 
 void Engine::update() {
     const float now = get_time_secs();
-    get()->_on_update_callback();
+    if(get()->_on_update_callback) { get()->_on_update_callback(); }
     camera()->update();
     ui()->update();
     renderer()->update();
