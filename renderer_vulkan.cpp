@@ -646,7 +646,7 @@ void RendererVulkan::initialize_resources() {
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     }
 
-    auto samp_ll = samplers.get_sampler();
+    auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     auto samp_lr = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
     DescriptorLayout dl_default{ .bindings = { { { &tlas },
                                                  { ddgi.radiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
