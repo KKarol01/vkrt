@@ -26,7 +26,7 @@ template <typename T, typename Storage = u32> struct ComponentArray : public Com
 
 class EntityComponents {
   public:
-    inline static constexpr u32 MAX_COMPONENTS = 32; // components' ids get stored in u32 bitfield to indicate presence
+    inline static constexpr u32 MAX_COMPONENTS = 8; // components' ids get stored in u32 bitfield to indicate presence
     constexpr EntityComponents() = default;
     EntityComponents(const EntityComponents&) = delete;
     EntityComponents& operator=(const EntityComponents&) = delete;

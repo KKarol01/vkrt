@@ -22,6 +22,8 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
     constexpr auto& at(u64 idx) { return storage.at(idx); }
     constexpr auto& at(Handle handle) { return at(find_idx(handle)); }
     constexpr auto& operator[](u64 idx) { return storage.at(idx); }
+    constexpr auto data() { return storage.data(); }
+    constexpr auto& data_storage() { return storage; }
 
     constexpr void insert(Handle h, auto&& t) {
         const auto it = find_insertion_it(h);

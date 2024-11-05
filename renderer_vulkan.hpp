@@ -91,26 +91,6 @@ struct BLASInstance {
     VkAccelerationStructureKHR blas;
 };
 
-enum class ShaderModuleType {
-    RT_BASIC_CLOSEST_HIT,
-    RT_BASIC_SHADOW_HIT,
-    RT_BASIC_MISS,
-    RT_BASIC_SHADOW_MISS,
-    RT_BASIC_RAYGEN,
-    RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
-    RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE,
-
-    DEFAULT_UNLIT_VERTEX,
-    DEFAULT_UNLIT_FRAGMENT,
-};
-
-enum class RenderPipelineType {
-    DEFAULT_UNLIT,
-    DDGI_PROBE_RAYCAST,
-    DDGI_PROBE_UPDATE,
-    DDGI_PROBE_OFFSET,
-};
-
 struct ShaderModuleWrapper {
     VkShaderModule module{};
     VkShaderStageFlagBits stage{};
@@ -138,8 +118,8 @@ struct DDGI {
         f32 normal_bias;
         f32 max_probe_offset;
         u32 frame_num;
-        i32 irradiance_probe_side;
-        i32 visibility_probe_side;
+        s32 irradiance_probe_side;
+        s32 visibility_probe_side;
         u32 rays_per_probe;
         VkDeviceAddress debug_probe_offsets;
     };
@@ -150,15 +130,15 @@ struct DDGI {
     glm::uvec3 probe_counts;
     glm::vec3 probe_walk;
     glm::vec3 probe_start;
-    i32 irradiance_probe_side{ 6 };
-    i32 visibility_probe_side{ 14 };
+    s32 irradiance_probe_side{ 6 };
+    s32 visibility_probe_side{ 14 };
     u32 rays_per_probe{ 64 };
     Buffer buffer;
     Buffer debug_probe_offsets_buffer;
-    Image radiance_texture;
-    Image irradiance_texture;
-    Image visibility_texture;
-    Image probe_offsets_texture;
+    Image* radiance_texture{};
+    Image* irradiance_texture{};
+    Image* visibility_texture{};
+    Image* probe_offsets_texture{};
     std::vector<Handle<Node>> debug_probes;
 };
 
@@ -167,19 +147,168 @@ struct IndirectDrawCommandBufferHeader {
     u32 geometry_instance_count{};
 };
 
-struct RenderingPrimitives {
-    VkSemaphore sem_swapchain_image{};
-    VkSemaphore sem_rendering_finished{};
-    VkSemaphore sem_gui_start{};
-    VkSemaphore sem_copy_to_sw_img_done{};
-    VkFence fen_rendering_finished{};
-    CommandPool cmdpool{};
-    VkDescriptorPool desc_pool{};
-    Buffer constants;
+struct Fence {
+    Fence() = default;
+    Fence(VkDevice dev, bool signaled);
+    Fence(Fence&& f) noexcept;
+    Fence& operator=(Fence&& f) noexcept;
+    ~Fence() noexcept;
+    VkFence fence{};
+};
+
+struct Semaphore {
+    Semaphore() = default;
+    Semaphore(VkDevice dev, bool timeline);
+    Semaphore(Semaphore&&) noexcept;
+    Semaphore& operator=(Semaphore&&) noexcept;
+    ~Semaphore() noexcept;
+    VkSemaphore semaphore{};
+};
+
+struct ShaderStorage {
+    struct ShaderMetadata {
+        std::filesystem::path path;
+        VkShaderStageFlagBits stage;
+    };
+
+    VkShaderModule get_shader(const std::filesystem::path& path);
+    VkShaderStageFlagBits get_stage(std::filesystem::path path) const;
+    VkShaderModule compile_shader(std::filesystem::path path);
+
+    std::unordered_map<VkShaderModule, ShaderMetadata> metadatas;
+};
+
+struct DescriptorBinding {
+    using Resource =
+        std::variant<std::monostate, const Buffer*, const Image*, VkAccelerationStructureKHR*, const std::vector<Image>*>;
+    DescriptorBinding() = default;
+    DescriptorBinding(Resource res, u32 count, VkImageLayout layout, std::optional<VkSampler> sampler = {});
+    DescriptorBinding(Resource res, u32 count, std::optional<VkSampler> sampler = {});
+    DescriptorBinding(Resource res);
+    VkDescriptorType get_vktype() const;
+    VkImageLayout deduce_layout(const Resource& res, const std::optional<VkSampler>& sampler);
+    Resource res{};
+    VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
+    std::optional<VkSampler> sampler{}; // if not set - storage image; if set, but sampler is nullptr - sampled image; if set and sampler is not nullptr - combined image sampler
+    u32 count{ 1 };
+};
+
+struct DescriptorLayout {
+    inline static constexpr u32 MAX_BINDINGS = 16;
+    bool is_empty() const;
+    std::array<DescriptorBinding, MAX_BINDINGS> bindings{};
+    VkDescriptorSetLayout layout{};
+    s32 variable_binding{ -1 };
+};
+
+struct PipelineLayout {
+    inline static constexpr u32 MAX_SETS = 4;
+
+    PipelineLayout() = default;
+    PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, u32 push_size = 128);
+
+    std::array<DescriptorLayout, MAX_SETS> sets{};
+    VkPipelineLayout layout{};
+    u32 push_size{};
+};
+
+struct Pipeline {
+    enum Type { None, Raster, Compute, RT };
+    struct RasterizationSettings {
+        u32 num_col_formats{ 1 };
+        std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
+        VkFormat dep_format{ VK_FORMAT_D16_UNORM };
+        VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
+        bool depth_test{ true };
+        VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
+    };
+    struct RaytracingSettings {
+        u32 recursion_depth{ 1 };
+        u32 group_count{};
+        Buffer* sbt;
+    };
+
+    Pipeline() = default;
+    Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLayout* layout,
+             std::variant<std::monostate, RasterizationSettings, RaytracingSettings> settings = {});
+    VkPipelineBindPoint get_bindpoint() const;
+
+    const PipelineLayout* layout{};
+    VkPipeline pipeline{};
+    Type type{ None };
+    union {
+        RasterizationSettings rasterization_settings;
+        RaytracingSettings raytracing_settings;
+    };
+};
+
+struct DescriptorPool {
+    DescriptorPool() = default;
+    DescriptorPool(const PipelineLayout* layout, u32 max_sets);
+    void allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, u32 count = 1, std::span<u32> variable_count = {});
+    void reset();
+    VkDescriptorPool pool{};
+    std::deque<VkDescriptorSet> sets;
+};
+
+struct RenderPass {
+    RenderPass() = default;
+    // TODO: make actual pipeline with layout here
+    RenderPass(const Pipeline* pipeline, DescriptorPool* desc_pool);
+    void bind(VkCommandBuffer cmd);
+    void bind_desc_sets(VkCommandBuffer cmd);
+    void update_desc_sets();
+    void push_constant(VkCommandBuffer cmd, u32 offset, u32 size, const void* value);
+    const Pipeline* pipeline{};
+    DescriptorPool* desc_pool{};
+    std::array<VkDescriptorSet*, PipelineLayout::MAX_SETS> sets{};
+};
+
+template <size_t frames> struct Swapchain {
+    Swapchain() = default;
+    void create();
+    u32 acquire(VkResult* res, u64 timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
+    VkSwapchainKHR swapchain{};
+    std::array<Image, frames> images;
+};
+
+struct RenderPasses {
+    RenderPass ddgi_radiance;
+    RenderPass ddgi_irradiance;
+    RenderPass ddgi_offsets;
+    RenderPass default_lit;
+};
+
+template <size_t frames> struct FrameData {
+    struct Data {
+        Semaphore sem_swapchain{};
+        // Semaphore sem_main{};
+        Semaphore sem_rendering_finished{};
+        Fence fen_rendering_finished{};
+        CommandPool* cmdpool{};
+        RenderPasses passes;
+        Buffer constants{};
+        Image* depth_buffer{};
+        DescriptorPool* descpool{};
+    };
+    Data& get() { return data[Engine::frame_num() % frames]; }
+    std::array<Data, frames> data{};
+};
+
+struct QueueSubmision {
+    std::span<VkCommandBuffer> cmds{};
+    std::span<std::pair<Semaphore*, u32>> wait_sems{};
+    std::span<std::pair<Semaphore*, u32>> signal_sems{};
+    std::span<VkPipelineStageFlags2> wait_stages{};
+    std::span<VkPipelineStageFlags2> signal_stages{};
+};
+
+struct QueueSubmit {
+    void submit(VkQueue queue, QueueSubmision submissions, Fence* fence = {});
+    void submit(VkQueue queue, std::span<QueueSubmision> submissions, Fence* fence = {});
 };
 
 class RendererVulkan : public Renderer {
-
   public:
     void init() final;
 
@@ -188,8 +317,9 @@ class RendererVulkan : public Renderer {
     void set_screen_rect(ScreenRect rect) final;
 
     void initialize_vulkan();
-    void create_swapchain();
+    // void create_swapchain();
     void initialize_imgui();
+    void initialize_resources();
 
     void update() final;
 
@@ -206,17 +336,16 @@ class RendererVulkan : public Renderer {
     void upload_instances();
     void upload_transforms();
 
-    void compile_shaders();
     void build_pipelines();
     void build_sbt();
     void create_rt_output_image();
     void build_blas();
     void build_tlas();
     void refit_tlas();
-    void initialize_ddgi();
+    void update_ddgi();
 
-    u32 get_resource_idx(int offset = 0) const { return (Engine::frame_num() + offset) % 2; }
-    RenderingPrimitives& get_primitives() { return primitives[get_resource_idx()]; }
+    Image* make_image(Image&& img);
+    Buffer* make_buffer(Buffer&& buf);
 
     u32 get_total_vertices() const {
         return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
@@ -235,33 +364,27 @@ class RendererVulkan : public Renderer {
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
     Flags<RendererFlags> flags;
-    VkRect2D screen_rect{};
-    std::unique_ptr<GpuStagingManager> staging;
+    VkRect2D screen_rect{ 1280, 768 };
+    // std::unique_ptr<GpuStagingManager> staging;
     SamplerStorage samplers;
 
     QueueScheduler scheduler_gq;
     u32 gqi, pqi, tqi1;
     VkQueue gq, pq, tq1;
-    VkSwapchainKHR swapchain{};
-    Image swapchain_images[2]{};
-    VkImageView imgui_views[2]{};
-    VkFormat swapchain_format;
-    Image output_images[2]{};
-    Image depth_buffers[2]{};
+    // VkSwapchainKHR swapchain{};
+    // Image swapchain_images[2]{};
+    // VkImageView imgui_views[2]{};
+    // VkFormat swapchain_format;
+    // Image* output_images[2]{};
+    Image* depth_buffers[2]{};
     vks::PhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     vks::PhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
-
-    std::unordered_map<ShaderModuleType, ShaderModuleWrapper> shader_modules;
-    std::unordered_map<RenderPipelineType, RenderPipelineWrapper> pipelines;
-    std::vector<RenderPipelineLayout> layouts;
-    DescriptorPoolAllocator descriptor_pool_allocator;
-    VkDescriptorPool imgui_desc_pool;
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
     HandleVector<RenderMesh> meshes;
     HandleVector<MeshMetadata> mesh_metadatas;
-    HandleVector<Image> images;
+    HandleVector<Image> textures;
     std::vector<MeshInstance> mesh_instances;
     std::unordered_map<Handle<MeshInstance>, u32> mesh_instance_idxs;
     HandleVector<RenderMaterial> materials;
@@ -276,14 +399,24 @@ class RendererVulkan : public Renderer {
     Buffer indirect_draw_buffer;
     Buffer* mesh_instance_transform_buffers[2]{};
     Buffer mesh_instance_mesh_id_buffer;
-    Buffer sbt;
+    // Buffer sbt;
     Buffer tlas_mesh_offsets_buffer;
     Buffer tlas_transform_buffer;
     Buffer blas_mesh_offsets_buffer;
     Buffer triangle_geo_inst_id_buffer;
     Buffer mesh_instances_buffer;
 
-    Image rt_image;
+    Swapchain<2> swapchain;
+    FrameData<2> frame_data;
+    ShaderStorage shaders;
+    std::deque<PipelineLayout> playouts;
+    std::deque<Pipeline> pipelines;
+    std::deque<DescriptorPool> descpools;
+    std::deque<CommandPool> cmdpools;
+    std::deque<Image> images;
+    std::deque<Buffer> buffers;
+
+    // Image rt_image;
     Buffer global_buffer;
     DDGI ddgi;
 
@@ -300,8 +433,6 @@ class RendererVulkan : public Renderer {
     std::vector<u32> upload_indices;
     std::vector<UploadImage> upload_images;
     std::vector<Handle<MeshInstance>> update_positions;
-
-    RenderingPrimitives primitives[2];
 };
 
 // clang-format off

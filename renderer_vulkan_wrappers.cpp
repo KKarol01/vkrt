@@ -96,12 +96,26 @@ bool Buffer::push_data(std::span<const std::byte> data, u32 offset) {
     if(mapped) {
         memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
     } else {
-        std::atomic_flag flag{};
+        auto cmd = get_renderer().frame_data.get().cmdpool->begin_onetime();
+        u32 iters = static_cast<u32>(std::ceilf(static_cast<f32>(data.size_bytes()) / 65536.0f));
+        for(u64 off = 0, i = 0; i < iters; ++i) {
+            const auto size = std::min(data.size_bytes() - off, 65536ull);
+            vkCmdUpdateBuffer(cmd, buffer, offset + off, size, data.data() + off);
+            off += size;
+        }
+        get_renderer().frame_data.get().cmdpool->end(cmd);
+        vks::CommandBufferSubmitInfo cmdinfo;
+        cmdinfo.commandBuffer = cmd;
+        vks::SubmitInfo2 info;
+        info.commandBufferInfoCount = 1;
+        info.pCommandBufferInfos = &cmdinfo;
+        vkQueueSubmit2(get_renderer().gq, 1, &info, nullptr);
+        /*std::atomic_flag flag{};
         if(!get_renderer().staging->send_to(GpuStagingUpload{ .dst = buffer, .src = data, .dst_offset = offset, .size_bytes = data.size_bytes() },
                                             {}, {}, &flag)) {
             return false;
         }
-        flag.wait(false);
+        flag.wait(false);*/
     }
 
     size = std::max(size, offset + data.size_bytes());
@@ -117,9 +131,25 @@ bool Buffer::resize(size_t new_size) {
     if(mapped) {
         success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
         flag.test_and_set();
+    } else if(size > 0) {
+        auto cmd = get_renderer().frame_data.get().cmdpool->begin_onetime();
+        VkBufferCopy region{ .size = size };
+        vkCmdCopyBuffer(cmd, buffer, new_buffer.buffer, 1, &region);
+        get_renderer().frame_data.get().cmdpool->end(cmd);
+        vks::CommandBufferSubmitInfo cmdinfo;
+        cmdinfo.commandBuffer = cmd;
+        vks::SubmitInfo2 info;
+        info.commandBufferInfoCount = 1;
+        info.pCommandBufferInfos = &cmdinfo;
+        vkQueueSubmit2(get_renderer().gq, 1, &info, nullptr);
+        flag.test_and_set();
+        success = true;
+        // assert(false);
+        /*success = get_renderer().staging->send_to(GpuStagingUpload{ .dst = new_buffer.buffer, .src = buffer, .size_bytes = size },
+                                                  {}, {}, &flag);*/
     } else {
-        success = get_renderer().staging->send_to(GpuStagingUpload{ .dst = new_buffer.buffer, .src = buffer, .size_bytes = size },
-                                                  {}, {}, &flag);
+        success = true;
+        flag.test_and_set();
     }
 
     if(!success) { return false; }
@@ -135,7 +165,7 @@ void Buffer::deallocate() {
 
 Image::Image(const std::string& name, u32 width, u32 height, u32 depth, u32 mips, u32 layers, VkFormat format,
              VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
+    : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
     vks::ImageCreateInfo iinfo;
 
     int dims = -1;
@@ -171,7 +201,7 @@ Image::Image(const std::string& name, u32 width, u32 height, u32 depth, u32 mips
 
 Image::Image(const std::string& name, VkImage image, u32 width, u32 height, u32 depth, u32 mips, u32 layers,
              VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth) {
+    : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
     int dims = -1;
     if(width > 1) { ++dims; }
     if(height > 1) { ++dims; }
@@ -201,15 +231,21 @@ Image& Image::operator=(Image&& other) noexcept {
     depth = other.depth;
     mips = other.mips;
     layers = other.layers;
+    usage = other.usage;
     return *this;
 }
 
 void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                              VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined,
+                              VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout) {
+    transition_layout(cmd, src_stage, src_access, dst_stage, dst_access, current_layout, dst_layout);
+}
+
+void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                              VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout src_layout,
                               VkImageLayout dst_layout) {
     vks::ImageMemoryBarrier2 imgb;
     imgb.image = image;
-    imgb.oldLayout = from_undefined ? VK_IMAGE_LAYOUT_UNDEFINED : current_layout;
+    imgb.oldLayout = src_layout;
     imgb.newLayout = dst_layout;
     imgb.srcStageMask = src_stage;
     imgb.srcAccessMask = src_access;
@@ -222,12 +258,10 @@ void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_sta
         .baseArrayLayer = 0,
         .layerCount = layers,
     };
-
     vks::DependencyInfo dep;
     dep.pImageMemoryBarriers = &imgb;
     dep.imageMemoryBarrierCount = 1;
     vkCmdPipelineBarrier2(cmd, &dep);
-
     current_layout = dst_layout;
 }
 
@@ -552,24 +586,25 @@ VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode addr
 }
 
 VkSampler SamplerStorage::get_sampler(vks::SamplerCreateInfo info) {
-    for(const auto& [c, s] : samplers) {
-        if(c.magFilter != info.magFilter) { continue; }
-        if(c.minFilter != info.minFilter) { continue; }
-        if(c.mipmapMode != info.mipmapMode) { continue; }
-        if(c.addressModeU != info.addressModeU) { continue; }
-        if(c.addressModeV != info.addressModeV) { continue; }
-        if(c.addressModeW != info.addressModeW) { continue; }
-        if(c.mipLodBias != info.mipLodBias) { continue; }
-        if(c.anisotropyEnable != info.anisotropyEnable) { continue; }
-        if(c.maxAnisotropy != info.maxAnisotropy) { continue; }
-        if(c.compareEnable != info.compareEnable) { continue; }
-        if(c.compareOp != info.compareOp) { continue; }
-        if(c.minLod != info.minLod) { continue; }
-        if(c.maxLod != info.maxLod) { continue; }
-        if(c.borderColor != info.borderColor) { continue; }
-        if(c.unnormalizedCoordinates != info.unnormalizedCoordinates) { continue; }
-        return s;
-    }
+    // That's most likely slower than just creating new
+    // for(const auto& [c, s] : samplers) {
+    //    if(c.magFilter != info.magFilter) { continue; }
+    //    if(c.minFilter != info.minFilter) { continue; }
+    //    if(c.mipmapMode != info.mipmapMode) { continue; }
+    //    if(c.addressModeU != info.addressModeU) { continue; }
+    //    if(c.addressModeV != info.addressModeV) { continue; }
+    //    if(c.addressModeW != info.addressModeW) { continue; }
+    //    if(c.mipLodBias != info.mipLodBias) { continue; }
+    //    if(c.anisotropyEnable != info.anisotropyEnable) { continue; }
+    //    if(c.maxAnisotropy != info.maxAnisotropy) { continue; }
+    //    if(c.compareEnable != info.compareEnable) { continue; }
+    //    if(c.compareOp != info.compareOp) { continue; }
+    //    if(c.minLod != info.minLod) { continue; }
+    //    if(c.maxLod != info.maxLod) { continue; }
+    //    if(c.borderColor != info.borderColor) { continue; }
+    //    if(c.unnormalizedCoordinates != info.unnormalizedCoordinates) { continue; }
+    //    return s;
+    //}
 
     VkSampler sampler;
     VK_CHECK(vkCreateSampler(get_renderer().dev, &info, nullptr, &sampler));

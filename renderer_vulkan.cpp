@@ -37,15 +37,276 @@ static float halton(int i, int b) {
         r = r + f * float(i % b);
         i = i / b;
     }
+
     return r;
+}
+
+PipelineLayout::PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, u32 push_size)
+    : sets(desc_layouts), push_size(push_size) {
+    std::array<VkDescriptorSetLayout, MAX_SETS> vksets{};
+    for(u32 i = 0; i < MAX_SETS; ++i) {
+        auto& l = sets.at(i);
+        vks::DescriptorSetLayoutCreateInfo info;
+        std::array<VkDescriptorSetLayoutBinding, DescriptorLayout::MAX_BINDINGS> vkb{};
+        std::array<VkDescriptorBindingFlags, DescriptorLayout::MAX_BINDINGS> bflags{};
+        vks::DescriptorSetLayoutBindingFlagsCreateInfo bflags_info{};
+        u32 bcount = 0;
+        for(u32 j = 0; j < DescriptorLayout::MAX_BINDINGS; ++j) {
+            DescriptorBinding& b = l.bindings[j];
+            if(b.res.index() == 0) { continue; }
+            auto deduced_type = b.get_vktype();
+            vkb[bcount++] = { .binding = j, .descriptorType = deduced_type, .descriptorCount = b.count, .stageFlags = VK_SHADER_STAGE_ALL };
+        }
+        info.bindingCount = bcount;
+        info.pBindings = vkb.data();
+        info.pNext = &bflags_info;
+        bflags_info.bindingCount = bcount;
+        bflags_info.pBindingFlags = bflags.data();
+        if(l.variable_binding != -1) {
+            bflags[l.variable_binding] |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+        }
+
+        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &info, nullptr, &vksets[i]));
+        l.layout = vksets[i];
+    }
+    VkPushConstantRange range{ .stageFlags = VK_SHADER_STAGE_ALL, .offset = 0, .size = push_size };
+    vks::PipelineLayoutCreateInfo info;
+    info.setLayoutCount = vksets.size();
+    info.pSetLayouts = vksets.data();
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &range;
+    VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &info, nullptr, &layout));
+}
+
+Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLayout* layout,
+                   std::variant<std::monostate, RasterizationSettings, RaytracingSettings> settings)
+    : layout(layout) {
+    std::vector<vks::PipelineShaderStageCreateInfo> stages;
+    for(const auto& p : shaders) {
+        vks::PipelineShaderStageCreateInfo stage;
+        stage.stage = get_renderer().shaders.metadatas.at(p).stage;
+        stage.module = p;
+        stage.pName = "main";
+        // clang-format off
+         if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) { type = Raster; }
+         else if(stage.stage == VK_SHADER_STAGE_COMPUTE_BIT) { type = Compute; }
+         else if(stage.stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { type = RT; }
+         stages.push_back(stage);
+        // clang-format on
+    }
+
+    if(type == Raster) {
+        if(settings.index() == 0) {
+            rasterization_settings = RasterizationSettings{};
+        } else {
+            rasterization_settings = *std::get_if<RasterizationSettings>(&settings);
+        }
+        /*layout(location = 0) in vec3 pos;
+        layout(location = 1) in vec3 nor;
+        layout(location = 2) in vec2 uv;*/
+
+        VkVertexInputAttributeDescription inputs[3]{
+            { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos) },
+            { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, nor) },
+            { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv) }
+        };
+        VkVertexInputBindingDescription binding{ .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX };
+        vks::PipelineVertexInputStateCreateInfo pVertexInputState;
+        pVertexInputState.vertexAttributeDescriptionCount = sizeof(inputs) / sizeof(inputs[0]);
+        pVertexInputState.pVertexAttributeDescriptions = inputs;
+        pVertexInputState.vertexBindingDescriptionCount = 1;
+        pVertexInputState.pVertexBindingDescriptions = &binding;
+
+        vks::PipelineInputAssemblyStateCreateInfo pInputAssemblyState;
+        pInputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        pInputAssemblyState.primitiveRestartEnable = false;
+
+        vks::PipelineTessellationStateCreateInfo pTessellationState;
+
+        vks::PipelineViewportStateCreateInfo pViewportState;
+
+        vks::PipelineRasterizationStateCreateInfo pRasterizationState;
+        pRasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
+        pRasterizationState.cullMode = rasterization_settings.culling;
+        pRasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        pRasterizationState.lineWidth = 1.0f;
+
+        vks::PipelineMultisampleStateCreateInfo pMultisampleState;
+        pMultisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        vks::PipelineDepthStencilStateCreateInfo pDepthStencilState;
+        pDepthStencilState.depthTestEnable = rasterization_settings.depth_test;
+        pDepthStencilState.depthWriteEnable = true;
+        pDepthStencilState.depthCompareOp = rasterization_settings.depth_op;
+        pDepthStencilState.depthBoundsTestEnable = false;
+        pDepthStencilState.stencilTestEnable = false;
+        pDepthStencilState.front = {};
+        pDepthStencilState.back = {};
+
+        vks::PipelineColorBlendStateCreateInfo pColorBlendState;
+        VkPipelineColorBlendAttachmentState blend1{ .colorWriteMask = 0b1111 /*RGBA*/ };
+        pColorBlendState.attachmentCount = 1;
+        pColorBlendState.pAttachments = &blend1;
+
+        VkDynamicState dynstates[]{
+            VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+            VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+        };
+        vks::PipelineDynamicStateCreateInfo pDynamicState;
+        pDynamicState.dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]);
+        pDynamicState.pDynamicStates = dynstates;
+
+        vks::PipelineRenderingCreateInfo pDynamicRendering;
+        pDynamicRendering.colorAttachmentCount = rasterization_settings.num_col_formats;
+        pDynamicRendering.pColorAttachmentFormats = rasterization_settings.col_formats.data();
+        pDynamicRendering.depthAttachmentFormat = rasterization_settings.dep_format;
+        // pDynamicRendering.stencilAttachmentFormat = rasterization_settings.st_format;
+
+        vks::GraphicsPipelineCreateInfo info;
+        info.stageCount = stages.size();
+        info.pStages = stages.data();
+        info.pVertexInputState = &pVertexInputState;
+        info.pInputAssemblyState = &pInputAssemblyState;
+        info.pTessellationState = &pTessellationState;
+        info.pViewportState = &pViewportState;
+        info.pRasterizationState = &pRasterizationState;
+        info.pMultisampleState = &pMultisampleState;
+        info.pDepthStencilState = &pDepthStencilState;
+        info.pColorBlendState = &pColorBlendState;
+        info.pDynamicState = &pDynamicState;
+        info.layout = layout->layout;
+        info.pNext = &pDynamicRendering;
+
+        VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
+    } else if(type == Compute) {
+        assert(stages.size() == 1);
+        vks::ComputePipelineCreateInfo info;
+        info.stage = stages.at(0);
+        info.layout = layout->layout;
+        VK_CHECK(vkCreateComputePipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
+    } else if(type == RT) {
+        if(settings.index() == 0) {
+            raytracing_settings = RaytracingSettings{};
+        } else {
+            raytracing_settings = *std::get_if<RaytracingSettings>(&settings);
+        }
+
+        std::vector<vks::RayTracingShaderGroupCreateInfoKHR> shader_groups;
+        shader_groups.reserve(stages.size());
+        std::queue<vks::RayTracingShaderGroupCreateInfoKHR*> incomplete;
+
+        for(u32 i = 0; i < stages.size(); ++i) {
+            auto& s = stages.at(i);
+            vks::RayTracingShaderGroupCreateInfoKHR to_add{};
+            to_add.generalShader = VK_SHADER_UNUSED_KHR;
+            to_add.closestHitShader = VK_SHADER_UNUSED_KHR;
+            to_add.anyHitShader = VK_SHADER_UNUSED_KHR;
+            to_add.intersectionShader = VK_SHADER_UNUSED_KHR;
+            if(s.stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR || s.stage == VK_SHADER_STAGE_MISS_BIT_KHR) {
+                to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+                to_add.generalShader = i;
+                shader_groups.push_back(to_add);
+            } else {
+                enum Add { Dont, Closest, Any, Inter };
+                Add add{ Dont };
+
+                if(!incomplete.empty()) {
+                    auto& f = incomplete.front();
+                    if(s.stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) {
+                        if(f->closestHitShader == VK_SHADER_UNUSED_KHR) {
+                            f->closestHitShader = i;
+                        } else {
+                            add = Closest;
+                        }
+                    } else if(s.stage == VK_SHADER_STAGE_ANY_HIT_BIT_KHR) {
+                        assert(false);
+                    } else if(s.stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) {
+                        assert(false);
+                    } else {
+                        assert(false);
+                    }
+
+                    if(f->type == VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR &&
+                       f->closestHitShader != VK_SHADER_UNUSED_KHR && f->anyHitShader != VK_SHADER_UNUSED_KHR) {
+                        incomplete.pop();
+                    } else if(f->type == VK_SHADER_GROUP_SHADER_INTERSECTION_KHR && f->closestHitShader != VK_SHADER_UNUSED_KHR &&
+                              f->anyHitShader != VK_SHADER_UNUSED_KHR && f->intersectionShader != VK_SHADER_UNUSED_KHR) {
+                        incomplete.pop();
+                    }
+                } else {
+                    if(s.stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) {
+                        add = Closest;
+                    } else if(s.stage == VK_SHADER_STAGE_ANY_HIT_BIT_KHR) {
+                        add = Any;
+                    } else if(s.stage == VK_SHADER_STAGE_INTERSECTION_BIT_KHR) {
+                        add = Inter;
+                    }
+                }
+
+                if(add == Closest) {
+                    to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+                    to_add.closestHitShader = i;
+                } else if(add == Any) {
+                    to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+                    to_add.anyHitShader = i;
+                } else if(add == Inter) {
+                    to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+                    to_add.intersectionShader = i;
+                }
+
+                if(add != Dont) {
+                    shader_groups.push_back(to_add);
+                    incomplete.push(&shader_groups.back());
+                }
+            }
+        }
+        vks::RayTracingPipelineCreateInfoKHR info;
+        info.stageCount = stages.size();
+        info.pStages = stages.data();
+        info.groupCount = shader_groups.size();
+        info.pGroups = shader_groups.data();
+        info.maxPipelineRayRecursionDepth = raytracing_settings.recursion_depth;
+        info.layout = layout->layout;
+        VK_CHECK(vkCreateRayTracingPipelinesKHR(get_renderer().dev, nullptr, nullptr, 1, &info, nullptr, &pipeline));
+
+        raytracing_settings.group_count = shader_groups.size();
+        const u32 handleSize = get_renderer().rt_props.shaderGroupHandleSize;
+        const u32 handleSizeAligned =
+            align_up(get_renderer().rt_props.shaderGroupHandleSize, get_renderer().rt_props.shaderGroupHandleAlignment);
+        const u32 groupCount = static_cast<u32>(shader_groups.size());
+        const u32 sbtSize = groupCount * handleSizeAligned;
+
+        std::vector<u8> shaderHandleStorage(sbtSize);
+        vkGetRayTracingShaderGroupHandlesKHR(get_renderer().dev, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
+
+        const VkBufferUsageFlags bufferUsageFlags =
+            VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        raytracing_settings.sbt = get_renderer().make_buffer(Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, false });
+        raytracing_settings.sbt->push_data(shaderHandleStorage);
+    }
+}
+
+VkPipelineBindPoint Pipeline::get_bindpoint() const {
+    switch(type) {
+    case Pipeline::Raster:
+        return VK_PIPELINE_BIND_POINT_GRAPHICS;
+    case Pipeline::Compute:
+        return VK_PIPELINE_BIND_POINT_COMPUTE;
+    case Pipeline::RT:
+        return VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
+    default:
+        assert(false);
+        return VK_PIPELINE_BIND_POINT_MAX_ENUM;
+    }
 }
 
 void RendererVulkan::init() {
     initialize_vulkan();
-    create_rt_output_image();
-    compile_shaders();
-    build_pipelines();
-    build_sbt();
+    // create_rt_output_image();
+    //  compile_shaders();
+    // build_pipelines();
+    // build_sbt();
+    initialize_resources();
     initialize_imgui();
     /*build_tlas();
     prepare_ddgi();*/
@@ -62,12 +323,13 @@ void RendererVulkan::set_screen_rect(ScreenRect rect) {
        screen_rect.extent.width != rect.width || screen_rect.extent.height != rect.height) {
         screen_rect = { .offset = { rect.offset_x, rect.offset_y }, .extent = { rect.width, rect.height } };
         flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT);
-        // const auto proj = glm::perspective(190.0f, (float)1024.0f / (float)768.0f, 0.0f, 10.0f);
-        // Engine::camera()->update_projection(proj);
+        // const auto proj = glm::perspective(190.0f, (float)1024.0f / (float)768.0f,
+        // 0.0f, 10.0f); Engine::camera()->update_projection(proj);
     }
 }
 
 void RendererVulkan::initialize_vulkan() {
+    // TODO: remove throws
     if(volkInitialize() != VK_SUCCESS) { throw std::runtime_error{ "Volk loader not found. Stopping" }; }
 
     vkb::InstanceBuilder builder;
@@ -138,6 +400,7 @@ void RendererVulkan::initialize_vulkan() {
     dev_vk12_features.bufferDeviceAddress = true;
     dev_vk12_features.hostQueryReset = true;
     dev_vk12_features.scalarBlockLayout = true;
+    dev_vk12_features.timelineSemaphore = true;
 
     vks::PhysicalDeviceAccelerationStructureFeaturesKHR acc_features;
     acc_features.accelerationStructure = true;
@@ -230,109 +493,76 @@ void RendererVulkan::initialize_vulkan() {
     allocatorCreateInfo.device = dev;
     allocatorCreateInfo.instance = instance;
     allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
-
-    VmaAllocator allocator;
-    VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &allocator));
-    vma = allocator;
-
-    staging = std::make_unique<GpuStagingManager>(tq1, tqi1, 1024 * 1024 * 64); // 64MB
-
-    global_buffer = Buffer{ "globals", 512, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-
-    vertex_buffer = Buffer{ "vertex_buffer", 0ull,
-                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                            false };
-    index_buffer = Buffer{ "index_buffer", 0ull,
-                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                           false };
-
-    for(int i = 0; i < sizeof(primitives) / sizeof(primitives[0]); ++i) {
-        RenderingPrimitives& primitives = this->primitives[i];
-        vks::SemaphoreCreateInfo sem_swapchain_info;
-        vks::FenceCreateInfo fence_info{ VkFenceCreateInfo{ .flags = VK_FENCE_CREATE_SIGNALED_BIT } };
-        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_swapchain_image));
-        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_rendering_finished));
-        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_gui_start));
-        VK_CHECK(vkCreateSemaphore(dev, &sem_swapchain_info, nullptr, &primitives.sem_copy_to_sw_img_done));
-        VK_CHECK(vkCreateFence(dev, &fence_info, nullptr, &primitives.fen_rendering_finished));
-        primitives.cmdpool = CommandPool{ gqi, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT };
-        mesh_instance_transform_buffers[i] =
-            new Buffer{ "mesh instance transforms", 0ull,
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
-    }
+    VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
 }
 
-void RendererVulkan::create_swapchain() {
-    if(swapchain) { vkDestroySwapchainKHR(dev, swapchain, nullptr); }
-
-    VkFormat view_formats[]{
-        VK_FORMAT_R8G8B8A8_SRGB,
-        VK_FORMAT_R8G8B8A8_UNORM,
-    };
-
-    VkImageFormatListCreateInfo format_list_info = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
-        .viewFormatCount = 2,
-        .pViewFormats = view_formats,
-    };
-
-    vks::SwapchainCreateInfoKHR sinfo{ VkSwapchainCreateInfoKHR{
-        .pNext = &format_list_info,
-        .flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR,
-        .surface = window_surface,
-        .minImageCount = 2,
-        .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-        .imageExtent = VkExtent2D{ Engine::window()->width, Engine::window()->height },
-        .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
-        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .clipped = true,
-    } };
-
-    VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
-    u32 num_images;
-    vkGetSwapchainImagesKHR(dev, swapchain, &num_images, nullptr);
-
-    std::vector<VkImage> images(num_images);
-    vkGetSwapchainImagesKHR(dev, swapchain, &num_images, images.data());
-
-    swapchain_format = sinfo.imageFormat;
-
-    for(int i = 0; i < 2; ++i) {
-        if(imgui_views[i]) { vkDestroyImageView(dev, imgui_views[i], nullptr); }
-        vkDestroyImageView(dev, std::exchange(swapchain_images[i].view, nullptr), nullptr);
-        swapchain_images[i].image = nullptr;
-
-        swapchain_images[i] = Image{ std::format("swapchain_image_{}", i),
-                                     images.at(i),
-                                     sinfo.imageExtent.width,
-                                     sinfo.imageExtent.height,
-                                     1u,
-                                     1u,
-                                     sinfo.imageArrayLayers,
-                                     sinfo.imageFormat,
-                                     VK_SAMPLE_COUNT_1_BIT,
-                                     sinfo.imageUsage };
-
-        vks::ImageViewCreateInfo imgui_image_view;
-        imgui_image_view.format = VK_FORMAT_R8G8B8A8_UNORM;
-        imgui_image_view.image = images[i];
-        imgui_image_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        imgui_image_view.subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .levelCount = 1,
-            .layerCount = 1,
-        };
-        VK_CHECK(vkCreateImageView(dev, &imgui_image_view, nullptr, &imgui_views[i]));
-        set_debug_name(images[i], std::format("swapchain_image_{}", i));
-        set_debug_name(imgui_views[i], std::format("imgui_image_view_{}", i));
-    }
-}
+// void RendererVulkan::create_swapchain() {
+//     if(swapchain) { vkDestroySwapchainKHR(dev, swapchain, nullptr); }
+//
+//     VkFormat view_formats[]{
+//         VK_FORMAT_R8G8B8A8_SRGB,
+//         VK_FORMAT_R8G8B8A8_UNORM,
+//     };
+//
+//     VkImageFormatListCreateInfo format_list_info = {
+//         .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
+//         .viewFormatCount = 2,
+//         .pViewFormats = view_formats,
+//     };
+//
+//     vks::SwapchainCreateInfoKHR sinfo{ VkSwapchainCreateInfoKHR{
+//         .pNext = &format_list_info,
+//         .flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR,
+//         .surface = window_surface,
+//         .minImageCount = 2,
+//         .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
+//         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+//         .imageExtent = VkExtent2D{ Engine::window()->width, Engine::window()->height },
+//         .imageArrayLayers = 1,
+//         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+//         VK_IMAGE_USAGE_SAMPLED_BIT, .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform =
+//         VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, .clipped = true,
+//     } };
+//
+//     VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
+//     u32 num_images;
+//     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, nullptr);
+//
+//     std::vector<VkImage> images(num_images);
+//     vkGetSwapchainImagesKHR(dev, swapchain, &num_images, images.data());
+//
+//     swapchain_format = sinfo.imageFormat;
+//
+//     for(int i = 0; i < 2; ++i) {
+//         if(imgui_views[i]) { vkDestroyImageView(dev, imgui_views[i], nullptr); }
+//         vkDestroyImageView(dev, std::exchange(swapchain_images[i].view, nullptr), nullptr);
+//         swapchain_images[i].image = nullptr;
+//
+//         swapchain_images[i] = Image{ std::format("swapchain_image_{}", i),
+//                                      images.at(i),
+//                                      sinfo.imageExtent.width,
+//                                      sinfo.imageExtent.height,
+//                                      1u,
+//                                      1u,
+//                                      sinfo.imageArrayLayers,
+//                                      sinfo.imageFormat,
+//                                      VK_SAMPLE_COUNT_1_BIT,
+//                                      sinfo.imageUsage };
+//
+//         vks::ImageViewCreateInfo imgui_image_view;
+//         imgui_image_view.format = VK_FORMAT_R8G8B8A8_UNORM;
+//         imgui_image_view.image = images[i];
+//         imgui_image_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+//         imgui_image_view.subresourceRange = {
+//             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+//             .levelCount = 1,
+//             .layerCount = 1,
+//         };
+//         VK_CHECK(vkCreateImageView(dev, &imgui_image_view, nullptr, &imgui_views[i]));
+//         set_debug_name(images[i], std::format("swapchain_image_{}", i));
+//         set_debug_name(imgui_views[i], std::format("imgui_image_view_{}", i));
+//     }
+// }
 
 void RendererVulkan::initialize_imgui() {
     IMGUI_CHECKVERSION();
@@ -343,13 +573,21 @@ void RendererVulkan::initialize_imgui() {
 
     VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
 
+    Image img{};
+    VkSampler samp = samplers.get_sampler();
+    PipelineLayout* imgui_layout = &playouts.emplace_back(PipelineLayout{ {
+        DescriptorLayout{ .bindings = { DescriptorBinding{ &img, 1, samp } } },
+    } });
+
+    DescriptorPool* imgui_dpool = &descpools.emplace_back(DescriptorPool{ imgui_layout, 2 });
+
     ImGui_ImplVulkan_InitInfo init_info = { 
         .Instance = instance,
         .PhysicalDevice = pdev,
         .Device = dev,
         .QueueFamily = gqi,
         .Queue = gq,
-        .DescriptorPool = imgui_desc_pool,
+        .DescriptorPool = imgui_dpool->pool,
         .MinImageCount = 2u,
         .ImageCount = 2u,
         .UseDynamicRendering = true,
@@ -364,11 +602,90 @@ void RendererVulkan::initialize_imgui() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
 
-    auto cmdimgui = get_primitives().cmdpool.begin_onetime();
+    auto cmdimgui = frame_data.get().cmdpool->begin_onetime();
     ImGui_ImplVulkan_CreateFontsTexture();
-    get_primitives().cmdpool.end(cmdimgui);
+    frame_data.get().cmdpool->end(cmdimgui);
     scheduler_gq.enqueue_wait_submit({ { cmdimgui } });
     vkQueueWaitIdle(gq);
+}
+
+void RendererVulkan::initialize_resources() {
+    // staging = std::make_unique<GpuStagingManager>(tq1, tqi1, 1024 * 1024 * 64); // 64MB
+
+    global_buffer = Buffer{ "globals", 512, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+    vertex_buffer = Buffer{ "vertex_buffer", 0ull,
+                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                            false };
+    index_buffer = Buffer{ "index_buffer", 0ull,
+                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                           false };
+
+    ddgi.radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    ddgi.irradiance_texture = make_image(Image{ "ddgi irradiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    ddgi.visibility_texture = make_image(Image{ "ddgi visibility", 1, 1, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    ddgi.probe_offsets_texture =
+        make_image(Image{ "ddgi probe offsets", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+
+    for(u32 i = 0; i < frame_data.data.size(); ++i) {
+        auto& fd = frame_data.data[i];
+        CommandPool* cmdgq1 = &cmdpools.emplace_back(CommandPool{ gqi });
+        fd.sem_swapchain = Semaphore{ dev, false };
+        fd.sem_rendering_finished = Semaphore{ dev, false };
+        fd.fen_rendering_finished = Fence{ dev, true };
+        fd.cmdpool = cmdgq1;
+        fd.constants = Buffer{ std::format("constants_{}", i), 64 * 5,
+                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        mesh_instance_transform_buffers[i] =
+            new Buffer{ "mesh instance transforms", 0ull,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+    }
+
+    auto samp_ll = samplers.get_sampler();
+    auto samp_lr = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    DescriptorLayout dl_default{ .bindings = { { { &tlas },
+                                                 { ddgi.radiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
+                                                 { ddgi.radiance_texture },
+                                                 { ddgi.irradiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
+                                                 { ddgi.visibility_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
+                                                 { ddgi.probe_offsets_texture },
+                                                 { ddgi.irradiance_texture },
+                                                 { ddgi.visibility_texture } } },
+                                 .variable_binding = 15 };
+    dl_default.bindings[15] = { &textures.data_storage(), 1024, samp_lr };
+
+    PipelineLayout* pl_default = &playouts.emplace_back(PipelineLayout{ { dl_default } });
+    Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{ { shaders.get_shader("default_unlit/default.vert.glsl"),
+                                                           shaders.get_shader("default_unlit/default.frag.glsl") },
+                                                         pl_default });
+    Pipeline* pp_ddgi_radiance = &pipelines.emplace_back(Pipeline{
+        { shaders.get_shader("rtbasic/raygen.rgen.glsl"), shaders.get_shader("rtbasic/miss.rmiss.glsl"),
+          shaders.get_shader("rtbasic/shadow.rmiss.glsl"), shaders.get_shader("rtbasic/closest_hit.rchit.glsl"),
+          shaders.get_shader("rtbasic/shadow.rchit.glsl") },
+        pl_default,
+        Pipeline::RaytracingSettings{ .recursion_depth = 2 } });
+    Pipeline* pp_ddgi_irradiance =
+        &pipelines.emplace_back(Pipeline{ { shaders.get_shader("rtbasic/probe_irradiance.comp.glsl") }, pl_default });
+    Pipeline* pp_ddgi_offsets =
+        &pipelines.emplace_back(Pipeline{ { shaders.get_shader("rtbasic/probe_offset.comp.glsl") }, pl_default });
+
+    for(u32 i = 0; i < frame_data.data.size(); ++i) {
+        auto& fd = frame_data.data[i];
+        DescriptorPool* dp = &descpools.emplace_back(DescriptorPool{ pl_default, 4 });
+        fd.descpool = dp;
+        fd.passes = RenderPasses{ .ddgi_radiance = { pp_ddgi_radiance, dp },
+                                  .ddgi_irradiance = { pp_ddgi_irradiance, dp },
+                                  .ddgi_offsets = { pp_ddgi_offsets, dp },
+                                  .default_lit = { pp_lit, dp } };
+        fd.depth_buffer =
+            make_image(Image{ std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1,
+                              VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
+    }
 }
 
 void RendererVulkan::update() {
@@ -382,89 +699,88 @@ void RendererVulkan::update() {
     if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
         // TODO: prepare ddgi on scene update
-        if(Engine::frame_num() < 100) { initialize_ddgi(); }
+        if(Engine::frame_num() < 100) { update_ddgi(); }
     }
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
     // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         vkQueueWaitIdle(gq);
-        create_swapchain();
+        swapchain.create();
+        // create_swapchain();
     }
     if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) {
         vkQueueWaitIdle(gq);
-        for(int i = 0; i < 2; ++i) {
-            output_images[i] =
-                Image{ std::format("render_output_image{}", i),
-                       screen_rect.extent.width,
-                       screen_rect.extent.height,
-                       1u,
-                       1u,
-                       1u,
-                       VK_FORMAT_R8G8B8A8_SRGB,
-                       VK_SAMPLE_COUNT_1_BIT,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
+        for(int i = 0; i < frame_data.data.size(); ++i) {
+            /* output_images[i] =
+                 Image{ std::format("render_output_image{}", i),
+                        screen_rect.extent.width,
+                        screen_rect.extent.height,
+                        1u,
+                        1u,
+                        1u,
+                        VK_FORMAT_R8G8B8A8_SRGB,
+                        VK_SAMPLE_COUNT_1_BIT,
+                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };*/
 
-            depth_buffers[i] = Image{
-                std::format("depth_buffer_{}", i), screen_rect.extent.width, screen_rect.extent.height, 1, 1, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+            *frame_data.data[i].depth_buffer = Image{
+                std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1, VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
             };
         }
     }
 
+    auto& fd = frame_data.get();
     const auto frame_num = Engine::frame_num();
-    const auto resource_idx = frame_num % 2;
+    vkWaitForFences(dev, 1, &fd.fen_rendering_finished.fence, true, 16'000'000);
+    fd.cmdpool->reset();
+    fd.descpool->reset();
 
-    RenderingPrimitives& primitives = this->primitives[resource_idx];
-
-    vkWaitForFences(dev, 1, &primitives.fen_rendering_finished, true, 16'000'000);
-    primitives.cmdpool.reset();
-
-    u32 sw_img_idx;
+    u32 swapchain_index{};
+    Image* swapchain_image{};
     {
-        const auto ms16 = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds{ 16 }).count();
-        const auto acquire_ret = vkAcquireNextImageKHR(dev, swapchain, ms16, primitives.sem_swapchain_image, nullptr, &sw_img_idx);
+        VkResult acquire_ret;
+        swapchain_index = swapchain.acquire(&acquire_ret, 16'000'000, fd.sem_swapchain.semaphore);
         if(acquire_ret != VK_SUCCESS) {
             ENG_WARN("Acquire image failed with: {}", static_cast<u32>(acquire_ret));
             return;
         }
+        swapchain_image = &swapchain.images[swapchain_index];
     }
 
     if(Engine::frame_num() > 0) {
-        for(u32 i = 0; i < ddgi.debug_probes.size(); ++i) {
-            auto h = Handle<Entity>{ *ddgi.debug_probes.at(i) };
-            auto& t = Engine::ec()->get<cmps::Transform>(h);
-            const auto tv =
-                ddgi.probe_start +
-                ddgi.probe_walk * glm::vec3{ i % ddgi.probe_counts.x, (i / ddgi.probe_counts.x) % ddgi.probe_counts.y,
-                                             i / (ddgi.probe_counts.x * ddgi.probe_counts.y) } +
-                ((glm::vec3*)ddgi.debug_probe_offsets_buffer.mapped)[i];
-            t.transform = glm::translate(glm::mat4{ 1.0f }, tv) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f });
-            Engine::scene()->update_transform(h);
-        }
+        // for(u32 i = 0; i < ddgi.debug_probes.size(); ++i) {
+        //     auto h = Handle<Entity>{ *ddgi.debug_probes.at(i) };
+        //     auto& t = Engine::ec()->get<cmps::Transform>(h);
+        //     const auto tv =
+        //         ddgi.probe_start +
+        //         ddgi.probe_walk * glm::vec3{ i % ddgi.probe_counts.x, (i / ddgi.probe_counts.x) % ddgi.probe_counts.y,
+        //                                      i / (ddgi.probe_counts.x * ddgi.probe_counts.y) } +
+        //         ((glm::vec3*)ddgi.debug_probe_offsets_buffer.mapped)[i];
+        //     t.transform = glm::translate(glm::mat4{ 1.0f }, tv) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f });
+        //     Engine::scene()->update_transform(h);
+        // }
     }
 
-    vkResetFences(dev, 1, &primitives.fen_rendering_finished);
+    vkResetFences(dev, 1, &frame_data.get().fen_rendering_finished.fence);
 
-    if(!primitives.desc_pool) { primitives.desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2); }
-    descriptor_pool_allocator.reset_pool(primitives.desc_pool);
+    /*if(!primitives.desc_pool) { primitives.desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2); }
+    descriptor_pool_allocator.reset_pool(primitives.desc_pool);*/
 
-    VkDescriptorSet frame_desc_set =
-        descriptor_pool_allocator.allocate_set(primitives.desc_pool, layouts.at(0).descriptor_layouts.at(0), images.size());
+    // VkDescriptorSet frame_desc_set = fd.passes.default_lit.sets[0];
+    // static VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
 
-    static VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-
-    DescriptorSetWriter per_frame_set_writer;
-    per_frame_set_writer.write(0, 0, tlas)
-        .write(1, 0, rt_image.view, {}, VK_IMAGE_LAYOUT_GENERAL)
-        .write(2, 0, ddgi.radiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .write(3, 0, ddgi.irradiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .write(4, 0, ddgi.visibility_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
-        .write(5, 0, ddgi.probe_offsets_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
-        .write(6, 0, ddgi.irradiance_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
-        .write(7, 0, ddgi.visibility_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL);
-    for(u32 i = 0; i < images.size(); ++i) {
-        per_frame_set_writer.write(15, i, images.at(i).view, linear_sampler, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
-    }
-    per_frame_set_writer.update(frame_desc_set, layouts.at(0), 0);
+    // DescriptorSetWriter per_frame_set_writer;
+    // per_frame_set_writer.write(0, 0, tlas)
+    //     .write(1, 0, rt_image.view, {}, VK_IMAGE_LAYOUT_GENERAL)
+    //     .write(2, 0, ddgi.radiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
+    //     .write(3, 0, ddgi.irradiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
+    //     .write(4, 0, ddgi.visibility_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
+    //     .write(5, 0, ddgi.probe_offsets_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
+    //     .write(6, 0, ddgi.irradiance_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
+    //     .write(7, 0, ddgi.visibility_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL);
+    // for(u32 i = 0; i < textures.size(); ++i) {
+    //     per_frame_set_writer.write(15, i, textures.at(i).view, linear_sampler, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    // }
+    // per_frame_set_writer.update(frame_desc_set, layouts.at(0), 0);
 
     const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0);
     const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0);
@@ -474,7 +790,7 @@ void RendererVulkan::update() {
     {
         float globals[16 * 4 + 12];
         const auto view = Engine::camera()->get_view();
-        const auto proj = glm::perspective(glm::radians(45.0f), 1024.0f/768.0f, 0.01f, 20.0f); // Engine::camera()->get_projection();
+        const auto proj = glm::perspective(glm::radians(45.0f), 1024.0f / 768.0f, 0.01f, 20.0f); // Engine::camera()->get_projection();
         const auto inv_view = glm::inverse(view);
         const auto inv_proj = glm::inverse(proj);
         memcpy(&globals[0], &view, sizeof(glm::mat4));
@@ -485,10 +801,19 @@ void RendererVulkan::update() {
         global_buffer.push_data(globals, sizeof(globals), 0ull);
     }
 
-    ImageStatefulBarrier output_image_barrier{ output_images[sw_img_idx] };
-    ImageStatefulBarrier swapchain_image_barrier{ swapchain_images[sw_img_idx] };
+    // ImageStatefulBarrier output_image_barrier{ *swapchain_image };
+    ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image };
+    ImageStatefulBarrier depth_buffer_barrier{ *fd.depth_buffer };
+    ImageStatefulBarrier radiance_image_barrier{ *ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                 VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
+    ImageStatefulBarrier irradiance_image_barrier{ *ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+    ImageStatefulBarrier visibility_image_barrier{ *ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+    ImageStatefulBarrier offset_image_barrier{ *ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
+                                               VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
 
-    auto cmd = get_primitives().cmdpool.begin_onetime();
+    auto cmd = fd.cmdpool->begin_onetime();
 
     if(flags.test_clear(RendererFlags::DIRTY_TRANSFORMS_BIT)) {
         for(const auto& e : update_positions) {
@@ -502,68 +827,32 @@ void RendererVulkan::update() {
             }
         }
         update_positions.clear();
-
-        /* TODO:
-            for later: put appropriate barriers for transform buffer[0] (it's being used by the previous frame)
-            either that or use second buffer if it matches the first one (how to make it match efficiently)
-        */
-
-        /*if(mesh_instance_transform_buffers[1]->capacity < mesh_instance_transform_buffers[0]->size) {
-            mesh_instance_transform_buffers[1]->deallocate();
-            delete mesh_instance_transform_buffers[1];
-            mesh_instance_transform_buffers[1] =
-                new Buffer("mesh instance transforms", mesh_instance_transform_buffers[0]->size,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
-        }
-        std::atomic_flag f1;
-        staging->send_to(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
-                                           .src = mesh_instance_transform_buffers[0]->buffer,
-                                           .size_bytes = mesh_instance_transform_buffers[0]->size },
-                         {}, {}, &f1);
-
-        std::vector<GpuStagingUpload> uploads;
-        uploads.reserve(update_positions.size());
-        for(const auto& e : update_positions) {
-            uploads.push_back(GpuStagingUpload{ .dst = mesh_instance_transform_buffers[1]->buffer,
-                                                .src = std::as_bytes(std::span{ &e.transform, sizeof(e.transform) }),
-                                                .dst_offset = e.idx * sizeof(e.transform),
-                                                .size_bytes = sizeof(e.transform) });
-        }
-        f1.wait(false);
-        staging->send_to(uploads, {}, {}, &f1);
-        update_positions.clear();
-        mesh_instance_transform_buffers[1]->size = mesh_instance_transform_buffers[0]->size;
-        std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
-        f1.wait(false);*/
     }
 
+    swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     if(tlas && ddgi.buffer.buffer) {
         ddgi.buffer.push_data(&frame_num, sizeof(u32), offsetof(DDGI::GPULayout, frame_num));
 
-        swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-        output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-        ImageStatefulBarrier depth_buffer_barrier{ depth_buffers[resource_idx], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                                                   VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
-        depth_buffer_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        /*output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);*/
 
         const u32 handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
 
         vks::StridedDeviceAddressRegionKHR raygen_sbt;
-        raygen_sbt.deviceAddress = sbt.bda;
+        raygen_sbt.deviceAddress = fd.passes.ddgi_radiance.pipeline->raytracing_settings.sbt->bda;
         raygen_sbt.size = handle_size_aligned * 1;
         raygen_sbt.stride = handle_size_aligned;
 
         vks::StridedDeviceAddressRegionKHR miss_sbt;
-        miss_sbt.deviceAddress = sbt.bda;
+        miss_sbt.deviceAddress = fd.passes.ddgi_radiance.pipeline->raytracing_settings.sbt->bda;
         miss_sbt.size = handle_size_aligned * 2;
         miss_sbt.stride = handle_size_aligned;
 
         vks::StridedDeviceAddressRegionKHR hit_sbt;
-        hit_sbt.deviceAddress = sbt.bda;
+        hit_sbt.deviceAddress = fd.passes.ddgi_radiance.pipeline->raytracing_settings.sbt->bda;
         hit_sbt.size = handle_size_aligned * 2;
         hit_sbt.stride = handle_size_aligned;
 
@@ -572,62 +861,64 @@ void RendererVulkan::update() {
         const auto* window = Engine::window();
         u32 mode = 0;
         // clang-format off
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_geo_inst_id_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL, 8 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_geo_inst_id_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 8 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
         // clang-format on
 
-        ImageStatefulBarrier radiance_image_barrier{ ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                     VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
-        ImageStatefulBarrier irradiance_image_barrier{ ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-        ImageStatefulBarrier visibility_image_barrier{ ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-        ImageStatefulBarrier offset_image_barrier{ ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+        fd.passes.ddgi_radiance.update_desc_sets();
+        fd.passes.ddgi_radiance.bind(cmd);
+        fd.passes.ddgi_radiance.bind_desc_sets(cmd);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        /*vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                                pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &frame_desc_set, 0, nullptr);
+                                pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &frame_desc_set, 0, nullptr);*/
 
         // radiance pass
         mode = 1;
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        fd.passes.ddgi_radiance.push_constant(cmd, 9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        /*vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
+                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);*/
         vkCmdTraceRaysKHR(cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
                           ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
 
         radiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RenderPipelineType::DDGI_PROBE_UPDATE).pipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &frame_desc_set, 0, nullptr);
+        // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RenderPipelineType::DDGI_PROBE_UPDATE).pipeline);
+        /*vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, 0, 1, &frame_desc_set, 0, nullptr);*/
+        fd.passes.ddgi_irradiance.update_desc_sets();
+        fd.passes.ddgi_irradiance.bind(cmd);
+        fd.passes.ddgi_irradiance.bind_desc_sets(cmd);
 
         // irradiance pass, only need radiance texture
         mode = 0;
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdDispatch(cmd, std::ceilf((float)ddgi.irradiance_texture.width / 8u),
-                      std::ceilf((float)ddgi.irradiance_texture.height / 8u), 1u);
+        /*vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
+                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);*/
+        fd.passes.ddgi_irradiance.push_constant(cmd, 9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        vkCmdDispatch(cmd, std::ceilf((float)ddgi.irradiance_texture->width / 8u),
+                      std::ceilf((float)ddgi.irradiance_texture->height / 8u), 1u);
 
         // visibility pass, only need radiance texture
         mode = 1;
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
-                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdDispatch(cmd, std::ceilf((float)ddgi.visibility_texture.width / 8u),
-                      std::ceilf((float)ddgi.visibility_texture.height / 8u), 1u);
+        fd.passes.ddgi_irradiance.push_constant(cmd, 9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
+        /*vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST).layout, VK_SHADER_STAGE_ALL,
+                           9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);*/
+        vkCmdDispatch(cmd, std::ceilf((float)ddgi.visibility_texture->width / 8u),
+                      std::ceilf((float)ddgi.visibility_texture->height / 8u), 1u);
 
         // probe offset pass, only need radiance texture to complete
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RenderPipelineType::DDGI_PROBE_OFFSET).pipeline);
-        vkCmdDispatch(cmd, std::ceilf((float)ddgi.probe_offsets_texture.width / 8.0f),
-                      std::ceilf((float)ddgi.probe_offsets_texture.height / 8.0f), 1u);
+        fd.passes.ddgi_offsets.bind(cmd);
+        /*vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.at(RenderPipelineType::DDGI_PROBE_OFFSET).pipeline);*/
+        vkCmdDispatch(cmd, std::ceilf((float)ddgi.probe_offsets_texture->width / 8.0f),
+                      std::ceilf((float)ddgi.probe_offsets_texture->height / 8.0f), 1u);
 
         irradiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
         visibility_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
@@ -638,7 +929,7 @@ void RendererVulkan::update() {
     {
         VkRenderingAttachmentInfo r_col_att_1{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = output_images[resource_idx].view,
+            .imageView = swapchain_image->view,
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -648,7 +939,7 @@ void RendererVulkan::update() {
 
         VkRenderingAttachmentInfo r_dep_att{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = depth_buffers[resource_idx].view,
+            .imageView = fd.depth_buffer->view,
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -657,7 +948,7 @@ void RendererVulkan::update() {
 
         VkRenderingInfo rendering_info{
             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = { .extent = screen_rect.extent },
+            .renderArea = { .extent = { .width = Engine::window()->width, .height = Engine::window()->height } },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = r_col_atts,
@@ -668,36 +959,39 @@ void RendererVulkan::update() {
         vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
         vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).pipeline);
+        fd.passes.default_lit.update_desc_sets();
+        fd.passes.default_lit.bind(cmd);
+        fd.passes.default_lit.bind_desc_sets(cmd);
+        /*vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, 0, 1, &frame_desc_set, 0, nullptr);
+                                pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, 0, 1, &frame_desc_set, 0, nullptr);*/
 
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { screen_rect.extent.width, screen_rect.extent.height } };
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->width, Engine::window()->height } };
         VkViewport r_view_1{ .x = 0.0f,
-                             .y = static_cast<float>(screen_rect.extent.height),
-                             .width = static_cast<float>(screen_rect.extent.width),
-                             .height = -static_cast<float>(screen_rect.extent.height),
+                             .y = static_cast<float>(Engine::window()->height),
+                             .width = static_cast<float>(Engine::window()->width),
+                             .height = -static_cast<float>(Engine::window()->height),
                              .minDepth = 0.0f,
                              .maxDepth = 1.0f };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
         vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
-        vkCmdPushConstants(cmd, pipelines.at(RenderPipelineType::DEFAULT_UNLIT).layout, VK_SHADER_STAGE_ALL,
-                           3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
+        // clang-format off
+        fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
+        fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
+        fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
+        // clang-format on
         vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
                                       indirect_draw_buffer.buffer, 0ull, max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cmd);
 
-        output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+        /*output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);*/
 
-        ImDrawData* im_draw_data = ImGui::GetDrawData();
+        // TODO: IMPLEMENT IMGUI
+        // assert(false);
+        /*ImDrawData* im_draw_data = ImGui::GetDrawData();
         if(im_draw_data) {
             VkRenderingAttachmentInfo i_col_atts[]{
                 VkRenderingAttachmentInfo{
@@ -711,23 +1005,42 @@ void RendererVulkan::update() {
             };
             VkRenderingInfo imgui_rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width, Engine::window()->height } },
-                .layerCount = 1,
-                .colorAttachmentCount = 1,
-                .pColorAttachments = i_col_atts,
+                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width,
+        Engine::window()->height } }, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = i_col_atts,
             };
             vkCmdBeginRendering(cmd, &imgui_rendering_info);
             vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
             vkCmdSetViewport(cmd, 0, 1, &r_view_1);
             ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
             vkCmdEndRendering(cmd);
-        }
+        }*/
     }
 
     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
-    get_primitives().cmdpool.end(cmd);
+    fd.cmdpool->end(cmd);
 
-    scheduler_gq.enqueue_wait_submit(
+    // TODO: Implement waiting for timeline semaphore and presenting
+    std::pair<Semaphore*, u32> waits[]{ { &fd.sem_swapchain, 0 } };
+    VkPipelineStageFlags2 wait_stages[]{ VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT };
+    std::pair<Semaphore*, u32> signals[]{ { &fd.sem_rendering_finished, 0 } };
+    VkPipelineStageFlags2 signal_stages[]{ VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT };
+    QueueSubmit gqs{};
+    QueueSubmision gqsubs{ .cmds = { &cmd, 1 },
+                           .wait_sems = { waits, 1 },
+                           .signal_sems = { signals, 1 },
+                           .wait_stages = { wait_stages, 1 },
+                           .signal_stages = { signal_stages, 1 } };
+    gqs.submit(gq, { &gqsubs, 1 }, &fd.fen_rendering_finished);
+
+    vks::PresentInfoKHR pinfo;
+    pinfo.swapchainCount = 1;
+    pinfo.pSwapchains = &swapchain.swapchain;
+    pinfo.pImageIndices = &swapchain_index;
+    pinfo.waitSemaphoreCount = 1;
+    pinfo.pWaitSemaphores = &fd.sem_rendering_finished.semaphore;
+    vkQueuePresentKHR(gq, &pinfo);
+
+    /*scheduler_gq.enqueue_wait_submit(
         RecordingSubmitInfo{
             .buffers = { cmd },
             .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
@@ -741,13 +1054,13 @@ void RendererVulkan::update() {
     pinfo.pImageIndices = &sw_img_idx;
     pinfo.waitSemaphoreCount = 1;
     pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
-    vkQueuePresentKHR(gq, &pinfo);
+    vkQueuePresentKHR(gq, &pinfo);*/
 }
 
 Handle<RenderTexture> RendererVulkan::batch_texture(const RenderTexture& batch) {
     Handle<Image> handle =
-        images.insert(Image{ batch.name, batch.width, batch.height, batch.depth, batch.mips, 1u, VK_FORMAT_R8G8B8A8_SRGB,
-                             VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        textures.insert(Image{ batch.name, batch.width, batch.height, batch.depth, batch.mips, 1u, VK_FORMAT_R8G8B8A8_SRGB,
+                               VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
     upload_images.push_back(UploadImage{ handle, { batch.data.begin(), batch.data.end() } });
     return Handle<RenderTexture>{ *handle };
 }
@@ -828,92 +1141,125 @@ void RendererVulkan::update_transform(Handle<MeshInstance> handle) {
 }
 
 void RendererVulkan::upload_model_textures() {
-    VkSemaphore acquire_sem = create_semaphore();
-    VkSemaphore release_sem = create_semaphore();
-    VkSemaphore transfer_done_sem = create_semaphore();
-    VkCommandBuffer acquire_cmd = get_primitives().cmdpool.begin_onetime();
-    VkCommandBuffer release_cmd = get_primitives().cmdpool.begin_onetime();
-    VkCommandBuffer cmd = get_primitives().cmdpool.begin_onetime();
-    std::vector<GpuStagingUpload> uploads;
-    uploads.reserve(upload_images.size());
-
+    std::vector<Buffer> bs;
+    bs.reserve(upload_images.size());
+    auto cmd = frame_data.get().cmdpool->begin_onetime();
     for(auto& tex : upload_images) {
-        Image* img = images.try_find(tex.image_handle);
-        {
-            VkImageMemoryBarrier img_barrier{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_NONE,
-                .dstAccessMask = VK_ACCESS_NONE,
-                .oldLayout = img->current_layout,
-                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .srcQueueFamilyIndex = gqi,
-                .dstQueueFamilyIndex = tqi1,
-                .image = img->image,
-                .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
-            };
-            vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0,
-                                 {}, 1, &img_barrier);
-        }
-        {
-            VkImageMemoryBarrier img_barrier{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_NONE,
-                .dstAccessMask = VK_ACCESS_NONE,
-                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .srcQueueFamilyIndex = tqi1,
-                .dstQueueFamilyIndex = gqi,
-                .image = img->image,
-                .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
-            };
-            vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0,
-                                 {}, 1, &img_barrier);
-        }
-        {
-            VkImageMemoryBarrier img_barrier{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_NONE,
-                .dstAccessMask = VK_ACCESS_NONE,
-                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                .srcQueueFamilyIndex = gqi,
-                .dstQueueFamilyIndex = gqi,
-                .image = img->image,
-                .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
-            };
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
-        }
-        uploads.push_back(GpuStagingUpload{ .src_queue_idx = gqi,
-                                            .dst = img,
-                                            .src = std::span{ tex.rgba_data.begin(), tex.rgba_data.end() },
-                                            .dst_offset = VkOffset3D{},
-                                            .dst_img_rel_sem = release_sem,
-                                            .size_bytes = tex.rgba_data.size() });
+        auto& b = bs.emplace_back(Buffer{ "staging buffer", tex.rgba_data.size(),
+                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, true });
+        b.push_data(tex.rgba_data, 0);
+        Image& img = textures.at(tex.image_handle);
+        img.transition_layout(cmd, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkBufferImageCopy copy{
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
+            .imageOffset = {},
+            .imageExtent = { img.width, img.height, 1 },
+        };
+        vkCmdCopyBufferToImage(cmd, b.buffer, img.image, img.current_layout, 1, &copy);
+        img.transition_layout(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     }
-    get_primitives().cmdpool.end(release_cmd);
-    get_primitives().cmdpool.end(acquire_cmd);
-    get_primitives().cmdpool.end(cmd);
-
-    scheduler_gq.enqueue_wait_submit({ .buffers = { release_cmd },
-                                       .signals = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
-
-    std::atomic_flag flag;
-    staging->send_to(std::span{ uploads.data(), uploads.size() }, release_sem, transfer_done_sem, &flag);
-    flag.wait(false);
-
-    vks::FenceCreateInfo fence_info{};
-    VkFence fence;
-    VK_CHECK(vkCreateFence(dev, &fence_info, {}, &fence));
-    scheduler_gq.enqueue_wait_submit({ .buffers = { acquire_cmd },
-                                       .waits = { { transfer_done_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } },
-                                       .signals = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
-    scheduler_gq.enqueue_wait_submit({ .buffers = { cmd }, .waits = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } }, fence);
-    VK_CHECK(vkWaitForFences(dev, 1, &fence, true, 1'000'000));
-    vkDestroyFence(dev, fence, {});
-    destroy_semaphore(release_sem);
-    destroy_semaphore(acquire_sem);
-    destroy_semaphore(transfer_done_sem);
+    frame_data.get().cmdpool->end(cmd);
+    vks::CommandBufferSubmitInfo cmdinfo;
+    cmdinfo.commandBuffer = cmd;
+    vks::SubmitInfo2 info;
+    info.commandBufferInfoCount = 1;
+    info.pCommandBufferInfos = &cmdinfo;
+    Fence f{ dev, false };
+    VK_CHECK(vkQueueSubmit2(gq, 1, &info, f.fence));
+    vkWaitForFences(dev, 1, &f.fence, true, ~0u);
+    for(auto& b : bs) {
+        b.deallocate();
+    }
     upload_images.clear();
+
+    // VkSemaphore acquire_sem = create_semaphore();
+    // VkSemaphore release_sem = create_semaphore();
+    // VkSemaphore transfer_done_sem = create_semaphore();
+    // VkCommandBuffer acquire_cmd = get_primitives().cmdpool.begin_onetime();
+    // VkCommandBuffer release_cmd = get_primitives().cmdpool.begin_onetime();
+    // VkCommandBuffer cmd = get_primitives().cmdpool.begin_onetime();
+    // std::vector<GpuStagingUpload> uploads;
+    // uploads.reserve(upload_images.size());
+
+    // for(auto& tex : upload_images) {
+    //     Image* img = &textures.at(tex.image_handle);
+    //     {
+    //         VkImageMemoryBarrier img_barrier{
+    //             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //             .srcAccessMask = VK_ACCESS_NONE,
+    //             .dstAccessMask = VK_ACCESS_NONE,
+    //             .oldLayout = img->current_layout,
+    //             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //             .srcQueueFamilyIndex = gqi,
+    //             .dstQueueFamilyIndex = tqi1,
+    //             .image = img->image,
+    //             .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+    //         };
+    //         vkCmdPipelineBarrier(release_cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_NONE, {}, 0, {}, 0,
+    //                              {}, 1, &img_barrier);
+    //     }
+    //     {
+    //         VkImageMemoryBarrier img_barrier{
+    //             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //             .srcAccessMask = VK_ACCESS_NONE,
+    //             .dstAccessMask = VK_ACCESS_NONE,
+    //             .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //             .srcQueueFamilyIndex = tqi1,
+    //             .dstQueueFamilyIndex = gqi,
+    //             .image = img->image,
+    //             .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+    //         };
+    //         vkCmdPipelineBarrier(acquire_cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0,
+    //                              {}, 1, &img_barrier);
+    //     }
+    //     {
+    //         VkImageMemoryBarrier img_barrier{
+    //             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    //             .srcAccessMask = VK_ACCESS_NONE,
+    //             .dstAccessMask = VK_ACCESS_NONE,
+    //             .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //             .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+    //             .srcQueueFamilyIndex = gqi,
+    //             .dstQueueFamilyIndex = gqi,
+    //             .image = img->image,
+    //             .subresourceRange = { .aspectMask = img->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
+    //         };
+    //         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, 0, {}, 0, {}, 1, &img_barrier);
+    //     }
+    //     uploads.push_back(GpuStagingUpload{ .src_queue_idx = gqi,
+    //                                         .dst = img,
+    //                                         .src = std::span{ tex.rgba_data.begin(), tex.rgba_data.end() },
+    //                                         .dst_offset = VkOffset3D{},
+    //                                         .dst_img_rel_sem = release_sem,
+    //                                         .size_bytes = tex.rgba_data.size() });
+    // }
+    // get_primitives().cmdpool.end(release_cmd);
+    // get_primitives().cmdpool.end(acquire_cmd);
+    // get_primitives().cmdpool.end(cmd);
+
+    // scheduler_gq.enqueue_wait_submit({ .buffers = { release_cmd },
+    //                                    .signals = { { release_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
+
+    // std::atomic_flag flag;
+    // staging->send_to(std::span{ uploads.data(), uploads.size() }, release_sem, transfer_done_sem, &flag);
+    // flag.wait(false);
+
+    // vks::FenceCreateInfo fence_info{};
+    // VkFence fence;
+    // VK_CHECK(vkCreateFence(dev, &fence_info, {}, &fence));
+    // scheduler_gq.enqueue_wait_submit({ .buffers = { acquire_cmd },
+    //                                    .waits = { { transfer_done_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } },
+    //                                    .signals = { { acquire_sem, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } });
+    // scheduler_gq.enqueue_wait_submit({ .buffers = { cmd }, .waits = { { acquire_sem,
+    // VK_PIPELINE_STAGE_ALL_COMMANDS_BIT } } }, fence); VK_CHECK(vkWaitForFences(dev, 1, &fence, true, 1'000'000));
+    // vkDestroyFence(dev, fence, {}); destroy_semaphore(release_sem); destroy_semaphore(acquire_sem);
+    // destroy_semaphore(transfer_done_sem); upload_images.clear();
 }
 
 void RendererVulkan::upload_staged_models() {
@@ -949,12 +1295,13 @@ void RendererVulkan::upload_instances() {
         const RenderMaterial& mat = materials.at(Handle<RenderMaterial>{ *mi.material });
         gpu_mesh_instances.push_back(GPUMeshInstance{ .vertex_offset = geom.vertex_offset + mb.vertex_offset,
                                                       .index_offset = geom.index_offset + mb.index_offset,
-                                                      .color_texture_idx = (u32)images.find_idx(Handle<Image>{ *mat.color_texture }) });
+                                                      .color_texture_idx =
+                                                          (u32)textures.find_idx(Handle<Image>{ *mat.color_texture }) });
         if(i == 0 || mesh_instances.at(i - 1).mesh != mi.mesh) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = mb.index_count,
                                                                       .instanceCount = 1,
                                                                       .firstIndex = geom.index_offset + mb.index_offset,
-                                                                      .vertexOffset = (i32)(geom.vertex_offset + mb.vertex_offset),
+                                                                      .vertexOffset = (s32)(geom.vertex_offset + mb.vertex_offset),
                                                                       .firstInstance = i });
         } else {
             ++gpu_draw_commands.back().instanceCount;
@@ -987,187 +1334,114 @@ void RendererVulkan::upload_transforms() {
     std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
 }
 
-void RendererVulkan::compile_shaders() {
-    shaderc::Compiler c;
-
-    static const auto read_file = [](const std::filesystem::path& path) {
-        std::string path_str = path.string();
-        std::string path_to_includes = path.parent_path().string();
-
-        char error[256] = {};
-        char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
-
-        if(!parsed_file) {
-            ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
-            return std::string{};
-        }
-
-        std::string parsed_file_str{ parsed_file };
-        free(parsed_file);
-        return parsed_file_str;
-    };
-
-    std::filesystem::path files[]{
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "closest_hit.rchit.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rchit.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "miss.rmiss.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "shadow.rmiss.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "raygen.rgen.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_irradiance.comp",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "rtbasic" / "probe_offset.comp",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "default_unlit" / "default.vert.glsl",
-        std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" / "default_unlit" / "default.frag.glsl",
-    };
-    shaderc_shader_kind kinds[]{
-        shaderc_closesthit_shader, shaderc_closesthit_shader, shaderc_miss_shader,
-        shaderc_miss_shader,       shaderc_raygen_shader,     shaderc_compute_shader,
-        shaderc_compute_shader,    shaderc_vertex_shader,     shaderc_fragment_shader,
-    };
-    VkShaderStageFlagBits stages[]{
-        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
-        VK_SHADER_STAGE_MISS_BIT_KHR,        VK_SHADER_STAGE_RAYGEN_BIT_KHR,      VK_SHADER_STAGE_COMPUTE_BIT,
-        VK_SHADER_STAGE_COMPUTE_BIT,         VK_SHADER_STAGE_VERTEX_BIT,          VK_SHADER_STAGE_FRAGMENT_BIT,
-
-    };
-    ShaderModuleType types[]{
-        ShaderModuleType::RT_BASIC_CLOSEST_HIT,
-        ShaderModuleType::RT_BASIC_SHADOW_HIT,
-        ShaderModuleType::RT_BASIC_MISS,
-        ShaderModuleType::RT_BASIC_SHADOW_MISS,
-        ShaderModuleType::RT_BASIC_RAYGEN,
-        ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE,
-        ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE,
-        ShaderModuleType::DEFAULT_UNLIT_VERTEX,
-        ShaderModuleType::DEFAULT_UNLIT_FRAGMENT,
-    };
-    std::vector<std::vector<u32>> compiled_modules;
-
-    shaderc::CompileOptions options;
-    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
-    options.SetTargetSpirv(shaderc_spirv_version_1_6);
-    options.SetGenerateDebugInfo();
-    // options.AddMacroDefinition("ASDF");
-    for(int i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
-        std::string file_str = read_file(files[i]);
-        auto res = c.CompileGlslToSpv(file_str, kinds[i], files[i].filename().string().c_str(), options);
-
-        if(res.GetCompilationStatus() != shaderc_compilation_status_success) {
-            ENG_WARN("Could not compile shader : {}, because : \"{}\"", files[i].string(), res.GetErrorMessage());
-        }
-
-        compiled_modules.emplace_back(res.begin(), res.end());
-
-        vks::ShaderModuleCreateInfo module_info;
-        module_info.codeSize = compiled_modules.back().size() * sizeof(compiled_modules.back()[0]);
-        module_info.pCode = compiled_modules.back().data();
-        vkCreateShaderModule(dev, &module_info, nullptr, &shader_modules[types[i]].module);
-        shader_modules[types[i]].stage = stages[i];
-    }
-}
-
 void RendererVulkan::build_pipelines() {
-    RenderPipelineLayout default_layout = RendererPipelineLayoutBuilder{}
-                                              .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-                                              .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                              .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                              .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                              .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                              .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                              .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                              .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                              .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                                              .add_variable_descriptor_count(0)
-                                              .set_push_constants(128)
-                                              .build();
-    RenderPipelineLayout imgui_layout =
-        RendererPipelineLayoutBuilder{}
-            .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {}, VK_SHADER_STAGE_FRAGMENT_BIT)
-            .set_push_constants(16, VK_SHADER_STAGE_VERTEX_BIT)
-            .build();
+    // This function should not be called
+    assert(false);
 
-    pipelines[RenderPipelineType::DEFAULT_UNLIT] = RenderPipelineWrapper{
-        .pipeline =
-            RendererGraphicsPipelineBuilder{}
-                .set_vertex_binding(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX)
-                .set_vertex_input(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos))
-                .set_vertex_input(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, nor))
-                .set_vertex_input(2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv))
-                .add_color_attachment_format(VK_FORMAT_R8G8B8A8_SRGB)
-                .set_depth_attachment_format(VK_FORMAT_D32_SFLOAT)
-                .set_stage(VK_SHADER_STAGE_VERTEX_BIT, shader_modules.at(ShaderModuleType::DEFAULT_UNLIT_VERTEX).module)
-                .set_stage(VK_SHADER_STAGE_FRAGMENT_BIT, shader_modules.at(ShaderModuleType::DEFAULT_UNLIT_FRAGMENT).module)
-                .set_depth_test(true, VK_COMPARE_OP_LESS)
-                .set_layout(default_layout.layout)
-                .set_dynamic_state(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)
-                .set_dynamic_state(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)
-                .build(),
-        .layout = default_layout.layout,
-    };
+    /* RenderPipelineLayout default_layout = RendererPipelineLayoutBuilder{}
+                                               .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                                               .add_set_binding(0, 1, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                               .add_set_binding(0, 2, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                               .add_set_binding(0, 3, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                               .add_set_binding(0, 4, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                               .add_set_binding(0, 5, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                               .add_set_binding(0, 6, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                               .add_set_binding(0, 7, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                                               .add_set_binding(0, 15, 1024, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                                               .add_variable_descriptor_count(0)
+                                               .set_push_constants(128)
+                                               .build();
+     RenderPipelineLayout imgui_layout =
+         RendererPipelineLayoutBuilder{}
+             .add_set_binding(0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, {}, VK_SHADER_STAGE_FRAGMENT_BIT)
+             .set_push_constants(16, VK_SHADER_STAGE_VERTEX_BIT)
+             .build();
 
-    pipelines[RenderPipelineType::DDGI_PROBE_RAYCAST] = RenderPipelineWrapper{
-        .pipeline = RendererRaytracingPipelineBuilder{}
-                        .set_layout(default_layout.layout)
-                        .add_raygen_stage(shader_modules.at(ShaderModuleType::RT_BASIC_RAYGEN).module)
-                        .add_miss_stage(shader_modules.at(ShaderModuleType::RT_BASIC_MISS).module)
-                        .add_miss_stage(shader_modules.at(ShaderModuleType::RT_BASIC_SHADOW_MISS).module)
-                        .add_closest_hit_stage(shader_modules.at(ShaderModuleType::RT_BASIC_CLOSEST_HIT).module)
-                        .add_closest_hit_stage(shader_modules.at(ShaderModuleType::RT_BASIC_SHADOW_HIT).module)
-                        .set_recursion_depth(2)
-                        .build(),
-        .layout = default_layout.layout,
-        .rt_shader_group_count = 5
-    };
+     pipelines[RenderPipelineType::DEFAULT_UNLIT] = RenderPipelineWrapper{
+         .pipeline =
+             RendererGraphicsPipelineBuilder{}
+                 .set_vertex_binding(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX)
+                 .set_vertex_input(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos))
+                 .set_vertex_input(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, nor))
+                 .set_vertex_input(2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv))
+                 .add_color_attachment_format(VK_FORMAT_R8G8B8A8_SRGB)
+                 .set_depth_attachment_format(VK_FORMAT_D32_SFLOAT)
+                 .set_stage(VK_SHADER_STAGE_VERTEX_BIT, shader_modules.at(ShaderModuleType::DEFAULT_UNLIT_VERTEX).module)
+                 .set_stage(VK_SHADER_STAGE_FRAGMENT_BIT, shader_modules.at(ShaderModuleType::DEFAULT_UNLIT_FRAGMENT).module)
+                 .set_depth_test(true, VK_COMPARE_OP_LESS)
+                 .set_layout(default_layout.layout)
+                 .set_dynamic_state(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)
+                 .set_dynamic_state(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)
+                 .build(),
+         .layout = default_layout.layout,
+     };
 
-    pipelines[RenderPipelineType::DDGI_PROBE_UPDATE] = RenderPipelineWrapper{
-        .pipeline = RendererComputePipelineBuilder{}
-                        .set_layout(default_layout.layout)
-                        .set_stage(shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE).module)
-                        .build(),
-        .layout = default_layout.layout,
-    };
+     pipelines[RenderPipelineType::DDGI_PROBE_RAYCAST] = RenderPipelineWrapper{
+         .pipeline = RendererRaytracingPipelineBuilder{}
+                         .set_layout(default_layout.layout)
+                         .add_raygen_stage(shader_modules.at(ShaderModuleType::RT_BASIC_RAYGEN).module)
+                         .add_miss_stage(shader_modules.at(ShaderModuleType::RT_BASIC_MISS).module)
+                         .add_miss_stage(shader_modules.at(ShaderModuleType::RT_BASIC_SHADOW_MISS).module)
+                         .add_closest_hit_stage(shader_modules.at(ShaderModuleType::RT_BASIC_CLOSEST_HIT).module)
+                         .add_closest_hit_stage(shader_modules.at(ShaderModuleType::RT_BASIC_SHADOW_HIT).module)
+                         .set_recursion_depth(2)
+                         .build(),
+         .layout = default_layout.layout,
+         .rt_shader_group_count = 5
+     };
 
-    pipelines[RenderPipelineType::DDGI_PROBE_OFFSET] = RenderPipelineWrapper{
-        .pipeline = RendererComputePipelineBuilder{}
-                        .set_layout(default_layout.layout)
-                        .set_stage(shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE).module)
-                        .build(),
-        .layout = default_layout.layout,
-    };
+     pipelines[RenderPipelineType::DDGI_PROBE_UPDATE] = RenderPipelineWrapper{
+         .pipeline = RendererComputePipelineBuilder{}
+                         .set_layout(default_layout.layout)
+                         .set_stage(shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_IRRADIANCE_COMPUTE).module)
+                         .build(),
+         .layout = default_layout.layout,
+     };
 
-    layouts.push_back(default_layout);
-    layouts.push_back(imgui_layout);
+     pipelines[RenderPipelineType::DDGI_PROBE_OFFSET] = RenderPipelineWrapper{
+         .pipeline = RendererComputePipelineBuilder{}
+                         .set_layout(default_layout.layout)
+                         .set_stage(shader_modules.at(ShaderModuleType::RT_BASIC_PROBE_PROBE_OFFSET_COMPUTE).module)
+                         .build(),
+         .layout = default_layout.layout,
+     };
 
-    imgui_desc_pool =
-        descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 16, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
+     layouts.push_back(default_layout);
+     layouts.push_back(imgui_layout);
+
+     imgui_desc_pool =
+         descriptor_pool_allocator.allocate_pool(imgui_layout, 0, 16, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);*/
 }
 
 void RendererVulkan::build_sbt() {
-    const RenderPipelineWrapper& pipeline = pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST);
-    const u32 handleSize = rt_props.shaderGroupHandleSize;
-    const u32 handleSizeAligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
-    const u32 groupCount = static_cast<u32>(pipeline.rt_shader_group_count);
-    const u32 sbtSize = groupCount * handleSizeAligned;
+    assert(false);
+    // const RenderPipelineWrapper& pipeline = pipelines.at(RenderPipelineType::DDGI_PROBE_RAYCAST);
+    // const u32 handleSize = rt_props.shaderGroupHandleSize;
+    // const u32 handleSizeAligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
+    // const u32 groupCount = static_cast<u32>(pipeline.rt_shader_group_count);
+    // const u32 sbtSize = groupCount * handleSizeAligned;
 
-    std::vector<uint8_t> shaderHandleStorage(sbtSize);
-    vkGetRayTracingShaderGroupHandlesKHR(dev, pipeline.pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
+    // std::vector<uint8_t> shaderHandleStorage(sbtSize);
+    // vkGetRayTracingShaderGroupHandlesKHR(dev, pipeline.pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
 
-    const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    sbt = Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, false };
-    sbt.push_data(shaderHandleStorage);
+    // const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+    // VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; sbt = Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, false };
+    // sbt.push_data(shaderHandleStorage);
 }
 
 void RendererVulkan::create_rt_output_image() {
-    const auto* window = Engine::window();
-    rt_image = Image{
-        "rt_image", window->width, window->height, 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
-    };
+    assert(false);
+    /*   const auto* window = Engine::window();
+       rt_image = Image{
+           "rt_image", window->width, window->height, 1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+       };
 
-    auto cmd = get_primitives().cmdpool.begin_onetime();
-    rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                               VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    get_primitives().cmdpool.end(cmd);
-    scheduler_gq.enqueue_wait_submit({ { cmd } });
-    vkQueueWaitIdle(gq);
+       auto cmd = get_primitives().cmdpool.begin_onetime();
+       rt_image.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                  VK_ACCESS_2_SHADER_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
+       get_primitives().cmdpool.end(cmd);
+       scheduler_gq.enqueue_wait_submit({ { cmd } });
+       vkQueueWaitIdle(gq);*/
 }
 
 void RendererVulkan::build_blas() {
@@ -1250,9 +1524,9 @@ void RendererVulkan::build_blas() {
         poffsets.at(i) = &ranges.at(i);
     }
 
-    auto cmd = get_primitives().cmdpool.begin_onetime();
+    auto cmd = frame_data.get().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, blas_geo_build_infos.size(), blas_geo_build_infos.data(), poffsets.data());
-    get_primitives().cmdpool.end(cmd);
+    frame_data.get().cmdpool->end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
@@ -1357,9 +1631,9 @@ void RendererVulkan::build_tlas() {
     build_range.transformOffset = 0;
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    auto cmd = get_primitives().cmdpool.begin_onetime();
+    auto cmd = frame_data.get().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    get_primitives().cmdpool.end(cmd);
+    frame_data.get().cmdpool->end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
     vkDeviceWaitIdle(dev);
 }
@@ -1427,7 +1701,9 @@ void RendererVulkan::refit_tlas() {
 #endif
 }
 
-void RendererVulkan::initialize_ddgi() {
+void RendererVulkan::update_ddgi() {
+    // assert(false && "no allocating new pointers for images");
+
     if(!ddgi.debug_probes.empty()) { return; }
 
     BoundingBox scene_aabb;
@@ -1443,7 +1719,7 @@ void RendererVulkan::initialize_ddgi() {
     }
 
     ddgi.probe_dims = scene_aabb;
-    const auto dim_scaling = glm::vec3{0.95, 0.8, 0.95};
+    const auto dim_scaling = glm::vec3{ 0.95, 0.8, 0.95 };
     ddgi.probe_dims.min *= dim_scaling;
     ddgi.probe_dims.max *= dim_scaling;
     ddgi.probe_distance = 1.3;
@@ -1451,57 +1727,57 @@ void RendererVulkan::initialize_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
-    //ddgi.probe_counts = {16, 4, 8};
+    // ddgi.probe_counts = {16, 4, 8};
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
-    //ddgi.probe_walk = {ddgi.probe_walk.x, 4.0f, ddgi.probe_walk.z};
+    // ddgi.probe_walk = {ddgi.probe_walk.x, 4.0f, ddgi.probe_walk.z};
 
     const u32 irradiance_texture_width = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
     const u32 irradiance_texture_height = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.z;
     const u32 visibility_texture_width = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
     const u32 visibility_texture_height = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.z;
 
-    ddgi.radiance_texture = Image{ "ddgi radiance",
-                                   ddgi.rays_per_probe,
-                                   ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z,
-                                   1,
-                                   1,
-                                   1,
-                                   VK_FORMAT_R16G16B16A16_SFLOAT,
-                                   VK_SAMPLE_COUNT_1_BIT,
-                                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-    ddgi.irradiance_texture = Image{
+    *ddgi.radiance_texture = Image{ "ddgi radiance",
+                                    ddgi.rays_per_probe,
+                                    ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z,
+                                    1,
+                                    1,
+                                    1,
+                                    VK_FORMAT_R16G16B16A16_SFLOAT,
+                                    VK_SAMPLE_COUNT_1_BIT,
+                                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
+    *ddgi.irradiance_texture = Image{
         "ddgi irradiance", irradiance_texture_width, irradiance_texture_height, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
-    ddgi.visibility_texture = Image{
+    *ddgi.visibility_texture = Image{
         "ddgi visibility", visibility_texture_width, visibility_texture_height, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
     };
 
-    ddgi.probe_offsets_texture = Image{ "ddgi probe offsets",
-                                        ddgi.probe_counts.x * ddgi.probe_counts.y,
-                                        ddgi.probe_counts.z,
-                                        1,
-                                        1,
-                                        1,
-                                        VK_FORMAT_R16G16B16A16_SFLOAT,
-                                        VK_SAMPLE_COUNT_1_BIT,
-                                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
+    *ddgi.probe_offsets_texture = Image{ "ddgi probe offsets",
+                                         ddgi.probe_counts.x * ddgi.probe_counts.y,
+                                         ddgi.probe_counts.z,
+                                         1,
+                                         1,
+                                         1,
+                                         VK_FORMAT_R16G16B16A16_SFLOAT,
+                                         VK_SAMPLE_COUNT_1_BIT,
+                                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
 
-    auto cmd = get_primitives().cmdpool.begin_onetime();
-    ddgi.radiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
-                                            VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    ddgi.irradiance_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
-                                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    ddgi.visibility_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
-                                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    ddgi.probe_offsets_texture.transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
-                                                 VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true, VK_IMAGE_LAYOUT_GENERAL);
-    get_primitives().cmdpool.end(cmd);
+    auto cmd = frame_data.get().cmdpool->begin_onetime();
+    ddgi.radiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                             VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.irradiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                               VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.visibility_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                               VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+    ddgi.probe_offsets_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+    frame_data.get().cmdpool->end(cmd);
     scheduler_gq.enqueue_wait_submit({ { cmd } });
 
     ddgi.buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI::GPULayout),
@@ -1511,10 +1787,10 @@ void RendererVulkan::initialize_ddgi() {
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
 
     DDGI::GPULayout ddgi_gpu_settings{
-        .radiance_tex_size = glm::ivec2{ ddgi.radiance_texture.width, ddgi.radiance_texture.height },
-        .irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture.width, ddgi.irradiance_texture.height },
-        .visibility_tex_size = glm::ivec2{ ddgi.visibility_texture.width, ddgi.visibility_texture.height },
-        .probe_offset_tex_size = glm::ivec2{ ddgi.probe_offsets_texture.width, ddgi.probe_offsets_texture.height },
+        .radiance_tex_size = glm::ivec2{ ddgi.radiance_texture->width, ddgi.radiance_texture->height },
+        .irradiance_tex_size = glm::ivec2{ ddgi.irradiance_texture->width, ddgi.irradiance_texture->height },
+        .visibility_tex_size = glm::ivec2{ ddgi.visibility_texture->width, ddgi.visibility_texture->height },
+        .probe_offset_tex_size = glm::ivec2{ ddgi.probe_offsets_texture->width, ddgi.probe_offsets_texture->height },
         .probe_start = ddgi.probe_dims.min,
         .probe_counts = ddgi.probe_counts,
         .probe_walk = ddgi.probe_walk,
@@ -1547,6 +1823,10 @@ void RendererVulkan::initialize_ddgi() {
     vkQueueWaitIdle(gq);
 }
 
+Image* RendererVulkan::make_image(Image&& img) { return &images.emplace_back(std::move(img)); }
+
+Buffer* RendererVulkan::make_buffer(Buffer&& buf) { return &buffers.emplace_back(std::move(buf)); }
+
 VkSemaphore RendererVulkan::create_semaphore() {
     VkSemaphore sem;
     vks::SemaphoreCreateInfo info;
@@ -1555,3 +1835,403 @@ VkSemaphore RendererVulkan::create_semaphore() {
 }
 
 void RendererVulkan::destroy_semaphore(VkSemaphore sem) { vkDestroySemaphore(dev, sem, {}); }
+
+VkShaderModule ShaderStorage::get_shader(const std::filesystem::path& path) {
+    for(const auto& e : metadatas) {
+        if(e.second.path == path) { return e.first; }
+    }
+    auto s = compile_shader(path);
+    auto t = get_stage(path);
+    metadatas[s] = ShaderMetadata{ .path = path, .stage = t };
+    return s;
+}
+
+VkShaderStageFlagBits ShaderStorage::get_stage(std::filesystem::path path) const {
+    if(path.extension() == ".glsl") { path.replace_extension(); }
+    const auto ext = path.extension();
+    if(ext == ".vert") { return VK_SHADER_STAGE_VERTEX_BIT; }
+    if(ext == ".frag") { return VK_SHADER_STAGE_FRAGMENT_BIT; }
+    if(ext == ".rgen") { return VK_SHADER_STAGE_RAYGEN_BIT_KHR; }
+    if(ext == ".rchit") { return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR; }
+    if(ext == ".rmiss") { return VK_SHADER_STAGE_MISS_BIT_KHR; }
+    if(ext == ".comp") { return VK_SHADER_STAGE_COMPUTE_BIT; }
+    assert(false);
+    return VK_SHADER_STAGE_VERTEX_BIT;
+}
+
+VkShaderModule ShaderStorage::compile_shader(std::filesystem::path path) {
+    static const auto read_file = [](const std::filesystem::path& path) {
+        std::string path_str = path.string();
+        std::string path_to_includes = path.parent_path().string();
+
+        char error[256] = {};
+        char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
+
+        if(!parsed_file) {
+            ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
+            return std::string{};
+        }
+
+        std::string parsed_file_str{ parsed_file };
+        free(parsed_file);
+        return parsed_file_str;
+    };
+    const auto stage = get_stage(path);
+    const auto kind = [stage] {
+        if(stage == VK_SHADER_STAGE_VERTEX_BIT) { return shaderc_vertex_shader; }
+        if(stage == VK_SHADER_STAGE_FRAGMENT_BIT) { return shaderc_fragment_shader; }
+        if(stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { return shaderc_raygen_shader; }
+        if(stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) { return shaderc_closesthit_shader; }
+        if(stage == VK_SHADER_STAGE_MISS_BIT_KHR) { return shaderc_miss_shader; }
+        if(stage == VK_SHADER_STAGE_COMPUTE_BIT) { return shaderc_compute_shader; }
+        assert(false);
+        return shaderc_vertex_shader;
+    }();
+
+    path = ENGINE_BASE_ASSET_PATH / ("shaders" / path);
+
+    shaderc::CompileOptions options;
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+    options.SetTargetSpirv(shaderc_spirv_version_1_6);
+    options.SetGenerateDebugInfo();
+    // options.AddMacroDefinition("ASDF");
+    shaderc::Compiler c;
+    std::string file_str = read_file(path);
+    const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
+    if(res.GetCompilationStatus() != shaderc_compilation_status_success) {
+        ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
+        return nullptr;
+    }
+
+    vks::ShaderModuleCreateInfo module_info;
+    module_info.codeSize = (res.end() - res.begin()) * sizeof(u32);
+    module_info.pCode = res.begin();
+    VkShaderModule mod;
+    VK_CHECK(vkCreateShaderModule(get_renderer().dev, &module_info, nullptr, &mod));
+    return mod;
+}
+
+Fence::Fence(VkDevice dev, bool signaled) {
+    vks::FenceCreateInfo info;
+    if(signaled) { info.flags |= VK_FENCE_CREATE_SIGNALED_BIT; }
+    VK_CHECK(vkCreateFence(dev, &info, nullptr, &fence));
+}
+
+Fence::Fence(Fence&& f) noexcept { *this = std::move(f); }
+
+Fence& Fence::operator=(Fence&& f) noexcept {
+    fence = std::exchange(f.fence, nullptr);
+    return *this;
+}
+
+Fence::~Fence() noexcept { vkDestroyFence(get_renderer().dev, fence, nullptr); }
+
+template <size_t frames> void Swapchain<frames>::create() {
+    Window& window = *Engine::window();
+
+    vks::SwapchainCreateInfoKHR sinfo;
+    // sinfo.pNext = &format_list_info;
+    // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
+    sinfo.surface = get_renderer().window_surface;
+    sinfo.minImageCount = frames;
+    sinfo.imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
+    sinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    sinfo.imageExtent = VkExtent2D{ window.width, window.height };
+    sinfo.imageArrayLayers = 1;
+    sinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    sinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    sinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    sinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    sinfo.clipped = true;
+
+    if(swapchain) { vkDestroySwapchainKHR(get_renderer().dev, swapchain, nullptr); }
+    VK_CHECK(vkCreateSwapchainKHR(get_renderer().dev, &sinfo, nullptr, &swapchain));
+    std::array<VkImage, frames> imgs;
+    u32 pframes = frames;
+    VK_CHECK(vkGetSwapchainImagesKHR(get_renderer().dev, swapchain, &pframes, imgs.data()));
+
+    for(u32 i = 0; i < frames; ++i) {
+        images[i] = Image{ std::format("swapchain_image_{}", i),
+                           imgs[i],
+                           sinfo.imageExtent.width,
+                           sinfo.imageExtent.height,
+                           1,
+                           1,
+                           sinfo.imageArrayLayers,
+                           sinfo.imageFormat,
+                           VK_SAMPLE_COUNT_1_BIT,
+                           sinfo.imageUsage };
+    }
+}
+
+template <size_t frames>
+u32 Swapchain<frames>::acquire(VkResult* res, u64 timeout, VkSemaphore semaphore, VkFence fence) {
+    u32 idx;
+    auto result = vkAcquireNextImageKHR(get_renderer().dev, swapchain, timeout, semaphore, fence, &idx);
+    if(res) { *res = result; }
+    return idx;
+}
+
+DescriptorPool::DescriptorPool(const PipelineLayout* layout, u32 max_sets) {
+    std::unordered_map<VkDescriptorType, u32> idxs;
+    std::vector<VkDescriptorPoolSize> sizes;
+    for(u32 i = 0; i < layout->MAX_SETS; ++i) {
+        auto& dl = layout->sets[i];
+        for(u32 j = 0; j < dl.MAX_BINDINGS; ++j) {
+            auto type = dl.bindings[j].get_vktype();
+            if(type == VK_DESCRIPTOR_TYPE_MAX_ENUM) { continue; }
+            u32 idx;
+            if(!idxs.contains(type)) {
+                idxs[type] = sizes.size();
+                sizes.push_back({});
+            }
+            idx = idxs.at(type);
+            sizes[idx].type = type;
+            sizes[idx].descriptorCount += dl.bindings[j].count * max_sets;
+        }
+    }
+    vks::DescriptorPoolCreateInfo info;
+    info.maxSets = max_sets;
+    info.poolSizeCount = sizes.size();
+    info.pPoolSizes = sizes.data();
+    VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &info, nullptr, &pool));
+}
+
+void DescriptorPool::allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, u32 count, std::span<u32> variable_count) {
+    vks::DescriptorSetVariableDescriptorCountAllocateInfo var_info;
+    var_info.descriptorSetCount = variable_count.size();
+    var_info.pDescriptorCounts = variable_count.data();
+    vks::DescriptorSetAllocateInfo info;
+    info.descriptorPool = pool;
+    info.descriptorSetCount = count;
+    info.pSetLayouts = layouts;
+    info.pNext = &var_info;
+    std::vector<VkDescriptorSet> _sets(count);
+    VK_CHECK(vkAllocateDescriptorSets(get_renderer().dev, &info, _sets.data()));
+    for(u32 i = 0; i < count; ++i) {
+        this->sets.push_back(_sets.at(i));
+        sets[i] = &this->sets.back();
+    }
+}
+
+void DescriptorPool::reset() {
+    VK_CHECK(vkResetDescriptorPool(get_renderer().dev, pool, {}));
+    for(auto& e : sets) {
+        e = nullptr;
+    }
+}
+
+RenderPass::RenderPass(const Pipeline* pipeline, DescriptorPool* desc_pool) : pipeline(pipeline), desc_pool(desc_pool) {
+    assert(pipeline);
+    assert(desc_pool);
+}
+
+void RenderPass::bind(VkCommandBuffer cmd) { vkCmdBindPipeline(cmd, pipeline->get_bindpoint(), pipeline->pipeline); }
+
+void RenderPass::bind_desc_sets(VkCommandBuffer cmd) {
+    for(u32 i = 0; i < sets.size(); ++i) {
+        if(sets[i]) {
+            vkCmdBindDescriptorSets(cmd, pipeline->get_bindpoint(), pipeline->layout->layout, i, 1, sets[i], 0, nullptr);
+        }
+    }
+}
+
+void RenderPass::update_desc_sets() {
+    if(!pipeline || !desc_pool) {
+        ENG_WARN("No pipeline or descriptor pool set!");
+        return;
+    }
+    for(u32 i = 0; i < sets.size(); ++i) {
+        auto& set = sets.at(i);
+        auto& desc_layout = pipeline->layout->sets[i];
+
+        if(desc_layout.is_empty()) { continue; }
+
+        if(!set || !*set) {
+            u32 variable_count = [&desc_layout] {
+                if(desc_layout.variable_binding == -1) { return 0ull; }
+                return std::visit(Visitor{ [](const std::vector<Image>* imgs) { return imgs->size(); },
+                                           [](auto&&) {
+                                               assert(false);
+                                               return 0ull;
+                                           } },
+                                  desc_layout.bindings.at(desc_layout.variable_binding).res);
+            }();
+            desc_pool->allocate(&desc_layout.layout, &set, 1, { &variable_count, 1 });
+            assert(*set);
+        }
+
+        u32 write_count = 0;
+        std::array<vks::WriteDescriptorSet, DescriptorLayout::MAX_BINDINGS> writes{};
+        std::array<std::variant<VkDescriptorBufferInfo, VkDescriptorImageInfo, vks::WriteDescriptorSetAccelerationStructureKHR>, DescriptorLayout::MAX_BINDINGS> write_infos{};
+        std::vector<VkDescriptorImageInfo> variable_writes;
+
+        for(u32 j = 0; j < desc_layout.bindings.size(); ++j) {
+            const auto& binding = desc_layout.bindings.at(j);
+            const auto vktype = binding.get_vktype();
+            if(vktype == VK_DESCRIPTOR_TYPE_MAX_ENUM) { continue; }
+            auto& write = writes.at(write_count);
+            auto& write_info = write_infos.at(write_count);
+            write.dstSet = *set;
+            write.dstBinding = j;
+            write.dstArrayElement = 0;
+            write.descriptorCount = binding.count; // TODO: writes is too small if binding count is > 1
+            write.descriptorType = vktype;
+            std::visit(Visitor{
+                           [&write_info](std::monostate) { assert(false); },
+                           [&write, &write_info](const Buffer* e) {
+                               write.pBufferInfo = &write_info.emplace<VkDescriptorBufferInfo>(VkDescriptorBufferInfo{
+                                   .buffer = e->buffer, .offset = 0, .range = VK_WHOLE_SIZE });
+                           },
+                           [this, &write, &write_info, &binding](const Image* e) {
+                               write.pImageInfo = &write_info.emplace<VkDescriptorImageInfo>(VkDescriptorImageInfo{
+                                   .sampler = binding.sampler ? *binding.sampler : nullptr,
+                                   .imageView = e->view,
+                                   .imageLayout = binding.layout });
+                           },
+                           [&write, &write_info](VkAccelerationStructureKHR* e) {
+                               vks::WriteDescriptorSetAccelerationStructureKHR i{};
+                               i.accelerationStructureCount = 1;
+                               i.pAccelerationStructures = e;
+                               write.pNext = &write_info.emplace<vks::WriteDescriptorSetAccelerationStructureKHR>(i);
+                           },
+                           [&write, &write_info, &variable_writes, &binding](const std::vector<Image>* e) {
+                               variable_writes.reserve(e->size());
+                               for(auto& img : *e) {
+                                   variable_writes.push_back(VkDescriptorImageInfo{
+                                       .sampler = *binding.sampler, .imageView = img.view, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+                               }
+                               write.descriptorCount = e->size();
+                               write.pImageInfo = variable_writes.data();
+                           },
+                       },
+                       binding.res);
+            ++write_count;
+        }
+        vkUpdateDescriptorSets(get_renderer().dev, write_count, writes.data(), 0, nullptr);
+    }
+}
+
+void RenderPass::push_constant(VkCommandBuffer cmd, u32 offset, u32 size, const void* value) {
+    vkCmdPushConstants(cmd, pipeline->layout->layout, VK_SHADER_STAGE_ALL, offset, size, value);
+}
+
+Semaphore::Semaphore(VkDevice dev, bool timeline) {
+    vks::SemaphoreCreateInfo info;
+    vks::SemaphoreTypeCreateInfo tinfo;
+    tinfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    if(timeline) { info.pNext = &tinfo; }
+    VK_CHECK(vkCreateSemaphore(dev, &info, nullptr, &semaphore));
+}
+
+Semaphore::Semaphore(Semaphore&& o) noexcept { *this = std::move(o); }
+
+Semaphore& Semaphore::operator=(Semaphore&& o) noexcept {
+    semaphore = std::exchange(o.semaphore, nullptr);
+    return *this;
+}
+
+Semaphore::~Semaphore() noexcept {
+    vkDestroySemaphore(get_renderer().dev, semaphore, nullptr);
+    semaphore = nullptr;
+}
+
+DescriptorBinding::DescriptorBinding(Resource res, u32 count, VkImageLayout layout, std::optional<VkSampler> sampler)
+    : res(res), layout(layout), sampler(sampler), count(count) {}
+
+DescriptorBinding::DescriptorBinding(Resource res, u32 count, std::optional<VkSampler> sampler)
+    : DescriptorBinding(res, count, deduce_layout(res, sampler), sampler) {}
+
+DescriptorBinding::DescriptorBinding(Resource res) : DescriptorBinding(res, 1) {}
+
+VkDescriptorType DescriptorBinding::get_vktype() const {
+    if(res.index() != 0 && sampler) {
+        if(*sampler == nullptr) {
+            return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        } else {
+            return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        }
+    }
+
+    return std::visit(Visitor{
+                          [](std::monostate) { return VK_DESCRIPTOR_TYPE_MAX_ENUM; },
+                          [](const Buffer* e) {
+                              if(e->usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
+                                  return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                              } else if(e->usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) {
+                                  return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                              } else {
+                                  assert(false);
+                                  return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                              }
+                          },
+                          [](const Image* e) {
+                              if(e->usage & VK_IMAGE_USAGE_STORAGE_BIT) { return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; }
+                              assert(false);
+                              return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                          },
+                          [](VkAccelerationStructureKHR*) { return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR; },
+                          [](const std::vector<Image>* e) {
+                              assert(false);
+                              return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                          },
+                      },
+                      res);
+}
+
+VkImageLayout DescriptorBinding::deduce_layout(const Resource& res, const std::optional<VkSampler>& sampler) {
+    return std::visit(Visitor{ [&sampler](const Image* e) {
+                                  if(sampler) { return VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL; }
+                                  if(e->usage & VK_IMAGE_USAGE_STORAGE_BIT) { return VK_IMAGE_LAYOUT_GENERAL; }
+                                  return VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+                              },
+                               [&sampler](const std::vector<Image>*) {
+                                   if(sampler) { return VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL; }
+                                   return VK_IMAGE_LAYOUT_GENERAL;
+                               },
+                               [](auto&&) { return VK_IMAGE_LAYOUT_MAX_ENUM; } },
+                      res);
+}
+
+bool DescriptorLayout::is_empty() const { return bindings[0].res.index() == 0; }
+
+void QueueSubmit::submit(VkQueue queue, QueueSubmision submissions, Fence* fence) {
+    submit(queue, std::span{ &submissions, 1 }, fence);
+}
+
+void QueueSubmit::submit(VkQueue queue, std::span<QueueSubmision> submissions, Fence* fence) {
+    std::vector<vks::SubmitInfo2> subs(submissions.size());
+    std::vector<std::vector<vks::CommandBufferSubmitInfo>> cmdsubs(submissions.size());
+    std::vector<std::vector<vks::SemaphoreSubmitInfo>> waitsubs(submissions.size());
+    std::vector<std::vector<vks::SemaphoreSubmitInfo>> signalsubs(submissions.size());
+    for(u32 i = 0; i < submissions.size(); ++i) {
+        auto& sub = subs[i];
+        auto& isub = submissions[i];
+        sub.commandBufferInfoCount = isub.cmds.size();
+        cmdsubs[i].resize(sub.commandBufferInfoCount);
+        for(u32 j = 0; j < sub.commandBufferInfoCount; ++j) {
+            cmdsubs[i][j].commandBuffer = isub.cmds[j];
+        }
+        sub.pCommandBufferInfos = cmdsubs[i].data();
+
+        sub.waitSemaphoreInfoCount = isub.wait_sems.size();
+        waitsubs[i].resize(sub.waitSemaphoreInfoCount);
+        for(u32 j = 0; j < sub.waitSemaphoreInfoCount; ++j) {
+            waitsubs[i][j].semaphore = isub.wait_sems[j].first->semaphore;
+            waitsubs[i][j].value = isub.wait_sems[j].second;
+            waitsubs[i][j].stageMask = isub.wait_stages[j];
+        }
+        sub.pWaitSemaphoreInfos = waitsubs[i].data();
+
+        sub.signalSemaphoreInfoCount = isub.signal_sems.size();
+        signalsubs[i].resize(sub.signalSemaphoreInfoCount);
+        for(u32 j = 0; j < sub.signalSemaphoreInfoCount; ++j) {
+            signalsubs[i][j].semaphore = isub.signal_sems[j].first->semaphore;
+            signalsubs[i][j].value = isub.signal_sems[j].second;
+            signalsubs[i][j].stageMask = isub.signal_stages[j];
+        }
+        sub.pSignalSemaphoreInfos = signalsubs[i].data();
+    }
+
+    vkQueueSubmit2(queue, subs.size(), subs.data(), fence ? fence->fence : nullptr);
+}

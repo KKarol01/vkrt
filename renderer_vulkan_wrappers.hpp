@@ -34,8 +34,8 @@ class Buffer {
 
     std::string name;
     VkBufferUsageFlags usage{};
-    u64 size{ 0 };
-    u64 capacity{ 0 };
+    u64 size{};
+    u64 capacity{};
     u32 alignment{ 1 };
     VkBuffer buffer{};
     VmaAllocation alloc{};
@@ -54,7 +54,9 @@ class Image {
     Image& operator=(Image&& other) noexcept;
 
     void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, bool from_undefined, VkImageLayout dst_layout);
+                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout);
+    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout src_layout, VkImageLayout dst_layout);
 
     void _deduce_aspect(VkImageUsageFlags usage);
     void _create_default_view(int dims, VkImageUsageFlags usage);
@@ -65,11 +67,12 @@ class Image {
     VkFormat format{};
     VkImageAspectFlags aspect{};
     VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
-    u32 width{ 0 };
-    u32 height{ 0 };
-    u32 depth{ 0 };
-    u32 mips{ 0 };
-    u32 layers{ 0 };
+    VkImageUsageFlags usage{};
+    u32 width{};
+    u32 height{};
+    u32 depth{};
+    u32 mips{};
+    u32 layers{};
 };
 
 struct RenderPipelineLayout {
