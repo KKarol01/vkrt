@@ -295,7 +295,7 @@ template <size_t frames> struct FrameData {
     std::array<Data, frames> data{};
 };
 
-struct QueueSubmision {
+struct QueueSubmission {
     std::span<VkCommandBuffer> cmds{};
     std::span<std::pair<Semaphore*, u32>> wait_sems{};
     std::span<std::pair<Semaphore*, u32>> signal_sems{};
@@ -304,8 +304,8 @@ struct QueueSubmision {
 };
 
 struct QueueSubmit {
-    void submit(VkQueue queue, QueueSubmision submissions, Fence* fence = {});
-    void submit(VkQueue queue, std::span<QueueSubmision> submissions, Fence* fence = {});
+    void submit(VkQueue queue, QueueSubmission submissions, Fence* fence = {});
+    void submit(VkQueue queue, std::span<QueueSubmission> submissions, Fence* fence = {});
 };
 
 class RendererVulkan : public Renderer {
@@ -336,9 +336,6 @@ class RendererVulkan : public Renderer {
     void upload_instances();
     void upload_transforms();
 
-    void build_pipelines();
-    void build_sbt();
-    void create_rt_output_image();
     void build_blas();
     void build_tlas();
     void refit_tlas();
@@ -355,8 +352,6 @@ class RendererVulkan : public Renderer {
     }
     u32 get_total_triangles() const { return get_total_indices() / 3u; }
 
-    VkSemaphore create_semaphore();
-    void destroy_semaphore(VkSemaphore sem);
 
     VkInstance instance;
     VkDevice dev;
@@ -368,17 +363,12 @@ class RendererVulkan : public Renderer {
     // std::unique_ptr<GpuStagingManager> staging;
     SamplerStorage samplers;
 
-    QueueScheduler scheduler_gq;
+    //QueueScheduler scheduler_gq;
     u32 gqi, pqi, tqi1;
     VkQueue gq, pq, tq1;
-    // VkSwapchainKHR swapchain{};
-    // Image swapchain_images[2]{};
-    // VkImageView imgui_views[2]{};
-    // VkFormat swapchain_format;
-    // Image* output_images[2]{};
     Image* depth_buffers[2]{};
-    vks::PhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
-    vks::PhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;

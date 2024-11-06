@@ -11,7 +11,7 @@ class Buffer {
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
     Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, vks::BufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment);
+    Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment);
 
     Buffer(Buffer&& other) noexcept;
     Buffer& operator=(Buffer&& other) noexcept;
@@ -56,7 +56,8 @@ class Image {
     void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                            VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout);
     void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout src_layout, VkImageLayout dst_layout);
+                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout src_layout,
+                           VkImageLayout dst_layout);
 
     void _deduce_aspect(VkImageUsageFlags usage);
     void _create_default_view(int dims, VkImageUsageFlags usage);
@@ -75,283 +76,14 @@ class Image {
     u32 layers{};
 };
 
-struct RenderPipelineLayout {
-    VkPipelineLayout layout{};
-    std::vector<VkDescriptorSetLayout> descriptor_layouts;
-    std::vector<VkDescriptorSetLayoutCreateFlags> layout_flags;
-    std::vector<std::vector<VkDescriptorSetLayoutBinding>> bindings;
-    std::vector<std::vector<VkDescriptorBindingFlags>> binding_flags;
-};
-
-class RendererPipelineLayoutBuilder {
-  public:
-    RendererPipelineLayoutBuilder& add_set_binding(u32 set, u32 binding, u32 count, VkDescriptorType type,
-                                                   VkDescriptorBindingFlags binding_flags = {},
-                                                   VkShaderStageFlags stages = VK_SHADER_STAGE_ALL);
-    RendererPipelineLayoutBuilder& add_variable_descriptor_count(u32 set);
-    RendererPipelineLayoutBuilder& set_push_constants(u32 size, VkShaderStageFlags stages = VK_SHADER_STAGE_ALL);
-    RendererPipelineLayoutBuilder& set_layout_flags(u32 set, VkDescriptorSetLayoutCreateFlags layout_flags);
-    RenderPipelineLayout build();
-
-  private:
-    u32 push_constants_size{ 0 };
-    VkShaderStageFlags push_constants_stage{};
-
-    struct DescriptorLayout {
-        VkDescriptorSetLayout layout{};
-        bool last_binding_of_variable_count{ 0 };
-        std::vector<VkDescriptorSetLayoutBinding> bindings;
-        std::vector<VkDescriptorBindingFlags> binding_flags;
-    };
-    std::array<DescriptorLayout, 4> descriptor_layouts{};
-    std::array<VkDescriptorSetLayoutCreateFlags, 4> descriptor_layout_flags{};
-};
-
-class RendererComputePipelineBuilder {
-  public:
-    RendererComputePipelineBuilder& set_stage(VkShaderModule module) {
-        this->module = module;
-        return *this;
-    }
-
-    RendererComputePipelineBuilder& set_layout(VkPipelineLayout layout) {
-        this->layout = layout;
-        return *this;
-    }
-
-    VkPipeline build();
-
-  private:
-    VkShaderModule module{};
-    VkPipelineLayout layout{};
-};
-
-class RendererRaytracingPipelineBuilder {
-  public:
-    RendererRaytracingPipelineBuilder& add_raygen_stage(VkShaderModule module) {
-        vks::RayTracingShaderGroupCreateInfoKHR group;
-        group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        group.generalShader = static_cast<u32>(stages.size());
-        group.closestHitShader = VK_SHADER_UNUSED_KHR;
-        group.anyHitShader = VK_SHADER_UNUSED_KHR;
-        group.intersectionShader = VK_SHADER_UNUSED_KHR;
-        add_stage(VK_SHADER_STAGE_RAYGEN_BIT_KHR, module, group);
-        return *this;
-    }
-
-    RendererRaytracingPipelineBuilder& add_closest_hit_stage(VkShaderModule module) {
-        vks::RayTracingShaderGroupCreateInfoKHR group;
-        group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-        group.generalShader = VK_SHADER_UNUSED_KHR;
-        group.closestHitShader = static_cast<u32>(stages.size());
-        group.anyHitShader = VK_SHADER_UNUSED_KHR;
-        group.intersectionShader = VK_SHADER_UNUSED_KHR;
-        add_stage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, module, group);
-        return *this;
-    }
-
-    RendererRaytracingPipelineBuilder& add_miss_stage(VkShaderModule module) {
-        vks::RayTracingShaderGroupCreateInfoKHR group;
-        group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        group.generalShader = static_cast<u32>(stages.size());
-        group.closestHitShader = VK_SHADER_UNUSED_KHR;
-        group.anyHitShader = VK_SHADER_UNUSED_KHR;
-        group.intersectionShader = VK_SHADER_UNUSED_KHR;
-        add_stage(VK_SHADER_STAGE_MISS_BIT_KHR, module, group);
-        return *this;
-    }
-
-    RendererRaytracingPipelineBuilder& set_layout(VkPipelineLayout layout) {
-        this->layout = layout;
-        return *this;
-    }
-
-    RendererRaytracingPipelineBuilder& set_recursion_depth(u32 depth) {
-        recursion_depth = depth;
-        return *this;
-    }
-
-    VkPipeline build();
-
-  private:
-    void add_stage(VkShaderStageFlagBits stage, VkShaderModule module, vks::RayTracingShaderGroupCreateInfoKHR group) {
-        vks::PipelineShaderStageCreateInfo info{};
-        info.stage = stage;
-        info.module = module;
-        info.pName = "main";
-        stages.push_back(info);
-        shader_groups.push_back(group);
-    }
-
-    std::vector<vks::PipelineShaderStageCreateInfo> stages;
-    std::vector<vks::RayTracingShaderGroupCreateInfoKHR> shader_groups;
-    u32 recursion_depth{ 1 };
-    VkPipelineLayout layout{};
-};
-
-class RendererGraphicsPipelineBuilder {
-  public:
-    RendererGraphicsPipelineBuilder& set_vertex_input(u32 location, u32 binding, VkFormat format, u32 offset) {
-        vertex_inputs.emplace_back(location, binding, format, offset);
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_vertex_binding(u32 binding, u32 stride, VkVertexInputRate input_rate) {
-        vertex_bindings.emplace_back(binding, stride, input_rate);
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_depth_test(bool depth_write, VkCompareOp compare) {
-        depth_test = true;
-        this->depth_write = depth_write;
-        depth_op = compare;
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_stencil_test(VkStencilOpState front, VkStencilOpState back) {
-        stencil_test = true;
-        stencil_front = front;
-        stencil_back = back;
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_attachment_color_blending(VkBlendFactor src_col, VkBlendFactor dst_col,
-                                                                   VkBlendOp col_op, VkBlendFactor src_a, VkBlendFactor dst_a,
-                                                                   VkBlendOp a_op, VkColorComponentFlagBits col_write_mask) {
-        color_blending_attachments.emplace_back(true, src_col, dst_col, col_op, src_a, dst_a, a_op, col_write_mask);
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_dynamic_state(VkDynamicState state) {
-        dynamic_states.push_back(state);
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_stage(VkShaderStageFlagBits stage, VkShaderModule module) {
-        shader_stages.emplace_back(stage, module);
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_layout(VkPipelineLayout layout) {
-        this->layout = layout;
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& add_color_attachment_format(VkFormat format) {
-        color_attachment_formats.push_back(format);
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_depth_attachment_format(VkFormat format) {
-        depth_attachment_format = format;
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_stencil_attachment_format(VkFormat format) {
-        stencil_attachment_format = format;
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_viewport_count(u32 count) {
-        viewport_count = count;
-        return *this;
-    }
-
-    RendererGraphicsPipelineBuilder& set_scissor_count(u32 count) {
-        scissor_count = count;
-        return *this;
-    }
-
-    VkPipeline build();
-
-  private:
-    std::vector<VkVertexInputAttributeDescription> vertex_inputs;
-    std::vector<VkVertexInputBindingDescription> vertex_bindings;
-
-    bool depth_test{ false }, depth_write{ false };
-    VkCompareOp depth_op{};
-
-    bool stencil_test{ false };
-    VkStencilOpState stencil_front{}, stencil_back{};
-
-    bool color_blending{ false };
-    std::vector<VkPipelineColorBlendAttachmentState> color_blending_attachments;
-
-    std::vector<VkDynamicState> dynamic_states;
-
-    std::vector<std::pair<VkShaderStageFlagBits, VkShaderModule>> shader_stages;
-
-    VkPipelineLayout layout{};
-
-    std::vector<VkFormat> color_attachment_formats;
-    VkFormat depth_attachment_format{ VK_FORMAT_UNDEFINED };
-    VkFormat stencil_attachment_format{ VK_FORMAT_UNDEFINED };
-
-    u32 viewport_count{}, scissor_count{};
-};
-
-class DescriptorPoolAllocator {
-    struct DescriptorSet {
-        VkDescriptorSet set;
-        VkDescriptorSetLayout layout;
-        bool free{ true };
-    };
-    struct PoolDescriptor {
-        std::vector<DescriptorSet> sets;
-    };
-
-  public:
-    VkDescriptorPool allocate_pool(const RenderPipelineLayout& layout, u32 set, u32 max_sets,
-                                   VkDescriptorPoolCreateFlags flags = {});
-    VkDescriptorSet allocate_set(VkDescriptorPool pool, VkDescriptorSetLayout layout, u32 variable_count = 0);
-    void reset_pool(VkDescriptorPool pool);
-
-    std::unordered_map<VkDescriptorPool, PoolDescriptor> pools;
-};
-
-class DescriptorSetWriter {
-    struct WriteImage {
-        VkImageView view{};
-        VkImageLayout layout{};
-        VkSampler sampler{};
-    };
-    struct WriteBuffer {
-        VkBuffer buffer{};
-        u32 offset{};
-        u32 range{};
-    };
-    struct WriteData {
-        u32 binding{};
-        u32 array_element{};
-        std::variant<WriteImage, WriteBuffer, VkAccelerationStructureKHR> payload;
-    };
-
-  public:
-    DescriptorSetWriter& write(u32 binding, u32 array_element, const Image& image, VkImageLayout layout);
-    DescriptorSetWriter& write(u32 binding, u32 array_element, const Image& image, VkSampler sampler, VkImageLayout layout);
-    DescriptorSetWriter& write(u32 binding, u32 array_element, VkImageView image, VkSampler sampler, VkImageLayout layout);
-    DescriptorSetWriter& write(u32 binding, u32 array_element, const Buffer& buffer, u32 offset, u32 range);
-    DescriptorSetWriter& write(u32 binding, u32 array_element, const VkAccelerationStructureKHR ac);
-    DescriptorSetWriter& write(u32 binding, u32 array_element, const Image* imgs, u32 count, VkSampler sampler, VkImageLayout layout) {
-        for(u32 i = 0; i < count; ++i) {
-            write(binding, array_element + i, imgs[i], sampler, layout);
-        }
-        return *this;
-    }
-    bool update(VkDescriptorSet set, const RenderPipelineLayout& layout, u32 set_idx);
-
-  private:
-    std::vector<WriteData> writes;
-};
-
 class SamplerStorage {
   public:
     VkSampler get_sampler();
     VkSampler get_sampler(VkFilter filter, VkSamplerAddressMode address);
-    VkSampler get_sampler(vks::SamplerCreateInfo info);
+    VkSampler get_sampler(VkSamplerCreateInfo info);
 
   private:
-    std::vector<std::pair<vks::SamplerCreateInfo, VkSampler>> samplers;
+    std::vector<std::pair<VkSamplerCreateInfo, VkSampler>> samplers;
 };
 
 class ImageStatefulBarrier {
@@ -380,19 +112,19 @@ class ImageStatefulBarrier {
   private:
     void insert_barrier(VkCommandBuffer cmd, VkImageLayout new_layout, VkPipelineStageFlags2 new_stage,
                         VkAccessFlags2 new_access, VkImageSubresourceRange new_range) {
-        vks::ImageMemoryBarrier2 barrier;
-        barrier.image = image->image;
-        barrier.oldLayout = current_layout;
-        barrier.newLayout = new_layout;
-        barrier.srcStageMask = current_stage;
-        barrier.srcAccessMask = current_access;
-        barrier.dstStageMask = new_stage;
-        barrier.dstAccessMask = new_access;
-        barrier.subresourceRange = current_range;
+        auto barrier = Vks(VkImageMemoryBarrier2{ .srcStageMask = current_stage,
+                                                  .srcAccessMask = current_access,
+                                                  .dstStageMask = new_stage,
+                                                  .dstAccessMask = new_access,
+                                                  .oldLayout = current_layout,
+                                                  .newLayout = new_layout,
+                                                  .image = image->image,
+                                                  .subresourceRange = current_range });
 
-        vks::DependencyInfo dep;
-        dep.pImageMemoryBarriers = &barrier;
-        dep.imageMemoryBarrierCount = 1;
+        auto dep = Vks(VkDependencyInfo{
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        });
         vkCmdPipelineBarrier2(cmd, &dep);
 
         current_range = new_range;
@@ -415,17 +147,17 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
 
-class QueueScheduler {
-  public:
-    QueueScheduler() = default;
-    QueueScheduler(VkQueue queue);
-
-    void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-    void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-
-  private:
-    VkQueue vkqueue;
-};
+//class QueueScheduler {
+//  public:
+//    QueueScheduler() = default;
+//    QueueScheduler(VkQueue queue);
+//
+//    void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+//    void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+//
+//  private:
+//    VkQueue vkqueue;
+//};
 
 class CommandPool {
   public:
