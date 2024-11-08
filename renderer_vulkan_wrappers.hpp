@@ -26,6 +26,16 @@ class Buffer {
     template <typename T> bool push_data(const std::vector<T>& vec, u32 offset) {
         return push_data(std::as_bytes(std::span{ vec }), offset);
     }
+    template <typename... Ts> bool push_data(u32 offset, const Ts&... ts) {
+        std::array<std::byte, (sizeof(Ts) + ...)> arr{};
+        u64 data_offset = 0;
+        const auto pack = [&arr, &data_offset](const auto& e) {
+            memcpy(&arr[data_offset], std::addressof(e), sizeof(e));
+            data_offset += sizeof(e);
+        };
+        (pack(ts), ...);
+        return push_data(std::span<const std::byte>{ arr.begin(), arr.end() }, offset);
+    }
 
     void clear() { size = 0; }
     bool resize(size_t new_size);
@@ -147,17 +157,17 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
 
-//class QueueScheduler {
-//  public:
-//    QueueScheduler() = default;
-//    QueueScheduler(VkQueue queue);
+// class QueueScheduler {
+//   public:
+//     QueueScheduler() = default;
+//     QueueScheduler(VkQueue queue);
 //
-//    void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-//    void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+//     void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
+//     void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
 //
-//  private:
-//    VkQueue vkqueue;
-//};
+//   private:
+//     VkQueue vkqueue;
+// };
 
 class CommandPool {
   public:

@@ -91,17 +91,6 @@ struct BLASInstance {
     VkAccelerationStructureKHR blas;
 };
 
-struct ShaderModuleWrapper {
-    VkShaderModule module{};
-    VkShaderStageFlagBits stage{};
-};
-
-struct RenderPipelineWrapper {
-    VkPipeline pipeline{};
-    VkPipelineLayout layout{};
-    u32 rt_shader_group_count{ 0 };
-};
-
 struct DDGI {
     struct GPULayout {
         glm::ivec2 radiance_tex_size;
@@ -282,12 +271,11 @@ struct RenderPasses {
 template <size_t frames> struct FrameData {
     struct Data {
         Semaphore sem_swapchain{};
-        // Semaphore sem_main{};
         Semaphore sem_rendering_finished{};
         Fence fen_rendering_finished{};
         CommandPool* cmdpool{};
         RenderPasses passes;
-        Buffer constants{};
+        Buffer* constants{};
         Image* depth_buffer{};
         DescriptorPool* descpool{};
     };
@@ -360,13 +348,10 @@ class RendererVulkan : public Renderer {
     VkSurfaceKHR window_surface;
     Flags<RendererFlags> flags;
     VkRect2D screen_rect{ 1280, 768 };
-    // std::unique_ptr<GpuStagingManager> staging;
     SamplerStorage samplers;
 
-    //QueueScheduler scheduler_gq;
-    u32 gqi, pqi, tqi1;
-    VkQueue gq, pq, tq1;
-    Image* depth_buffers[2]{};
+    u32 gqi;
+    VkQueue gq;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
@@ -389,7 +374,6 @@ class RendererVulkan : public Renderer {
     Buffer indirect_draw_buffer;
     Buffer* mesh_instance_transform_buffers[2]{};
     Buffer mesh_instance_mesh_id_buffer;
-    // Buffer sbt;
     Buffer tlas_mesh_offsets_buffer;
     Buffer tlas_transform_buffer;
     Buffer blas_mesh_offsets_buffer;
@@ -406,8 +390,6 @@ class RendererVulkan : public Renderer {
     std::deque<Image> images;
     std::deque<Buffer> buffers;
 
-    // Image rt_image;
-    Buffer global_buffer;
     DDGI ddgi;
 
     struct UploadImage {

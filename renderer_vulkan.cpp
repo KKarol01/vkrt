@@ -381,7 +381,8 @@ void RendererVulkan::initialize_vulkan() {
                         .add_required_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)        // for imgui
                         .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME) // for imgui
-                        //.add_required_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
+                        .prefer_gpu_device_type()
+                        .require_present()
                         .select();
     if(!phys_ret) { throw std::runtime_error{ "Failed to select Vulkan Physical Device. Error: " }; }
 
@@ -444,18 +445,12 @@ void RendererVulkan::initialize_vulkan() {
                        .add_pNext(&acc_features)
                        .add_pNext(&rtpp_features)
                        .add_pNext(&rayq_features)
-                       //.add_pNext(&maint5_features)
                        .build();
     if(!dev_ret) { throw std::runtime_error{ "Failed to create Vulkan device. Error: " }; }
     vkb::Device vkb_device = dev_ret.value();
     volkLoadDevice(vkb_device.device);
 
     VkDevice device = vkb_device.device;
-
-    auto graphics_queue_ret = vkb_device.get_queue(vkb::QueueType::graphics);
-    if(!graphics_queue_ret) { throw std::runtime_error{ "Failed to get graphics queue. Error: " }; }
-
-    VkQueue graphics_queue = graphics_queue_ret.value();
 
     auto pdev_props = Vks(VkPhysicalDeviceProperties2{
         .pNext = &rt_props,
@@ -468,15 +463,6 @@ void RendererVulkan::initialize_vulkan() {
     pdev = phys_ret->physical_device;
     gqi = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
     gq = vkb_device.get_queue(vkb::QueueType::graphics).value();
-    pqi = vkb_device.get_queue_index(vkb::QueueType::present).value();
-    pq = vkb_device.get_queue(vkb::QueueType::present).value();
-    tqi1 = vkb_device.get_dedicated_queue_index(vkb::QueueType::transfer).has_value()
-               ? vkb_device.get_dedicated_queue_index(vkb::QueueType::transfer).value()
-               : vkb_device.get_queue_index(vkb::QueueType::transfer).value();
-    tq1 = vkb_device.get_dedicated_queue(vkb::QueueType::transfer).has_value()
-              ? vkb_device.get_dedicated_queue(vkb::QueueType::transfer).value()
-              : vkb_device.get_queue(vkb::QueueType::transfer).value();
-    // scheduler_gq = QueueScheduler{ gq };
 
     VmaVulkanFunctions vulkanFunctions = {
         .vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr,
@@ -566,9 +552,6 @@ void RendererVulkan::initialize_imgui() {
 }
 
 void RendererVulkan::initialize_resources() {
-    // staging = std::make_unique<GpuStagingManager>(tq1, tqi1, 1024 * 1024 * 64); // 64MB
-
-    global_buffer = Buffer{ "globals", 512, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     vertex_buffer = Buffer{ "vertex_buffer", 0ull,
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -595,8 +578,9 @@ void RendererVulkan::initialize_resources() {
         fd.sem_rendering_finished = Semaphore{ dev, false };
         fd.fen_rendering_finished = Fence{ dev, true };
         fd.cmdpool = cmdgq1;
-        fd.constants = Buffer{ std::format("constants_{}", i), 64 * 5,
-                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        fd.constants =
+            make_buffer(Buffer{ std::format("constants_{}", i), 512,
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false });
         mesh_instance_transform_buffers[i] =
             new Buffer{ "mesh instance transforms", 0ull,
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
@@ -718,46 +702,20 @@ void RendererVulkan::update() {
 
     vkResetFences(dev, 1, &frame_data.get().fen_rendering_finished.fence);
 
-    /*if(!primitives.desc_pool) { primitives.desc_pool = descriptor_pool_allocator.allocate_pool(layouts.at(0), 0, 2); }
-    descriptor_pool_allocator.reset_pool(primitives.desc_pool);*/
-
-    // VkDescriptorSet frame_desc_set = fd.passes.default_lit.sets[0];
-    // static VkSampler linear_sampler = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-
-    // DescriptorSetWriter per_frame_set_writer;
-    // per_frame_set_writer.write(0, 0, tlas)
-    //     .write(1, 0, rt_image.view, {}, VK_IMAGE_LAYOUT_GENERAL)
-    //     .write(2, 0, ddgi.radiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
-    //     .write(3, 0, ddgi.irradiance_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
-    //     .write(4, 0, ddgi.visibility_texture.view, linear_sampler, VK_IMAGE_LAYOUT_GENERAL)
-    //     .write(5, 0, ddgi.probe_offsets_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
-    //     .write(6, 0, ddgi.irradiance_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL)
-    //     .write(7, 0, ddgi.visibility_texture.view, {}, VK_IMAGE_LAYOUT_GENERAL);
-    // for(u32 i = 0; i < textures.size(); ++i) {
-    //     per_frame_set_writer.write(15, i, textures.at(i).view, linear_sampler, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
-    // }
-    // per_frame_set_writer.update(frame_desc_set, layouts.at(0), 0);
-
-    const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0);
-    const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0);
-    const glm::mat3 rand_mat =
-        glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
-
     {
+        const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0);
+        const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0);
+        const glm::mat3 rand_mat =
+            glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
+
         float globals[16 * 4 + 12];
         const auto view = Engine::camera()->get_view();
         const auto proj = glm::perspective(glm::radians(45.0f), 1024.0f / 768.0f, 0.01f, 20.0f); // Engine::camera()->get_projection();
         const auto inv_view = glm::inverse(view);
         const auto inv_proj = glm::inverse(proj);
-        memcpy(&globals[0], &view, sizeof(glm::mat4));
-        memcpy(&globals[16], &proj, sizeof(glm::mat4));
-        memcpy(&globals[32], &inv_view, sizeof(glm::mat4));
-        memcpy(&globals[48], &inv_proj, sizeof(glm::mat4));
-        memcpy(&globals[64], &rand_mat, sizeof(glm::mat3));
-        global_buffer.push_data(globals, sizeof(globals), 0ull);
+        fd.constants->push_data(0ul, view, proj, inv_view, inv_proj, rand_mat);
     }
 
-    // ImageStatefulBarrier output_image_barrier{ *swapchain_image };
     ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image };
     ImageStatefulBarrier depth_buffer_barrier{ *fd.depth_buffer };
     ImageStatefulBarrier radiance_image_barrier{ *ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
@@ -815,7 +773,7 @@ void RendererVulkan::update() {
         const auto* window = Engine::window();
         u32 mode = 0;
         // clang-format off
-        fd.passes.ddgi_radiance.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
         fd.passes.ddgi_radiance.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
         fd.passes.ddgi_radiance.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
         fd.passes.ddgi_radiance.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
@@ -910,7 +868,7 @@ void RendererVulkan::update() {
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
         vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
         // clang-format off
-        fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &global_buffer.bda);
+        fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
         fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
         fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
         fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);

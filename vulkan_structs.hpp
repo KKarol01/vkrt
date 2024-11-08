@@ -6,7 +6,7 @@
 // clang-format off
 
 
-template <typename T> struct INIT_VK_STYPE { INIT_VK_STYPE() = delete; };
+template <typename T> struct INIT_VK_STYPE;
 
 #define INIT_VK_EXPAND(x) x
 #define INIT_VK_STRUCT_1(name, ...) template <> struct INIT_VK_STYPE<name> {}

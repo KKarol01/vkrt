@@ -16,7 +16,7 @@ Buffer::Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsag
 
 Buffer::Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment)
     : name{ name }, capacity{ create_info.size }, alignment{ alignment } {
-    u32 queue_family_indices[]{ get_renderer().gqi, get_renderer().tqi1 };
+    u32 queue_family_indices[]{ get_renderer().gqi, get_renderer().gqi };
     if(queue_family_indices[0] != queue_family_indices[1]) {
         create_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
         create_info.queueFamilyIndexCount = 2;
@@ -326,7 +326,7 @@ VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo info) {
     return sampler;
 }
 
-//QueueScheduler::QueueScheduler(VkQueue queue) : vkqueue{ queue } { assert(queue); }
+// QueueScheduler::QueueScheduler(VkQueue queue) : vkqueue{ queue } { assert(queue); }
 
 CommandPool::CommandPool(u32 queue_index, VkCommandPoolCreateFlags flags) {
     auto info = Vks(VkCommandPoolCreateInfo{

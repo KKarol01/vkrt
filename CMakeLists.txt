@@ -93,7 +93,6 @@ add_executable(vkrt
     "gpu_staging_manager.cpp"
     "ui.cpp" 
     "scene.cpp"
-    "linear_allocator.cpp"
     "renderer_vulkan_wrappers.cpp"   
 )
 
