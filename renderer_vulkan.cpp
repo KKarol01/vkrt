@@ -461,8 +461,8 @@ void RendererVulkan::initialize_vulkan() {
     instance = vkb_inst.instance;
     dev = device;
     pdev = phys_ret->physical_device;
-    gqi = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
-    gq = vkb_device.get_queue(vkb::QueueType::graphics).value();
+    gq = Queue{ .queue = vkb_device.get_queue(vkb::QueueType::graphics).value(),
+                .idx = vkb_device.get_queue_index(vkb::QueueType::graphics).value() };
 
     VmaVulkanFunctions vulkanFunctions = {
         .vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr,
@@ -525,11 +525,11 @@ void RendererVulkan::initialize_imgui() {
         .Instance = instance,
         .PhysicalDevice = pdev,
         .Device = dev,
-        .QueueFamily = gqi,
-        .Queue = gq,
+        .QueueFamily = gq.idx,
+        .Queue = gq.queue,
         .DescriptorPool = imgui_dpool->pool,
-        .MinImageCount = 2u,
-        .ImageCount = 2u,
+        .MinImageCount = (u32)frame_data.data.size(),
+        .ImageCount = (u32)frame_data.data.size(),
         .UseDynamicRendering = true,
         .PipelineRenderingCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -545,10 +545,8 @@ void RendererVulkan::initialize_imgui() {
     auto cmdimgui = frame_data.get().cmdpool->begin_onetime();
     ImGui_ImplVulkan_CreateFontsTexture();
     frame_data.get().cmdpool->end(cmdimgui);
-    QueueSubmit qs;
-    qs.submit(gq, QueueSubmission{ .cmds = { &cmdimgui, 1 } });
-    // scheduler_gq.enqueue_wait_submit({ { cmdimgui } });
-    vkQueueWaitIdle(gq);
+    gq.submit(QueueSubmission{ .cmds = { cmdimgui } });
+    gq.wait_idle();
 }
 
 void RendererVulkan::initialize_resources() {
@@ -573,7 +571,7 @@ void RendererVulkan::initialize_resources() {
 
     for(u32 i = 0; i < frame_data.data.size(); ++i) {
         auto& fd = frame_data.data[i];
-        CommandPool* cmdgq1 = &cmdpools.emplace_back(CommandPool{ gqi });
+        CommandPool* cmdgq1 = &cmdpools.emplace_back(CommandPool{ gq.idx });
         fd.sem_swapchain = Semaphore{ dev, false };
         fd.sem_rendering_finished = Semaphore{ dev, false };
         fd.fen_rendering_finished = Fence{ dev, true };
@@ -644,24 +642,12 @@ void RendererVulkan::update() {
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
     // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
-        vkQueueWaitIdle(gq);
+        gq.wait_idle();
         swapchain.create();
-        // create_swapchain();
     }
     if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) {
-        vkQueueWaitIdle(gq);
+        gq.wait_idle();
         for(int i = 0; i < frame_data.data.size(); ++i) {
-            /* output_images[i] =
-                 Image{ std::format("render_output_image{}", i),
-                        screen_rect.extent.width,
-                        screen_rect.extent.height,
-                        1u,
-                        1u,
-                        1u,
-                        VK_FORMAT_R8G8B8A8_SRGB,
-                        VK_SAMPLE_COUNT_1_BIT,
-                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };*/
-
             *frame_data.data[i].depth_buffer = Image{
                 std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1, VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
             };
@@ -716,8 +702,12 @@ void RendererVulkan::update() {
         fd.constants->push_data(0ul, view, proj, inv_view, inv_proj, rand_mat);
     }
 
-    ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image };
-    ImageStatefulBarrier depth_buffer_barrier{ *fd.depth_buffer };
+    ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image, VK_IMAGE_LAYOUT_UNDEFINED,
+                                                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                                  VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT };
+    ImageStatefulBarrier depth_buffer_barrier{ *fd.depth_buffer, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                                   VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT };
     ImageStatefulBarrier radiance_image_barrier{ *ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
                                                  VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
     ImageStatefulBarrier irradiance_image_barrier{ *ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL,
@@ -909,19 +899,10 @@ void RendererVulkan::update() {
 
     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
     fd.cmdpool->end(cmd);
-
-    // TODO: Implement waiting for timeline semaphore and presenting
-    std::pair<Semaphore*, u32> waits[]{ { &fd.sem_swapchain, 0 } };
-    VkPipelineStageFlags2 wait_stages[]{ VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT };
-    std::pair<Semaphore*, u32> signals[]{ { &fd.sem_rendering_finished, 0 } };
-    VkPipelineStageFlags2 signal_stages[]{ VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT };
-    QueueSubmit gqs{};
-    QueueSubmission gqsubs{ .cmds = { &cmd, 1 },
-                            .wait_sems = { waits, 1 },
-                            .signal_sems = { signals, 1 },
-                            .wait_stages = { wait_stages, 1 },
-                            .signal_stages = { signal_stages, 1 } };
-    gqs.submit(gq, { &gqsubs, 1 }, &fd.fen_rendering_finished);
+    gq.submit(QueueSubmission{ .cmds = { cmd },
+                               .wait_sems = { { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, fd.sem_swapchain } },
+                               .signal_sems = { { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fd.sem_rendering_finished } } },
+              &fd.fen_rendering_finished);
 
     auto pinfo = Vks(VkPresentInfoKHR{
         .waitSemaphoreCount = 1,
@@ -930,23 +911,7 @@ void RendererVulkan::update() {
         .pSwapchains = &swapchain.swapchain,
         .pImageIndices = &swapchain_index,
     });
-    vkQueuePresentKHR(gq, &pinfo);
-
-    /*scheduler_gq.enqueue_wait_submit(
-        RecordingSubmitInfo{
-            .buffers = { cmd },
-            .waits = { { primitives.sem_swapchain_image, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
-            .signals = { { primitives.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } },
-        },
-        primitives.fen_rendering_finished);
-
-    vks::PresentInfoKHR pinfo;
-    pinfo.swapchainCount = 1;
-    pinfo.pSwapchains = &swapchain;
-    pinfo.pImageIndices = &sw_img_idx;
-    pinfo.waitSemaphoreCount = 1;
-    pinfo.pWaitSemaphores = &primitives.sem_rendering_finished;
-    vkQueuePresentKHR(gq, &pinfo);*/
+    vkQueuePresentKHR(gq.queue, &pinfo);
 }
 
 Handle<RenderTexture> RendererVulkan::batch_texture(const RenderTexture& batch) {
@@ -1056,16 +1021,9 @@ void RendererVulkan::upload_model_textures() {
                               VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     }
     frame_data.get().cmdpool->end(cmd);
-    auto cmdinfo = Vks(VkCommandBufferSubmitInfo{
-        .commandBuffer = cmd,
-    });
-    auto info = Vks(VkSubmitInfo2{
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &cmdinfo,
-    });
     Fence f{ dev, false };
-    VK_CHECK(vkQueueSubmit2(gq, 1, &info, f.fence));
-    vkWaitForFences(dev, 1, &f.fence, true, ~0u);
+    gq.submit(cmd, &f);
+    f.wait();
     for(auto& b : bs) {
         b.deallocate();
     }
@@ -1235,10 +1193,9 @@ void RendererVulkan::build_blas() {
     auto cmd = frame_data.get().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, blas_geo_build_infos.size(), blas_geo_build_infos.data(), poffsets.data());
     frame_data.get().cmdpool->end(cmd);
-    // scheduler_gq.enqueue_wait_submit({ { cmd } });
-    QueueSubmit qs;
-    qs.submit(gq, QueueSubmission{ .cmds = { &cmd, 1 } });
-    vkDeviceWaitIdle(dev);
+    Fence f{ dev, false };
+    gq.submit(cmd, &f);
+    f.wait();
 }
 
 void RendererVulkan::build_tlas() {
@@ -1350,10 +1307,9 @@ void RendererVulkan::build_tlas() {
     auto cmd = frame_data.get().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
     frame_data.get().cmdpool->end(cmd);
-    QueueSubmit qs;
-    qs.submit(gq, QueueSubmission{ .cmds = { &cmd, 1 } });
-    // scheduler_gq.enqueue_wait_submit({ { cmd } });
-    vkDeviceWaitIdle(dev);
+    Fence f{ dev, false };
+    gq.submit(cmd, &f);
+    f.wait();
 }
 
 void RendererVulkan::refit_tlas() {
@@ -1496,9 +1452,7 @@ void RendererVulkan::update_ddgi() {
                                                   VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
     frame_data.get().cmdpool->end(cmd);
-    QueueSubmit qs;
-    qs.submit(gq, QueueSubmission{ .cmds = { &cmd, 1 } });
-    // scheduler_gq.enqueue_wait_submit({ { cmd } });
+    gq.submit(cmd);
 
     ddgi.buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI::GPULayout),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true };
@@ -1539,8 +1493,7 @@ void RendererVulkan::update_ddgi() {
     for(int i = 0; i < ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z; ++i) {
         // ddgi.debug_probes.push_back(Engine::scene()->instance_model(sphere_handle, { .transform = glm::mat4{ 1.0f } }));
     }
-
-    vkQueueWaitIdle(gq);
+    gq.wait_idle();
 }
 
 Image* RendererVulkan::make_image(Image&& img) { return &images.emplace_back(std::move(img)); }
@@ -1637,6 +1590,8 @@ Fence& Fence::operator=(Fence&& f) noexcept {
 }
 
 Fence::~Fence() noexcept { vkDestroyFence(get_renderer().dev, fence, nullptr); }
+
+VkResult Fence::wait(u32 timeout) { return vkWaitForFences(get_renderer().dev, 1, &fence, true, timeout); }
 
 template <size_t frames> void Swapchain<frames>::create() {
     Window& window = *Engine::window();
@@ -1912,45 +1867,24 @@ VkImageLayout DescriptorBinding::deduce_layout(const Resource& res, const std::o
 
 bool DescriptorLayout::is_empty() const { return bindings[0].res.index() == 0; }
 
-void QueueSubmit::submit(VkQueue queue, QueueSubmission submissions, Fence* fence) {
-    submit(queue, std::span{ &submissions, 1 }, fence);
-}
+void Queue::submit(const QueueSubmission& submissions, Fence* fence) { submit(std::span{ &submissions, 1 }, fence); }
 
-void QueueSubmit::submit(VkQueue queue, std::span<QueueSubmission> submissions, Fence* fence) {
+void Queue::submit(std::span<const QueueSubmission> submissions, Fence* fence) {
     std::vector<VkSubmitInfo2> subs(submissions.size());
-    std::vector<std::vector<VkSemaphoreSubmitInfo>> waitsubs(submissions.size());
-    std::vector<std::vector<VkCommandBufferSubmitInfo>> cmdsubs(submissions.size());
-    std::vector<std::vector<VkSemaphoreSubmitInfo>> signalsubs(submissions.size());
     for(u32 i = 0; i < submissions.size(); ++i) {
-        auto& sub = subs[i];
-        auto& isub = submissions[i];
-        waitsubs[i].resize(isub.wait_sems.size());
-        cmdsubs[i].resize(isub.cmds.size());
-        signalsubs[i].resize(isub.signal_sems.size());
-        for(u32 j = 0; j < isub.wait_sems.size(); ++j) {
-            waitsubs[i][j] = Vks(VkSemaphoreSubmitInfo{});
-            waitsubs[i][j].semaphore = isub.wait_sems[j].first->semaphore;
-            waitsubs[i][j].value = isub.wait_sems[j].second;
-            waitsubs[i][j].stageMask = isub.wait_stages[j];
-        }
-        for(u32 j = 0; j < isub.cmds.size(); ++j) {
-            cmdsubs[i][j] = Vks(VkCommandBufferSubmitInfo{});
-            cmdsubs[i][j].commandBuffer = isub.cmds[j];
-        }
-        for(u32 j = 0; j < isub.signal_sems.size(); ++j) {
-            signalsubs[i][j] = Vks(VkSemaphoreSubmitInfo{});
-            signalsubs[i][j].semaphore = isub.signal_sems[j].first->semaphore;
-            signalsubs[i][j].value = isub.signal_sems[j].second;
-            signalsubs[i][j].stageMask = isub.signal_stages[j];
-        }
-        sub = Vks(VkSubmitInfo2{
-            .waitSemaphoreInfoCount = (u32)isub.wait_sems.size(),
-            .pWaitSemaphoreInfos = waitsubs[i].data(),
-            .commandBufferInfoCount = (u32)isub.cmds.size(),
-            .pCommandBufferInfos = cmdsubs[i].data(),
-            .signalSemaphoreInfoCount = (u32)isub.signal_sems.size(),
-            .pSignalSemaphoreInfos = signalsubs[i].data(),
+        const auto& sub = submissions[i];
+        subs[i] = Vks(VkSubmitInfo2{
+            .waitSemaphoreInfoCount = (u32)sub.wait_sems.size(),
+            .pWaitSemaphoreInfos = sub.wait_sems.data(),
+            .commandBufferInfoCount = (u32)sub.cmds.size(),
+            .pCommandBufferInfos = sub.cmds.data(),
+            .signalSemaphoreInfoCount = (u32)sub.signal_sems.size(),
+            .pSignalSemaphoreInfos = sub.signal_sems.data(),
         });
     }
-    vkQueueSubmit2(queue, subs.size(), subs.data(), fence ? fence->fence : nullptr);
+    VK_CHECK(vkQueueSubmit2(queue, subs.size(), subs.data(), fence ? fence->fence : nullptr));
 }
+
+void Queue::submit(VkCommandBuffer cmd, Fence* fence) { submit(QueueSubmission{ .cmds = { cmd } }, fence); }
+
+void Queue::wait_idle() { vkQueueWaitIdle(queue); }

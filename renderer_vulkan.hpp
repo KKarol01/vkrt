@@ -142,6 +142,7 @@ struct Fence {
     Fence(Fence&& f) noexcept;
     Fence& operator=(Fence&& f) noexcept;
     ~Fence() noexcept;
+    VkResult wait(u32 timeout = ~0u);
     VkFence fence{};
 };
 
@@ -283,17 +284,29 @@ template <size_t frames> struct FrameData {
     std::array<Data, frames> data{};
 };
 
-struct QueueSubmission {
-    std::span<VkCommandBuffer> cmds{};
-    std::span<std::pair<Semaphore*, u32>> wait_sems{};
-    std::span<std::pair<Semaphore*, u32>> signal_sems{};
-    std::span<VkPipelineStageFlags2> wait_stages{};
-    std::span<VkPipelineStageFlags2> signal_stages{};
+struct QueueCmdSubmission : public VkCommandBufferSubmitInfo {
+    QueueCmdSubmission(VkCommandBuffer cmd)
+        : VkCommandBufferSubmitInfo(Vks(VkCommandBufferSubmitInfo{ .commandBuffer = cmd })) {}
 };
 
-struct QueueSubmit {
-    void submit(VkQueue queue, QueueSubmission submissions, Fence* fence = {});
-    void submit(VkQueue queue, std::span<QueueSubmission> submissions, Fence* fence = {});
+struct QueueSemaphoreSubmission : public VkSemaphoreSubmitInfo {
+    QueueSemaphoreSubmission(VkPipelineStageFlags2 stage, Semaphore& sem, u32 value = 0)
+        : VkSemaphoreSubmitInfo(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem.semaphore, .value = value, .stageMask = stage })) {}
+};
+
+struct QueueSubmission {
+    std::vector<QueueCmdSubmission> cmds{};
+    std::vector<QueueSemaphoreSubmission> wait_sems{};
+    std::vector<QueueSemaphoreSubmission> signal_sems{};
+};
+
+struct Queue {
+    void submit(const QueueSubmission& submissions, Fence* fence = {});
+    void submit(std::span<const QueueSubmission> submissions, Fence* fence = {});
+    void submit(VkCommandBuffer cmd, Fence* fence = {});
+    void wait_idle();
+    VkQueue queue{};
+    u32 idx{ ~0u };
 };
 
 class RendererVulkan : public Renderer {
@@ -340,7 +353,6 @@ class RendererVulkan : public Renderer {
     }
     u32 get_total_triangles() const { return get_total_indices() / 3u; }
 
-
     VkInstance instance;
     VkDevice dev;
     VkPhysicalDevice pdev;
@@ -350,8 +362,7 @@ class RendererVulkan : public Renderer {
     VkRect2D screen_rect{ 1280, 768 };
     SamplerStorage samplers;
 
-    u32 gqi;
-    VkQueue gq;
+    Queue gq;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 

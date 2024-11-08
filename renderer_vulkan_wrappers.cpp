@@ -16,7 +16,7 @@ Buffer::Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsag
 
 Buffer::Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment)
     : name{ name }, capacity{ create_info.size }, alignment{ alignment } {
-    u32 queue_family_indices[]{ get_renderer().gqi, get_renderer().gqi };
+    u32 queue_family_indices[]{ get_renderer().gq.idx, get_renderer().gq.idx };
     if(queue_family_indices[0] != queue_family_indices[1]) {
         create_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
         create_info.queueFamilyIndexCount = 2;
@@ -105,14 +105,7 @@ bool Buffer::push_data(std::span<const std::byte> data, u32 offset) {
             off += size;
         }
         get_renderer().frame_data.get().cmdpool->end(cmd);
-        auto cmdinfo = Vks(VkCommandBufferSubmitInfo{
-            .commandBuffer = cmd,
-        });
-        auto info = Vks(VkSubmitInfo2{
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &cmdinfo,
-        });
-        vkQueueSubmit2(get_renderer().gq, 1, &info, nullptr);
+        get_renderer().gq.submit(cmd);
         /*std::atomic_flag flag{};
         if(!get_renderer().staging->send_to(GpuStagingUpload{ .dst = buffer, .src = data, .dst_offset = offset, .size_bytes = data.size_bytes() },
                                             {}, {}, &flag)) {
@@ -139,14 +132,7 @@ bool Buffer::resize(size_t new_size) {
         VkBufferCopy region{ .size = size };
         vkCmdCopyBuffer(cmd, buffer, new_buffer.buffer, 1, &region);
         get_renderer().frame_data.get().cmdpool->end(cmd);
-        auto cmdinfo = Vks(VkCommandBufferSubmitInfo{
-            .commandBuffer = cmd,
-        });
-        auto info = Vks(VkSubmitInfo2{
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &cmdinfo,
-        });
-        vkQueueSubmit2(get_renderer().gq, 1, &info, nullptr);
+        get_renderer().gq.submit(cmd);
         flag.test_and_set();
         success = true;
         // assert(false);
