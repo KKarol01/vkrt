@@ -658,7 +658,7 @@ void RendererVulkan::update() {
     const auto frame_num = Engine::frame_num();
     vkWaitForFences(dev, 1, &fd.fen_rendering_finished.fence, true, 16'000'000);
     fd.cmdpool->reset();
-    fd.descpool->reset();
+    // fd.descpool->reset();
 
     u32 swapchain_index{};
     Image* swapchain_image{};
@@ -694,7 +694,6 @@ void RendererVulkan::update() {
         const glm::mat3 rand_mat =
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-        float globals[16 * 4 + 12];
         const auto view = Engine::camera()->get_view();
         const auto proj = glm::perspective(glm::radians(45.0f), 1024.0f / 768.0f, 0.01f, 20.0f); // Engine::camera()->get_projection();
         const auto inv_view = glm::inverse(view);
@@ -1715,6 +1714,7 @@ void RenderPass::update_desc_sets() {
 
         if(desc_layout.is_empty()) { continue; }
 
+        // if set was never allocated or descriptor pool was reset
         if(!set || !*set) {
             u32 variable_count = [&desc_layout] {
                 if(desc_layout.variable_binding == -1) { return 0ull; }

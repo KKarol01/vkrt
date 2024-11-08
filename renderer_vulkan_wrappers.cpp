@@ -312,8 +312,6 @@ VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo info) {
     return sampler;
 }
 
-// QueueScheduler::QueueScheduler(VkQueue queue) : vkqueue{ queue } { assert(queue); }
-
 CommandPool::CommandPool(u32 queue_index, VkCommandPoolCreateFlags flags) {
     auto info = Vks(VkCommandPoolCreateInfo{
         .flags = flags,
