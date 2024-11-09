@@ -161,6 +161,7 @@ struct ShaderStorage {
         VkShaderStageFlagBits stage;
     };
 
+    void precompile_shaders(std::initializer_list<std::filesystem::path> paths);
     VkShaderModule get_shader(const std::filesystem::path& path);
     VkShaderStageFlagBits get_stage(std::filesystem::path path) const;
     VkShaderModule compile_shader(std::filesystem::path path);
@@ -318,7 +319,6 @@ class RendererVulkan : public Renderer {
     void set_screen_rect(ScreenRect rect) final;
 
     void initialize_vulkan();
-    // void create_swapchain();
     void initialize_imgui();
     void initialize_resources();
 

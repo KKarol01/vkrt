@@ -559,15 +559,16 @@ void RendererVulkan::initialize_resources() {
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                            false };
 
-    ddgi.radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-    ddgi.irradiance_texture = make_image(Image{ "ddgi irradiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-    ddgi.visibility_texture = make_image(Image{ "ddgi visibility", 1, 1, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-    ddgi.probe_offsets_texture =
-        make_image(Image{ "ddgi probe offsets", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    ddgi = {
+        .radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
+        .irradiance_texture = make_image(Image{ "ddgi irradiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
+        .visibility_texture = make_image(Image{ "ddgi visibility", 1, 1, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
+        .probe_offsets_texture = make_image(Image{ "ddgi probe offsets", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
+    };
 
     for(u32 i = 0; i < frame_data.data.size(); ++i) {
         auto& fd = frame_data.data[i];
@@ -596,6 +597,18 @@ void RendererVulkan::initialize_resources() {
                                                  { ddgi.visibility_texture } } },
                                  .variable_binding = 15 };
     dl_default.bindings[15] = { &textures.data_storage(), 1024, samp_lr };
+
+    shaders.precompile_shaders({
+        "default_unlit/default.vert.glsl",
+        "default_unlit/default.frag.glsl",
+        "rtbasic/raygen.rgen.glsl",
+        "rtbasic/miss.rmiss.glsl",
+        "rtbasic/shadow.rmiss.glsl",
+        "rtbasic/closest_hit.rchit.glsl",
+        "rtbasic/shadow.rchit.glsl",
+        "rtbasic/probe_irradiance.comp.glsl",
+        "rtbasic/probe_offset.comp.glsl",
+    });
 
     PipelineLayout* pl_default = &playouts.emplace_back(PipelineLayout{ { dl_default } });
     Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{ { shaders.get_shader("default_unlit/default.vert.glsl"),
@@ -1498,6 +1511,30 @@ void RendererVulkan::update_ddgi() {
 Image* RendererVulkan::make_image(Image&& img) { return &images.emplace_back(std::move(img)); }
 
 Buffer* RendererVulkan::make_buffer(Buffer&& buf) { return &buffers.emplace_back(std::move(buf)); }
+
+void ShaderStorage::precompile_shaders(std::initializer_list<std::filesystem::path> paths) {
+    std::vector<std::jthread> ths;
+    ths.reserve(std::max(std::thread::hardware_concurrency(), 4u));
+    std::vector<VkShaderModule> mods(paths.size());
+    std::vector<VkShaderStageFlagBits> stages(paths.size());
+    u32 per_th = std::ceilf((float)paths.size() / ths.capacity());
+    for(u32 i = 0, j = 0; i < paths.size(); i += per_th) {
+        u32 count = std::min(per_th, (u32)paths.size() - i);
+        if(count == 0) { break; }
+        ths.push_back(std::jthread{ [this, i, count, &mods, &stages, &paths] {
+            for(u32 j = i; j < i + count; ++j) {
+                mods[j] = compile_shader(*(paths.begin() + j));
+                stages[j] = get_stage(*(paths.begin() + j));
+            }
+        } });
+    }
+    for(auto& e : ths) {
+        e.join();
+    }
+    for(u32 i = 0; i < mods.size(); ++i) {
+        metadatas[mods[i]] = ShaderMetadata{ .path = *(paths.begin() + i), .stage = stages[i] };
+    }
+}
 
 VkShaderModule ShaderStorage::get_shader(const std::filesystem::path& path) {
     for(const auto& e : metadatas) {
