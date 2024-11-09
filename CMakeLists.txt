@@ -125,6 +125,9 @@ target_precompile_headers(vkrt
     PRIVATE
     <volk/volk.h>
     vulkan_structs.hpp
+    <imgui/imgui.h>
+    <imgui/backends/imgui_impl_glfw.h>
+    <imgui/backends/imgui_impl_vulkan.h>
     <GLFW/glfw3.h>
     <glm/glm.hpp>
     <VulkanMemoryAllocator/include/vk_mem_alloc.h>
