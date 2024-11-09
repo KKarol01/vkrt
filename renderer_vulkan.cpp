@@ -222,8 +222,8 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
                 to_add.generalShader = i;
                 shader_groups.push_back(to_add);
             } else {
-                enum Add { Dont, Closest, Any, Inter };
-                Add add{ Dont };
+                enum IncompleteType { Dont, Closest, Any, Inter };
+                IncompleteType push_incomplete{ Dont };
 
                 if(!incomplete.empty()) {
                     auto& f = incomplete.front();
@@ -231,11 +231,12 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
                         if(f->closestHitShader == VK_SHADER_UNUSED_KHR) {
                             f->closestHitShader = i;
                         } else {
-                            add = Closest;
+                            push_incomplete = Closest;
                         }
                     } else if(s.stage == VK_SHADER_STAGE_ANY_HIT_BIT_KHR) {
                         assert(false);
-                    } else if(s.stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) {
+                    } else if(s.stage == VK_SHADER_STAGE_INTERSECTION_BIT_KHR) {
+                        f->type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
                         assert(false);
                     } else {
                         assert(false);
@@ -244,32 +245,33 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
                     if(f->type == VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR &&
                        f->closestHitShader != VK_SHADER_UNUSED_KHR && f->anyHitShader != VK_SHADER_UNUSED_KHR) {
                         incomplete.pop();
-                    } else if(f->type == VK_SHADER_GROUP_SHADER_INTERSECTION_KHR && f->closestHitShader != VK_SHADER_UNUSED_KHR &&
-                              f->anyHitShader != VK_SHADER_UNUSED_KHR && f->intersectionShader != VK_SHADER_UNUSED_KHR) {
+                    } else if(f->type == VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR &&
+                              f->closestHitShader != VK_SHADER_UNUSED_KHR && f->anyHitShader != VK_SHADER_UNUSED_KHR &&
+                              f->intersectionShader != VK_SHADER_UNUSED_KHR) {
                         incomplete.pop();
                     }
                 } else {
                     if(s.stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) {
-                        add = Closest;
+                        push_incomplete = Closest;
                     } else if(s.stage == VK_SHADER_STAGE_ANY_HIT_BIT_KHR) {
-                        add = Any;
+                        push_incomplete = Any;
                     } else if(s.stage == VK_SHADER_STAGE_INTERSECTION_BIT_KHR) {
-                        add = Inter;
+                        push_incomplete = Inter;
                     }
                 }
 
-                if(add == Closest) {
+                if(push_incomplete == Closest) {
                     to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
                     to_add.closestHitShader = i;
-                } else if(add == Any) {
+                } else if(push_incomplete == Any) {
                     to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
                     to_add.anyHitShader = i;
-                } else if(add == Inter) {
+                } else if(push_incomplete == Inter) {
                     to_add.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
                     to_add.intersectionShader = i;
                 }
 
-                if(add != Dont) {
+                if(push_incomplete != Dont) {
                     shader_groups.push_back(to_add);
                     incomplete.push(&shader_groups.back());
                 }
