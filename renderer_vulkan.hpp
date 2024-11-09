@@ -222,11 +222,10 @@ struct Pipeline {
     Pipeline() = default;
     Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLayout* layout,
              std::variant<std::monostate, RasterizationSettings, RaytracingSettings> settings = {});
-    VkPipelineBindPoint get_bindpoint() const;
 
     const PipelineLayout* layout{};
     VkPipeline pipeline{};
-    Type type{ None };
+    VkPipelineBindPoint bind_point{};
     union {
         RasterizationSettings rasterization_settings;
         RaytracingSettings raytracing_settings;

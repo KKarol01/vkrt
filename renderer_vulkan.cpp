@@ -93,14 +93,14 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
             .pName = "main",
         });
         // clang-format off
-         if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) { type = Raster; }
-         else if(stage.stage == VK_SHADER_STAGE_COMPUTE_BIT) { type = Compute; }
-         else if(stage.stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { type = RT; }
+         if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) { bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
+         else if(stage.stage == VK_SHADER_STAGE_COMPUTE_BIT) { bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+         else if(stage.stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { bind_point = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR; }
          stages.push_back(stage);
         // clang-format on
     }
 
-    if(type == Raster) {
+    if(bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
         if(settings.index() == 0) {
             rasterization_settings = RasterizationSettings{};
         } else {
@@ -191,14 +191,14 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
             .layout = layout->layout,
         });
         VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
-    } else if(type == Compute) {
+    } else if(bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
         assert(stages.size() == 1);
         auto info = Vks(VkComputePipelineCreateInfo{
             .stage = stages.at(0),
             .layout = layout->layout,
         });
         VK_CHECK(vkCreateComputePipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
-    } else if(type == RT) {
+    } else if(bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
         if(settings.index() == 0) {
             raytracing_settings = RaytracingSettings{};
         } else {
@@ -300,20 +300,8 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
             VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         raytracing_settings.sbt = get_renderer().make_buffer(Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, false });
         raytracing_settings.sbt->push_data(shaderHandleStorage);
-    }
-}
-
-VkPipelineBindPoint Pipeline::get_bindpoint() const {
-    switch(type) {
-    case Pipeline::Raster:
-        return VK_PIPELINE_BIND_POINT_GRAPHICS;
-    case Pipeline::Compute:
-        return VK_PIPELINE_BIND_POINT_COMPUTE;
-    case Pipeline::RT:
-        return VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
-    default:
+    } else {
         assert(false);
-        return VK_PIPELINE_BIND_POINT_MAX_ENUM;
     }
 }
 
@@ -1732,12 +1720,12 @@ RenderPass::RenderPass(const Pipeline* pipeline, DescriptorPool* desc_pool) : pi
     assert(desc_pool);
 }
 
-void RenderPass::bind(VkCommandBuffer cmd) { vkCmdBindPipeline(cmd, pipeline->get_bindpoint(), pipeline->pipeline); }
+void RenderPass::bind(VkCommandBuffer cmd) { vkCmdBindPipeline(cmd, pipeline->bind_point, pipeline->pipeline); }
 
 void RenderPass::bind_desc_sets(VkCommandBuffer cmd) {
     for(u32 i = 0; i < sets.size(); ++i) {
         if(sets[i]) {
-            vkCmdBindDescriptorSets(cmd, pipeline->get_bindpoint(), pipeline->layout->layout, i, 1, sets[i], 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, pipeline->bind_point, pipeline->layout->layout, i, 1, sets[i], 0, nullptr);
         }
     }
 }
