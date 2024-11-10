@@ -6,7 +6,7 @@
 Buffer::Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map)
     : Buffer(name, size, 1u, usage, map) {}
 
-Buffer::Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsageFlags usage, bool map)
+Buffer::Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map)
     : Buffer(name, Vks(VkBufferCreateInfo{ .size = size, .usage = usage }),
              VmaAllocationCreateInfo{
                  .flags = (map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u),
@@ -14,9 +14,9 @@ Buffer::Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsag
              },
              alignment) {}
 
-Buffer::Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment)
+Buffer::Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, uint32_t alignment)
     : name{ name }, capacity{ create_info.size }, alignment{ alignment } {
-    u32 queue_family_indices[]{ get_renderer().gq.idx, get_renderer().gq.idx };
+    uint32_t queue_family_indices[]{ get_renderer().gq.idx, get_renderer().gq.idx };
     if(queue_family_indices[0] != queue_family_indices[1]) {
         create_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
         create_info.queueFamilyIndexCount = 2;
@@ -71,7 +71,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
     return *this;
 }
 
-bool Buffer::push_data(std::span<const std::byte> data, u32 offset) {
+bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
     if(!buffer) {
         assert(false && "Buffer was not created correctly");
         return false;
@@ -98,8 +98,8 @@ bool Buffer::push_data(std::span<const std::byte> data, u32 offset) {
         memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
     } else {
         auto cmd = get_renderer().frame_data.get().cmdpool->begin_onetime();
-        u32 iters = static_cast<u32>(std::ceilf(static_cast<f32>(data.size_bytes()) / 65536.0f));
-        for(u64 off = 0, i = 0; i < iters; ++i) {
+        uint32_t iters = static_cast<uint32_t>(std::ceilf(static_cast<float>(data.size_bytes()) / 65536.0f));
+        for(uint64_t off = 0, i = 0; i < iters; ++i) {
             const auto size = std::min(data.size_bytes() - off, 65536ull);
             vkCmdUpdateBuffer(cmd, buffer, offset + off, size, data.data() + off);
             off += size;
@@ -154,7 +154,7 @@ void Buffer::deallocate() {
     if(buffer && alloc) { vmaDestroyBuffer(get_renderer().vma, buffer, alloc); }
 }
 
-Image::Image(const std::string& name, u32 width, u32 height, u32 depth, u32 mips, u32 layers, VkFormat format,
+Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
              VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
 
@@ -190,7 +190,7 @@ Image::Image(const std::string& name, u32 width, u32 height, u32 depth, u32 mips
     set_debug_name(view, std::format("{}_default_view", name));
 }
 
-Image::Image(const std::string& name, VkImage image, u32 width, u32 height, u32 depth, u32 mips, u32 layers,
+Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
              VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
     int dims = -1;
@@ -312,7 +312,7 @@ VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo info) {
     return sampler;
 }
 
-CommandPool::CommandPool(u32 queue_index, VkCommandPoolCreateFlags flags) {
+CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) {
     auto info = Vks(VkCommandPoolCreateInfo{
         .flags = flags,
         .queueFamilyIndex = queue_index,

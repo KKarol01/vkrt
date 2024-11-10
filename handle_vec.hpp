@@ -19,9 +19,9 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
     constexpr auto end(this auto&& self) { return self.storage.end(); }
     constexpr auto& front() { return storage.front(); }
     constexpr auto size() const { return storage.size(); }
-    constexpr auto& at(u64 idx) { return storage.at(idx); }
+    constexpr auto& at(uint64_t idx) { return storage.at(idx); }
     constexpr auto& at(Handle handle) { return at(find_idx(handle)); }
-    constexpr auto& operator[](u64 idx) { return storage.at(idx); }
+    constexpr auto& operator[](uint64_t idx) { return storage.at(idx); }
     constexpr auto data() { return storage.data(); }
     constexpr auto& data_storage() { return storage; }
 
@@ -55,8 +55,8 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
         if(it == handles.end()) { return nullptr; }
         return &at(std::distance(handles.begin(), it));
     }
-    constexpr u64 find_idx(Handle handle) const { return std::distance(handles.begin(), find_handle_it(handle)); }
-    constexpr Handle handle_at(u64 idx) const { return handles.at(idx); }
+    constexpr uint64_t find_idx(Handle handle) const { return std::distance(handles.begin(), find_handle_it(handle)); }
+    constexpr Handle handle_at(uint64_t idx) const { return handles.at(idx); }
 
   private:
     constexpr auto find_handle_it(this auto&& self, Handle h) {

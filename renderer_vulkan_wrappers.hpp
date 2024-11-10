@@ -10,25 +10,25 @@ class Buffer {
   public:
     constexpr Buffer() = default;
     Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, size_t size, u32 alignment, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, u32 alignment);
+    Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
+    Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, uint32_t alignment);
 
     Buffer(Buffer&& other) noexcept;
     Buffer& operator=(Buffer&& other) noexcept;
 
-    bool push_data(std::span<const std::byte> data, u32 offset);
+    bool push_data(std::span<const std::byte> data, uint32_t offset);
     bool push_data(std::span<const std::byte> data) { return push_data(data, size); }
     bool push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
     bool push_data(const void* data, size_t size_bytes, size_t offset) {
         return push_data(std::span{ static_cast<const std::byte*>(data), size_bytes }, offset);
     }
     template <typename T> bool push_data(const std::vector<T>& vec) { return push_data(vec, size); }
-    template <typename T> bool push_data(const std::vector<T>& vec, u32 offset) {
+    template <typename T> bool push_data(const std::vector<T>& vec, uint32_t offset) {
         return push_data(std::as_bytes(std::span{ vec }), offset);
     }
-    template <typename... Ts> bool push_data(u32 offset, const Ts&... ts) {
+    template <typename... Ts> bool push_data(uint32_t offset, const Ts&... ts) {
         std::array<std::byte, (sizeof(Ts) + ...)> arr{};
-        u64 data_offset = 0;
+        uint64_t data_offset = 0;
         const auto pack = [&arr, &data_offset](const auto& e) {
             memcpy(&arr[data_offset], std::addressof(e), sizeof(e));
             data_offset += sizeof(e);
@@ -44,9 +44,9 @@ class Buffer {
 
     std::string name;
     VkBufferUsageFlags usage{};
-    u64 size{};
-    u64 capacity{};
-    u32 alignment{ 1 };
+    uint64_t size{};
+    uint64_t capacity{};
+    uint32_t alignment{ 1 };
     VkBuffer buffer{};
     VmaAllocation alloc{};
     void* mapped{};
@@ -56,9 +56,9 @@ class Buffer {
 class Image {
   public:
     constexpr Image() = default;
-    Image(const std::string& name, u32 width, u32 height, u32 depth, u32 mips, u32 layers, VkFormat format,
+    Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
           VkSampleCountFlagBits samples, VkImageUsageFlags usage = {});
-    Image(const std::string& name, VkImage image, u32 width, u32 height, u32 depth, u32 mips, u32 layers,
+    Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
           VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
     Image(Image&& other) noexcept;
     Image& operator=(Image&& other) noexcept;
@@ -79,11 +79,11 @@ class Image {
     VkImageAspectFlags aspect{};
     VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
     VkImageUsageFlags usage{};
-    u32 width{};
-    u32 height{};
-    u32 depth{};
-    u32 mips{};
-    u32 layers{};
+    uint32_t width{};
+    uint32_t height{};
+    uint32_t depth{};
+    uint32_t mips{};
+    uint32_t layers{};
 };
 
 class SamplerStorage {
@@ -98,8 +98,8 @@ class SamplerStorage {
 
 class ImageStatefulBarrier {
   public:
-    constexpr ImageStatefulBarrier(Image& img, VkImageAspectFlags aspect, u32 base_mip, u32 mips, u32 base_layer,
-                                   u32 layers, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+    constexpr ImageStatefulBarrier(Image& img, VkImageAspectFlags aspect, uint32_t base_mip, uint32_t mips, uint32_t base_layer,
+                                   uint32_t layers, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
                                    VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_NONE,
                                    VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
         : image{ &img }, current_range{ aspect, base_mip, mips, base_layer, layers }, current_layout{ start_layout },
@@ -172,7 +172,7 @@ struct RecordingSubmitInfo {
 class CommandPool {
   public:
     constexpr CommandPool() noexcept = default;
-    CommandPool(u32 queue_index, VkCommandPoolCreateFlags flags = {});
+    CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags = {});
     ~CommandPool() noexcept;
 
     CommandPool(const CommandPool&) noexcept = delete;

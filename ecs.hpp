@@ -8,7 +8,7 @@
 #include "common/types.hpp"
 #include "handle_vec.hpp"
 
-template <typename Storage = u32> struct EntityComponentIdGenerator {
+template <typename Storage = uint32_t> struct EntityComponentIdGenerator {
     template <typename T> static Storage get_id() {
         static Storage idx = counter++;
         return idx;
@@ -20,13 +20,13 @@ struct ComponentArrayBase {
     virtual ~ComponentArrayBase() = default;
 };
 
-template <typename T, typename Storage = u32> struct ComponentArray : public ComponentArrayBase {
+template <typename T, typename Storage = uint32_t> struct ComponentArray : public ComponentArrayBase {
     HandleVector<T, Storage> data;
 };
 
 class EntityComponents {
   public:
-    inline static constexpr u32 MAX_COMPONENTS = 8; // components' ids get stored in u32 bitfield to indicate presence
+    inline static constexpr uint32_t MAX_COMPONENTS = 8; // components' ids get stored in uint32_t bitfield to indicate presence
     constexpr EntityComponents() = default;
     EntityComponents(const EntityComponents&) = delete;
     EntityComponents& operator=(const EntityComponents&) = delete;
@@ -39,7 +39,7 @@ class EntityComponents {
         components.at(idx) = std::make_unique<ComponentArray<T>>();
     }
     template <typename T> T& get(Handle<Entity> handle) { return get_comp_array<T>()->data.at(Handle<T>{ *handle }); }
-    template <typename T> u64 get_idx(Handle<Entity> handle) const {
+    template <typename T> uint64_t get_idx(Handle<Entity> handle) const {
         return get_comp_array<T>()->data.find_idx(Handle<T>{ *handle });
     }
     template <typename T> void insert(Handle<Entity> handle, T&& t) {

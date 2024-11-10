@@ -1,11 +1,13 @@
 #pragma once
-#include "handle.hpp"
 #include <glm/glm.hpp>
+#include "handle.hpp"
+#include "common/spatial.hpp"
 
 struct ModelAsset;
-struct Mesh;
-struct MeshInstance;
-struct BLASInstance;
+struct MeshAsset;
+struct RenderInstance;
+struct RenderMesh;
+struct RenderBLAS;
 
 namespace cmps {
 
@@ -14,10 +16,11 @@ struct Transform {
 };
 
 struct RenderMesh {
-    ModelAsset* asset;
-    Mesh* mesh;
-    Handle<MeshInstance> render_handle;
-    Handle<BLASInstance> blas_handle;
+    ModelAsset* asset{};
+    MeshAsset* mesh{};
+    Handle<RenderInstance> ri_handle{};
+    Handle<::RenderMesh> rm_handle{};
+    Handle<RenderBLAS> blas_handle{};
 };
 
 } // namespace cmps

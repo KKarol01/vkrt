@@ -19,9 +19,9 @@ Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
         .indices = model.indices,
     });
 
-    std::vector<Handle<RenderTexture>> textures;
+    std::vector<Handle<Image>> textures;
     for(const auto& e : model.textures) {
-        textures.push_back(Engine::renderer()->batch_texture(RenderTexture{
+        textures.push_back(Engine::renderer()->batch_texture(ImageDescriptor{
             .name = e.name,
             .width = e.size.first,
             .height = e.size.second,
@@ -29,16 +29,16 @@ Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
         }));
     }
 
-    std::vector<Material> materials;
+    std::vector<MaterialAsset> materials;
     for(const auto& e : model.materials) {
-        Handle<MaterialBatch> material_handle =
-            Engine::renderer()->batch_material(MaterialBatch{ .color_texture = textures.at(e.color_texture.value_or(0)) });
-        materials.push_back(Material{ .name = e.name,
-                                      .material_handle = material_handle,
-                                      .color_texture_handle = textures.at(e.color_texture.value_or(0)) });
+        Handle<RenderMaterial> material_handle =
+            Engine::renderer()->batch_material(MaterialDescriptor{ .color_texture = textures.at(e.color_texture.value_or(0)) });
+        materials.push_back(MaterialAsset{ .material_handle = material_handle,
+                                           .color_texture_handle =
+                                               e.color_texture ? textures.at(*e.color_texture) : Handle<Image>{} });
     }
 
-    std::vector<Mesh> meshes;
+    std::vector<MeshAsset> meshes;
     for(auto& e : model.meshes) {
         BoundingBox aabb;
         for(uint32_t i = e.vertex_offset; i < e.vertex_offset + e.vertex_count; ++i) {
@@ -52,9 +52,9 @@ Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
             .vertex_count = e.vertex_count,
             .index_count = e.index_count,
         });
-        meshes.push_back(Mesh{
+        meshes.push_back(MeshAsset{
             .name = e.name,
-            .mesh_handle = mesh_handle,
+            .rm_handle = mesh_handle,
             .material = &materials.at(e.material.value_or(0)),
             .aabb = aabb,
         });
@@ -66,18 +66,18 @@ Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
                                        .meshes = std::move(meshes),
                                        .materials = std::move(materials),
                                        .textures = std::move(textures) });
-    model_asset_handles[asset_handle] = &model_assets.back();
+    handle_model_assets[asset_handle] = &model_assets.back();
     path_model_assets[path] = asset_handle;
     return asset_handle;
 }
 
 Handle<Node> Scene::instance_model(Handle<ModelAsset> asset, InstanceSettings settings) {
-    ModelAsset& ma = *model_asset_handles.at(asset);
+    ModelAsset& ma = *handle_model_assets.at(asset);
     Node parent{
-        .name = settings.name.empty() ? ma.path.filename().replace_extension().string() : std::move(settings.name),
+        .name = ma.path.filename().replace_extension().string(),
         .handle = Handle<Entity>{ generate_handle },
-        .children_offset = (u32)nodes.size() + 1,
-        .children_count = (u32)ma.meshes.size(),
+        .children_offset = (uint32_t)nodes.size() + 1,
+        .children_count = (uint32_t)ma.meshes.size(),
     };
     attach_component<cmps::Transform>(&parent, cmps::Transform{ settings.transform });
     root_nodes.push_back(nodes.size());
@@ -91,20 +91,19 @@ Handle<Node> Scene::instance_model(Handle<ModelAsset> asset, InstanceSettings se
             .handle = Handle<Entity>{ generate_handle },
             .parent = root_nodes.back(),
         };
+        attach_component<cmps::Transform>(&child, cmps::Transform{ .transform = glm::mat4{ 1.0f } });
+        attach_component<cmps::RenderMesh>(&child, cmps::RenderMesh{ .asset = &ma, .mesh = &e });
 
-        Handle<MeshInstance> render_handle = Engine::renderer()->instance_mesh(InstanceSettings{
+        Engine::renderer()->instance_mesh(InstanceSettings{
             .flags = settings.flags,
             .entity = child.handle,
-            .mesh = e.mesh_handle,
             .material = e.material->material_handle,
+            .mesh = e.rm_handle,
         });
 
-        cmps::RenderMesh render_mesh{ .asset = &ma, .mesh = &e, .render_handle = render_handle };
         if(settings.flags.test(InstanceFlags::RAY_TRACED_BIT)) {
-            render_mesh.blas_handle = Engine::renderer()->instance_blas(BLASInstanceSettings{ .render_instance = render_handle });
+            Engine::renderer()->instance_blas(BLASInstanceSettings{ .entity = child.handle });
         }
-        attach_component<cmps::Transform>(&child, {});
-        attach_component<cmps::RenderMesh>(&child, std::move(render_mesh));
         entity_node_idxs[child.handle] = nodes.size();
         nodes.push_back(child);
         final_transforms.push_back(settings.transform);
@@ -114,20 +113,20 @@ Handle<Node> Scene::instance_model(Handle<ModelAsset> asset, InstanceSettings se
 }
 
 void Scene::update_transform(Handle<Entity> entity) {
-    u32 idx = entity_node_idxs.at(entity);
+    uint32_t idx = entity_node_idxs.at(entity);
     glm::mat4 tr = glm::mat4{ 1.0f };
     if(nodes.at(idx).parent != ~0u) { tr = final_transforms.at(nodes.at(idx).parent); }
     _update_transform(idx, tr);
 }
 
-void Scene::_update_transform(u32 idx, glm::mat4 t) {
+void Scene::_update_transform(uint32_t idx, glm::mat4 t) {
     Node& node = nodes.at(idx);
     cmps::Transform& tr = Engine::ec()->get<cmps::Transform>(node.handle);
     final_transforms.at(idx) = tr.transform * t;
     if(node.has_component<cmps::RenderMesh>()) {
-        Engine::renderer()->update_transform(Engine::ec()->get<cmps::RenderMesh>(node.handle).render_handle);
+        Engine::renderer()->update_transform(Engine::ec()->get<cmps::RenderMesh>(node.handle).ri_handle);
     }
-    for(u32 i = 0; i < node.children_count; ++i) {
+    for(uint32_t i = 0; i < node.children_count; ++i) {
         _update_transform(node.children_offset + i, final_transforms.at(idx));
     }
 }

@@ -21,7 +21,7 @@
 #endif
 
 /* Controls renderer's behavior */
-enum class RendererFlags : u32 {
+enum class RendererFlags : uint32_t {
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
     DIRTY_MESH_BLAS_BIT = 0x4,
@@ -32,12 +32,12 @@ enum class RendererFlags : u32 {
     RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class GeometryFlags : u32 {};
+enum class GeometryFlags : uint32_t {};
 enum class MeshBatchFlags { DIRTY_BLAS_BIT = 0x1 };
 
 /* Used by mesh instance to index textures in the shader */
 struct RenderMaterial {
-    Handle<RenderTexture> color_texture;
+    Handle<Image> color_texture;
 };
 
 struct GeometryMetadata {};
@@ -51,10 +51,10 @@ struct MeshMetadata {
 struct RenderGeometry {
     Flags<GeometryFlags> flags;
     Handle<GeometryMetadata> metadata;
-    u32 vertex_offset{ 0 };
-    u32 vertex_count{ 0 };
-    u32 index_offset{ 0 };
-    u32 index_count{ 0 };
+    uint32_t vertex_offset{ 0 };
+    uint32_t vertex_count{ 0 };
+    uint32_t index_offset{ 0 };
+    uint32_t index_count{ 0 };
 };
 
 /* subset of geometry's vertex and index buffers */
@@ -62,32 +62,32 @@ struct RenderMesh {
     Flags<MeshBatchFlags> flags;
     Handle<RenderGeometry> geometry;
     Handle<MeshMetadata> metadata;
-    u32 vertex_offset{ 0 };
-    u32 vertex_count{ 0 };
-    u32 index_offset{ 0 };
-    u32 index_count{ 0 };
+    uint32_t vertex_offset{ 0 };
+    uint32_t vertex_count{ 0 };
+    uint32_t index_offset{ 0 };
+    uint32_t index_count{ 0 };
 };
 
 /* render mesh with material and entity handle for ec system */
-struct MeshInstance {
-    Handle<MeshInstance> handle;
+struct RenderInstance {
+    Handle<RenderInstance> handle;
     Handle<Entity> entity;
     Handle<RenderMesh> mesh;
-    Handle<MaterialBatch> material;
+    Handle<RenderMaterial> material;
 };
 
 /* unpacked mesh instance for gpu consumption */
 struct GPUMeshInstance {
-    u32 vertex_offset{};
-    u32 index_offset{};
-    u32 color_texture_idx;
+    uint32_t vertex_offset{};
+    uint32_t index_offset{};
+    uint32_t color_texture_idx;
 };
 
 /* for each meshinstance struct that has raytracing flag set */
-struct BLASInstance {
-    Handle<BLASInstance> handle;
-    Handle<MeshInstance> render_handle;
-    Handle<RenderMesh> mesh_batch;
+struct RenderBLAS {
+    Handle<RenderBLAS> handle;
+    Handle<RenderInstance> ri_handle;
+    Handle<RenderMesh> rm_handle;
     VkAccelerationStructureKHR blas;
 };
 
@@ -100,28 +100,28 @@ struct DDGI {
         glm::vec3 probe_start;
         glm::uvec3 probe_counts;
         glm::vec3 probe_walk;
-        f32 min_probe_distance;
-        f32 max_probe_distance;
-        f32 min_dist;
-        f32 max_dist;
-        f32 normal_bias;
-        f32 max_probe_offset;
-        u32 frame_num;
-        s32 irradiance_probe_side;
-        s32 visibility_probe_side;
-        u32 rays_per_probe;
+        float min_probe_distance;
+        float max_probe_distance;
+        float min_dist;
+        float max_dist;
+        float normal_bias;
+        float max_probe_offset;
+        uint32_t frame_num;
+        int32_t irradiance_probe_side;
+        int32_t visibility_probe_side;
+        uint32_t rays_per_probe;
         VkDeviceAddress debug_probe_offsets;
     };
     using GPUProbeOffsetsLayout = glm::vec3;
 
     BoundingBox probe_dims;
-    f32 probe_distance{ 0.4f };
+    float probe_distance{ 0.4f };
     glm::uvec3 probe_counts;
     glm::vec3 probe_walk;
     glm::vec3 probe_start;
-    s32 irradiance_probe_side{ 6 };
-    s32 visibility_probe_side{ 14 };
-    u32 rays_per_probe{ 64 };
+    int32_t irradiance_probe_side{ 6 };
+    int32_t visibility_probe_side{ 14 };
+    uint32_t rays_per_probe{ 64 };
     Buffer buffer;
     Buffer debug_probe_offsets_buffer;
     Image* radiance_texture{};
@@ -132,8 +132,8 @@ struct DDGI {
 };
 
 struct IndirectDrawCommandBufferHeader {
-    u32 draw_count{};
-    u32 geometry_instance_count{};
+    uint32_t draw_count{};
+    uint32_t geometry_instance_count{};
 };
 
 struct Fence {
@@ -142,7 +142,7 @@ struct Fence {
     Fence(Fence&& f) noexcept;
     Fence& operator=(Fence&& f) noexcept;
     ~Fence() noexcept;
-    VkResult wait(u32 timeout = ~0u);
+    VkResult wait(uint32_t timeout = ~0u);
     VkFence fence{};
 };
 
@@ -173,40 +173,40 @@ struct DescriptorBinding {
     using Resource =
         std::variant<std::monostate, const Buffer*, const Image*, VkAccelerationStructureKHR*, const std::vector<Image>*>;
     DescriptorBinding() = default;
-    DescriptorBinding(Resource res, u32 count, VkImageLayout layout, std::optional<VkSampler> sampler = {});
-    DescriptorBinding(Resource res, u32 count, std::optional<VkSampler> sampler = {});
+    DescriptorBinding(Resource res, uint32_t count, VkImageLayout layout, std::optional<VkSampler> sampler = {});
+    DescriptorBinding(Resource res, uint32_t count, std::optional<VkSampler> sampler = {});
     DescriptorBinding(Resource res);
     VkDescriptorType get_vktype() const;
     VkImageLayout deduce_layout(const Resource& res, const std::optional<VkSampler>& sampler);
     Resource res{};
     VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
     std::optional<VkSampler> sampler{}; // if not set - storage image; if set, but sampler is nullptr - sampled image; if set and sampler is not nullptr - combined image sampler
-    u32 count{ 1 };
+    uint32_t count{ 1 };
 };
 
 struct DescriptorLayout {
-    inline static constexpr u32 MAX_BINDINGS = 16;
+    inline static constexpr uint32_t MAX_BINDINGS = 16;
     bool is_empty() const;
     std::array<DescriptorBinding, MAX_BINDINGS> bindings{};
     VkDescriptorSetLayout layout{};
-    s32 variable_binding{ -1 };
+    int32_t variable_binding{ -1 };
 };
 
 struct PipelineLayout {
-    inline static constexpr u32 MAX_SETS = 4;
+    inline static constexpr uint32_t MAX_SETS = 4;
 
     PipelineLayout() = default;
-    PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, u32 push_size = 128);
+    PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, uint32_t push_size = 128);
 
     std::array<DescriptorLayout, MAX_SETS> sets{};
     VkPipelineLayout layout{};
-    u32 push_size{};
+    uint32_t push_size{};
 };
 
 struct Pipeline {
     enum Type { None, Raster, Compute, RT };
     struct RasterizationSettings {
-        u32 num_col_formats{ 1 };
+        uint32_t num_col_formats{ 1 };
         std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
         VkFormat dep_format{ VK_FORMAT_D16_UNORM };
         VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
@@ -214,8 +214,8 @@ struct Pipeline {
         VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
     };
     struct RaytracingSettings {
-        u32 recursion_depth{ 1 };
-        u32 group_count{};
+        uint32_t recursion_depth{ 1 };
+        uint32_t group_count{};
         Buffer* sbt;
     };
 
@@ -234,8 +234,8 @@ struct Pipeline {
 
 struct DescriptorPool {
     DescriptorPool() = default;
-    DescriptorPool(const PipelineLayout* layout, u32 max_sets);
-    void allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, u32 count = 1, std::span<u32> variable_count = {});
+    DescriptorPool(const PipelineLayout* layout, uint32_t max_sets);
+    void allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, uint32_t count = 1, std::span<uint32_t> variable_count = {});
     void reset();
     VkDescriptorPool pool{};
     std::deque<VkDescriptorSet> sets;
@@ -248,7 +248,7 @@ struct RenderPass {
     void bind(VkCommandBuffer cmd);
     void bind_desc_sets(VkCommandBuffer cmd);
     void update_desc_sets();
-    void push_constant(VkCommandBuffer cmd, u32 offset, u32 size, const void* value);
+    void push_constant(VkCommandBuffer cmd, uint32_t offset, uint32_t size, const void* value);
     const Pipeline* pipeline{};
     DescriptorPool* desc_pool{};
     std::array<VkDescriptorSet*, PipelineLayout::MAX_SETS> sets{};
@@ -257,7 +257,7 @@ struct RenderPass {
 template <size_t frames> struct Swapchain {
     Swapchain() = default;
     void create();
-    u32 acquire(VkResult* res, u64 timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
+    uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     VkSwapchainKHR swapchain{};
     std::array<Image, frames> images;
 };
@@ -290,7 +290,7 @@ struct QueueCmdSubmission : public VkCommandBufferSubmitInfo {
 };
 
 struct QueueSemaphoreSubmission : public VkSemaphoreSubmitInfo {
-    QueueSemaphoreSubmission(VkPipelineStageFlags2 stage, Semaphore& sem, u32 value = 0)
+    QueueSemaphoreSubmission(VkPipelineStageFlags2 stage, Semaphore& sem, uint32_t value = 0)
         : VkSemaphoreSubmitInfo(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem.semaphore, .value = value, .stageMask = stage })) {}
 };
 
@@ -306,7 +306,7 @@ struct Queue {
     void submit(VkCommandBuffer cmd, Fence* fence = {});
     void wait_idle();
     VkQueue queue{};
-    u32 idx{ ~0u };
+    uint32_t idx{ ~0u };
 };
 
 class RendererVulkan : public Renderer {
@@ -315,21 +315,19 @@ class RendererVulkan : public Renderer {
 
     static RendererVulkan* get() { return static_cast<RendererVulkan*>(Engine::renderer()); }
 
-    void set_screen_rect(ScreenRect rect) final;
-
     void initialize_vulkan();
     void initialize_imgui();
     void initialize_resources();
 
     void update() final;
 
-    Handle<RenderTexture> batch_texture(const RenderTexture& batch) final;
-    Handle<MaterialBatch> batch_material(const MaterialBatch& batch) final;
+    Handle<Image> batch_texture(const ImageDescriptor& desc) final;
+    Handle<RenderMaterial> batch_material(const MaterialDescriptor& desc) final;
     Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) final;
     Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) final;
-    Handle<MeshInstance> instance_mesh(const InstanceSettings& settings) final;
-    Handle<BLASInstance> instance_blas(const BLASInstanceSettings& settings) final;
-    void update_transform(Handle<MeshInstance> handle) final;
+    void instance_mesh(const InstanceSettings& settings) final;
+    void instance_blas(const BLASInstanceSettings& settings) final;
+    void update_transform(Handle<RenderInstance> handle) final;
 
     void upload_model_textures();
     void upload_staged_models();
@@ -344,13 +342,13 @@ class RendererVulkan : public Renderer {
     Image* make_image(Image&& img);
     Buffer* make_buffer(Buffer&& buf);
 
-    u32 get_total_vertices() const {
+    uint32_t get_total_vertices() const {
         return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
     }
-    u32 get_total_indices() const {
+    uint32_t get_total_indices() const {
         return geometries.empty() ? 0u : geometries.back().index_offset + geometries.back().index_count;
     }
-    u32 get_total_triangles() const { return get_total_indices() / 3u; }
+    uint32_t get_total_triangles() const { return get_total_indices() / 3u; }
 
     VkInstance instance;
     VkDevice dev;
@@ -358,7 +356,6 @@ class RendererVulkan : public Renderer {
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
     Flags<RendererFlags> flags;
-    VkRect2D screen_rect{ 1280, 768 };
     SamplerStorage samplers;
 
     Queue gq;
@@ -370,11 +367,11 @@ class RendererVulkan : public Renderer {
     HandleVector<RenderMesh> meshes;
     HandleVector<MeshMetadata> mesh_metadatas;
     HandleVector<Image> textures;
-    std::vector<MeshInstance> mesh_instances;
-    std::unordered_map<Handle<MeshInstance>, u32> mesh_instance_idxs;
+    std::vector<RenderInstance> mesh_instances;
+    std::unordered_map<Handle<RenderInstance>, uint32_t> mesh_instance_idxs;
     HandleVector<RenderMaterial> materials;
-    std::vector<BLASInstance> blas_instances;
-    u32 max_draw_count{};
+    std::vector<RenderBLAS> blas_instances;
+    uint32_t max_draw_count{};
 
     VkAccelerationStructureKHR tlas{};
     Buffer tlas_buffer;
@@ -407,14 +404,14 @@ class RendererVulkan : public Renderer {
         std::vector<std::byte> rgba_data;
     };
     struct UpdatePosition {
-        u32 idx;
+        uint32_t idx;
         glm::mat4 transform;
     };
 
     std::vector<Vertex> upload_vertices;
-    std::vector<u32> upload_indices;
+    std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<Handle<MeshInstance>> update_positions;
+    std::vector<Handle<RenderInstance>> update_positions;
 };
 
 // clang-format off
