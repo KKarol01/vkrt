@@ -36,13 +36,13 @@
 struct GLFWwindow;
 
 struct Window {
-    Window(uint32_t width, uint32_t height);
+    Window(float width, float height);
     ~Window();
 
     bool should_close() const;
 
-    uint32_t width;
-    uint32_t height;
+    float width;
+    float height;
     GLFWwindow* window{ nullptr };
 };
 

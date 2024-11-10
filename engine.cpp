@@ -12,7 +12,7 @@ static void on_window_resize(GLFWwindow* window, int w, int h) {
     Engine::notify_on_window_resize();
 }
 
-Window::Window(uint32_t width, uint32_t height) : width(width), height(height) {
+Window::Window(float width, float height) : width(width), height(height) {
     window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
     if(!window) { ENG_WARN("Could not create glfw window"); }
 }
@@ -77,7 +77,7 @@ Engine* Engine::get() {
 }
 
 Window* Engine::window() {
-    static Window _window{ 1280, 768 };
+    static Window _window{ 1280.0f, 768.0f };
     return &_window;
 }
 

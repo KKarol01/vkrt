@@ -12,35 +12,71 @@
 static std::array<std::pair<VkImageView, VkDescriptorSet>, 2> output_images;
 
 void UI::update() {
-    //auto renderer = ((RendererVulkan*)Engine::renderer());
+    auto renderer = ((RendererVulkan*)Engine::renderer());
+    if(Engine::window()->height == 0) { return; }
 
-    //if(Engine::window()->height == 0) { return; }
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 
-    //ImGui_ImplVulkan_NewFrame();
-    //ImGui_ImplGlfw_NewFrame();
-    //ImGui::NewFrame();
-    //ImGuizmo::BeginFrame();
+    ImGui::Begin("##ui");
 
-    //ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
-    //ImGui::SetNextWindowPos({});
-    //ImGui::SetNextWindowSize({ (float)Engine::window()->width, (float)Engine::window()->height });
-    //ImGui::SetNextWindowScroll({});
-    //ImGui::Begin("main ui window", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_MenuBar);
-    //ImGui::PopStyleVar();
+    if(ImGui::BeginChild("##left_panel")) {
+        for(auto& n : Engine::scene()->nodes) {
+            ImGui::PushID(&n);
+            if(ImGui::Selectable(n.name.c_str(), &draw_scene_expanded[&n])) { set_selected(&n); }
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
 
-    //if(ImGui::BeginMenuBar()) {
-    //    ImGui::Button("asd");
-    //    ImGui::EndMenuBar();
-    //}
+    if(draw_scene_selected) {
+        ImGuizmo::SetRect(0.0f, 0.0f, Engine::window()->width, Engine::window()->height);
+        ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
+        auto& io = ImGui::GetIO();
+        const auto viewmat = Engine::camera()->get_view();
+        const auto projmat = Engine::camera()->get_projection();
+        ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
+        ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
 
-    //if(ImGui::BeginTable("table", 3, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable,
-    //                     ImGui::GetContentRegionAvail())) {
-    //    ImGui::TableSetupColumn("l1", ImGuiTableColumnFlags_WidthStretch, 0.6f);
-    //    ImGui::TableSetupColumn("l2", ImGuiTableColumnFlags_WidthStretch, 2.0f);
-    //    ImGui::TableSetupColumn("l3", ImGuiTableColumnFlags_WidthStretch, 0.7f);
-    //    ImGui::TableNextRow();
-    //    ImGui::TableSetColumnIndex(0);
-    //    { draw_left_column(); }
+        if(draw_scene_selected->has_component<cmps::RenderMesh>()) {
+            cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(draw_scene_selected->handle);
+            glm::mat4 tt = glm::translate(
+                Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(draw_scene_selected->handle)),
+                rm.mesh->aabb.center());
+            glm::mat4 delta{};
+            ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
+            glm::vec3 t, r, s;
+            ImGuizmo::DecomposeMatrixToComponents(&delta[0][0], &t.x, &r.x, &s.x);
+            if(ImGuizmo::IsUsing()) {
+                glm::mat4& cmps_transform = Engine::ec()->get<cmps::Transform>(draw_scene_selected->handle).transform;
+                cmps_transform = glm::translate(cmps_transform, t);
+                Engine::scene()->update_transform(draw_scene_selected->handle);
+            }
+        }
+    }
+
+    // ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
+    // ImGui::SetNextWindowPos({});
+    // ImGui::SetNextWindowSize({ (float)Engine::window()->width, (float)Engine::window()->height });
+    // ImGui::SetNextWindowScroll({});
+    // ImGui::Begin("main ui window", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+    // ImGuiWindowFlags_MenuBar); ImGui::PopStyleVar();
+
+    // if(ImGui::BeginMenuBar()) {
+    //     ImGui::Button("asd");
+    //     ImGui::EndMenuBar();
+    // }
+
+    // if(ImGui::BeginTable("table", 3, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable,
+    //                      ImGui::GetContentRegionAvail())) {
+    //     ImGui::TableSetupColumn("l1", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+    //     ImGui::TableSetupColumn("l2", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+    //     ImGui::TableSetupColumn("l3", ImGuiTableColumnFlags_WidthStretch, 0.7f);
+    //     ImGui::TableNextRow();
+    //     ImGui::TableSetColumnIndex(0);
+    //     { draw_left_column(); }
 
     //    ImGui::TableSetColumnIndex(1);
     //    {
@@ -133,8 +169,8 @@ void UI::update() {
     //    { draw_right_column(); }
     //    ImGui::EndTable();
     //}
-    //ImGui::End();
-    //ImGui::Render();
+    ImGui::End();
+    ImGui::Render();
 }
 
 void UI::draw_left_column() {
@@ -205,7 +241,7 @@ void UI::draw_right_column() {
         if(node->has_component<cmps::RenderMesh>()) {
             cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(node->handle);
             Engine::scene()->update_transform(node->handle);
-            //Engine::renderer()->update_transform(rm.render_handle);
+            // Engine::renderer()->update_transform(rm.render_handle);
         }
     }
     ImGui::PopID();

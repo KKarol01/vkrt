@@ -307,10 +307,6 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
 
 void RendererVulkan::init() {
     initialize_vulkan();
-    // create_rt_output_image();
-    //  compile_shaders();
-    // build_pipelines();
-    // build_sbt();
     initialize_resources();
     initialize_imgui();
     /*build_tlas();
@@ -623,9 +619,9 @@ void RendererVulkan::initialize_resources() {
                                   .ddgi_irradiance = { pp_ddgi_irradiance, dp },
                                   .ddgi_offsets = { pp_ddgi_offsets, dp },
                                   .default_lit = { pp_lit, dp } };
-        fd.depth_buffer =
-            make_image(Image{ std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1,
-                              VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
+        fd.depth_buffer = make_image(Image{ std::format("depth_buffer_{}", i), (uint32_t)Engine::window()->width,
+                                            (uint32_t)Engine::window()->height, 1, 1, 1, VK_FORMAT_D16_UNORM,
+                                            VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
     }
 }
 
@@ -651,9 +647,15 @@ void RendererVulkan::update() {
     if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) {
         gq.wait_idle();
         for(int i = 0; i < frame_data.data.size(); ++i) {
-            *frame_data.data[i].depth_buffer = Image{
-                std::format("depth_buffer_{}", i), Engine::window()->width, Engine::window()->height, 1, 1, 1, VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-            };
+            *frame_data.data[i].depth_buffer = Image{ std::format("depth_buffer_{}", i),
+                                                      (uint32_t)Engine::window()->width,
+                                                      (uint32_t)Engine::window()->height,
+                                                      1,
+                                                      1,
+                                                      1,
+                                                      VK_FORMAT_D16_UNORM,
+                                                      VK_SAMPLE_COUNT_1_BIT,
+                                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT };
         }
     }
 
@@ -698,7 +700,7 @@ void RendererVulkan::update() {
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
         const auto view = Engine::camera()->get_view();
-        const auto proj = glm::perspective(glm::radians(45.0f), 1024.0f / 768.0f, 0.01f, 20.0f); // Engine::camera()->get_projection();
+        const auto proj = Engine::camera()->get_projection();
         const auto inv_view = glm::inverse(view);
         const auto inv_proj = glm::inverse(proj);
         fd.constants->push_data(0ul, view, proj, inv_view, inv_proj, rand_mat);
@@ -834,7 +836,7 @@ void RendererVulkan::update() {
         });
 
         auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = Engine::window()->width, .height = Engine::window()->height } },
+            .renderArea = { .extent = { .width = (uint32_t)Engine::window()->width, .height = (uint32_t)Engine::window()->height } },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = r_col_atts,
@@ -850,7 +852,7 @@ void RendererVulkan::update() {
         fd.passes.default_lit.bind_desc_sets(cmd);
 
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { Engine::window()->width, Engine::window()->height } };
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
         VkViewport r_view_1{ .x = 0.0f,
                              .y = static_cast<float>(Engine::window()->height),
                              .width = static_cast<float>(Engine::window()->width),
@@ -869,17 +871,12 @@ void RendererVulkan::update() {
                                       indirect_draw_buffer.buffer, 0ull, max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cmd);
 
-        /*output_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);*/
-
-        // TODO: IMPLEMENT IMGUI
-        // assert(false);
-        /*ImDrawData* im_draw_data = ImGui::GetDrawData();
+        ImDrawData* im_draw_data = ImGui::GetDrawData();
         if(im_draw_data) {
             VkRenderingAttachmentInfo i_col_atts[]{
                 VkRenderingAttachmentInfo{
                     .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                    .imageView = swapchain_images[sw_img_idx].view,
+                    .imageView = swapchain_image->view,
                     .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -888,15 +885,18 @@ void RendererVulkan::update() {
             };
             VkRenderingInfo imgui_rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { Engine::window()->width,
-        Engine::window()->height } }, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = i_col_atts,
+                .renderArea = VkRect2D{ .offset = { 0, 0 },
+                                        .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } },
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = i_col_atts,
             };
             vkCmdBeginRendering(cmd, &imgui_rendering_info);
             vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
             vkCmdSetViewport(cmd, 0, 1, &r_view_1);
             ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
             vkCmdEndRendering(cmd);
-        }*/
+        }
     }
 
     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
@@ -1060,10 +1060,10 @@ void RendererVulkan::upload_instances() {
         const RenderMesh& mb = meshes.at(mi.mesh);
         const RenderGeometry& geom = geometries.at(mb.geometry);
         const RenderMaterial& mat = materials.at(Handle<RenderMaterial>{ *mi.material });
-        gpu_mesh_instances.push_back(GPUMeshInstance{ .vertex_offset = geom.vertex_offset + mb.vertex_offset,
-                                                      .index_offset = geom.index_offset + mb.index_offset,
-                                                      .color_texture_idx =
-                                                          (uint32_t)textures.find_idx(Handle<Image>{ *mat.color_texture }) });
+        gpu_mesh_instances.push_back(GPUMeshInstance{
+            .vertex_offset = geom.vertex_offset + mb.vertex_offset,
+            .index_offset = geom.index_offset + mb.index_offset,
+            .color_texture_idx = (uint32_t)textures.find_idx(Handle<Image>{ *mat.color_texture }) });
         if(i == 0 || mesh_instances.at(i - 1).mesh != mi.mesh) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = mb.index_count,
                                                                       .instanceCount = 1,
@@ -1212,9 +1212,10 @@ void RendererVulkan::build_tlas() {
         const RenderBLAS& bi = blas_instances.at(i);
         const RenderMesh& mb = meshes.at(bi.rm_handle);
         const RenderGeometry& geom = geometries.at(mb.geometry);
-        const uint32_t mi_idx = std::distance(mesh_instances.begin(),
-                                         std::find_if(mesh_instances.begin(), mesh_instances.end(),
-                                                      [&bi](const RenderInstance& e) { return e.handle == bi.ri_handle; }));
+        const uint32_t mi_idx =
+            std::distance(mesh_instances.begin(),
+                          std::find_if(mesh_instances.begin(), mesh_instances.end(),
+                                       [&bi](const RenderInstance& e) { return e.handle == bi.ri_handle; }));
         const uint32_t scene_mi_idx = Engine::scene()->entity_node_idxs.at(mesh_instances.at(mi_idx).entity);
 
         triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + mb.index_count / 3u);
@@ -1624,7 +1625,7 @@ template <size_t frames> void Swapchain<frames>::create() {
         .minImageCount = frames,
         .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-        .imageExtent = VkExtent2D{ window.width, window.height },
+        .imageExtent = VkExtent2D{ (uint32_t)window.width, (uint32_t)window.height },
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -1686,7 +1687,8 @@ DescriptorPool::DescriptorPool(const PipelineLayout* layout, uint32_t max_sets) 
     VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &info, nullptr, &pool));
 }
 
-void DescriptorPool::allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, uint32_t count, std::span<uint32_t> variable_count) {
+void DescriptorPool::allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, uint32_t count,
+                              std::span<uint32_t> variable_count) {
     auto var_info = Vks(VkDescriptorSetVariableDescriptorCountAllocateInfo{});
     var_info.descriptorSetCount = variable_count.size();
     var_info.pDescriptorCounts = variable_count.data();
