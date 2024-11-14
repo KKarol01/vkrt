@@ -853,10 +853,10 @@ void RendererVulkan::update() {
 
         vkCmdBeginRendering(cmd, &rendering_info);
         VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
-        VkViewport r_view_1{ .x = 0.0f,
-                             .y = static_cast<float>(Engine::window()->height),
-                             .width = static_cast<float>(Engine::window()->width),
-                             .height = -static_cast<float>(Engine::window()->height),
+        VkViewport r_view_1{ .x = Engine::ui()->routput.window.x,
+                             .y = Engine::ui()->routput.window.y + Engine::ui()->routput.window.h, // Engine::window()->height,
+                             .width = Engine::ui()->routput.window.w,   // Engine::window()->width,
+                             .height = -Engine::ui()->routput.window.h, //-Engine::window()->height,
                              .minDepth = 0.0f,
                              .maxDepth = 1.0f };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
@@ -870,7 +870,10 @@ void RendererVulkan::update() {
         vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
                                       indirect_draw_buffer.buffer, 0ull, max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cmd);
+    }
 
+    // Imgui pass
+    {
         ImDrawData* im_draw_data = ImGui::GetDrawData();
         if(im_draw_data) {
             VkRenderingAttachmentInfo i_col_atts[]{
@@ -883,6 +886,13 @@ void RendererVulkan::update() {
                     .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
                 },
             };
+            VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
+            VkViewport r_view_1{ .x = 0.0f,
+                                 .y = Engine::window()->height,
+                                 .width = Engine::window()->width,
+                                 .height = -Engine::window()->height,
+                                 .minDepth = 0.0f,
+                                 .maxDepth = 1.0f };
             VkRenderingInfo imgui_rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                 .renderArea = VkRect2D{ .offset = { 0, 0 },

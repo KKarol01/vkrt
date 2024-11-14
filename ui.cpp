@@ -20,231 +20,106 @@ void UI::update() {
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
 
-    ImGui::Begin("##ui");
-
-    if(ImGui::BeginChild("##left_panel")) {
-        for(auto& n : Engine::scene()->nodes) {
-            ImGui::PushID(&n);
-            if(ImGui::Selectable(n.name.c_str(), &draw_scene_expanded[&n])) { set_selected(&n); }
-            ImGui::PopID();
-        }
-        ImGui::EndChild();
+    ImGui::SetNextWindowPos({});
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+    if(ImGui::Begin("asdf", 0, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground)) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+        ImGuiCur c1;
+        node_list.draw();
+        auto rs1 = ImGui::GetItemRectSize();
+        console.draw();
+        ImGuiCur{ c1.x + rs1.x + ImGui::GetStyle().FramePadding.x, c1.y }.set_pos();
+        ImGui::PopStyleColor();
+        routput.draw();
     }
-
-    if(draw_scene_selected) {
-        ImGuizmo::SetRect(0.0f, 0.0f, Engine::window()->width, Engine::window()->height);
-        ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
-        auto& io = ImGui::GetIO();
-        const auto viewmat = Engine::camera()->get_view();
-        const auto projmat = Engine::camera()->get_projection();
-        ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
-        ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
-
-        if(draw_scene_selected->has_component<cmps::RenderMesh>()) {
-            cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(draw_scene_selected->handle);
-            glm::mat4 tt = glm::translate(
-                Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(draw_scene_selected->handle)),
-                rm.mesh->aabb.center());
-            glm::mat4 delta{};
-            ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
-            glm::vec3 t, r, s;
-            ImGuizmo::DecomposeMatrixToComponents(&delta[0][0], &t.x, &r.x, &s.x);
-            if(ImGuizmo::IsUsing()) {
-                glm::mat4& cmps_transform = Engine::ec()->get<cmps::Transform>(draw_scene_selected->handle).transform;
-                cmps_transform = glm::translate(cmps_transform, t);
-                Engine::scene()->update_transform(draw_scene_selected->handle);
-            }
-        }
-    }
-
-    // ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
-    // ImGui::SetNextWindowPos({});
-    // ImGui::SetNextWindowSize({ (float)Engine::window()->width, (float)Engine::window()->height });
-    // ImGui::SetNextWindowScroll({});
-    // ImGui::Begin("main ui window", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-    // ImGuiWindowFlags_MenuBar); ImGui::PopStyleVar();
-
-    // if(ImGui::BeginMenuBar()) {
-    //     ImGui::Button("asd");
-    //     ImGui::EndMenuBar();
-    // }
-
-    // if(ImGui::BeginTable("table", 3, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable,
-    //                      ImGui::GetContentRegionAvail())) {
-    //     ImGui::TableSetupColumn("l1", ImGuiTableColumnFlags_WidthStretch, 0.6f);
-    //     ImGui::TableSetupColumn("l2", ImGuiTableColumnFlags_WidthStretch, 2.0f);
-    //     ImGui::TableSetupColumn("l3", ImGuiTableColumnFlags_WidthStretch, 0.7f);
-    //     ImGui::TableNextRow();
-    //     ImGui::TableSetColumnIndex(0);
-    //     { draw_left_column(); }
-
-    //    ImGui::TableSetColumnIndex(1);
-    //    {
-    //        const ImVec2 cell_padding = ImVec2{ ImGui::GetStyle().CellPadding.x + ImGui::GetStyle().ChildBorderSize,
-    //                                            ImGui::GetStyle().ItemSpacing.y + ImGui::GetStyle().ChildBorderSize };
-    //        ImGui::SetCursorPosX(ImGui::GetCursorPosX() - cell_padding.x - 1.0f);
-    //        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - cell_padding.y);
-    //        auto cpos = ImGui::GetCursorScreenPos();
-    //        const ImVec2 image_output_size{ ImGui::GetContentRegionAvail().x + cell_padding.x,
-    //                                        ImGui::GetContentRegionAvail().y * 0.5f };
-
-    //        if(ImGui::BeginChild("image output", image_output_size, ImGuiChildFlags_Border | ImGuiChildFlags_ResizeY)) {
-    //            const auto fn = get_renderer().get_resource_idx();
-    //            const Image* oi = &get_renderer().output_images[fn];
-    //            if(oi && oi->view && output_images[fn].first != oi->view) {
-    //                const auto linear_sampler = get_renderer().samplers.get_sampler();
-    //                if(output_images[fn].second) {
-    //                    vkDeviceWaitIdle(get_renderer().dev);
-    //                    ImGui_ImplVulkan_RemoveTexture(output_images[fn].second);
-    //                }
-    //                output_images[fn].first = oi->view;
-    //                output_images[fn].second =
-    //                    ImGui_ImplVulkan_AddTexture(linear_sampler, oi->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    //            }
-    //            if(oi && oi->view) {
-    //                ImGui::Image((ImTextureID)output_images[fn].second, ImGui::GetContentRegionAvail());
-    //            }
-
-    //            if(draw_scene_selected) {
-    //                ScreenRect srect{ .offset_x = (int)output_offset_x,
-    //                                  .offset_y = (int)output_offset_y,
-    //                                  .width = (uint32_t)output_offset_w,
-    //                                  .height = (uint32_t)output_offset_h };
-    //                ImGuizmo::SetRect(srect.offset_x, srect.offset_y, srect.width, srect.height);
-    //                ImGuizmo::SetDrawlist();
-    //                auto& io = ImGui::GetIO();
-    //                const auto viewmat = Engine::camera()->get_view();
-    //                const auto projmat = Engine::camera()->get_projection();
-    //                ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
-    //                ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
-
-    //                // TODO: MAKE BOUNDING BOX UNRELATED TO RENDER MESH
-    //                if(draw_scene_selected->has_component<cmps::RenderMesh>()) {
-    //                    cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(draw_scene_selected->handle);
-    //                    glm::mat4 tt = glm::translate(Engine::scene()->final_transforms.at(
-    //                                                      Engine::scene()->entity_node_idxs.at(draw_scene_selected->handle)),
-    //                                                  rm.mesh->aabb.center());
-    //                    glm::mat4 delta;
-    //                    ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
-    //                    glm::vec3 t, r, s;
-    //                    ImGuizmo::DecomposeMatrixToComponents(&delta[0][0], &t.x, &r.x, &s.x);
-    //                    if(ImGuizmo::IsUsing()) {
-    //                        glm::mat4& cmps_transform = Engine::ec()->get<cmps::Transform>(draw_scene_selected->handle).transform;
-    //                        cmps_transform = glm::translate(cmps_transform, t);
-    //                        Engine::scene()->update_transform(draw_scene_selected->handle);
-    //                        //Engine::renderer()->update_transform(rm.render_handle);
-    //                    }
-    //                }
-    //            }
-    //        }
-    //        ImGui::EndChild();
-
-    //        static constexpr float aspect = 16.0f / 9.0f;
-    //        const float orig_width = image_output_size.x - ImGui::GetStyle().ItemSpacing.x * 0.5f + 1.0f;
-    //        const float orig_height = ImGui::GetCursorScreenPos().y - cpos.y - ImGui::GetStyle().ItemSpacing.y - 5.0f;
-    //        float width = orig_width;
-    //        float height = orig_height;
-    //        if(width > height * aspect) {
-    //            width = height * aspect;
-    //        } else {
-    //            height = width / aspect;
-    //        }
-    //        float offsetX = cpos.x + 2.0f + std::abs(orig_width - width) * 0.5f;
-    //        float offsetY = cpos.y + ImGui::GetStyle().ItemSpacing.y + std::abs(orig_height - height) * 0.5f;
-    //        output_offset_x = offsetX;
-    //        output_offset_y = offsetY;
-    //        output_offset_w = width;
-    //        output_offset_h = height;
-    //        Engine::renderer()->set_screen_rect({ (int)offsetX, (int)offsetY, (uint32_t)width, (uint32_t)height });
-
-    //        ImGui::SetCursorPosX(ImGui::GetCursorPosX() - cell_padding.x);
-    //        if(ImGui::BeginChild("log output", ImVec2{ ImGui::GetContentRegionAvail().x + cell_padding.x,
-    //                                                   ImGui::GetContentRegionAvail().y + cell_padding.y })) {
-    //            draw_bottom_shelf();
-    //        }
-    //        ImGui::EndChild();
-    //    }
-
-    //    ImGui::TableSetColumnIndex(2);
-    //    { draw_right_column(); }
-    //    ImGui::EndTable();
-    //}
     ImGui::End();
     ImGui::Render();
 }
 
-void UI::draw_left_column() {
-    auto* scene = Engine::scene();
-    if(ImGui::BeginTabBar("draw_scene_hierarchy_tab_bar")) {
-        if(ImGui::BeginTabItem("Scene", nullptr, ImGuiTabItemFlags_SetSelected)) { ImGui::EndTabItem(); }
-        ImGui::EndTabBar();
-    }
-    ImGui::BeginChild("scene hierarchy");
-    for(auto rn : scene->root_nodes) {
-        Node& node = scene->nodes.at(rn);
-        ImGui::PushID(&node);
-        bool& expanded = draw_scene_expanded[&node];
-        bool selected = &node == draw_scene_selected;
-        auto cposx = ImGui::GetCursorPosX();
-        if(ImGui::CollapsingHeader(node.name.c_str())) {
-            ImGui::Indent();
-            // TODO: traverse the children
-            for(auto& n : std::span{ scene->nodes.data() + rn + node.children_offset, node.children_count }) {
-                ImGui::PushID(&n);
-                if(ImGui::Selectable(n.name.c_str(), &n == draw_scene_selected)) { set_selected(&n); }
-                ImGui::PopID();
-            }
-            ImGui::Unindent();
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndChild();
+ImGuiCur::ImGuiCur() { get_screen_pos(); }
+
+ImGuiCur::ImGuiCur(float x, float y) : x(x), y(y) {}
+
+void ImGuiCur::get_pos() { std::tie(x, y) = std::tuple{ ImGui::GetCursorPos().x, ImGui::GetCursorPos().y }; }
+
+void ImGuiCur::get_screen_pos() {
+    std::tie(x, y) = std::tuple{ ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y };
 }
 
-void UI::draw_bottom_shelf() {
-    int mode = -1;
-    if(ImGui::BeginTabBar("bottom tab bar")) {
-        if(ImGui::BeginTabItem("Debug", nullptr, ImGuiTabItemFlags_SetSelected)) {
-            mode = 0;
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
+void ImGuiCur::set_pos() { ImGui::SetCursorPos({ x, y }); }
+
+void ImGuiCur::offset(float x, float y) {
+    this->x += x;
+    this->y += y;
+}
+
+void UIWindow::get_window_pos() { std::tie(x, y) = std::tuple{ ImGui::GetWindowPos().x, ImGui::GetWindowPos().y }; }
+
+void UIWindow::get_window_size() { std::tie(w, h) = std::tuple{ ImGui::GetWindowSize().x, ImGui::GetWindowSize().y }; }
+
+void UIWindow::set_window_pos() { ImGui::SetNextWindowPos({ x, y }); }
+
+void UIWindow::set_window_size() { ImGui::SetNextWindowSize({ w, h }); }
+
+void NodeList::draw() {
+    if(Engine::frame_num() == 0) {
+        window.w = 200.0f;
+        window.h = ImGui::GetIO().DisplaySize.y * 0.7f;
     }
-    switch(mode) {
-    case 0: {
-        if(ImGui::BeginChild("output log window", {}, {}, ImGuiWindowFlags_HorizontalScrollbar)) {
-            float alternating = 0.0f;
-            for(const auto& msg : Engine::get()->msg_log) {
-                alternating = alternating + (1.0f - alternating) - 1.0f * alternating;
-                auto col = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-                col.w *= (1.0f - alternating) * 0.75f + alternating * 0.6f;
-                ImGui::PushStyleColor(ImGuiCol_Text, col);
-                ImGui::Text(msg.c_str());
-                ImGui::PopStyleColor();
+    if(ImGui::BeginChild("Scene", { window.w, window.h }, ImGuiChildFlags_Border)) {
+        for(auto& n : Engine::scene()->nodes) {
+            ImGui::PushID(&n);
+            if(ImGui::Selectable(n.name.c_str(), selected_node == &n)) { selected_node = &n; }
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
+    window.w = ImGui::GetItemRectSize().x;
+    window.h = ImGui::GetItemRectSize().y;
+}
+
+void Console::draw() {
+    window.w = ImGui::GetContentRegionAvail().x;
+    window.h = ImGui::GetContentRegionAvail().y;
+    if(ImGui::BeginChild("Console", { window.w, window.h }, ImGuiChildFlags_Border)) {
+        ImGui::Text("console");
+        ImGui::EndChild();
+    }
+}
+
+void RenderOutput::draw() {
+    ImGuiCur pos;
+    window.x = pos.x;
+    window.y = pos.y;
+    window.w = ImGui::GetContentRegionAvail().x;
+    window.h = Engine::ui()->node_list.window.h;
+    if(ImGui::BeginChild("Render Output", { window.w, window.h }, ImGuiChildFlags_Border)) {
+        if(Engine::ui()->node_list.selected_node) {
+            ImGuizmo::SetRect(window.x, window.y, window.w, window.h);
+            ImGuizmo::SetDrawlist();
+            auto& io = ImGui::GetIO();
+            const auto viewmat = Engine::camera()->get_view();
+            const auto projmat = Engine::camera()->get_projection();
+            ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
+            ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
+
+            if(Engine::ui()->node_list.selected_node->has_component<cmps::RenderMesh>()) {
+                cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(Engine::ui()->node_list.selected_node->handle);
+                glm::mat4 tt = glm::translate(Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(
+                                                  Engine::ui()->node_list.selected_node->handle)),
+                                              rm.mesh->aabb.center());
+                glm::mat4 delta{};
+                ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
+                glm::vec3 t, r, s;
+                ImGuizmo::DecomposeMatrixToComponents(&delta[0][0], &t.x, &r.x, &s.x);
+                if(ImGuizmo::IsUsing()) {
+                    glm::mat4& cmps_transform =
+                        Engine::ec()->get<cmps::Transform>(Engine::ui()->node_list.selected_node->handle).transform;
+                    cmps_transform = glm::translate(cmps_transform, t);
+                    Engine::scene()->update_transform(Engine::ui()->node_list.selected_node->handle);
+                }
             }
         }
         ImGui::EndChild();
-    } break;
-    default: {
-        return;
-    }
     }
 }
-
-void UI::draw_right_column() {
-    Node* node = draw_scene_selected;
-    if(!node) { return; }
-    glm::mat4& t = Engine::ec()->get<cmps::Transform>(node->handle).transform;
-    ImGui::PushID(node);
-    ImGui::Text(node->name.c_str());
-    if(ImGui::SliderFloat3("##transform", &t[3].x, -1.0f, 1.0f)) {
-        if(node->has_component<cmps::RenderMesh>()) {
-            cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(node->handle);
-            Engine::scene()->update_transform(node->handle);
-            // Engine::renderer()->update_transform(rm.render_handle);
-        }
-    }
-    ImGui::PopID();
-}
-
-void UI::set_selected(Node* ptr) { draw_scene_selected = ptr; }

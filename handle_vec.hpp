@@ -49,7 +49,6 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
         storage.emplace(storage.begin() + idx, std::forward<ARGS>(args)...);
         return h;
     }
-    constexpr void erase(const T& t) { storage.erase(t); }
     constexpr T* try_find(Handle handle) {
         auto it = find_handle_it(handle);
         if(it == handles.end()) { return nullptr; }
