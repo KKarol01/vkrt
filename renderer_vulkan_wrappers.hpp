@@ -56,10 +56,10 @@ class Buffer {
 class Image {
   public:
     constexpr Image() = default;
-    Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
-          VkSampleCountFlagBits samples, VkImageUsageFlags usage = {});
-    Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
-          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
+    Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
+          VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage = {});
+    Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
+          uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage);
     Image(Image&& other) noexcept;
     Image& operator=(Image&& other) noexcept;
 
@@ -98,8 +98,8 @@ class SamplerStorage {
 
 class ImageStatefulBarrier {
   public:
-    constexpr ImageStatefulBarrier(Image& img, VkImageAspectFlags aspect, uint32_t base_mip, uint32_t mips, uint32_t base_layer,
-                                   uint32_t layers, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+    constexpr ImageStatefulBarrier(Image& img, VkImageAspectFlags aspect, uint32_t base_mip, uint32_t mips,
+                                   uint32_t base_layer, uint32_t layers, VkImageLayout start_layout = VK_IMAGE_LAYOUT_UNDEFINED,
                                    VkPipelineStageFlags2 start_stage = VK_PIPELINE_STAGE_2_NONE,
                                    VkAccessFlags2 start_access = VK_ACCESS_2_NONE)
         : image{ &img }, current_range{ aspect, base_mip, mips, base_layer, layers }, current_layout{ start_layout },

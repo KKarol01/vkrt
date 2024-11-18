@@ -61,11 +61,20 @@ struct BLASInstanceSettings {
     Handle<Entity> entity;
 };
 
+struct ScreenRect {
+    float x;
+    float y;
+    float w;
+    float h;
+};
+
 class Renderer {
   public:
     virtual ~Renderer() = default;
     virtual void init() = 0;
     virtual void update() = 0;
+    virtual void on_window_resize() = 0;
+    virtual void set_screen(ScreenRect screen) = 0;
     virtual Handle<Image> batch_texture(const ImageDescriptor& batch) = 0;
     virtual Handle<RenderMaterial> batch_material(const MaterialDescriptor& batch) = 0;
     virtual Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) = 0;

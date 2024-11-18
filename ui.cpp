@@ -34,6 +34,8 @@ void UI::update() {
     }
     ImGui::End();
     ImGui::Render();
+
+    Engine::renderer()->set_screen(ScreenRect{ routput.window.x, routput.window.y, routput.window.w, routput.window.h });
 }
 
 ImGuiCur::ImGuiCur() { get_screen_pos(); }
@@ -67,13 +69,14 @@ void NodeList::draw() {
         window.h = ImGui::GetIO().DisplaySize.y * 0.7f;
     }
     if(ImGui::BeginChild("Scene", { window.w, window.h }, ImGuiChildFlags_Border)) {
-        for(auto& n : Engine::scene()->nodes) {
-            ImGui::PushID(&n);
-            if(ImGui::Selectable(n.name.c_str(), selected_node == &n)) { selected_node = &n; }
+        for(auto rnidx : Engine::scene()->root_nodes) {
+            auto& rn = Engine::scene()->nodes.at(rnidx);
+            ImGui::PushID(&rn);
+            if(ImGui::Selectable(rn.name.c_str(), selected_node == &rn)) { selected_node = &rn; }
             ImGui::PopID();
         }
-        ImGui::EndChild();
     }
+    ImGui::EndChild();
     window.w = ImGui::GetItemRectSize().x;
     window.h = ImGui::GetItemRectSize().y;
 }
@@ -81,10 +84,8 @@ void NodeList::draw() {
 void Console::draw() {
     window.w = ImGui::GetContentRegionAvail().x;
     window.h = ImGui::GetContentRegionAvail().y;
-    if(ImGui::BeginChild("Console", { window.w, window.h }, ImGuiChildFlags_Border)) {
-        ImGui::Text("console");
-        ImGui::EndChild();
-    }
+    if(ImGui::BeginChild("Console", { window.w, window.h }, ImGuiChildFlags_Border)) { ImGui::Text("console"); }
+    ImGui::EndChild();
 }
 
 void RenderOutput::draw() {
@@ -120,6 +121,6 @@ void RenderOutput::draw() {
                 }
             }
         }
-        ImGui::EndChild();
     }
+    ImGui::EndChild();
 }

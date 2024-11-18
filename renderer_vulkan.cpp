@@ -309,25 +309,12 @@ void RendererVulkan::init() {
     initialize_vulkan();
     initialize_resources();
     initialize_imgui();
-    /*build_tlas();
-    prepare_ddgi();*/
     Engine::add_on_window_resize_callback([this] {
-        flags |= RendererFlags::RESIZE_SWAPCHAIN_BIT;
+        on_window_resize();
         return true;
     });
-    // screen_rect = { .offset = { 150, 0 }, .extent = { 768, 576 } };
     flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT | RendererFlags::RESIZE_SWAPCHAIN_BIT);
 }
-
-// void RendererVulkan::set_screen_rect(ScreenRect rect) {
-//     if(screen_rect.offset.x != rect.offset_x || screen_rect.offset.y != rect.offset_y ||
-//        screen_rect.extent.width != rect.width || screen_rect.extent.height != rect.height) {
-//         screen_rect = { .offset = { rect.offset_x, rect.offset_y }, .extent = { rect.width, rect.height } };
-//         flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT);
-//         // const auto proj = glm::perspective(190.0f, (float)1024.0f / (float)768.0f,
-//         // 0.0f, 10.0f); Engine::camera()->update_projection(proj);
-//     }
-// }
 
 void RendererVulkan::initialize_vulkan() {
     // TODO: remove throws
@@ -643,9 +630,6 @@ void RendererVulkan::update() {
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         gq.wait_idle();
         swapchain.create();
-    }
-    if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) {
-        gq.wait_idle();
         for(int i = 0; i < frame_data.data.size(); ++i) {
             *frame_data.data[i].depth_buffer = Image{ std::format("depth_buffer_{}", i),
                                                       (uint32_t)Engine::window()->width,
@@ -658,6 +642,7 @@ void RendererVulkan::update() {
                                                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT };
         }
     }
+    // if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) { gq.wait_idle(); }
 
     auto& fd = frame_data.get();
     const auto frame_num = Engine::frame_num();
@@ -852,11 +837,15 @@ void RendererVulkan::update() {
         fd.passes.default_lit.bind_desc_sets(cmd);
 
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
-        VkViewport r_view_1{ .x = Engine::ui()->routput.window.x,
-                             .y = Engine::ui()->routput.window.y + Engine::ui()->routput.window.h, // Engine::window()->height,
-                             .width = Engine::ui()->routput.window.w,   // Engine::window()->width,
-                             .height = -Engine::ui()->routput.window.h, //-Engine::window()->height,
+        VkRect2D r_sciss_1{ .offset = { .x = (int)(screen_rect.x), .y = (int)(screen_rect.y) },
+                            .extent = {
+                                .width = (uint32_t)(screen_rect.w),
+                                .height = (uint32_t)(screen_rect.h),
+                            } };
+        VkViewport r_view_1{ .x = screen_rect.x,
+                             .y = screen_rect.y + screen_rect.h,
+                             .width = screen_rect.w,
+                             .height = -screen_rect.h,
                              .minDepth = 0.0f,
                              .maxDepth = 1.0f };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
@@ -924,6 +913,23 @@ void RendererVulkan::update() {
         .pImageIndices = &swapchain_index,
     });
     vkQueuePresentKHR(gq.queue, &pinfo);
+}
+
+void RendererVulkan::on_window_resize() { flags.set(RendererFlags::RESIZE_SWAPCHAIN_BIT); }
+
+void RendererVulkan::set_screen(ScreenRect screen) {
+    const float aspect = 16.0f / 9.0f;
+    float sw = screen.h * aspect;
+    float sh = screen.w / aspect;
+    screen_rect = screen;
+    if(sh <= screen.h) {
+        screen_rect.h = sh;
+    } else {
+        screen_rect.w = sw;
+    }
+    screen_rect.x = screen.x + std::fabsf(screen.w - screen_rect.w) * 0.5f;
+    screen_rect.y = screen.y + std::fabsf(screen.h - screen_rect.h) * 0.5f;
+    Engine::camera()->update_projection(glm::perspective(glm::radians(75.0f), screen_rect.w / screen_rect.h, 0.01f, 15.0f));
 }
 
 Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
@@ -1132,7 +1138,6 @@ void RendererVulkan::build_blas() {
 
     for(auto& rm : meshes) {
         if(!rm.flags.test_clear(MeshBatchFlags::DIRTY_BLAS_BIT)) { continue; }
-        RenderGeometry& geom = geometries.at(rm.geometry);
         MeshMetadata& meta = mesh_metadatas.at(rm.metadata);
         dirty_batches.push_back(&rm);
 
@@ -1651,6 +1656,7 @@ template <size_t frames> void Swapchain<frames>::create() {
     VK_CHECK(vkGetSwapchainImagesKHR(get_renderer().dev, swapchain, &pframes, imgs.data()));
 
     for(uint32_t i = 0; i < frames; ++i) {
+        images[i].image = nullptr;
         images[i] = Image{ std::format("swapchain_image_{}", i),
                            imgs[i],
                            sinfo.imageExtent.width,

@@ -235,7 +235,8 @@ struct Pipeline {
 struct DescriptorPool {
     DescriptorPool() = default;
     DescriptorPool(const PipelineLayout* layout, uint32_t max_sets);
-    void allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, uint32_t count = 1, std::span<uint32_t> variable_count = {});
+    void allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, uint32_t count = 1,
+                  std::span<uint32_t> variable_count = {});
     void reset();
     VkDescriptorPool pool{};
     std::deque<VkDescriptorSet> sets;
@@ -321,6 +322,8 @@ class RendererVulkan : public Renderer {
 
     void update() final;
 
+    void on_window_resize() final;
+    void set_screen(ScreenRect screen) final;
     Handle<Image> batch_texture(const ImageDescriptor& desc) final;
     Handle<RenderMaterial> batch_material(const MaterialDescriptor& desc) final;
     Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) final;
@@ -357,6 +360,7 @@ class RendererVulkan : public Renderer {
     VkSurfaceKHR window_surface;
     Flags<RendererFlags> flags;
     SamplerStorage samplers;
+    ScreenRect screen_rect;
 
     Queue gq;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;

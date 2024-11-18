@@ -154,8 +154,8 @@ void Buffer::deallocate() {
     if(buffer && alloc) { vmaDestroyBuffer(get_renderer().vma, buffer, alloc); }
 }
 
-Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, VkFormat format,
-             VkSampleCountFlagBits samples, VkImageUsageFlags usage)
+Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
+             VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
 
     int dims = -1;
@@ -190,8 +190,8 @@ Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t 
     set_debug_name(view, std::format("{}_default_view", name));
 }
 
-Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
-             VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
+Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
+             uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
     : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
     int dims = -1;
     if(width > 1) { ++dims; }
