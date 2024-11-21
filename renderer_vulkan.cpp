@@ -108,12 +108,15 @@ Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLay
         }
         /*layout(location = 0) in vec3 pos;
         layout(location = 1) in vec3 nor;
-        layout(location = 2) in vec2 uv;*/
+        layout(location = 2) in vec2 uv;
+        layout(location = 2) in vec4 tang;
+        */
 
-        VkVertexInputAttributeDescription inputs[3]{
+        VkVertexInputAttributeDescription inputs[]{
             { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos) },
             { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, nor) },
-            { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv) }
+            { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv) },
+            { .location = 3, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Vertex, tang) },
         };
         VkVertexInputBindingDescription binding{ .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX };
         auto pVertexInputState = Vks(VkPipelineVertexInputStateCreateInfo{
@@ -932,16 +935,33 @@ void RendererVulkan::set_screen(ScreenRect screen) {
     Engine::camera()->update_projection(glm::perspective(glm::radians(75.0f), screen_rect.w / screen_rect.h, 0.01f, 15.0f));
 }
 
+static VkFormat deduce_image_format(ImageFormat format) {
+    switch(format) {
+    case ImageFormat::UNORM:
+        return VK_FORMAT_R8G8B8A8_UNORM;
+    case ImageFormat::SRGB:
+        return VK_FORMAT_R8G8B8A8_SRGB;
+    default: {
+        assert(false);
+        return VK_FORMAT_R8G8B8A8_UNORM;
+    }
+    }
+}
+
 Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
     Handle<Image> handle =
-        textures.insert(Image{ desc.name, desc.width, desc.height, desc.depth, desc.mips, 1u, VK_FORMAT_R8G8B8A8_SRGB,
+        textures.insert(Image{ desc.name, desc.width, desc.height, desc.depth, desc.mips, 1u, deduce_image_format(desc.format),
                                VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
     upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
     return handle;
 }
 
 Handle<RenderMaterial> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
-    return Handle<RenderMaterial>{ *materials.insert(RenderMaterial{ .color_texture = desc.color_texture }) };
+    return Handle<RenderMaterial>{ *materials.insert(RenderMaterial{
+        .color_texture = desc.base_color_texture,
+        .normal_texture = desc.normal_texture,
+        .metallic_roughness_texture = desc.metallic_roughness_texture,
+    }) };
 }
 
 Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
@@ -1079,7 +1099,10 @@ void RendererVulkan::upload_instances() {
         gpu_mesh_instances.push_back(GPUMeshInstance{
             .vertex_offset = geom.vertex_offset + mb.vertex_offset,
             .index_offset = geom.index_offset + mb.index_offset,
-            .color_texture_idx = (uint32_t)textures.find_idx(Handle<Image>{ *mat.color_texture }) });
+            .color_texture_idx = (uint32_t)textures.find_idx(mat.color_texture),
+            .normal_texture_idx = (uint32_t)(mat.normal_texture ? textures.find_idx(mat.normal_texture) : *mat.normal_texture),
+            .metallic_roughness_idx = (uint32_t)(mat.metallic_roughness_texture ? textures.find_idx(mat.metallic_roughness_texture)
+                                                                                : *mat.metallic_roughness_texture) });
         if(i == 0 || mesh_instances.at(i - 1).mesh != mi.mesh) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = mb.index_count,
                                                                       .instanceCount = 1,
@@ -1502,7 +1525,7 @@ void RendererVulkan::update_ddgi() {
 
     ddgi.buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI::GPULayout), 0);
 
-    Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
+    // Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
     ddgi.debug_probes.clear(); // TODO: also remove from the scene
     for(int i = 0; i < ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z; ++i) {
         // ddgi.debug_probes.push_back(Engine::scene()->instance_model(sphere_handle, { .transform = glm::mat4{ 1.0f } }));

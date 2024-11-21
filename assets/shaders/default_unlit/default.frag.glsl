@@ -14,6 +14,8 @@ layout(location = 0) in VertexOutput {
 	vec3 pos;
 	vec3 nor;
     vec2 uv;
+    vec3 tang;
+    vec3 bitang;
 } vert;
 
 #define RAYTRACING
@@ -94,13 +96,43 @@ vec3 sample_irradiance(vec3 world_pos, vec3 normal, vec3 cam_pos) {
 	return (irr / sum_weight) * 0.5 * PI;
 }
 
+vec3 rotateYUpToZUp(vec3 v) {
+    // Rotation matrix for 90 degrees around the X-axis
+    mat3 rotationMatrix = mat3(
+        1.0,  0.0,  0.0,
+        0.0,  0.0,  1.0,
+        0.0, -1.0,  0.0
+    );
+
+    return rotationMatrix * v;
+}
+
 void main() {
 	MeshData md = mesh_datas.at[vert.mesh_id];
 
-	vec3 cam_pos = vec3(globals.view * vec4(0.0, 0.0, 0.0, 1.0));
-	vec3 irr = sample_irradiance(vert.pos, vert.nor, cam_pos);
+	vec3 cam_pos = vec3(globals.viewInverse * vec4(0.0, 0.0, 0.0, 1.0));
+	vec3 irr = vec3(0.0); //sample_irradiance(vert.pos, vert.nor, cam_pos);
 	vec3 col1 = texture(textures[nonuniformEXT(md.color_texture)], vert.uv).rgb;
-	vec3 final_color = calc_direct_lighting(vert.pos, vert.nor, cam_pos, col1, irr, 1.0);
+	vec3 nor = vert.nor;
+	float metalness = 0.3;
+	float roughness = 0.3;
+	
+	if(md.normal_texture != ~0) {
+		mat3 TBN = mat3(vert.tang, vert.bitang, vert.nor);
+		nor = texture(textures[nonuniformEXT(md.normal_texture)], vert.uv).rgb;
+		nor = normalize(TBN * normalize(nor * 2.0 - 1.0));
+	}
+	if(md.metallic_roughness_texture != ~0) {
+		vec2 mr = texture(textures[nonuniformEXT(md.metallic_roughness_texture)], vert.uv).gb;
+		roughness = mr.x;
+		metalness = mr.y;
+	}
 	//final_color = irr * 2.0 * col1;
-	FRAG_COL = vec4(final_color, 1.0);
+	//FRAG_COL = vec4(final_color, 1.0);
+	//final_color = calc_direct_lighting_Cook_Torrance_BRDF(vert.pos, nor, cam_pos, col1, metalness, roughness);
+	//final_color = vec3(BRDF_Smith_GGX_G2(vert.nor, normalize(lights[0] - vert.pos), normalize(cam_pos - vert.pos), roughness*roughness));
+	vec3 final_color = vec3(0.0);
+	final_color = calc_light(vert.pos, cam_pos, vert.nor, col1, metalness, roughness);
+	//final_color = calc_direct_lighting1(vert.pos, cam_pos, vert.nor, col1, metalness, roughness);
+	FRAG_COL = vec4(vec3(final_color), 1.0);
 }

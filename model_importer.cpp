@@ -85,6 +85,12 @@ static void load_mesh(ImportedModel& model, fastgltf::Asset& asset, fastgltf::Me
                             memcpy(reinterpret_cast<std::byte*>(&model.vertices.at(imesh.vertex_offset + idx)) + offset,
                                    &p, sizeof(GLM));
                         });
+                } else if(num_comp == 4) {
+                    fastgltf::iterateAccessorWithIndex<glm::vec4>(
+                        asset, asset.accessors.at(it->accessorIndex), [&](const glm::vec4& p, uint64_t idx) {
+                            memcpy(reinterpret_cast<std::byte*>(&model.vertices.at(imesh.vertex_offset + idx)) + offset,
+                                   &p, sizeof(GLM));
+                        });
                 }
             }
         };
@@ -97,6 +103,10 @@ static void load_mesh(ImportedModel& model, fastgltf::Asset& asset, fastgltf::Me
 
         if(auto it = prim.findAttribute("TEXCOORD_0"); it) {
             push_vertex_attrib.operator()<glm::vec2>(prim.findAttribute("TEXCOORD_0"), offsetof(ImportedModel::Vertex, uv));
+        }
+
+        if(auto it = prim.findAttribute("TANGENT"); it) {
+            push_vertex_attrib.operator()<glm::vec4>(prim.findAttribute("TANGENT"), offsetof(ImportedModel::Vertex, tang));
         }
 
         auto& indices = asset.accessors.at(prim.indicesAccessor.value());
@@ -113,8 +123,14 @@ static void load_mesh(ImportedModel& model, fastgltf::Asset& asset, fastgltf::Me
             imat.name = mat.name;
 
             if(mat.pbrData.baseColorTexture) {
-                auto& base_tex = asset.textures.at(mat.pbrData.baseColorTexture->textureIndex);
-                imat.color_texture = *base_tex.imageIndex;
+                imat.color_texture = *asset.textures.at(mat.pbrData.baseColorTexture->textureIndex).imageIndex;
+            }
+            if(mat.normalTexture) {
+                imat.normal_texture = *asset.textures.at(mat.normalTexture->textureIndex).imageIndex;
+            }
+            if(mat.pbrData.metallicRoughnessTexture) {
+                auto& mr_tex = asset.textures.at(mat.pbrData.metallicRoughnessTexture->textureIndex);
+                imat.metallic_roughness_texture = *mr_tex.imageIndex;
             }
         }
 

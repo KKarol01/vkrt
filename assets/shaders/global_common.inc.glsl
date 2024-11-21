@@ -8,6 +8,8 @@ struct MeshData {
     uint32_t vertex_offset;
     uint32_t index_offset;
     uint32_t color_texture;
+    uint32_t normal_texture;
+    uint32_t metallic_roughness_texture;
 };
 
 layout(scalar, buffer_reference, buffer_reference_align = 8) readonly buffer GlobalBuffer {

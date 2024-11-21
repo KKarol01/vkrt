@@ -104,11 +104,14 @@ void RenderOutput::draw() {
             ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
             ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
 
-            if(Engine::ui()->node_list.selected_node->has_component<cmps::RenderMesh>()) {
-                cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(Engine::ui()->node_list.selected_node->handle);
-                glm::mat4 tt = glm::translate(Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(
-                                                  Engine::ui()->node_list.selected_node->handle)),
-                                              rm.mesh->aabb.center());
+            if(Engine::ui()->node_list.selected_node->has_component<cmps::Transform>()) {
+                //cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(Engine::ui()->node_list.selected_node->handle);
+                glm::mat4 tt = glm::translate(
+                    Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(
+                        Engine::ui()->node_list.selected_node->handle
+                    )), glm::vec3{Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(
+                        Engine::ui()->node_list.selected_node->handle
+                    ))[3]});
                 glm::mat4 delta{};
                 ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
                 glm::vec3 t, r, s;

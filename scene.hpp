@@ -26,6 +26,8 @@ struct MaterialAsset {
     std::string name;
     Handle<RenderMaterial> material_handle;
     Handle<Image> color_texture_handle;
+    Handle<Image> normal_texture_handle;
+    Handle<Image> metallic_roughness_texture_handle;
 };
 
 struct MeshAsset {

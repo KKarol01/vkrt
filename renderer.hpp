@@ -8,6 +8,10 @@
 
 enum class BatchFlags {};
 enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };
+enum class ImageFormat {
+    UNORM,
+    SRGB,
+};
 
 struct RenderGeometry;
 struct RenderMesh;
@@ -21,6 +25,7 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec3 nor;
     glm::vec2 uv;
+    glm::vec4 tang;
 };
 
 struct GeometryDescriptor {
@@ -34,11 +39,14 @@ struct ImageDescriptor {
     uint32_t height{};
     uint32_t depth{ 1 };
     uint32_t mips{ 1 };
+    ImageFormat format{ ImageFormat::UNORM };
     std::span<const std::byte> data;
 };
 
 struct MaterialDescriptor {
-    Handle<Image> color_texture;
+    Handle<Image> base_color_texture;
+    Handle<Image> normal_texture;
+    Handle<Image> metallic_roughness_texture;
 };
 
 struct MeshDescriptor {

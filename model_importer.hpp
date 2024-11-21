@@ -5,12 +5,14 @@
 #include <optional>
 #include <filesystem>
 #include <glm/glm.hpp>
+#include "renderer.hpp"
 
 struct ImportedModel {
     struct Vertex {
         glm::vec3 pos{};
         glm::vec3 nor{};
         glm::vec2 uv{};
+        glm::vec4 tang{};
     };
 
     struct Texture {
@@ -23,6 +25,7 @@ struct ImportedModel {
         std::string name;
         std::optional<uint32_t> color_texture;
         std::optional<uint32_t> normal_texture;
+        std::optional<uint32_t> metallic_roughness_texture;
     };
 
     struct Mesh {

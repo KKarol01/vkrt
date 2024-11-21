@@ -38,6 +38,8 @@ enum class MeshBatchFlags { DIRTY_BLAS_BIT = 0x1 };
 /* Used by mesh instance to index textures in the shader */
 struct RenderMaterial {
     Handle<Image> color_texture;
+    Handle<Image> normal_texture;
+    Handle<Image> metallic_roughness_texture;
 };
 
 struct GeometryMetadata {};
@@ -81,6 +83,8 @@ struct GPUMeshInstance {
     uint32_t vertex_offset{};
     uint32_t index_offset{};
     uint32_t color_texture_idx;
+    uint32_t normal_texture_idx;
+    uint32_t metallic_roughness_idx;
 };
 
 /* for each meshinstance struct that has raytracing flag set */

@@ -12,30 +12,51 @@ Handle<ModelAsset> Scene::load_from_file(const std::filesystem::path& path) {
 
     std::vector<Vertex> vertices;
     vertices.reserve(model.vertices.size());
-    std::transform(model.vertices.begin(), model.vertices.end(), std::back_inserter(vertices),
-                   [](const ImportedModel::Vertex& v) { return Vertex{ .pos = v.pos, .nor = v.nor, .uv = v.uv }; });
+    std::transform(model.vertices.begin(), model.vertices.end(), std::back_inserter(vertices), [](const ImportedModel::Vertex& v) {
+        return Vertex{
+            .pos = v.pos,
+            .nor = v.nor,
+            .uv = v.uv,
+            .tang = v.tang,
+        };
+    });
     Handle<RenderGeometry> geometry_handle = Engine::renderer()->batch_geometry(GeometryDescriptor{
         .vertices = vertices,
         .indices = model.indices,
     });
 
     std::vector<Handle<Image>> textures;
-    for(const auto& e : model.textures) {
+    std::vector<ImageFormat> texture_formats(model.textures.size());
+    for(const auto& e : model.materials) {
+        if(e.color_texture) { texture_formats.at(*e.color_texture) = ImageFormat::SRGB; }
+        // Rest of the types should be unorm (for now).
+    }
+
+    for(uint32_t i = 0; i < model.textures.size(); ++i) {
+        auto& e = model.textures.at(i);
         textures.push_back(Engine::renderer()->batch_texture(ImageDescriptor{
             .name = e.name,
             .width = e.size.first,
             .height = e.size.second,
+            .format = texture_formats.at(i),
             .data = e.rgba_data,
         }));
     }
 
     std::vector<MaterialAsset> materials;
     for(const auto& e : model.materials) {
-        Handle<RenderMaterial> material_handle =
-            Engine::renderer()->batch_material(MaterialDescriptor{ .color_texture = textures.at(e.color_texture.value_or(0)) });
-        materials.push_back(MaterialAsset{ .material_handle = material_handle,
-                                           .color_texture_handle =
-                                               e.color_texture ? textures.at(*e.color_texture) : Handle<Image>{} });
+        Handle<RenderMaterial> material_handle = Engine::renderer()->batch_material(MaterialDescriptor{
+            .base_color_texture = textures.at(e.color_texture.value_or(0)),
+            .normal_texture = e.normal_texture ? textures.at(*e.normal_texture) : Handle<Image>{},
+            .metallic_roughness_texture = e.metallic_roughness_texture ? textures.at(*e.metallic_roughness_texture) : Handle<Image>{},
+        });
+        materials.push_back(MaterialAsset{
+            .material_handle = material_handle,
+            .color_texture_handle = e.color_texture ? textures.at(*e.color_texture) : Handle<Image>{},
+            .normal_texture_handle = e.normal_texture ? textures.at(*e.normal_texture) : Handle<Image>{},
+            .metallic_roughness_texture_handle =
+                e.metallic_roughness_texture ? textures.at(*e.metallic_roughness_texture) : Handle<Image>{},
+        });
     }
 
     std::vector<MeshAsset> meshes;

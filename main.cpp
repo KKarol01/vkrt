@@ -20,12 +20,12 @@ int main() {
     Engine::init();
 
     {
-        Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
-        Handle<ModelAsset> cornell_handle = Engine::scene()->load_from_file("cornell/cornell1.glb");
+        //Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
+        Handle<ModelAsset> cornell_handle = Engine::scene()->load_from_file("pbr_sphere/pbr_sphere.glb");
         /*Engine::scene()->instance_model(sphere_handle, { .flags = {},
                                                           .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) });*/
         Engine::scene()->instance_model(cornell_handle, { .flags = InstanceFlags::RAY_TRACED_BIT,
-                                                          .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 2.0f }) });
+                                                          .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 1.0f }) });
     }
 
     Engine::start();
