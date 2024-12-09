@@ -20,14 +20,14 @@ const vec3 lights[] = vec3[](
 
 
 float calc_shadow(vec3 o, vec3 d, float max) {
-	float shadow = 0.0;
+    float shadow = 0.0;
 #if defined(RAYQUERY)
-	rayQueryEXT rq;
-	rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, o, 0.01, d, max);
-	rayQueryProceedEXT(rq);
-	if(rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
-		shadow += 1.0;
-	}
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, o, 0.01, d, max);
+    rayQueryProceedEXT(rq);
+    if(rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
+        shadow += 1.0;
+    }
 #elif defined(RAYTRACING)
     const uint sbtOffset = 3;
     const uint sbtStride = 0;
@@ -35,9 +35,9 @@ float calc_shadow(vec3 o, vec3 d, float max) {
     traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, sbtOffset + 1, sbtStride, missIndex + 1, o, 0.01, d, max, 1);
     shadow += (max > payload_shadow.distance) ? 0.0 : 1.0;
 #else 
-	shadow = 1.0;
+    shadow = 1.0;
 #endif
-	return shadow;
+    return shadow;
 }
 
 vec3 BRDF_lambertian(vec3 diffuseColor)
@@ -127,7 +127,7 @@ vec3 calc_light(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness, float roug
 }
 
 vec3 calc_direct_lighting1(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness, float roughness) { 
-	vec3 l_color = vec3(0.0);
+    vec3 l_color = vec3(0.0);
     for(int i = 0; i < num_lights; ++i) {
         vec3 light = lights[i];
         vec3 pointToLight = light - p;
@@ -159,12 +159,12 @@ vec3 calc_direct_lighting1(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness,
 }
 
 vec3 calc_direct_lighting(vec3 p, vec3 n, vec3 cam_pos, vec3 albedo, vec3 indirect, float use_shadows) {
-	float sum = 0.0;
-	for(int i=0; i < 4; ++i) {
-		vec3 pl = normalize(lights[i] - p);
-		float inv_dist2 = 1.0 / distance(p, lights[i]);
-		inv_dist2 = pow(inv_dist2, 2.0);
-		//sum += max(0.0, dot(pl, n)) * inv_dist2;
+    float sum = 0.0;
+    for(int i=0; i < 4; ++i) {
+        vec3 pl = normalize(lights[i] - p);
+        float inv_dist2 = 1.0 / distance(p, lights[i]);
+        inv_dist2 = pow(inv_dist2, 2.0);
+        //sum += max(0.0, dot(pl, n)) * inv_dist2;
         vec3 V = normalize(cam_pos - p);
         vec3 O = p + 0.01*n + 0.01*V;
         O = p;
@@ -172,7 +172,7 @@ vec3 calc_direct_lighting(vec3 p, vec3 n, vec3 cam_pos, vec3 albedo, vec3 indire
         float maxL = length(L);
         L /= maxL;
         sum += max(0.0, dot(pl, n)) * inv_dist2 * 15.0 * calc_shadow(p, L, maxL);
-	}
+    }
     sum /= float(num_lights);
     return (sum + indirect) * albedo;
 }

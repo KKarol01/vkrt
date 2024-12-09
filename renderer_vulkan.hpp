@@ -216,6 +216,10 @@ struct Pipeline {
         VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
         bool depth_test{ true };
         VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
+        uint32_t num_vertex_bindings{};
+        uint32_t num_vertex_attribs{};
+        std::array<VkVertexInputBindingDescription, 8> vertex_bindings{};
+        std::array<VkVertexInputAttributeDescription, 8> vertex_attribs{};
     };
     struct RaytracingSettings {
         uint32_t recursion_depth{ 1 };
@@ -272,6 +276,16 @@ struct RenderPasses {
     RenderPass ddgi_irradiance;
     RenderPass ddgi_offsets;
     RenderPass default_lit;
+    RenderPass rect_depth_buffer;
+    RenderPass rect_bilateral_filter;
+};
+
+struct GBuffer {
+    Image* color_image{};
+    Image* view_space_positions_image{};
+    Image* view_space_normals_image{};
+    Image* depth_buffer_image{};
+    Image* ambient_occlusion_image{};
 };
 
 template <size_t frames> struct FrameData {
@@ -280,9 +294,9 @@ template <size_t frames> struct FrameData {
         Semaphore sem_rendering_finished{};
         Fence fen_rendering_finished{};
         CommandPool* cmdpool{};
-        RenderPasses passes;
+        RenderPasses passes{};
         Buffer* constants{};
-        Image* depth_buffer{};
+        GBuffer gbuffer{};
         DescriptorPool* descpool{};
     };
     Data& get() { return data[Engine::frame_num() % frames]; }

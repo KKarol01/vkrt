@@ -8,6 +8,8 @@
 #extension GL_EXT_ray_tracing : require
 
 layout(location = 0) out vec4 FRAG_COL;
+layout(location = 1) out vec4 FRAG_VIEW_POS;
+layout(location = 2) out vec4 FRAG_VIEW_NOR;
 
 layout(location = 0) in VertexOutput {
     flat uint mesh_id;
@@ -114,8 +116,8 @@ void main() {
 	vec3 irr = vec3(0.0); //sample_irradiance(vert.pos, vert.nor, cam_pos);
 	vec3 col1 = texture(textures[nonuniformEXT(md.color_texture)], vert.uv).rgb;
 	vec3 nor = vert.nor;
-	float metalness = 0.3;
-	float roughness = 0.3;
+	float metalness = 0.01;
+	float roughness = 1.0;
 	
 	if(md.normal_texture != ~0) {
 		mat3 TBN = mat3(vert.tang, vert.bitang, vert.nor);
@@ -134,5 +136,8 @@ void main() {
 	vec3 final_color = vec3(0.0);
 	final_color = calc_light(vert.pos, cam_pos, vert.nor, col1, metalness, roughness);
 	//final_color = calc_direct_lighting1(vert.pos, cam_pos, vert.nor, col1, metalness, roughness);
-	FRAG_COL = vec4(vec3(final_color), 1.0);
+	//FRAG_COL = vec4(vec3(final_color), 1.0);
+	FRAG_COL = vec4(vec3(col1), 1.0);
+	FRAG_VIEW_POS = vec4(vec3(globals.view * vec4(vert.pos, 1.0)), 0.0);
+	FRAG_VIEW_NOR = vec4(vec3(globals.view * vec4(nor, 0.0)), 0.0);
 }

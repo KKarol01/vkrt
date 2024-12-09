@@ -53,6 +53,7 @@ static ImportedModel::Material& get_or_create_material(ImportedModel& model, uin
 static void load_mesh(ImportedModel& model, fastgltf::Asset& asset, fastgltf::Mesh& mesh) {
     for(uint32_t i = 0; i < mesh.primitives.size(); ++i) {
         auto& prim = mesh.primitives.at(i);
+
         ImportedModel::Mesh imesh;
         imesh.name = mesh.name;
 
@@ -156,9 +157,78 @@ ImportedModel ModelImporter::import_model(const std::filesystem::path& path) {
         load_image(model, asset.get(), img);
     }
 
-    for(auto& mesh : asset->meshes) {
-        load_mesh(model, asset.get(), mesh);
-    }
+    fastgltf::iterateSceneNodes(asset.get(), 0ull, fastgltf::math::fmat4x4{}, [&](fastgltf::Node& node, fastgltf::math::fmat4x4 transform) {
+        if(!node.meshIndex.has_value()) { return; }
+        auto& mesh = asset->meshes.at(node.meshIndex.value());
+
+        static const std::array<std::string, 4> attribs{ "POSITION", "NORMAL", "TEXCOORD_0", "TANGENT" };
+        static const std::array<uint32_t, 4> attrib_offsets{ offsetof(Vertex, pos), offsetof(Vertex, nor),
+                                                             offsetof(Vertex, uv), offsetof(Vertex, tang) };
+        static const std::array<uint32_t, 4> attrib_sizes{ sizeof(Vertex::pos), sizeof(Vertex::nor), sizeof(Vertex::uv),
+                                                           sizeof(Vertex::tang) };
+        for(auto& prim : mesh.primitives) {
+            if(prim.type != fastgltf::PrimitiveType::Triangles) { continue; }
+
+            auto& model_mesh = model.meshes.emplace_back();
+            model_mesh.name = mesh.name;
+            model_mesh.vertex_offset = model.vertices.size();
+            model_mesh.index_offset = model.indices.size();
+
+            for(uint32_t i = 0; i < attribs.size(); ++i) {
+                auto it = prim.findAttribute(attribs[i]);
+                auto set_component = [&](auto val, size_t idx) {
+                    memcpy((std::byte*)&model.vertices.at(model_mesh.vertex_offset + idx) + attrib_offsets.at(i), &val,
+                           attrib_sizes.at(i));
+                };
+
+                if(it != prim.attributes.end()) {
+                    auto& accessor = asset->accessors.at(it->accessorIndex);
+
+                    if(i == 0) {
+                        model.vertices.resize(model.vertices.size() + accessor.count);
+                        model_mesh.vertex_count += accessor.count;
+                    }
+
+                    if(accessor.type == fastgltf::AccessorType::Vec2) {
+                        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(asset.get(), accessor, set_component);
+                    } else if(accessor.type == fastgltf::AccessorType::Vec3) {
+                        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(asset.get(), accessor, set_component);
+                    } else if(accessor.type == fastgltf::AccessorType::Vec4) {
+                        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(asset.get(), accessor, set_component);
+                    }
+                } else if(i == 0 && it == prim.attributes.end()) {
+                    break;
+                }
+            }
+
+            auto& indices = asset->accessors.at(prim.indicesAccessor.value());
+            model_mesh.index_count += indices.count;
+            model.indices.resize(model.indices.size() + indices.count);
+            fastgltf::copyFromAccessor<uint32_t>(asset.get(), indices, model.indices.data() + model_mesh.index_offset);
+
+            if(prim.materialIndex) {
+                auto& mat = asset->materials.at(*prim.materialIndex);
+                auto& imat = get_or_create_material(model, *prim.materialIndex);
+                model_mesh.material = *prim.materialIndex;
+                imat.name = mat.name;
+
+                if(mat.pbrData.baseColorTexture) {
+                    imat.color_texture = *asset->textures.at(mat.pbrData.baseColorTexture->textureIndex).imageIndex;
+                }
+                if(mat.normalTexture) {
+                    imat.normal_texture = *asset->textures.at(mat.normalTexture->textureIndex).imageIndex;
+                }
+                if(mat.pbrData.metallicRoughnessTexture) {
+                    imat.metallic_roughness_texture =
+                        *asset->textures.at(mat.pbrData.metallicRoughnessTexture->textureIndex).imageIndex;
+                }
+            }
+        }
+    });
+
+    // for(auto& mesh : asset->meshes) {
+    //     load_mesh(model, asset.get(), mesh);
+    // }
 
     return model;
 }

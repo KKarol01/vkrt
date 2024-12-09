@@ -8,25 +8,17 @@
 #include <glm/mat3x3.hpp>
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <iostream>
-#include "vulkan_structs.hpp"
-#include "model_importer.hpp"
 #include "engine.hpp"
-#include "renderer_vulkan.hpp"
-#include "handle_vec.hpp"
-#include "ecs.hpp"
 
 int main() {
     Engine::init();
-
     {
-        //Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
-        Handle<ModelAsset> cornell_handle = Engine::scene()->load_from_file("pbr_sphere/pbr_sphere.glb");
+        // Handle<ModelAsset> model = Engine::scene()->load_from_file("cornell/cornell1.glb");
+        Handle<ModelAsset> model = Engine::scene()->load_from_file("bathroom.glb");
         /*Engine::scene()->instance_model(sphere_handle, { .flags = {},
                                                           .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) });*/
-        Engine::scene()->instance_model(cornell_handle, { .flags = InstanceFlags::RAY_TRACED_BIT,
-                                                          .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 1.0f }) });
+        Engine::scene()->instance_model(model, { .flags = InstanceFlags::RAY_TRACED_BIT,
+                                                 .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 1.0f }) });
     }
-
     Engine::start();
 }
