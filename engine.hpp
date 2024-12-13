@@ -72,8 +72,8 @@ class Engine {
     static Camera* camera();
     static Renderer* renderer();
     static UI* ui();
-    static Scene* scene();
-    static EntityComponents* ec();
+    static scene::Scene* scene();
+    //static EntityComponents* ec();
     static double get_time_secs();
     static double last_frame_time() { return get()->_last_frame_time; }
     static double delta_time() { return get()->_delta_time; }

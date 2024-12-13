@@ -31,8 +31,9 @@ void Engine::init() {
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { get()->_refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
-    ec()->register_component_array<cmps::Transform>();
-    ec()->register_component_array<cmps::RenderMesh>();
+    //ec()->register_component_array<cmps::Transform>();
+    //ec()->register_component_array<cmps::Mesh>();
+    //ec()->register_component_array<cmps::MeshInstance>();
 
     renderer()->init();
 }
@@ -96,15 +97,15 @@ UI* Engine::ui() {
     return &_ui;
 }
 
-Scene* Engine::scene() {
-    static Scene _scene;
+scene::Scene* Engine::scene() {
+    static scene::Scene _scene;
     return &_scene;
 }
 
-EntityComponents* Engine::ec() {
-    static EntityComponents _ec = EntityComponents{};
-    return &_ec;
-}
+//EntityComponents* Engine::ec() {
+//    static EntityComponents _ec = EntityComponents{};
+//    return &_ec;
+//}
 
 double Engine::get_time_secs() { return glfwGetTime(); }
 

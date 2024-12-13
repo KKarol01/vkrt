@@ -844,11 +844,12 @@ void RendererVulkan::update() {
     if(flags.test_clear(RendererFlags::DIRTY_TRANSFORMS_BIT)) {
         for(const auto& e : update_positions) {
             const auto idx = mesh_instance_idxs.at(e);
-            const auto& mi = mesh_instances.at(idx);
+            const auto& ri = mesh_instances.at(idx);
             const auto offset = idx * sizeof(glm::mat4);
-            const auto& t = Engine::scene()->get_final_transform(mi.entity);
+            const auto& t = Engine::scene()->get_final_transform(ri.entity);
             vkCmdUpdateBuffer(cmd, mesh_instance_transform_buffers[0]->buffer, offset, sizeof(glm::mat4), &t);
-            if(Engine::ec()->get<cmps::RenderMesh>(mi.entity).blas_handle) {
+            if(ri.mesh->metadata->blas) {
+                assert(false && "TODO: Check if this is correct");
                 flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
             }
         }
@@ -1222,40 +1223,40 @@ Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& 
 }
 
 Handle<RenderMesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
-    RenderMesh mesh_batch{ .geometry = batch.geometry,
-                           .metadata = mesh_metadatas.emplace(),
-                           .vertex_offset = batch.vertex_offset,
-                           .vertex_count = batch.vertex_count,
-                           .index_offset = batch.index_offset,
-                           .index_count = batch.index_count };
+    RenderMesh mesh_batch{
+        .geometry = batch.geometry,
+        .metadata = mesh_metadatas.emplace(),
+    };
     return meshes.insert(mesh_batch);
 }
 
-void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
+Handle<RenderInstance> RendererVulkan::instance_mesh(const InstanceSettings& settings) {
     assert(settings.entity);
-    auto& rm = Engine::ec()->get<cmps::RenderMesh>(settings.entity);
-    rm.ri_handle = Handle<RenderInstance>{ generate_handle };
-    rm.rm_handle = settings.mesh;
+    Handle<RenderInstance> handle{ generate_handle };
     mesh_instances.push_back(RenderInstance{
-        .handle = rm.ri_handle,
+        .handle = handle,
         .entity = settings.entity,
         .mesh = settings.mesh,
         .material = settings.material,
     });
-    mesh_instance_idxs[rm.ri_handle] = mesh_instances.size() - 1u;
+    mesh_instance_idxs[handle] = mesh_instances.size() - 1u;
     flags.set(RendererFlags::DIRTY_MESH_INSTANCES);
+    return handle;
 }
 
 void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
-    auto& crm = Engine::ec()->get<cmps::RenderMesh>(settings.entity);
-    crm.blas_handle = Handle<RenderBLAS>{ generate_handle };
-    blas_instances.push_back(RenderBLAS{ .handle = crm.blas_handle, .ri_handle = crm.ri_handle, .rm_handle = crm.rm_handle });
-    flags.set(RendererFlags::DIRTY_TLAS_BIT);
-    auto& rm = meshes.at(crm.rm_handle);
-    if(!rm.metadata->blas) {
-        rm.flags.set(MeshBatchFlags::DIRTY_BLAS_BIT);
-        flags.set(RendererFlags::DIRTY_MESH_BLAS_BIT);
-    }
+    assert(false && "TODO");
+    //auto& mesh = Engine::ec()->get<cmps::Mesh>(settings.entity);
+    //auto& mesh_instance = Engine::ec()->get<cmps::MeshInstance>(settings.entity);
+    //mesh.blas_handle = Handle<RenderBLAS>{ generate_handle };
+    //blas_instances.push_back(RenderBLAS{
+    //    .handle = mesh.blas_handle, .instance_handle = mesh_instance.instance_handle, .mesh_handle = mesh.mesh_handle });
+    //flags.set(RendererFlags::DIRTY_TLAS_BIT);
+    //auto& rm = meshes.at(mesh.mesh_handle);
+    //if(!rm.metadata->blas) {
+    //    rm.flags.set(MeshBatchFlags::DIRTY_BLAS_BIT);
+    //    flags.set(RendererFlags::DIRTY_MESH_BLAS_BIT);
+    //}
 }
 
 void RendererVulkan::update_transform(Handle<RenderInstance> handle) {
@@ -1328,17 +1329,17 @@ void RendererVulkan::upload_instances() {
         const RenderGeometry& geom = geometries.at(mb.geometry);
         const RenderMaterial& mat = materials.at(Handle<RenderMaterial>{ *mi.material });
         gpu_mesh_instances.push_back(GPUMeshInstance{
-            .vertex_offset = geom.vertex_offset + mb.vertex_offset,
-            .index_offset = geom.index_offset + mb.index_offset,
+            .vertex_offset = geom.vertex_offset,
+            .index_offset = geom.index_offset,
             .color_texture_idx = (uint32_t)textures.find_idx(mat.color_texture),
             .normal_texture_idx = (uint32_t)(mat.normal_texture ? textures.find_idx(mat.normal_texture) : *mat.normal_texture),
             .metallic_roughness_idx = (uint32_t)(mat.metallic_roughness_texture ? textures.find_idx(mat.metallic_roughness_texture)
                                                                                 : *mat.metallic_roughness_texture) });
         if(i == 0 || mesh_instances.at(i - 1).mesh != mi.mesh) {
-            gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = mb.index_count,
+            gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
                                                                       .instanceCount = 1,
-                                                                      .firstIndex = geom.index_offset + mb.index_offset,
-                                                                      .vertexOffset = (int32_t)(geom.vertex_offset + mb.vertex_offset),
+                                                                      .firstIndex = geom.index_offset,
+                                                                      .vertexOffset = (int32_t)(geom.vertex_offset),
                                                                       .firstInstance = i });
         } else {
             ++gpu_draw_commands.back().instanceCount;
@@ -1392,6 +1393,7 @@ void RendererVulkan::build_blas() {
 
     for(auto& rm : meshes) {
         if(!rm.flags.test_clear(MeshBatchFlags::DIRTY_BLAS_BIT)) { continue; }
+        RenderGeometry& geometry = geometries.at(rm.geometry);
         MeshMetadata& meta = mesh_metadatas.at(rm.metadata);
         dirty_batches.push_back(&rm);
 
@@ -1411,7 +1413,7 @@ void RendererVulkan::build_blas() {
             .pGeometries = &blas_geo,
         });
 
-        const uint32_t primitive_count = rm.index_count / 3u;
+        const uint32_t primitive_count = geometry.index_count / 3u;
         auto build_size_info = Vks(VkAccelerationStructureBuildSizesInfoKHR{});
         vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_geometry,
                                                 &primitive_count, &build_size_info);
@@ -1443,9 +1445,9 @@ void RendererVulkan::build_blas() {
 
         VkAccelerationStructureBuildRangeInfoKHR& range_info = ranges.emplace_back();
         range_info = Vks(VkAccelerationStructureBuildRangeInfoKHR{
-            .primitiveCount = rm.index_count / 3u,
-            .primitiveOffset = (uint32_t)((geom.index_offset + rm.index_offset) * sizeof(uint32_t)),
-            .firstVertex = geom.vertex_offset + rm.vertex_offset,
+            .primitiveCount = geom.index_count / 3u,
+            .primitiveOffset = (uint32_t)((geom.index_offset) * sizeof(uint32_t)),
+            .firstVertex = geom.vertex_offset,
             .transformOffset = 0,
         });
 
@@ -1473,22 +1475,21 @@ void RendererVulkan::build_tlas() {
     std::vector<VkAccelerationStructureInstanceKHR> tlas_instances;
 
     std::sort(blas_instances.begin(), blas_instances.end(),
-              [](const RenderBLAS& a, const RenderBLAS& b) { return a.rm_handle < b.rm_handle; });
+              [](const RenderBLAS& a, const RenderBLAS& b) { return a.mesh_handle < b.mesh_handle; });
 
     // TODO: Compress mesh ids per triangle for identical blases with identical materials
     // TODO: Remove geometry offset for indexing in shaders as all blases have only one geometry always
     for(uint32_t i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
         const RenderBLAS& bi = blas_instances.at(i);
-        const RenderMesh& mb = meshes.at(bi.rm_handle);
+        const RenderMesh& mb = meshes.at(bi.mesh_handle);
         const RenderGeometry& geom = geometries.at(mb.geometry);
         const uint32_t mi_idx =
             std::distance(mesh_instances.begin(),
                           std::find_if(mesh_instances.begin(), mesh_instances.end(),
-                                       [&bi](const RenderInstance& e) { return e.handle == bi.ri_handle; }));
-        const uint32_t scene_mi_idx = Engine::scene()->entity_node_idxs.at(mesh_instances.at(mi_idx).entity);
+                                       [&bi](const RenderInstance& e) { return e.handle == bi.instance_handle; }));
 
-        triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + mb.index_count / 3u);
-        for(uint32_t j = 0; j < mb.index_count / 3u; ++j) {
+        triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + geom.index_count / 3u);
+        for(uint32_t j = 0; j < geom.index_count / 3u; ++j) {
             triangle_geo_inst_ids.push_back(mi_idx);
         }
 
@@ -1505,7 +1506,7 @@ void RendererVulkan::build_tlas() {
         tlas_mesh_offsets.push_back(toff);
         blas_mesh_offsets.push_back(boff / 3u);
         ++toff;
-        boff += mb.index_count; // TODO: validate this
+        boff += geom.index_count; // TODO: validate this
     }
 
     tlas_mesh_offsets_buffer = Buffer{ "tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]),
@@ -1648,17 +1649,17 @@ void RendererVulkan::update_ddgi() {
 
     if(!ddgi.debug_probes.empty()) { return; }
 
-    BoundingBox scene_aabb;
-    for(const Node& node : Engine::scene()->nodes) {
-        if(!node.has_component<cmps::RenderMesh>()) { continue; }
-        const cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(node.handle);
+    BoundingBox scene_aabb{ .min = { -1.0f, -1.0f, -1.0f }, .max = { 1.0f, 1.0f, 1.0f } };
+    /*for(const Node& node : Engine::scene()->nodes) {
+        if(!node.has_component<cmps::Mesh>()) { continue; }
+        const cmps::Mesh& rm = Engine::ec()->get<cmps::Mesh>(node.handle);
         glm::mat4 t = Engine::scene()->get_final_transform(node.handle);
         BoundingBox m = rm.mesh->aabb;
         m.min = m.min * glm::mat4x3{ t };
         m.max = m.max * glm::mat4x3{ t };
         scene_aabb.min = glm::min(scene_aabb.min, m.min);
         scene_aabb.max = glm::max(scene_aabb.max, m.max);
-    }
+    }*/
 
     ddgi.probe_dims = scene_aabb;
     const auto dim_scaling = glm::vec3{ 0.95, 0.8, 0.95 };

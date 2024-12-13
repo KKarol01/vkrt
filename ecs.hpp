@@ -4,6 +4,7 @@
 #include <cassert>
 #include <span>
 #include <memory>
+#include <utility>
 #include "handle.hpp"
 #include "common/types.hpp"
 #include "handle_vec.hpp"
@@ -43,7 +44,8 @@ class EntityComponents {
         return get_comp_array<T>()->data.find_idx(Handle<T>{ *handle });
     }
     template <typename T> void insert(Handle<Entity> handle, T&& t) {
-        get_comp_array<T>()->data.insert(Handle<T>{ *handle }, std::forward<T>(t));
+        using T_NOREF = std::remove_cvref_t<T>;
+        get_comp_array<T_NOREF>()->data.insert(Handle<T_NOREF>{ *handle }, std::forward<T>(t));
     }
     template <typename T> std::span<const T> get_comps() const {
         ComponentArray<T>* arr = get_comp_array<T>();

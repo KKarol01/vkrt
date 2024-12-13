@@ -64,10 +64,6 @@ struct RenderMesh {
     Flags<MeshBatchFlags> flags;
     Handle<RenderGeometry> geometry;
     Handle<MeshMetadata> metadata;
-    uint32_t vertex_offset{ 0 };
-    uint32_t vertex_count{ 0 };
-    uint32_t index_offset{ 0 };
-    uint32_t index_count{ 0 };
 };
 
 /* render mesh with material and entity handle for ec system */
@@ -90,8 +86,8 @@ struct GPUMeshInstance {
 /* for each meshinstance struct that has raytracing flag set */
 struct RenderBLAS {
     Handle<RenderBLAS> handle;
-    Handle<RenderInstance> ri_handle;
-    Handle<RenderMesh> rm_handle;
+    Handle<RenderInstance> instance_handle;
+    Handle<RenderMesh> mesh_handle;
     VkAccelerationStructureKHR blas;
 };
 
@@ -346,7 +342,7 @@ class RendererVulkan : public Renderer {
     Handle<RenderMaterial> batch_material(const MaterialDescriptor& desc) final;
     Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) final;
     Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) final;
-    void instance_mesh(const InstanceSettings& settings) final;
+    Handle<RenderInstance> instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(Handle<RenderInstance> handle) final;
 

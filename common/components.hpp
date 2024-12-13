@@ -8,6 +8,8 @@ struct MeshAsset;
 struct RenderInstance;
 struct RenderMesh;
 struct RenderBLAS;
+struct RenderGeometry;
+struct RenderMaterial;
 
 namespace cmps {
 
@@ -15,12 +17,6 @@ struct Transform {
     glm::mat4 transform{ 1.0f };
 };
 
-struct RenderMesh {
-    ModelAsset* asset{};
-    MeshAsset* mesh{};
-    Handle<RenderInstance> ri_handle{};
-    Handle<::RenderMesh> rm_handle{};
-    Handle<RenderBLAS> blas_handle{};
-};
+
 
 } // namespace cmps
