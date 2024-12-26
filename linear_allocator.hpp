@@ -1,9 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#ifndef NDEBUG
 #include <cassert>
-#endif
 
 class LinearAllocator {
   public:

@@ -5,6 +5,7 @@
 #include "handle.hpp"
 #include "common/flags.hpp"
 #include "common/types.hpp"
+#include <span>
 
 enum class BatchFlags {};
 enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };

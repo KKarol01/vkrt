@@ -1,7 +1,7 @@
 #include "camera.hpp"
-#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glfw/glfw3.h>
 #include "engine.hpp"
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
@@ -49,7 +49,7 @@ void Camera::update() {
 }
 
 void Camera::on_mouse_move(float px, float py) {
-    const float dt = Engine::delta_time() * 10.0f;
+    const float dt = Engine::delta_time() * 1.0f;
     if(enabled) {
         pitch += glm::radians((lpy - py) * dt) * 20.0f;
         yaw += glm::radians((lpx - px) * dt) * 20.0f;

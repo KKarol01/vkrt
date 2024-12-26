@@ -5,6 +5,10 @@
 #include <forward_list>
 #include <queue>
 #include <variant>
+#include <atomic>
+#include <memory>
+#include <thread>
+#include <mutex>
 #include <vulkan/vulkan.h>
 
 class LinearAllocator;

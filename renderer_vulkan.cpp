@@ -12,8 +12,6 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
 #include <shaderc/shaderc.hpp>
-#define STB_INCLUDE_IMPLEMENTATION
-#define STB_INCLUDE_LINE_GLSL
 #include <stb/stb_include.h>
 #include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_glfw.h>

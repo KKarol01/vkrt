@@ -1,7 +1,5 @@
-cmake_minimum_required(VERSION 3.6)
+cmake_minimum_required(VERSION 3.29)
 project(vkrt)
-
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Vulkan REQUIRED)
 
@@ -10,6 +8,7 @@ target_compile_definitions(glm INTERFACE
     GLM_FORCE_DEPTH_ZERO_TO_ONE
     GLM_FORCE_RADIANS
     GLM_FORCE_AVX2
+    GLM_ENABLE_EXPERIMENTAL
 )
 
 add_subdirectory(third_party/vk-bootstrap SYSTEM)
@@ -21,24 +20,6 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/glfw)
-
-set(VMA_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
-set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "" FORCE)
-set(VMA_DYNAMIC_VULKAN_FUNCTIONS ON CACHE BOOL "" FORCE)
-add_subdirectory(third_party/VulkanMemoryAllocator)
-add_library(vma STATIC build_vma.cpp)
-target_compile_definitions(vma PUBLIC VK_USE_PLATFORM_WIN_32_KHR WIN32_LEAN_AND_MEAN VK_VERSION_1_3)
-target_include_directories(vma PUBLIC ${CMAKE_SOURCE_DIR}/third_party/ ${Vulkan_INCLUDE_DIRS})
-
-add_library(volk STATIC build_volk.c)
-target_include_directories(volk PUBLIC ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
-target_compile_definitions(volk
-    PUBLIC
-    VK_USE_PLATFORM_WIN32_KHR
-)
-
-add_library(stb STATIC build_stb.c)
-target_include_directories(stb PUBLIC ${CMAKE_SOURCE_DIR}/third_party)
 
 set(FASTGLTF_USE_CUSTOM_SMALLVECTOR ON CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
@@ -53,6 +34,29 @@ set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_USE_STD_MODULE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fastgltf)
+
+add_library(build_header_only STATIC
+    "build_header_only.cpp"
+)
+target_compile_definitions(build_header_only
+    PRIVATE
+        STB_IMAGE_IMPLEMENTATION
+        STB_INCLUDE_IMPLEMENTATION
+        VOLK_IMPLEMENTATION
+        VMA_IMPLEMENTATION
+        VMA_STATIC_VULKAN_FUNCTIONS=0
+        VMA_DYNAMIC_VULKAN_FUNCTIONS=0
+    PUBLIC
+        STB_INCLUDE_LINE_GLSL
+        VK_USE_PLATFORM_WIN32_KHR
+        VK_VERSION_1_3
+        WIN32_LEAN_AND_MEAN
+)
+target_include_directories(build_header_only
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/third_party
+        ${Vulkan_INCLUDE_DIRS}
+)
 
 add_library(imgui STATIC
     "third_party/imgui/imgui.cpp"
@@ -102,11 +106,9 @@ target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_link_libraries(vkrt
     PRIVATE
     glm
+    build_header_only
     vk-bootstrap
     glfw
-    vma
-    volk
-    stb
     imgui
     imguizmo
     $<$<CONFIG:Debug>:shaderc_combinedd>
@@ -115,28 +117,41 @@ target_link_libraries(vkrt
 )
 target_compile_definitions(vkrt
     PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    WIN32_LEAN_AND_MEAN
-    VC_EXTRALEAN
-    NOMINMAX
-    ENGINE_BASE_ASSET_PATH="${CMAKE_SOURCE_DIR}/assets/"
+        _CRT_SECURE_NO_WARNINGS
+        VC_EXTRALEAN
+        NOMINMAX
+        ENGINE_BASE_ASSET_PATH="${CMAKE_SOURCE_DIR}/assets/"
 )
 target_precompile_headers(vkrt
     PRIVATE
-    <volk/volk.h>
-    vulkan_structs.hpp
-    <imgui/imgui.h>
-    <imgui/backends/imgui_impl_glfw.h>
-    <imgui/backends/imgui_impl_vulkan.h>
-    <GLFW/glfw3.h>
-    <glm/glm.hpp>
-    <VulkanMemoryAllocator/include/vk_mem_alloc.h>
-    <vk-bootstrap/src/VkBootstrap.h>
-    <shaderc/shaderc.hpp>
-    <fastgltf/core.hpp>
-    <fastgltf/types.hpp>
-    <fastgltf/tools.hpp>
-    <fastgltf/glm_element_traits.hpp>
-    <iostream>
-    <format>
+        <vector>
+        <string>
+        <variant>
+        <utility>
+        <span>
+        <cstddef>
+        <forward_list>
+        <queue>
+        <atomic>
+        <memory>
+        <thread>
+        <mutex>
+        <numeric>
+        <fstream>
+        <volk/volk.h>
+        <vulkan/vulkan.h>
+        <glm/glm.hpp>
+        <glm/mat3x3.hpp>
+        <glm/gtc/quaternion.hpp>
+        <glm/gtc/matrix_transform.hpp>
+        <glm/gtx/quaternion.hpp>
+        <glm/gtx/transform.hpp>
+        <GLFW/glfw3.h>
+        <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+        <vk-bootstrap/src/VkBootstrap.h>
+        <shaderc/shaderc.hpp>
+        <imgui/imgui.h>
+        <imgui/backends/imgui_impl_glfw.h>
+        <imgui/backends/imgui_impl_vulkan.h>
+        "renderer_vulkan.hpp"
 )

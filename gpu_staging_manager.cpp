@@ -2,6 +2,7 @@
 #include "linear_allocator.hpp"
 #include "renderer_vulkan.hpp"
 #include <map>
+#include <mutex>
 
 //GpuStagingManager::GpuStagingManager(VkQueue queue, uint32_t queue_index, size_t pool_size_bytes)
 //    : submit_queue{ new QueueScheduler{ queue } }, queue_idx{ queue_index } {

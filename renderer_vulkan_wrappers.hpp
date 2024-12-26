@@ -3,8 +3,11 @@
 #include <string>
 #include <variant>
 #include <utility>
+#include <span>
 #include <vulkan/vulkan.h>
+#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include "common/types.hpp"
+#include "vulkan_structs.hpp"
 
 class Buffer {
   public:

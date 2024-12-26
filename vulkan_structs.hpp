@@ -5,7 +5,6 @@
 
 // clang-format off
 
-
 template <typename T> struct INIT_VK_STYPE;
 
 #define INIT_VK_EXPAND(x) x
