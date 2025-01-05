@@ -4,20 +4,7 @@
 #include <compare>
 #include <atomic>
 
-#define CREATE_HANDLE_DISPATCHER2(Type, ReturnType)                                                                    \
-    template <typename Storage> struct HandleDispatcher<Type, Storage> {                                               \
-        constexpr ReturnType* operator()(const Handle<Type, Storage>& h) const;                                        \
-    };                                                                                                                 \
-    template <typename Storage>                                                                                        \
-    constexpr ReturnType* HandleDispatcher<Type, Storage>::operator()(const Handle<Type, Storage>& h) const
-
-#define CREATE_HANDLE_DISPATCHER(Type) CREATE_HANDLE_DISPATCHER2(Type, Type)
-
 template <typename T, typename Storage = uint32_t> struct Handle;
-
-template <typename T, typename Storage = uint32_t> struct HandleDispatcher {
-    constexpr T* operator()(const Handle<T, Storage>& h) const;
-};
 
 template <typename T, typename Storage> struct HandleGenerator {
     static Storage gen() { return counter++; }
@@ -33,7 +20,6 @@ template <typename T, typename Storage> struct Handle {
     explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage>::gen() } {}
     constexpr Storage operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;
-    constexpr auto* operator->() const { return HandleDispatcher<T>{}(*this); }
     constexpr explicit operator bool() const { return handle != ~Storage{}; }
     Storage handle{ ~Storage{} };
 };

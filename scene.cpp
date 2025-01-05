@@ -12,93 +12,6 @@
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
 
-// Handle<Entity> Scene::instance_model(const std::filesystem::path& path) {
-//     if(auto it = path_model_assets.find(path); it != path_model_assets.end()) { return it->second; }
-//
-//     ImportedModel model = ModelImporter::import_model(path);
-//
-//     std::vector<Vertex> vertices;
-//     vertices.reserve(model.vertices.size());
-//     std::transform(model.vertices.begin(), model.vertices.end(), std::back_inserter(vertices), [](const ImportedModel::Vertex& v) {
-//         return Vertex{
-//             .pos = v.pos,
-//             .nor = v.nor,
-//             .uv = v.uv,
-//             .tang = v.tang,
-//         };
-//     });
-//     Handle<RenderGeometry> geometry_handle = Engine::renderer()->batch_geometry(GeometryDescriptor{
-//         .vertices = vertices,
-//         .indices = model.indices,
-//     });
-//
-//     std::vector<Handle<Image>> textures;
-//     std::vector<ImageFormat> texture_formats(model.textures.size());
-//     for(const auto& e : model.materials) {
-//         if(e.color_texture) { texture_formats.at(*e.color_texture) = ImageFormat::SRGB; }
-//         // Rest of the types should be unorm (for now).
-//     }
-//
-//     for(uint32_t i = 0; i < model.textures.size(); ++i) {
-//         auto& e = model.textures.at(i);
-//         textures.push_back(Engine::renderer()->batch_texture(ImageDescriptor{
-//             .name = e.name,
-//             .width = e.size.first,
-//             .height = e.size.second,
-//             .format = texture_formats.at(i),
-//             .data = e.rgba_data,
-//         }));
-//     }
-//
-//     std::vector<MaterialAsset> materials;
-//     for(const auto& e : model.materials) {
-//         Handle<RenderMaterial> material_handle = Engine::renderer()->batch_material(MaterialDescriptor{
-//             .base_color_texture = textures.at(e.color_texture.value_or(0)),
-//             .normal_texture = e.normal_texture ? textures.at(*e.normal_texture) : Handle<Image>{},
-//             .metallic_roughness_texture = e.metallic_roughness_texture ? textures.at(*e.metallic_roughness_texture) : Handle<Image>{},
-//         });
-//         materials.push_back(MaterialAsset{
-//             .material_handle = material_handle,
-//             .color_texture_handle = e.color_texture ? textures.at(*e.color_texture) : Handle<Image>{},
-//             .normal_texture_handle = e.normal_texture ? textures.at(*e.normal_texture) : Handle<Image>{},
-//             .metallic_roughness_texture_handle =
-//                 e.metallic_roughness_texture ? textures.at(*e.metallic_roughness_texture) : Handle<Image>{},
-//         });
-//     }
-//
-//     std::vector<MeshAsset> meshes;
-//     for(auto& e : model.meshes) {
-//         BoundingBox aabb;
-//         for(uint32_t i = e.vertex_offset; i < e.vertex_offset + e.vertex_count; ++i) {
-//             aabb.min = glm::min(aabb.min, vertices.at(i).pos);
-//             aabb.max = glm::max(aabb.max, vertices.at(i).pos);
-//         }
-//         Handle<RenderMesh> mesh_handle = Engine::renderer()->batch_mesh(MeshDescriptor{
-//             .geometry = geometry_handle,
-//             .vertex_offset = e.vertex_offset,
-//             .index_offset = e.index_offset,
-//             .vertex_count = e.vertex_count,
-//             .index_count = e.index_count,
-//         });
-//         meshes.push_back(MeshAsset{
-//             .name = e.name,
-//             .rm_handle = mesh_handle,
-//             .material = &materials.at(e.material.value_or(0)),
-//             .aabb = aabb,
-//         });
-//     }
-//
-//     Handle<ModelAsset> asset_handle{ generate_handle };
-//     model_assets.push_back(ModelAsset{ .path = path,
-//                                        .geometry = geometry_handle,
-//                                        .meshes = std::move(meshes),
-//                                        .materials = std::move(materials),
-//                                        .textures = std::move(textures) });
-//     handle_model_assets[asset_handle] = &model_assets.back();
-//     path_model_assets[path] = asset_handle;
-//     return asset_handle;
-// }
-
 static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& img, ImageFormat format) {
     std::byte* img_data{};
     int width{}, height{}, ch{};
@@ -119,7 +32,7 @@ static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& i
     }, img.data);
     // clang-format on
     if(!result) { return Handle<Image>{}; }
-    return Engine::renderer()->batch_texture(ImageDescriptor{
+    return get_renderer().batch_texture(ImageDescriptor{
         .name = img.name.c_str(),
         .width = static_cast<uint32_t>(width),
         .height = static_cast<uint32_t>(height),
@@ -186,8 +99,8 @@ static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fa
     fastgltf::copyFromAccessor<uint32_t>(asset, indices_accesor, indices.data());
 
     auto& node_primitive = node->primitives.emplace_back();
-    node_primitive.geometry_handle = Engine::renderer()->batch_geometry({ .vertices = vertices, .indices = indices });
-    node_primitive.mesh_handle = Engine::renderer()->batch_mesh(MeshDescriptor{ .geometry = node_primitive.geometry_handle });
+    node_primitive.geometry_handle = get_renderer().batch_geometry({ .vertices = vertices, .indices = indices });
+    node_primitive.mesh_handle = get_renderer().batch_mesh(MeshDescriptor{ .geometry = node_primitive.geometry_handle });
 
     if(prim.materialIndex) {
         if(state.materials.size() > *prim.materialIndex) {
@@ -208,7 +121,7 @@ static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fa
                 state_material.metallic_roughness_handle =
                     scene_get_or_load_image(state, asset, material.pbrData.metallicRoughnessTexture->textureIndex, ImageFormat::UNORM);
             }
-            state_material.handle = Engine::renderer()->batch_material(MaterialDescriptor{
+            state_material.handle = get_renderer().batch_material(MaterialDescriptor{
                 .base_color_texture = state_material.base_color_image_handle,
                 .normal_texture = state_material.normal_image_handle,
                 .metallic_roughness_texture = state_material.metallic_roughness_handle,
@@ -256,17 +169,17 @@ static void scene_load_nodes(SceneLoadingState& state, fastgltf::Asset& asset, f
     }
 }
 
-Handle<Entity> scene::Scene::load_from_file(const std::filesystem::path& path) {
+Handle<scene::Node> scene::Scene::load_from_file(const std::filesystem::path& path) {
     const std::filesystem::path full_path = std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path;
 
     fastgltf::Parser parser;
     auto glbbuffer = fastgltf::GltfDataBuffer::FromPath(full_path);
-    if(!glbbuffer) { return Handle<Entity>{}; }
+    if(!glbbuffer) { return Handle<Node>{}; }
 
     constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                  fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     auto expected_asset = parser.loadGltfBinary(glbbuffer.get(), full_path.parent_path(), gltfOptions);
-    if(!expected_asset) { return Handle<Entity>{}; }
+    if(!expected_asset) { return Handle<Node>{}; }
     auto& asset = expected_asset.get();
 
     std::vector<Handle<Image>> images;
@@ -275,7 +188,7 @@ Handle<Entity> scene::Scene::load_from_file(const std::filesystem::path& path) {
     auto& scene = asset.scenes[0];
     Node* scene_node = &nodes.emplace_back();
     scene_node->name = scene.name.c_str();
-    scene_node->handle = Handle<Entity>{ generate_handle };
+    scene_node->handle = Handle<Node>{ generate_handle };
     SceneLoadingState state;
     for(auto idx : scene.nodeIndices) {
         scene_load_nodes(state, asset, asset.nodes.at(idx), this, scene_node, scene_compose_matrix(asset.nodes.at(idx).transform));
@@ -284,74 +197,67 @@ Handle<Entity> scene::Scene::load_from_file(const std::filesystem::path& path) {
     return scene_node->handle;
 }
 
-Handle<Entity> scene::Scene::instance_model(Handle<Entity> entity) {
+components::Entity scene::Scene::instance_model(Handle<scene::Node> entity) {
     Node* n = node_handles.at(entity);
     NodeInstance* i = add_instance();
     std::stack<NodeInstance*> i_stack;
     i_stack.push(i);
     traverse_node_hierarchy_indexed(n, [&](Node* n, uint32_t idx) {
-        NodeInstance* i = i_stack.top();
+        NodeInstance* ni = i_stack.top();
         i_stack.pop();
-        i->node_handle = n->handle;
-        i->transform = n->transform;
-        i->final_transform = n->final_transform;
-        i->children.reserve(n->children.size());
-        i->primitive_handles.reserve(n->primitives.size());
-        instance_handles[i->handle] = i;
+        ni->node_handle = n->handle;
+        ni->transform = n->transform;
+        ni->final_transform = n->transform;
+        ni->children.reserve(n->children.size());
+        ni->primitives.reserve(n->primitives.size());
+        ni->entity = Engine::get().ecs_storage->create();
+        instance_handles[ni->entity] = ni;
         for(auto& p : n->primitives) {
-            i->primitive_handles.push_back(Engine::renderer()->instance_mesh(InstanceSettings{
-                .entity = i->handle,
-                .mesh = p.mesh_handle,
-                .material = p.material_handle,
-                .transform = i->final_transform,
-            }));
+            auto pi = ni->primitives.emplace_back(Engine::get().ecs_storage->create());
+            Engine::get().ecs_storage->emplace<components::Transform>(pi, ni->final_transform);
+            Engine::get().ecs_storage->emplace<components::Renderable>(
+                pi, components::Renderable{ .mesh_handle = p.mesh_handle, .material_handle = p.material_handle });
+            Engine::get().renderer->instance_mesh(InstanceSettings{ .entity = pi });
         }
         for(auto& c : n->children) {
-            i->children.push_back(add_instance());
+            ni->children.push_back(add_instance());
         }
-        for(auto it = i->children.rbegin(); it != i->children.rend(); ++it) {
+        for(auto it = ni->children.rbegin(); it != ni->children.rend(); ++it) {
             i_stack.push(*it);
         }
     });
     scene.push_back(i);
-    return i->handle;
+    return i->entity;
 }
 
 scene::Node* scene::Scene::add_node() {
     auto& n = nodes.emplace_back();
-    n.handle = Handle<Entity>{ generate_handle };
+    n.handle = Handle<Node>{ generate_handle };
     node_handles[n.handle] = &n;
     return &n;
 }
 
 scene::NodeInstance* scene::Scene::add_instance() {
     auto& n = node_instances.emplace_back();
-    n.handle = Handle<Entity>{ generate_handle };
+    n.entity = Engine::get().ecs_storage->create();
     return &n;
 }
 
-void scene::Scene::update_transform(Handle<Entity> entity) {
-    // uint32_t idx = entity_node_idxs.at(entity);
-    // glm::mat4 tr = glm::mat4{ 1.0f };
-    // if(nodes.at(idx).parent != ~0u) { tr = final_transforms.at(nodes.at(idx).parent); }
-    //_update_transform(idx, tr);
-}
+// void scene::Scene::update_transform(Handle<Entity> entity) {
+//  uint32_t idx = entity_node_idxs.at(entity);
+//  glm::mat4 tr = glm::mat4{ 1.0f };
+//  if(nodes.at(idx).parent != ~0u) { tr = final_transforms.at(nodes.at(idx).parent); }
+//_update_transform(idx, tr);
+//}
 
-void scene::Scene::_update_transform(uint32_t idx, glm::mat4 t) {
-    // Node& node = nodes.at(idx);
-    // cmps::Transform& tr = Engine::ec()->get<cmps::Transform>(node.handle);
-    // final_transforms.at(idx) = tr.transform * t;
-    // if(node.has_component<cmps::Mesh>()) {
-    //     Engine::renderer()->update_transform(Engine::ec()->get<cmps::Mesh>(node.handle).ri_handle);
-    // }
-    // for(uint32_t i = 0; i < node.children_count; ++i) {
-    //     _update_transform(node.children_offset + i, final_transforms.at(idx));
-    // }
-}
-
-template <typename Comp> Comp& scene::Scene::attach_component(scene::Node* node, Comp&& comp) {
-    using Comp_Noref = std::remove_cvref_t<Comp>;
-    node->components |= (1u << EntityComponentIdGenerator<>::get_id<Comp_Noref>());
-    Engine::ec()->insert<Comp_Noref>(node->handle, std::forward<Comp>(comp));
-    return Engine::ec()->get<Comp_Noref>(node->handle);
-}
+// void scene::Scene::_update_transform(uint32_t idx, glm::mat4 t) {
+//  Node& node = nodes.at(idx);
+//  cmps::Transform& tr = Engine::ec()->get<cmps::Transform>(node.handle);
+//  final_transforms.at(idx) = tr.transform * t;
+//  if(node.has_component<cmps::Mesh>()) {
+//      get_renderer().update_transform(Engine::ec()->get<cmps::Mesh>(node.handle).ri_handle);
+//  }
+//  for(uint32_t i = 0; i < node.children_count; ++i) {
+//      _update_transform(node.children_offset + i, final_transforms.at(idx));
+//  }
+//}

@@ -1,11 +1,12 @@
 #pragma once
 
+#include <span>
 #include <glm/mat4x3.hpp>
 #include "model_importer.hpp"
 #include "handle.hpp"
 #include "common/flags.hpp"
 #include "common/types.hpp"
-#include <span>
+#include "ecs.hpp"
 
 enum class BatchFlags {};
 enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };
@@ -55,15 +56,12 @@ struct MeshDescriptor {
 };
 
 struct InstanceSettings {
-    Flags<InstanceFlags> flags;
-    Handle<Entity> entity;
-    Handle<RenderMesh> mesh;
-    Handle<RenderMaterial> material;
-    glm::mat4 transform{ 1.0f };
+    // Primitive's entity (scene::NodeInstance's primitives)
+    components::Entity entity;
 };
 
 struct BLASInstanceSettings {
-    Handle<Entity> entity;
+    components::Entity entity;
 };
 
 struct ScreenRect {
@@ -84,7 +82,7 @@ class Renderer {
     virtual Handle<RenderMaterial> batch_material(const MaterialDescriptor& batch) = 0;
     virtual Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) = 0;
     virtual Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) = 0;
-    virtual Handle<RenderInstance> instance_mesh(const InstanceSettings& settings) = 0;
+    virtual void instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
-    virtual void update_transform(Handle<RenderInstance> handle) = 0;
+    virtual void update_transform(components::Entity entity) = 0;
 };

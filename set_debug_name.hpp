@@ -1,5 +1,5 @@
 #include <vulkan/vulkan.h>
-#include "engine.hpp"
+#include "renderer_vulkan.hpp"
 
 // clang-format off
 template<typename VkStruct> struct VkObject {};
@@ -16,6 +16,6 @@ template <typename VkStruct> inline void set_debug_name(VkStruct object, const s
         .objectHandle = reinterpret_cast<uint64_t>(object),
         .pObjectName = name.c_str(),
     };
-    vkSetDebugUtilsObjectNameEXT(static_cast<RendererVulkan*>(Engine::renderer())->dev, &obj_name);
+    vkSetDebugUtilsObjectNameEXT(get_renderer().dev, &obj_name);
 #endif
 }

@@ -11,12 +11,12 @@
 #include "engine.hpp"
 
 int main() {
-    Engine::init();
+    Engine::get().init();
     {
-         Handle<Entity> model = Engine::scene()->load_from_file("cornell/cornell1.glb");
-        //Handle<Entity> model = Engine::scene()->load_from_file("bistro.glb");
+        Handle<scene::Node> model = Engine::get().scene->load_from_file("cornell/cornell1.glb");
+        // Handle<Entity> model = Engine::scene()->load_from_file("bistro.glb");
         /* Engine::scene()->instance_model(sphere_handle, { .flags = {}, .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) }); */
-        Engine::scene()->instance_model(model);
+        Engine::get().scene->instance_model(model);
     }
-    Engine::start();
+    Engine::get().start();
 }

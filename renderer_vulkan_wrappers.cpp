@@ -209,8 +209,8 @@ Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t he
 Image::Image(Image&& other) noexcept { *this = std::move(other); }
 
 Image& Image::operator=(Image&& other) noexcept {
-    if(image) { vkDestroyImage(RendererVulkan::get()->dev, image, nullptr); }
-    if(view) { vkDestroyImageView(RendererVulkan::get()->dev, view, nullptr); }
+    if(image) { vkDestroyImage(get_renderer().dev, image, nullptr); }
+    if(view) { vkDestroyImageView(get_renderer().dev, view, nullptr); }
     image = std::exchange(other.image, nullptr);
     alloc = std::exchange(other.alloc, nullptr);
     view = std::exchange(other.view, nullptr);
@@ -317,11 +317,11 @@ CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) {
         .flags = flags,
         .queueFamilyIndex = queue_index,
     });
-    VK_CHECK(vkCreateCommandPool(RendererVulkan::get()->dev, &info, {}, &cmdpool));
+    VK_CHECK(vkCreateCommandPool(get_renderer().dev, &info, {}, &cmdpool));
 }
 
 CommandPool::~CommandPool() noexcept {
-    if(cmdpool) { vkDestroyCommandPool(RendererVulkan::get()->dev, cmdpool, nullptr); }
+    if(cmdpool) { vkDestroyCommandPool(get_renderer().dev, cmdpool, nullptr); }
 }
 
 CommandPool::CommandPool(CommandPool&& other) noexcept { *this = std::move(other); }
@@ -346,7 +346,7 @@ VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
         .commandBufferCount = 1,
     });
     VkCommandBuffer buffer;
-    VK_CHECK(vkAllocateCommandBuffers(RendererVulkan::get()->dev, &info, &buffer));
+    VK_CHECK(vkAllocateCommandBuffers(get_renderer().dev, &info, &buffer));
     buffers.emplace_back(buffer, false);
     return buffer;
 }
@@ -367,7 +367,7 @@ VkCommandBuffer CommandPool::begin_onetime(VkCommandBufferLevel level) {
 void CommandPool::end(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
 
 void CommandPool::reset() {
-    vkResetCommandPool(RendererVulkan::get()->dev, cmdpool, {});
+    vkResetCommandPool(get_renderer().dev, cmdpool, {});
     for(auto& e : buffers) {
         e.second = true;
     }

@@ -153,5 +153,4 @@ target_precompile_headers(vkrt
         <imgui/imgui.h>
         <imgui/backends/imgui_impl_glfw.h>
         <imgui/backends/imgui_impl_vulkan.h>
-        "renderer_vulkan.hpp"
 )

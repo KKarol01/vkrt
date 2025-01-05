@@ -67,12 +67,12 @@ struct RenderMesh {
 };
 
 /* render mesh with material and entity handle for ec system */
-struct RenderInstance {
-    Handle<RenderInstance> handle;
-    Handle<Entity> entity;
-    Handle<RenderMesh> mesh;
-    Handle<RenderMaterial> material;
-};
+// struct RenderInstance {
+//     Handle<RenderInstance> handle;
+//     Handle<Entity> entity;
+//     Handle<RenderMesh> mesh;
+//     Handle<RenderMaterial> material;
+// };
 
 /* unpacked mesh instance for gpu consumption */
 struct GPUMeshInstance {
@@ -81,14 +81,6 @@ struct GPUMeshInstance {
     uint32_t color_texture_idx;
     uint32_t normal_texture_idx;
     uint32_t metallic_roughness_idx;
-};
-
-/* for each meshinstance struct that has raytracing flag set */
-struct RenderBLAS {
-    Handle<RenderBLAS> handle;
-    Handle<RenderInstance> instance_handle;
-    Handle<RenderMesh> mesh_handle;
-    VkAccelerationStructureKHR blas;
 };
 
 struct DDGI {
@@ -198,7 +190,7 @@ struct PipelineLayout {
     PipelineLayout() = default;
     PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, uint32_t push_size = 128);
 
-    std::array<DescriptorLayout, MAX_SETS> sets{};
+    std::array<DescriptorLayout, MAX_SETS> layouts{};
     VkPipelineLayout layout{};
     uint32_t push_size{};
 };
@@ -295,7 +287,7 @@ template <size_t frames> struct FrameData {
         GBuffer gbuffer{};
         DescriptorPool* descpool{};
     };
-    Data& get() { return data[Engine::frame_num() % frames]; }
+    Data& get() { return data[Engine::get().frame_num() % frames]; }
     std::array<Data, frames> data{};
 };
 
@@ -328,8 +320,6 @@ class RendererVulkan : public Renderer {
   public:
     void init() final;
 
-    static RendererVulkan* get() { return static_cast<RendererVulkan*>(Engine::renderer()); }
-
     void initialize_vulkan();
     void initialize_imgui();
     void initialize_resources();
@@ -342,9 +332,9 @@ class RendererVulkan : public Renderer {
     Handle<RenderMaterial> batch_material(const MaterialDescriptor& desc) final;
     Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) final;
     Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) final;
-    Handle<RenderInstance> instance_mesh(const InstanceSettings& settings) final;
+    void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
-    void update_transform(Handle<RenderInstance> handle) final;
+    void update_transform(components::Entity entity) final;
 
     void upload_model_textures();
     void upload_staged_models();
@@ -385,10 +375,10 @@ class RendererVulkan : public Renderer {
     HandleVector<RenderMesh> meshes;
     HandleVector<MeshMetadata> mesh_metadatas;
     HandleVector<Image> textures;
-    std::vector<RenderInstance> mesh_instances;
-    std::unordered_map<Handle<RenderInstance>, uint32_t> mesh_instance_idxs;
     HandleVector<RenderMaterial> materials;
-    std::vector<RenderBLAS> blas_instances;
+    std::vector<components::Entity> mesh_instances;
+    std::unordered_map<components::Entity, uint32_t> mesh_instance_idxs;
+    std::vector<components::Entity> blas_instances;
     uint32_t max_draw_count{};
 
     VkAccelerationStructureKHR tlas{};
@@ -429,14 +419,9 @@ class RendererVulkan : public Renderer {
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<Handle<RenderInstance>> update_positions;
+    std::vector<components::Entity> update_positions;
 };
 
 // clang-format off
-inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::renderer()); }
-
-CREATE_HANDLE_DISPATCHER(RenderGeometry) { return &get_renderer().geometries.at(h); }
-CREATE_HANDLE_DISPATCHER(GeometryMetadata) { return &get_renderer().geometry_metadatas.at(h); }
-CREATE_HANDLE_DISPATCHER(RenderMesh) { return &get_renderer().meshes.at(h); }
-CREATE_HANDLE_DISPATCHER(MeshMetadata) { return &get_renderer().mesh_metadatas.at(h); }
+inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
 // clang-format on

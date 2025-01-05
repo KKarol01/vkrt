@@ -5,11 +5,11 @@
 #include "renderer_vulkan.hpp"
 #include "camera.hpp"
 
-static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::camera()->on_mouse_move(px, py); }
+static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::get().camera->on_mouse_move(px, py); }
 static void on_window_resize(GLFWwindow* window, int w, int h) {
-    Engine::window()->width = w;
-    Engine::window()->height = h;
-    Engine::notify_on_window_resize();
+    Engine::get().window->width = w;
+    Engine::get().window->height = h;
+    Engine::get().notify_on_window_resize();
 }
 
 Window::Window(float width, float height) : width(width), height(height) {
@@ -26,86 +26,60 @@ bool Window::should_close() const { return glfwWindowShouldClose(window); }
 void Engine::init() {
     if(!glfwInit()) { ENG_WARN("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwSetCursorPosCallback(window()->window, on_mouse_move);
-    glfwSetFramebufferSizeCallback(window()->window, on_window_resize);
+
+    window = new Window{ 1280.0f, 768.0f };
+    camera = new Camera{ glm::radians(90.0f), 0.01f, 100.0f };
+    ecs_storage = new components::Storage{};
+
+    glfwSetCursorPosCallback(window->window, &on_mouse_move);
+    glfwSetFramebufferSizeCallback(window->window, &on_window_resize);
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-    if(monitor_videomode) { get()->_refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
+    if(monitor_videomode) { _refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
-    //ec()->register_component_array<cmps::Transform>();
-    //ec()->register_component_array<cmps::Mesh>();
-    //ec()->register_component_array<cmps::MeshInstance>();
-
-    renderer()->init();
+    renderer = new RendererVulkan{};
+    ui = new UI{};
+    scene = new scene::Scene{};
+    renderer->init();
 }
 
-void Engine::destroy() { get()->~Engine(); }
+void Engine::destroy() { this->~Engine(); }
 
 void Engine::start() {
-    while(!Engine::window()->should_close()) {
-        if(get_time_secs() - last_frame_time() >= get()->_refresh_rate) { update(); }
+    while(!window->should_close()) {
+        if(get_time_secs() - last_frame_time() >= _refresh_rate) { update(); }
         glfwPollEvents();
     }
 }
 
 void Engine::update() {
     const float now = get_time_secs();
-    if(get()->_on_update_callback) { get()->_on_update_callback(); }
-    camera()->update();
-    ui()->update();
-    renderer()->update();
-    ++get()->_frame_num;
-    get()->_last_frame_time = now;
-    get()->_delta_time = get_time_secs() - get()->_last_frame_time;
+    if(_on_update_callback) { _on_update_callback(); }
+    camera->update();
+    ui->update();
+    renderer->update();
+    ++_frame_num;
+    _last_frame_time = now;
+    _delta_time = get_time_secs() - _last_frame_time;
 }
 
 void Engine::set_on_update_callback(const std::function<void()>& on_update_callback) {
-    get()->_on_update_callback = on_update_callback;
+    _on_update_callback = on_update_callback;
 }
 
 void Engine::add_on_window_resize_callback(const std::function<bool()>& on_update_callback) {
-    get()->_on_window_resize_callbacks.push_back(on_update_callback);
+    _on_window_resize_callbacks.push_back(on_update_callback);
 }
 
 void Engine::notify_on_window_resize() {
-    for(const auto& e : get()->_on_window_resize_callbacks) {
+    for(const auto& e : _on_window_resize_callbacks) {
         e();
     }
 }
 
-Engine* Engine::get() {
+Engine& Engine::get() {
     static Engine _engine;
-    return &_engine;
+    return _engine;
 }
-
-Window* Engine::window() {
-    static Window _window{ 1280.0f, 768.0f };
-    return &_window;
-}
-
-Camera* Engine::camera() {
-    static Camera _camera{ glm::radians(90.0f), 0.01f, 100.0f };
-    return &_camera;
-}
-
-Renderer* Engine::renderer() {
-    static Renderer* _renderer = new RendererVulkan();
-    return _renderer;
-}
-
-UI* Engine::ui() {
-    static UI _ui;
-    return &_ui;
-}
-
-scene::Scene* Engine::scene() {
-    static scene::Scene _scene;
-    return &_scene;
-}
-
-//EntityComponents* Engine::ec() {
-//    static EntityComponents _ec = EntityComponents{};
-//    return &_ec;
-//}
 
 double Engine::get_time_secs() { return glfwGetTime(); }
 

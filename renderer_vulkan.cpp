@@ -40,33 +40,33 @@ static float halton(int i, int b) {
 }
 
 PipelineLayout::PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, uint32_t push_size)
-    : sets(desc_layouts), push_size(push_size) {
+    : layouts(desc_layouts), push_size(push_size) {
     std::array<VkDescriptorSetLayout, MAX_SETS> vksets{};
     for(uint32_t i = 0; i < MAX_SETS; ++i) {
-        auto& l = sets.at(i);
-        std::array<VkDescriptorSetLayoutBinding, DescriptorLayout::MAX_BINDINGS> vkb{};
-        std::array<VkDescriptorBindingFlags, DescriptorLayout::MAX_BINDINGS> bflags{};
-        uint32_t bcount = 0;
+        auto& layout = layouts.at(i);
+        std::array<VkDescriptorSetLayoutBinding, DescriptorLayout::MAX_BINDINGS> vkbs{};
+        std::array<VkDescriptorBindingFlags, DescriptorLayout::MAX_BINDINGS> vkbfs{};
+        uint32_t vkbc = 0;
         for(uint32_t j = 0; j < DescriptorLayout::MAX_BINDINGS; ++j) {
-            DescriptorBinding& b = l.bindings[j];
+            DescriptorBinding& b = layout.bindings[j];
             if(b.res.index() == 0) { continue; }
             auto deduced_type = b.get_vktype();
-            vkb[bcount++] = { .binding = j, .descriptorType = deduced_type, .descriptorCount = b.count, .stageFlags = VK_SHADER_STAGE_ALL };
+            vkbs[vkbc++] = { .binding = j, .descriptorType = deduced_type, .descriptorCount = b.count, .stageFlags = VK_SHADER_STAGE_ALL };
         }
-        if(l.variable_binding != -1) {
-            bflags[l.variable_binding] |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+        if(layout.variable_binding != -1) {
+            vkbfs[layout.variable_binding] |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
         }
-        auto bflags_info = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
-            .bindingCount = bcount,
-            .pBindingFlags = bflags.data(),
+        auto vkbf_info = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
+            .bindingCount = vkbc,
+            .pBindingFlags = vkbfs.data(),
         });
-        auto info = Vks(VkDescriptorSetLayoutCreateInfo{
-            .pNext = &bflags_info,
-            .bindingCount = bcount,
-            .pBindings = vkb.data(),
+        auto vkbl_info = Vks(VkDescriptorSetLayoutCreateInfo{
+            .pNext = &vkbf_info,
+            .bindingCount = vkbc,
+            .pBindings = vkbs.data(),
         });
-        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &info, nullptr, &vksets[i]));
-        l.layout = vksets[i];
+        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &vkbl_info, nullptr, &vksets[i]));
+        layout.layout = vksets[i];
     }
     VkPushConstantRange range{ .stageFlags = VK_SHADER_STAGE_ALL, .offset = 0, .size = push_size };
     auto info = Vks(VkPipelineLayoutCreateInfo{
@@ -305,7 +305,7 @@ void RendererVulkan::init() {
     initialize_vulkan();
     initialize_resources();
     initialize_imgui();
-    Engine::add_on_window_resize_callback([this] {
+    Engine::get().add_on_window_resize_callback([this] {
         on_window_resize();
         return true;
     });
@@ -332,7 +332,7 @@ void RendererVulkan::initialize_vulkan() {
     vkb::Instance vkb_inst = inst_ret.value();
     volkLoadInstance(vkb_inst.instance);
 
-    const auto* window = Engine::window();
+    const auto* window = Engine::get().window;
 
     auto surface_info = Vks(VkWin32SurfaceCreateInfoKHR{
         .hinstance = GetModuleHandle(nullptr),
@@ -432,6 +432,7 @@ void RendererVulkan::initialize_vulkan() {
     pdev = phys_ret->physical_device;
     gq = Queue{ .queue = vkb_device.get_queue(vkb::QueueType::graphics).value(),
                 .idx = vkb_device.get_queue_index(vkb::QueueType::graphics).value() };
+    screen_rect = { .w = window->width, .h = window->height };
 
     VmaVulkanFunctions vulkanFunctions = {
         .vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr,
@@ -478,7 +479,7 @@ void RendererVulkan::initialize_imgui() {
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
 
-    ImGui_ImplGlfw_InitForVulkan(Engine::window()->window, true);
+    ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
 
     VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
 
@@ -642,27 +643,24 @@ void RendererVulkan::initialize_resources() {
         auto& fd = frame_data.data[i];
         fd.gbuffer = {
             // TODO: vkformat of rgba32f is a bit fat - check if the precision is needed.
-            .color_image = make_image(Image{
-                std::format("g_color_{}", i), (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height, 1,
-                1, 1, VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
+            .color_image = make_image(Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w,
+                                             (uint32_t)screen_rect.h, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
+                                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
             .view_space_positions_image =
-                make_image(Image{ std::format("g_view_pos_{}", i), (uint32_t)Engine::window()->width,
-                                  (uint32_t)Engine::window()->height, 1, 1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                make_image(Image{ std::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1,
+                                  1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
                                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT }),
-            .view_space_normals_image = make_image(Image{
-                std::format("g_view_nor_{}", i), (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height,
-                1, 1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
+            .view_space_normals_image =
+                make_image(Image{ std::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1,
+                                  1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
             .depth_buffer_image = make_image(Image{
-                std::format("g_depth_{}", i), (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height, 1,
-                1, 1, VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
+                std::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1, VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-            .ambient_occlusion_image =
-                make_image(Image{ std::format("ao_{}", i), (uint32_t)Engine::window()->width,
-                                  (uint32_t)Engine::window()->height, 1, 1, 1, VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT }),
+            .ambient_occlusion_image = make_image(Image{
+                std::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1, VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT }),
         };
 
         DescriptorLayout dl_depth_rect{ .bindings = { {
@@ -702,7 +700,7 @@ void RendererVulkan::initialize_resources() {
 }
 
 void RendererVulkan::update() {
-    if(Engine::window()->width == 0 || Engine::window()->height == 0) { return; }
+    if(screen_rect.w * screen_rect.h == 0.0f) { return; }
     if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
     if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) {
         upload_instances();
@@ -712,7 +710,7 @@ void RendererVulkan::update() {
     if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
         // TODO: prepare ddgi on scene update
-        if(Engine::frame_num() < 100) { update_ddgi(); }
+        if(Engine::get().frame_num() < 100) { update_ddgi(); }
     }
     if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
     // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
@@ -722,8 +720,8 @@ void RendererVulkan::update() {
         for(int i = 0; i < frame_data.data.size(); ++i) {
             *frame_data.data[i].gbuffer.color_image =
                 Image{ std::format("g_color_{}", i),
-                       (uint32_t)Engine::window()->width,
-                       (uint32_t)Engine::window()->height,
+                       (uint32_t)screen_rect.w,
+                       (uint32_t)screen_rect.h,
                        1,
                        1,
                        1,
@@ -732,8 +730,8 @@ void RendererVulkan::update() {
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
             *frame_data.data[i].gbuffer.view_space_positions_image =
                 Image{ std::format("g_view_pos_{}", i),
-                       (uint32_t)Engine::window()->width,
-                       (uint32_t)Engine::window()->height,
+                       (uint32_t)screen_rect.w,
+                       (uint32_t)screen_rect.h,
                        1,
                        1,
                        1,
@@ -743,8 +741,8 @@ void RendererVulkan::update() {
                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
             *frame_data.data[i].gbuffer.view_space_normals_image =
                 Image{ std::format("g_view_nor_{}", i),
-                       (uint32_t)Engine::window()->width,
-                       (uint32_t)Engine::window()->height,
+                       (uint32_t)screen_rect.w,
+                       (uint32_t)screen_rect.h,
                        1,
                        1,
                        1,
@@ -753,8 +751,8 @@ void RendererVulkan::update() {
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
             *frame_data.data[i].gbuffer.depth_buffer_image =
                 Image{ std::format("g_depth_{}", i),
-                       (uint32_t)Engine::window()->width,
-                       (uint32_t)Engine::window()->height,
+                       (uint32_t)screen_rect.w,
+                       (uint32_t)screen_rect.h,
                        1,
                        1,
                        1,
@@ -763,8 +761,8 @@ void RendererVulkan::update() {
                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
             *frame_data.data[i].gbuffer.ambient_occlusion_image =
                 Image{ std::format("ao_{}", i),
-                       (uint32_t)Engine::window()->width,
-                       (uint32_t)Engine::window()->height,
+                       (uint32_t)screen_rect.w,
+                       (uint32_t)screen_rect.h,
                        1,
                        1,
                        1,
@@ -776,7 +774,7 @@ void RendererVulkan::update() {
     // if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) { gq.wait_idle(); }
 
     auto& fd = frame_data.get();
-    const auto frame_num = Engine::frame_num();
+    const auto frame_num = Engine::get().frame_num();
     vkWaitForFences(dev, 1, &fd.fen_rendering_finished.fence, true, 16'000'000);
     fd.cmdpool->reset();
     // fd.descpool->reset();
@@ -793,7 +791,7 @@ void RendererVulkan::update() {
         swapchain_image = &swapchain.images[swapchain_index];
     }
 
-    if(Engine::frame_num() > 0) {
+    if(Engine::get().frame_num() > 0) {
         // for(uint32_t i = 0; i < ddgi.debug_probes.size(); ++i) {
         //     auto h = Handle<Entity>{ *ddgi.debug_probes.at(i) };
         //     auto& t = Engine::ec()->get<cmps::Transform>(h);
@@ -809,16 +807,16 @@ void RendererVulkan::update() {
 
     vkResetFences(dev, 1, &frame_data.get().fen_rendering_finished.fence);
 
+    const auto view = Engine::get().camera->get_view();
+    const auto proj = Engine::get().camera->get_projection();
+    const auto inv_view = glm::inverse(view);
+    const auto inv_proj = glm::inverse(proj);
     {
-        const float hx = (halton(Engine::frame_num() % 4u, 2) * 2.0 - 1.0);
-        const float hy = (halton(Engine::frame_num() % 4u, 3) * 2.0 - 1.0);
+        const float hx = (halton(Engine::get().frame_num() % 4u, 2) * 2.0 - 1.0);
+        const float hy = (halton(Engine::get().frame_num() % 4u, 3) * 2.0 - 1.0);
         const glm::mat3 rand_mat =
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-        const auto view = Engine::camera()->get_view();
-        const auto proj = Engine::camera()->get_projection();
-        const auto inv_view = glm::inverse(view);
-        const auto inv_proj = glm::inverse(proj);
         fd.constants->push_data(0ul, view, proj, inv_view, inv_proj, rand_mat);
     }
 
@@ -840,13 +838,13 @@ void RendererVulkan::update() {
     auto cmd = fd.cmdpool->begin_onetime();
 
     if(flags.test_clear(RendererFlags::DIRTY_TRANSFORMS_BIT)) {
-        for(const auto& e : update_positions) {
+        for(auto e : update_positions) {
             const auto idx = mesh_instance_idxs.at(e);
-            const auto& ri = mesh_instances.at(idx);
             const auto offset = idx * sizeof(glm::mat4);
-            const auto& t = Engine::scene()->get_final_transform(ri.entity);
+            const auto& t = Engine::get().ecs_storage->get<components::Transform>(e);
+            const auto& r = Engine::get().ecs_storage->get<components::Renderable>(e);
             vkCmdUpdateBuffer(cmd, mesh_instance_transform_buffers[0]->buffer, offset, sizeof(glm::mat4), &t);
-            if(ri.mesh->metadata->blas) {
+            if(true /*r.mesh_handle->metadata->blas*/) {
                 assert(false && "TODO: Check if this is correct");
                 flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
             }
@@ -889,7 +887,7 @@ void RendererVulkan::update() {
 
         auto callable_sbt = Vks(VkStridedDeviceAddressRegionKHR{});
 
-        const auto* window = Engine::window();
+        const auto* window = Engine::get().window;
         uint32_t mode = 0;
         // clang-format off
         fd.passes.ddgi_radiance.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
@@ -975,7 +973,7 @@ void RendererVulkan::update() {
         });
 
         auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = (uint32_t)Engine::window()->width, .height = (uint32_t)Engine::window()->height } },
+            .renderArea = { .extent = { .width = (uint32_t)screen_rect.w, .height = (uint32_t)screen_rect.h } },
             .layerCount = 1,
             .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
             .pColorAttachments = r_col_atts,
@@ -991,13 +989,10 @@ void RendererVulkan::update() {
         fd.passes.default_lit.bind_desc_sets(cmd);
 
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
-        VkViewport r_view_1{ .x = 0.0f,
-                             .y = Engine::window()->height,
-                             .width = Engine::window()->width,
-                             .height = -Engine::window()->height,
-                             .minDepth = 0.0f,
-                             .maxDepth = 1.0f };
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
+        VkViewport r_view_1{
+            .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+        };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
         vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
         // clang-format off
@@ -1025,17 +1020,13 @@ void RendererVulkan::update() {
                     .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
                 },
             };
-            VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
-            VkViewport r_view_1{ .x = 0.0f,
-                                 .y = Engine::window()->height,
-                                 .width = Engine::window()->width,
-                                 .height = -Engine::window()->height,
-                                 .minDepth = 0.0f,
-                                 .maxDepth = 1.0f };
+            VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
+            VkViewport r_view_1{
+                .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+            };
             VkRenderingInfo imgui_rendering_info{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = VkRect2D{ .offset = { 0, 0 },
-                                        .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } },
+                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } },
                 .layerCount = 1,
                 .colorAttachmentCount = 1,
                 .pColorAttachments = i_col_atts,
@@ -1059,7 +1050,7 @@ void RendererVulkan::update() {
 
         VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
         auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = (uint32_t)Engine::window()->width, .height = (uint32_t)Engine::window()->height } },
+            .renderArea = { .extent = { .width = (uint32_t)screen_rect.w, .height = (uint32_t)screen_rect.h } },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = r_col_atts,
@@ -1079,13 +1070,10 @@ void RendererVulkan::update() {
                                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
         vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::window()->width, (uint32_t)Engine::window()->height } };
-        VkViewport r_view_1{ .x = 0.0f,
-                             .y = Engine::window()->height,
-                             .width = Engine::window()->width,
-                             .height = -Engine::window()->height,
-                             .minDepth = 0.0f,
-                             .maxDepth = 1.0f };
+        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
+        VkViewport r_view_1{
+            .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+        };
         vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
         vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
         // clang-format off
@@ -1094,7 +1082,6 @@ void RendererVulkan::update() {
         fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
         fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);*/
         // clang-format on
-        const auto proj = Engine::camera()->get_projection();
         vkCmdPushConstants(cmd, fd.passes.rect_depth_buffer.pipeline->layout->layout, VK_SHADER_STAGE_ALL, 0, 64, &proj);
         vkCmdDraw(cmd, 6, 1, 0, 0);
         vkCmdEndRendering(cmd);
@@ -1111,7 +1098,7 @@ void RendererVulkan::update() {
 
         VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
         auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = (uint32_t)Engine::window()->width, .height = (uint32_t)Engine::window()->height } },
+            .renderArea = { .extent = { .width = (uint32_t)screen_rect.w, .height = (uint32_t)screen_rect.h } },
             .layerCount = 1,
             .colorAttachmentCount = 1,
             .pColorAttachments = r_col_atts,
@@ -1151,7 +1138,7 @@ void RendererVulkan::update() {
 void RendererVulkan::on_window_resize() { flags.set(RendererFlags::RESIZE_SWAPCHAIN_BIT); }
 
 void RendererVulkan::set_screen(ScreenRect screen) {
-    const float aspect = 16.0f / 9.0f;
+    /*const float aspect = 16.0f / 9.0f;
     float sw = screen.h * aspect;
     float sh = screen.w / aspect;
     screen_rect = screen;
@@ -1161,8 +1148,11 @@ void RendererVulkan::set_screen(ScreenRect screen) {
         screen_rect.w = sw;
     }
     screen_rect.x = screen.x + std::fabsf(screen.w - screen_rect.w) * 0.5f;
-    screen_rect.y = screen.y + std::fabsf(screen.h - screen_rect.h) * 0.5f;
-    Engine::camera()->update_projection(glm::perspective(glm::radians(75.0f), screen_rect.w / screen_rect.h, 0.01f, 15.0f));
+    screen_rect.y = screen.y + std::fabsf(screen.h - screen_rect.h) * 0.5f;*/
+    screen_rect = screen;
+    // TODO:
+    ENG_WARN("TODO: Resize resources on new set_screen()");
+    // Engine::camera()->update_projection(glm::perspective(glm::radians(75.0f), screen_rect.w / screen_rect.h, 0.01f, 15.0f));
 }
 
 static VkFormat deduce_image_format(ImageFormat format) {
@@ -1228,37 +1218,37 @@ Handle<RenderMesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
     return meshes.insert(mesh_batch);
 }
 
-Handle<RenderInstance> RendererVulkan::instance_mesh(const InstanceSettings& settings) {
-    assert(settings.entity);
-    Handle<RenderInstance> handle{ generate_handle };
-    mesh_instances.push_back(RenderInstance{
-        .handle = handle,
-        .entity = settings.entity,
-        .mesh = settings.mesh,
-        .material = settings.material,
-    });
-    mesh_instance_idxs[handle] = mesh_instances.size() - 1u;
+void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
+    /* assert(settings.entity);
+     Handle<RenderInstance> handle{ generate_handle };
+     mesh_instances.push_back(RenderInstance{
+         .handle = handle,
+         .entity = settings.entity,
+         .mesh = settings.mesh,
+         .material = settings.material,
+     });
+     mesh_instance_idxs[handle] = mesh_instances.size() - 1u;*/
+    mesh_instances.push_back(settings.entity);
     flags.set(RendererFlags::DIRTY_MESH_INSTANCES);
-    return handle;
 }
 
 void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
     assert(false && "TODO");
-    //auto& mesh = Engine::ec()->get<cmps::Mesh>(settings.entity);
-    //auto& mesh_instance = Engine::ec()->get<cmps::MeshInstance>(settings.entity);
-    //mesh.blas_handle = Handle<RenderBLAS>{ generate_handle };
-    //blas_instances.push_back(RenderBLAS{
-    //    .handle = mesh.blas_handle, .instance_handle = mesh_instance.instance_handle, .mesh_handle = mesh.mesh_handle });
-    //flags.set(RendererFlags::DIRTY_TLAS_BIT);
-    //auto& rm = meshes.at(mesh.mesh_handle);
-    //if(!rm.metadata->blas) {
-    //    rm.flags.set(MeshBatchFlags::DIRTY_BLAS_BIT);
-    //    flags.set(RendererFlags::DIRTY_MESH_BLAS_BIT);
-    //}
+    // auto& mesh = Engine::ec()->get<cmps::Mesh>(settings.entity);
+    // auto& mesh_instance = Engine::ec()->get<cmps::MeshInstance>(settings.entity);
+    // mesh.blas_handle = Handle<RenderBLAS>{ generate_handle };
+    // blas_instances.push_back(RenderBLAS{
+    //     .handle = mesh.blas_handle, .instance_handle = mesh_instance.instance_handle, .mesh_handle = mesh.mesh_handle });
+    // flags.set(RendererFlags::DIRTY_TLAS_BIT);
+    // auto& rm = meshes.at(mesh.mesh_handle);
+    // if(!rm.metadata->blas) {
+    //     rm.flags.set(MeshBatchFlags::DIRTY_BLAS_BIT);
+    //     flags.set(RendererFlags::DIRTY_MESH_BLAS_BIT);
+    // }
 }
 
-void RendererVulkan::update_transform(Handle<RenderInstance> handle) {
-    update_positions.push_back(handle);
+void RendererVulkan::update_transform(components::Entity entity) {
+    update_positions.push_back(entity);
     flags.set(RendererFlags::DIRTY_TRANSFORMS_BIT);
 }
 
@@ -1304,16 +1294,18 @@ void RendererVulkan::upload_staged_models() {
 }
 
 void RendererVulkan::upload_instances() {
-    std::sort(mesh_instances.begin(), mesh_instances.end(), [](const RenderInstance& a, const RenderInstance& b) {
-        if(a.material >= b.material) { return false; }
-        if(a.mesh >= b.mesh) { return false; }
+    std::sort(mesh_instances.begin(), mesh_instances.end(), [](auto a, auto b) {
+        const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
+        const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
+        if(ra.material_handle >= rb.material_handle) { return false; }
+        if(ra.mesh_handle >= rb.mesh_handle) { return false; }
         return true;
     });
 
     mesh_instance_idxs.clear();
     mesh_instance_idxs.reserve(mesh_instances.size());
     for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
-        mesh_instance_idxs[mesh_instances.at(i).handle] = i;
+        mesh_instance_idxs[mesh_instances.at(i)] = i;
     }
 
     const auto total_triangles = get_total_triangles();
@@ -1322,10 +1314,10 @@ void RendererVulkan::upload_instances() {
     IndirectDrawCommandBufferHeader gpu_draw_header;
 
     for(uint32_t i = 0u; i < mesh_instances.size(); ++i) {
-        const RenderInstance& mi = mesh_instances.at(i);
-        const RenderMesh& mb = meshes.at(mi.mesh);
+        const components::Renderable& mi = Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i));
+        const RenderMesh& mb = meshes.at(mi.mesh_handle);
         const RenderGeometry& geom = geometries.at(mb.geometry);
-        const RenderMaterial& mat = materials.at(Handle<RenderMaterial>{ *mi.material });
+        const RenderMaterial& mat = materials.at(mi.material_handle);
         gpu_mesh_instances.push_back(GPUMeshInstance{
             .vertex_offset = geom.vertex_offset,
             .index_offset = geom.index_offset,
@@ -1333,7 +1325,7 @@ void RendererVulkan::upload_instances() {
             .normal_texture_idx = (uint32_t)(mat.normal_texture ? textures.find_idx(mat.normal_texture) : *mat.normal_texture),
             .metallic_roughness_idx = (uint32_t)(mat.metallic_roughness_texture ? textures.find_idx(mat.metallic_roughness_texture)
                                                                                 : *mat.metallic_roughness_texture) });
-        if(i == 0 || mesh_instances.at(i - 1).mesh != mi.mesh) {
+        if(i == 0 || Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i - 1)).mesh_handle != mi.mesh_handle) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
                                                                       .instanceCount = 1,
                                                                       .firstIndex = geom.index_offset,
@@ -1363,9 +1355,9 @@ void RendererVulkan::upload_transforms() {
 
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
-    std::transform(mesh_instances.begin(), mesh_instances.end(), std::back_inserter(transforms),
-                   [](const RenderInstance& e) { return Engine::scene()->get_final_transform(e.entity); });
-
+    for(auto e : mesh_instances) {
+        transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
+    }
     dst_transforms->push_data(transforms, 0ull);
     std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
 }
@@ -1472,19 +1464,23 @@ void RendererVulkan::build_tlas() {
     std::vector<uint32_t> triangle_geo_inst_ids;
     std::vector<VkAccelerationStructureInstanceKHR> tlas_instances;
 
-    std::sort(blas_instances.begin(), blas_instances.end(),
-              [](const RenderBLAS& a, const RenderBLAS& b) { return a.mesh_handle < b.mesh_handle; });
+    std::sort(blas_instances.begin(), blas_instances.end(), [](auto a, auto b) {
+        const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
+        const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
+        return ra.mesh_handle < rb.mesh_handle;
+    });
 
     // TODO: Compress mesh ids per triangle for identical blases with identical materials
     // TODO: Remove geometry offset for indexing in shaders as all blases have only one geometry always
     for(uint32_t i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
-        const RenderBLAS& bi = blas_instances.at(i);
-        const RenderMesh& mb = meshes.at(bi.mesh_handle);
+        const uint32_t mi_idx = mesh_instance_idxs.at(blas_instances.at(i));
+        const auto& mr = Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(mi_idx));
+        const RenderMesh& mb = meshes.at(mr.mesh_handle);
         const RenderGeometry& geom = geometries.at(mb.geometry);
-        const uint32_t mi_idx =
-            std::distance(mesh_instances.begin(),
-                          std::find_if(mesh_instances.begin(), mesh_instances.end(),
-                                       [&bi](const RenderInstance& e) { return e.handle == bi.instance_handle; }));
+        const MeshMetadata& mm = mesh_metadatas.at(mb.metadata);
+        /*std::distance(mesh_instances.begin(),
+                      std::find_if(mesh_instances.begin(), mesh_instances.end(),
+                                   [&bi](const RenderInstance& e) { return e.handle == bi.instance_handle; }));*/
 
         triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + geom.index_count / 3u);
         for(uint32_t j = 0; j < geom.index_count / 3u; ++j) {
@@ -1494,12 +1490,12 @@ void RendererVulkan::build_tlas() {
         VkAccelerationStructureInstanceKHR& tlas_instance = tlas_instances.emplace_back();
         tlas_instance = Vks(VkAccelerationStructureInstanceKHR{
             .transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(glm::mat4x3{
-                Engine::scene()->get_final_transform(mesh_instances.at(mi_idx).entity) })),
+                Engine::get().ecs_storage->get<components::Transform>(mesh_instances.at(mi_idx)).transform })),
             .instanceCustomIndex = 0,
             .mask = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference = mb.metadata->blas_buffer.bda,
+            .accelerationStructureReference = mesh_metadatas.at(mb.metadata).blas_buffer.bda,
         });
         tlas_mesh_offsets.push_back(toff);
         blas_mesh_offsets.push_back(boff / 3u);
@@ -1885,7 +1881,7 @@ Fence::~Fence() noexcept { vkDestroyFence(get_renderer().dev, fence, nullptr); }
 VkResult Fence::wait(uint32_t timeout) { return vkWaitForFences(get_renderer().dev, 1, &fence, true, timeout); }
 
 template <size_t frames> void Swapchain<frames>::create() {
-    Window& window = *Engine::window();
+    Window& window = *Engine::get().window;
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
@@ -1935,7 +1931,7 @@ DescriptorPool::DescriptorPool(const PipelineLayout* layout, uint32_t max_sets) 
     std::unordered_map<VkDescriptorType, uint32_t> idxs;
     std::vector<VkDescriptorPoolSize> sizes;
     for(uint32_t i = 0; i < layout->MAX_SETS; ++i) {
-        auto& dl = layout->sets[i];
+        auto& dl = layout->layouts[i];
         for(uint32_t j = 0; j < dl.MAX_BINDINGS; ++j) {
             auto type = dl.bindings[j].get_vktype();
             if(type == VK_DESCRIPTOR_TYPE_MAX_ENUM) { continue; }
@@ -2004,7 +2000,7 @@ void RenderPass::update_desc_sets() {
     }
     for(uint32_t i = 0; i < sets.size(); ++i) {
         auto& set = sets.at(i);
-        auto& desc_layout = pipeline->layout->sets[i];
+        auto& desc_layout = pipeline->layout->layouts[i];
 
         if(desc_layout.is_empty()) { continue; }
 
@@ -2118,7 +2114,6 @@ VkDescriptorType DescriptorBinding::get_vktype() const {
             return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         }
     }
-
     return std::visit(Visitor{
                           [](std::monostate) { return VK_DESCRIPTOR_TYPE_MAX_ENUM; },
                           [](const Buffer* e) {
