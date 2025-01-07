@@ -251,12 +251,11 @@ struct RenderPass {
     std::array<VkDescriptorSet*, PipelineLayout::MAX_SETS> sets{};
 };
 
-template <size_t frames> struct Swapchain {
-    Swapchain() = default;
-    void create();
+struct Swapchain {
+    void create(uint32_t image_count, uint32_t width, uint32_t height);
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     VkSwapchainKHR swapchain{};
-    std::array<Image, frames> images;
+    std::vector<Image> images;
 };
 
 struct RenderPasses {
@@ -276,19 +275,15 @@ struct GBuffer {
     Image* ambient_occlusion_image{};
 };
 
-template <size_t frames> struct FrameData {
-    struct Data {
-        Semaphore sem_swapchain{};
-        Semaphore sem_rendering_finished{};
-        Fence fen_rendering_finished{};
-        CommandPool* cmdpool{};
-        RenderPasses passes{};
-        Buffer* constants{};
-        GBuffer gbuffer{};
-        DescriptorPool* descpool{};
-    };
-    Data& get() { return data[Engine::get().frame_num() % frames]; }
-    std::array<Data, frames> data{};
+struct FrameData {
+    Semaphore sem_swapchain{};
+    Semaphore sem_rendering_finished{};
+    Fence fen_rendering_finished{};
+    CommandPool* cmdpool{};
+    RenderPasses passes{};
+    Buffer* constants{};
+    GBuffer gbuffer{};
+    DescriptorPool* descpool{};
 };
 
 struct QueueCmdSubmission : public VkCommandBufferSubmitInfo {
@@ -343,11 +338,11 @@ class RendererVulkan : public Renderer {
 
     void build_blas();
     void build_tlas();
-    void refit_tlas();
     void update_ddgi();
 
     Image* make_image(Image&& img);
     Buffer* make_buffer(Buffer&& buf);
+    FrameData& get_frame_data(uint32_t offset = 0);
 
     uint32_t get_total_vertices() const {
         return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
@@ -395,8 +390,8 @@ class RendererVulkan : public Renderer {
     Buffer triangle_geo_inst_id_buffer;
     Buffer mesh_instances_buffer;
 
-    Swapchain<2> swapchain;
-    FrameData<2> frame_data;
+    Swapchain swapchain;
+    std::array<FrameData, 2> frame_datas{};
     ShaderStorage shaders;
     std::deque<PipelineLayout> playouts;
     std::deque<Pipeline> pipelines;
@@ -410,10 +405,6 @@ class RendererVulkan : public Renderer {
     struct UploadImage {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
-    };
-    struct UpdatePosition {
-        uint32_t idx;
-        glm::mat4 transform;
     };
 
     std::vector<Vertex> upload_vertices;

@@ -97,14 +97,14 @@ bool Buffer::push_data(std::span<const std::byte> data, uint32_t offset) {
     if(mapped) {
         memcpy(static_cast<std::byte*>(mapped) + offset, data.data(), data.size_bytes());
     } else {
-        auto cmd = get_renderer().frame_data.get().cmdpool->begin_onetime();
+        auto cmd = get_renderer().get_frame_data().cmdpool->begin_onetime();
         uint32_t iters = static_cast<uint32_t>(std::ceilf(static_cast<float>(data.size_bytes()) / 65536.0f));
         for(uint64_t off = 0, i = 0; i < iters; ++i) {
             const auto size = std::min(data.size_bytes() - off, 65536ull);
             vkCmdUpdateBuffer(cmd, buffer, offset + off, size, data.data() + off);
             off += size;
         }
-        get_renderer().frame_data.get().cmdpool->end(cmd);
+        get_renderer().get_frame_data().cmdpool->end(cmd);
         get_renderer().gq.submit(cmd);
         /*std::atomic_flag flag{};
         if(!get_renderer().staging->send_to(GpuStagingUpload{ .dst = buffer, .src = data, .dst_offset = offset, .size_bytes = data.size_bytes() },
@@ -128,10 +128,10 @@ bool Buffer::resize(size_t new_size) {
         success = new_buffer.push_data(std::span{ static_cast<const std::byte*>(mapped), size });
         flag.test_and_set();
     } else if(size > 0) {
-        auto cmd = get_renderer().frame_data.get().cmdpool->begin_onetime();
+        auto cmd = get_renderer().get_frame_data().cmdpool->begin_onetime();
         VkBufferCopy region{ .size = size };
         vkCmdCopyBuffer(cmd, buffer, new_buffer.buffer, 1, &region);
-        get_renderer().frame_data.get().cmdpool->end(cmd);
+        get_renderer().get_frame_data().cmdpool->end(cmd);
         get_renderer().gq.submit(cmd);
         flag.test_and_set();
         success = true;

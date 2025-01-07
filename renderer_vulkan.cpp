@@ -498,8 +498,8 @@ void RendererVulkan::initialize_imgui() {
         .QueueFamily = gq.idx,
         .Queue = gq.queue,
         .DescriptorPool = imgui_dpool->pool,
-        .MinImageCount = (uint32_t)frame_data.data.size(),
-        .ImageCount = (uint32_t)frame_data.data.size(),
+        .MinImageCount = (uint32_t)frame_datas.size(),
+        .ImageCount = (uint32_t)frame_datas.size(),
         .UseDynamicRendering = true,
         .PipelineRenderingCreateInfo = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -512,9 +512,9 @@ void RendererVulkan::initialize_imgui() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
 
-    auto cmdimgui = frame_data.get().cmdpool->begin_onetime();
+    auto cmdimgui = get_frame_data().cmdpool->begin_onetime();
     ImGui_ImplVulkan_CreateFontsTexture();
-    frame_data.get().cmdpool->end(cmdimgui);
+    get_frame_data().cmdpool->end(cmdimgui);
     gq.submit(QueueSubmission{ .cmds = { cmdimgui } });
     gq.wait_idle();
 }
@@ -540,8 +540,8 @@ void RendererVulkan::initialize_resources() {
                                                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
     };
 
-    for(uint32_t i = 0; i < frame_data.data.size(); ++i) {
-        auto& fd = frame_data.data[i];
+    for(uint32_t i = 0; i < frame_datas.size(); ++i) {
+        auto& fd = frame_datas[i];
         CommandPool* cmdgq1 = &cmdpools.emplace_back(CommandPool{ gq.idx });
         fd.sem_swapchain = Semaphore{ dev, false };
         fd.sem_rendering_finished = Semaphore{ dev, false };
@@ -639,8 +639,8 @@ void RendererVulkan::initialize_resources() {
     Pipeline* pp_ddgi_offsets = &pipelines.emplace_back(Pipeline{
         { shaders.get_shader("rtbasic/probe_offset.comp.glsl") }, pl_default, raster_settings_default });
 
-    for(uint32_t i = 0; i < frame_data.data.size(); ++i) {
-        auto& fd = frame_data.data[i];
+    for(uint32_t i = 0; i < frame_datas.size(); ++i) {
+        auto& fd = frame_datas[i];
         fd.gbuffer = {
             // TODO: vkformat of rgba32f is a bit fat - check if the precision is needed.
             .color_image = make_image(Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w,
@@ -712,13 +712,13 @@ void RendererVulkan::update() {
         // TODO: prepare ddgi on scene update
         if(Engine::get().frame_num() < 100) { update_ddgi(); }
     }
-    if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { refit_tlas(); }
+    if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { assert(false && "It's recommended to rebuild."); }
     // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
         gq.wait_idle();
-        swapchain.create();
-        for(int i = 0; i < frame_data.data.size(); ++i) {
-            *frame_data.data[i].gbuffer.color_image =
+        swapchain.create(frame_datas.size(), screen_rect.w, screen_rect.h);
+        for(int i = 0; i < frame_datas.size(); ++i) {
+            *frame_datas[i].gbuffer.color_image =
                 Image{ std::format("g_color_{}", i),
                        (uint32_t)screen_rect.w,
                        (uint32_t)screen_rect.h,
@@ -728,7 +728,7 @@ void RendererVulkan::update() {
                        VK_FORMAT_R8G8B8A8_SRGB,
                        VK_SAMPLE_COUNT_1_BIT,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-            *frame_data.data[i].gbuffer.view_space_positions_image =
+            *frame_datas[i].gbuffer.view_space_positions_image =
                 Image{ std::format("g_view_pos_{}", i),
                        (uint32_t)screen_rect.w,
                        (uint32_t)screen_rect.h,
@@ -739,7 +739,7 @@ void RendererVulkan::update() {
                        VK_SAMPLE_COUNT_1_BIT,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
-            *frame_data.data[i].gbuffer.view_space_normals_image =
+            *frame_datas[i].gbuffer.view_space_normals_image =
                 Image{ std::format("g_view_nor_{}", i),
                        (uint32_t)screen_rect.w,
                        (uint32_t)screen_rect.h,
@@ -749,7 +749,7 @@ void RendererVulkan::update() {
                        VK_FORMAT_R32G32B32A32_SFLOAT,
                        VK_SAMPLE_COUNT_1_BIT,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-            *frame_data.data[i].gbuffer.depth_buffer_image =
+            *frame_datas[i].gbuffer.depth_buffer_image =
                 Image{ std::format("g_depth_{}", i),
                        (uint32_t)screen_rect.w,
                        (uint32_t)screen_rect.h,
@@ -759,7 +759,7 @@ void RendererVulkan::update() {
                        VK_FORMAT_D16_UNORM,
                        VK_SAMPLE_COUNT_1_BIT,
                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-            *frame_data.data[i].gbuffer.ambient_occlusion_image =
+            *frame_datas[i].gbuffer.ambient_occlusion_image =
                 Image{ std::format("ao_{}", i),
                        (uint32_t)screen_rect.w,
                        (uint32_t)screen_rect.h,
@@ -773,7 +773,7 @@ void RendererVulkan::update() {
     }
     // if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) { gq.wait_idle(); }
 
-    auto& fd = frame_data.get();
+    auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
     vkWaitForFences(dev, 1, &fd.fen_rendering_finished.fence, true, 16'000'000);
     fd.cmdpool->reset();
@@ -805,7 +805,7 @@ void RendererVulkan::update() {
         // }
     }
 
-    vkResetFences(dev, 1, &frame_data.get().fen_rendering_finished.fence);
+    vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
 
     const auto view = Engine::get().camera->get_view();
     const auto proj = Engine::get().camera->get_projection();
@@ -1255,7 +1255,7 @@ void RendererVulkan::update_transform(components::Entity entity) {
 void RendererVulkan::upload_model_textures() {
     std::vector<Buffer> bs;
     bs.reserve(upload_images.size());
-    auto cmd = frame_data.get().cmdpool->begin_onetime();
+    auto cmd = get_frame_data().cmdpool->begin_onetime();
     for(auto& tex : upload_images) {
         auto& b = bs.emplace_back(Buffer{ "staging buffer", tex.rgba_data.size(),
                                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, true });
@@ -1275,7 +1275,7 @@ void RendererVulkan::upload_model_textures() {
         img.transition_layout(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                               VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     }
-    frame_data.get().cmdpool->end(cmd);
+    get_frame_data().cmdpool->end(cmd);
     Fence f{ dev, false };
     gq.submit(cmd, &f);
     f.wait();
@@ -1450,9 +1450,9 @@ void RendererVulkan::build_blas() {
         poffsets.at(i) = &ranges.at(i);
     }
 
-    auto cmd = frame_data.get().cmdpool->begin_onetime();
+    auto cmd = get_frame_data().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, blas_geo_build_infos.size(), blas_geo_build_infos.data(), poffsets.data());
-    frame_data.get().cmdpool->end(cmd);
+    get_frame_data().cmdpool->end(cmd);
     Fence f{ dev, false };
     gq.submit(cmd, &f);
     f.wait();
@@ -1567,75 +1567,12 @@ void RendererVulkan::build_tlas() {
     });
     VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
 
-    auto cmd = frame_data.get().cmdpool->begin_onetime();
+    auto cmd = get_frame_data().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    frame_data.get().cmdpool->end(cmd);
+    get_frame_data().cmdpool->end(cmd);
     Fence f{ dev, false };
     gq.submit(cmd, &f);
     f.wait();
-}
-
-void RendererVulkan::refit_tlas() {
-    assert(false && "TODO");
-#if 0
-    std::vector<const RenderModelInstance*> render_model_instances;
-    render_model_instances.reserve(model_instances.size());
-
-    for(auto& i : model_instances) {
-        if(i.flags & InstanceFlags::RAY_TRACED_BIT) { render_model_instances.push_back(&i); }
-    }
-
-    std::vector<vks::AccelerationStructureInstanceKHR> instances(render_model_instances.size());
-    for(uint32_t i = 0; i < instances.size(); ++i) {
-        auto& instance = instances.at(i);
-        instance.transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(render_model_instances.at(i)->transform));
-        instance.instanceCustomIndex = 0;
-        instance.mask = render_model_instances.at(i)->tlas_instance_mask;
-        instance.instanceShaderBindingTableRecordOffset = 0;
-        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = render_model_instances.at(i)->geom->metadata->blas_buffer.bda;
-    }
-
-    if(tlas_instance_buffer.capacity != instances.size() * sizeof(instances[0])) {
-        ENG_WARN("Tlas instance buffer size differs from the instance vector in tlas update. That's probably an error: "
-                 "{} != {}",
-                 tlas_instance_buffer.capacity, render_model_instances.size() * sizeof(render_model_instances[0]));
-    }
-
-    tlas_instance_buffer.push_data(instances, 0);
-
-    vks::AccelerationStructureGeometryKHR geometry;
-    geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-    geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    geometry.geometry.instances.arrayOfPointers = false;
-    geometry.geometry.instances.data.deviceAddress = tlas_instance_buffer.bda;
-
-    vks::AccelerationStructureBuildGeometryInfoKHR tlas_info;
-    tlas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    tlas_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-    tlas_info.geometryCount = 1;
-    tlas_info.pGeometries = &geometry;
-    tlas_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-    tlas_info.srcAccelerationStructure = tlas;
-    tlas_info.dstAccelerationStructure = tlas;
-    tlas_info.scratchData.deviceAddress = tlas_scratch_buffer.bda;
-
-    const uint32_t max_primitives = instances.size();
-
-    vks::AccelerationStructureBuildRangeInfoKHR build_range;
-    build_range.primitiveCount = max_primitives;
-    build_range.primitiveOffset = 0;
-    build_range.firstVertex = 0;
-    build_range.transformOffset = 0;
-    VkAccelerationStructureBuildRangeInfoKHR* build_ranges[]{ &build_range };
-
-    auto cmd = get_primitives().cmdpool.begin_onetime();
-    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &tlas_info, build_ranges);
-    get_primitives().cmdpool.end(cmd);
-    scheduler_gq.enqueue_wait_submit({ { cmd } });
-    vkDeviceWaitIdle(dev);
-#endif
 }
 
 void RendererVulkan::update_ddgi() {
@@ -1701,7 +1638,7 @@ void RendererVulkan::update_ddgi() {
                                          VK_SAMPLE_COUNT_1_BIT,
                                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
 
-    auto cmd = frame_data.get().cmdpool->begin_onetime();
+    auto cmd = get_frame_data().cmdpool->begin_onetime();
     ddgi.radiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
@@ -1714,7 +1651,7 @@ void RendererVulkan::update_ddgi() {
     ddgi.probe_offsets_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
                                                   VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
                                                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
-    frame_data.get().cmdpool->end(cmd);
+    get_frame_data().cmdpool->end(cmd);
     gq.submit(cmd);
 
     ddgi.buffer = Buffer{ "ddgi_settings_buffer", sizeof(DDGI::GPULayout),
@@ -1762,6 +1699,10 @@ void RendererVulkan::update_ddgi() {
 Image* RendererVulkan::make_image(Image&& img) { return &images.emplace_back(std::move(img)); }
 
 Buffer* RendererVulkan::make_buffer(Buffer&& buf) { return &buffers.emplace_back(std::move(buf)); }
+
+FrameData& RendererVulkan::get_frame_data(uint32_t offset) {
+    return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];
+}
 
 void ShaderStorage::precompile_shaders(std::initializer_list<std::filesystem::path> paths) {
     std::vector<std::jthread> ths;
@@ -1880,16 +1821,15 @@ Fence::~Fence() noexcept { vkDestroyFence(get_renderer().dev, fence, nullptr); }
 
 VkResult Fence::wait(uint32_t timeout) { return vkWaitForFences(get_renderer().dev, 1, &fence, true, timeout); }
 
-template <size_t frames> void Swapchain<frames>::create() {
-    Window& window = *Engine::get().window;
+void Swapchain::create(uint32_t image_count, uint32_t width, uint32_t height) {
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
         .surface = get_renderer().window_surface,
-        .minImageCount = frames,
+        .minImageCount = image_count,
         .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-        .imageExtent = VkExtent2D{ (uint32_t)window.width, (uint32_t)window.height },
+        .imageExtent = VkExtent2D{ width, height },
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -1900,14 +1840,15 @@ template <size_t frames> void Swapchain<frames>::create() {
 
     if(swapchain) { vkDestroySwapchainKHR(get_renderer().dev, swapchain, nullptr); }
     VK_CHECK(vkCreateSwapchainKHR(get_renderer().dev, &sinfo, nullptr, &swapchain));
-    std::array<VkImage, frames> imgs;
-    uint32_t pframes = frames;
-    VK_CHECK(vkGetSwapchainImagesKHR(get_renderer().dev, swapchain, &pframes, imgs.data()));
+    std::vector<VkImage> vk_images(image_count);
+    images.resize(image_count);
 
-    for(uint32_t i = 0; i < frames; ++i) {
+    VK_CHECK(vkGetSwapchainImagesKHR(get_renderer().dev, swapchain, &image_count, vk_images.data()));
+
+    for(uint32_t i = 0; i < image_count; ++i) {
         images[i].image = nullptr;
         images[i] = Image{ std::format("swapchain_image_{}", i),
-                           imgs[i],
+                           vk_images[i],
                            sinfo.imageExtent.width,
                            sinfo.imageExtent.height,
                            1,
@@ -1919,8 +1860,7 @@ template <size_t frames> void Swapchain<frames>::create() {
     }
 }
 
-template <size_t frames>
-uint32_t Swapchain<frames>::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence) {
+uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence) {
     uint32_t idx;
     auto result = vkAcquireNextImageKHR(get_renderer().dev, swapchain, timeout, semaphore, fence, &idx);
     if(res) { *res = result; }
