@@ -79,14 +79,14 @@ PipelineLayout::PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layou
     VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &info, nullptr, &layout));
 }
 
-Pipeline::Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLayout* layout,
+Pipeline::Pipeline(const std::vector<std::filesystem::path>& shaders, const PipelineLayout* layout,
                    std::variant<std::monostate, RasterizationSettings, RaytracingSettings> settings)
     : layout(layout) {
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     for(const auto& p : shaders) {
         auto stage = Vks(VkPipelineShaderStageCreateInfo{
-            .stage = get_renderer().shaders.metadatas.at(p).stage,
-            .module = p,
+            .stage = get_renderer().shader_storage.get_stage(p),
+            .module = get_renderer().shader_storage.get_shader(p),
             .pName = "main",
         });
         // clang-format off
@@ -569,20 +569,14 @@ void RendererVulkan::initialize_resources() {
                                  .variable_binding = 15 };
     dl_default.bindings[15] = { &textures.data_storage(), 1024, samp_lr };
 
-    shaders.precompile_shaders({
-        "default_unlit/default.vert.glsl",
-        "default_unlit/default.frag.glsl",
-        "rtbasic/raygen.rgen.glsl",
-        "rtbasic/miss.rmiss.glsl",
-        "rtbasic/shadow.rmiss.glsl",
-        "rtbasic/closest_hit.rchit.glsl",
-        "rtbasic/shadow.rchit.glsl",
-        "rtbasic/probe_irradiance.comp.glsl",
-        "rtbasic/probe_offset.comp.glsl",
-        "depth/depth_rect_buffer.vert.glsl",
-        "depth/depth_rect_buffer.frag.glsl",
-        "bilateral/bilateral.frag.glsl",
-    });
+    {
+        std::vector<std::filesystem::path> shaders;
+        for(auto it : std::filesystem::recursive_directory_iterator{ std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders" }) {
+            if(!it.is_regular_file()) { continue; }
+            shaders.push_back(it.path());
+        }
+        shader_storage.precompile_shaders(shaders);
+    }
 
     PipelineLayout* pl_default = &playouts.emplace_back(PipelineLayout{ { dl_default } });
 
@@ -624,20 +618,17 @@ void RendererVulkan::initialize_resources() {
         .num_vertex_attribs = 0,
     };
 
-    Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{ { shaders.get_shader("default_unlit/default.vert.glsl"),
-                                                           shaders.get_shader("default_unlit/default.frag.glsl") },
-                                                         pl_default,
-                                                         raster_settings_lit });
-    Pipeline* pp_ddgi_radiance = &pipelines.emplace_back(Pipeline{
-        { shaders.get_shader("rtbasic/raygen.rgen.glsl"), shaders.get_shader("rtbasic/miss.rmiss.glsl"),
-          shaders.get_shader("rtbasic/shadow.rmiss.glsl"), shaders.get_shader("rtbasic/closest_hit.rchit.glsl"),
-          shaders.get_shader("rtbasic/shadow.rchit.glsl") },
-        pl_default,
-        Pipeline::RaytracingSettings{ .recursion_depth = 2 } });
-    Pipeline* pp_ddgi_irradiance = &pipelines.emplace_back(Pipeline{
-        { shaders.get_shader("rtbasic/probe_irradiance.comp.glsl") }, pl_default, raster_settings_default });
-    Pipeline* pp_ddgi_offsets = &pipelines.emplace_back(Pipeline{
-        { shaders.get_shader("rtbasic/probe_offset.comp.glsl") }, pl_default, raster_settings_default });
+    Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{
+        { "default_unlit/default.vert.glsl", "default_unlit/default.frag.glsl" }, pl_default, raster_settings_lit });
+    Pipeline* pp_ddgi_radiance =
+        &pipelines.emplace_back(Pipeline{ { "rtbasic/raygen.rgen.glsl", "rtbasic/miss.rmiss.glsl", "rtbasic/shadow.rmiss.glsl",
+                                            "rtbasic/closest_hit.rchit.glsl", "rtbasic/shadow.rchit.glsl" },
+                                          pl_default,
+                                          Pipeline::RaytracingSettings{ .recursion_depth = 2 } });
+    Pipeline* pp_ddgi_irradiance =
+        &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_irradiance.comp.glsl" }, pl_default, raster_settings_default });
+    Pipeline* pp_ddgi_offsets =
+        &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_offset.comp.glsl" }, pl_default, raster_settings_default });
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
@@ -676,15 +667,10 @@ void RendererVulkan::initialize_resources() {
                                 } } };
         PipelineLayout* pl_depth_rect = &playouts.emplace_back(PipelineLayout{ { dl_depth_rect } });
         PipelineLayout* pl_ao = &playouts.emplace_back(PipelineLayout{ { dl_ao } });
-        Pipeline* pp_depth_rect =
-            &pipelines.emplace_back(Pipeline{ { shaders.get_shader("depth/depth_rect_buffer.vert.glsl"),
-                                                shaders.get_shader("depth/depth_rect_buffer.frag.glsl") },
-                                              pl_depth_rect,
-                                              raster_settings_depth_rect });
-        Pipeline* pp_ao = &pipelines.emplace_back(Pipeline{ { shaders.get_shader("depth/depth_rect_buffer.vert.glsl"),
-                                                              shaders.get_shader("bilateral/bilateral.frag.glsl") },
-                                                            pl_ao,
-                                                            raster_settings_ao });
+        Pipeline* pp_depth_rect = &pipelines.emplace_back(Pipeline{
+            { "depth/depth_rect_buffer.vert.glsl", "depth/depth_rect_buffer.frag.glsl" }, pl_depth_rect, raster_settings_depth_rect });
+        Pipeline* pp_ao = &pipelines.emplace_back(Pipeline{
+            { "depth/depth_rect_buffer.vert.glsl", "bilateral/bilateral.frag.glsl" }, pl_ao, raster_settings_ao });
 
         DescriptorPool* dp = &descpools.emplace_back(DescriptorPool{ pl_default, 8 });
         fd.descpool = dp;
@@ -1704,37 +1690,37 @@ FrameData& RendererVulkan::get_frame_data(uint32_t offset) {
     return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];
 }
 
-void ShaderStorage::precompile_shaders(std::initializer_list<std::filesystem::path> paths) {
+void ShaderStorage::precompile_shaders(std::vector<std::filesystem::path> paths) {
     std::vector<std::jthread> ths;
-    ths.reserve(std::max(std::thread::hardware_concurrency(), 4u));
+    ths.resize(std::max(std::thread::hardware_concurrency(), 4u));
     std::vector<VkShaderModule> mods(paths.size());
     std::vector<VkShaderStageFlagBits> stages(paths.size());
-    uint32_t per_th = std::ceilf((float)paths.size() / ths.capacity());
-    for(uint32_t i = 0, j = 0; i < paths.size(); i += per_th) {
+    uint32_t per_th = std::ceilf((float)paths.size() / ths.size());
+    for(uint32_t i = 0; i < paths.size(); i += per_th) {
+        canonize_path(paths.at(i));
         uint32_t count = std::min(per_th, (uint32_t)paths.size() - i);
         if(count == 0) { break; }
-        ths.push_back(std::jthread{ [this, i, count, &mods, &stages, &paths] {
+        ths.at(i / per_th) = std::jthread{ [this, i, count, &mods, &stages, &paths] {
             for(uint32_t j = i; j < i + count; ++j) {
-                mods[j] = compile_shader(*(paths.begin() + j));
-                stages[j] = get_stage(*(paths.begin() + j));
+                stages[j] = get_stage(paths[j]);
+                mods[j] = compile_shader(paths[j]);
             }
-        } });
+        } };
     }
     for(auto& e : ths) {
-        e.join();
+        if(e.joinable()) { e.join(); }
     }
-    for(uint32_t i = 0; i < mods.size(); ++i) {
-        metadatas[mods[i]] = ShaderMetadata{ .path = *(paths.begin() + i), .stage = stages[i] };
+    for(uint32_t i = 0; i < paths.size(); ++i) {
+        if(mods.at(i)) { metadatas[paths.at(i)] = ShaderMetadata{ .shader = mods.at(i), .stage = stages.at(i) }; }
     }
 }
 
-VkShaderModule ShaderStorage::get_shader(const std::filesystem::path& path) {
-    for(const auto& e : metadatas) {
-        if(e.second.path == path) { return e.first; }
-    }
-    auto s = compile_shader(path);
+VkShaderModule ShaderStorage::get_shader(std::filesystem::path path) {
+    canonize_path(path);
+    if(metadatas.contains(path)) { return metadatas.at(path).shader; }
     auto t = get_stage(path);
-    metadatas[s] = ShaderMetadata{ .path = path, .stage = t };
+    auto s = compile_shader(path);
+    if(s) { metadatas[path] = ShaderMetadata{ .shader = s, .stage = t }; }
     return s;
 }
 
@@ -1747,23 +1733,20 @@ VkShaderStageFlagBits ShaderStorage::get_stage(std::filesystem::path path) const
     if(ext == ".rchit") { return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR; }
     if(ext == ".rmiss") { return VK_SHADER_STAGE_MISS_BIT_KHR; }
     if(ext == ".comp") { return VK_SHADER_STAGE_COMPUTE_BIT; }
-    assert(false);
-    return VK_SHADER_STAGE_VERTEX_BIT;
+    if(path.extension() != ".inc") { ENG_WARN("Unrecognized shader extension {}", path.string()); }
+    return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
 }
 
 VkShaderModule ShaderStorage::compile_shader(std::filesystem::path path) {
     static const auto read_file = [](const std::filesystem::path& path) {
         std::string path_str = path.string();
         std::string path_to_includes = path.parent_path().string();
-
         char error[256] = {};
         char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
-
         if(!parsed_file) {
             ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
             return std::string{};
         }
-
         std::string parsed_file_str{ parsed_file };
         free(parsed_file);
         return parsed_file_str;
@@ -1776,11 +1759,12 @@ VkShaderModule ShaderStorage::compile_shader(std::filesystem::path path) {
         if(stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) { return shaderc_closesthit_shader; }
         if(stage == VK_SHADER_STAGE_MISS_BIT_KHR) { return shaderc_miss_shader; }
         if(stage == VK_SHADER_STAGE_COMPUTE_BIT) { return shaderc_compute_shader; }
-        assert(false);
-        return shaderc_vertex_shader;
+        return static_cast<decltype(shaderc_vertex_shader)>(~(std::underlying_type_t<decltype(shaderc_vertex_shader)>{}));
     }();
 
-    path = ENGINE_BASE_ASSET_PATH / ("shaders" / path);
+    if(~std::underlying_type_t<decltype(shaderc_vertex_shader)>(kind) == 0) { return {}; }
+
+    // path = ENGINE_BASE_ASSET_PATH / ("shaders" / path);
 
     shaderc::CompileOptions options;
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
@@ -1802,6 +1786,12 @@ VkShaderModule ShaderStorage::compile_shader(std::filesystem::path path) {
     VkShaderModule mod;
     VK_CHECK(vkCreateShaderModule(get_renderer().dev, &module_info, nullptr, &mod));
     return mod;
+}
+
+void ShaderStorage::canonize_path(std::filesystem::path& p) {
+    static const auto prefix = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders");
+    if(!p.string().starts_with(prefix.string())) { p = prefix / p; }
+    p.make_preferred();
 }
 
 Fence::Fence(VkDevice dev, bool signaled) {

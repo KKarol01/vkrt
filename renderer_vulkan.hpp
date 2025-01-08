@@ -1,6 +1,7 @@
 #pragma once
 
 #include <span>
+#include <filesystem>
 #include <bitset>
 #include <unordered_set>
 #include <latch>
@@ -149,16 +150,18 @@ struct Semaphore {
 
 struct ShaderStorage {
     struct ShaderMetadata {
-        std::filesystem::path path;
+        VkShaderModule shader{};
         VkShaderStageFlagBits stage;
     };
 
-    void precompile_shaders(std::initializer_list<std::filesystem::path> paths);
-    VkShaderModule get_shader(const std::filesystem::path& path);
+    void precompile_shaders(std::vector<std::filesystem::path> paths);
+    VkShaderModule get_shader(std::filesystem::path path);
     VkShaderStageFlagBits get_stage(std::filesystem::path path) const;
     VkShaderModule compile_shader(std::filesystem::path path);
+    // TODO: maybe this should be global tool
+    void canonize_path(std::filesystem::path& p);
 
-    std::unordered_map<VkShaderModule, ShaderMetadata> metadatas;
+    std::unordered_map<std::filesystem::path, ShaderMetadata> metadatas;
 };
 
 struct DescriptorBinding {
@@ -216,7 +219,7 @@ struct Pipeline {
     };
 
     Pipeline() = default;
-    Pipeline(const std::vector<VkShaderModule>& shaders, const PipelineLayout* layout,
+    Pipeline(const std::vector<std::filesystem::path>& shaders, const PipelineLayout* layout,
              std::variant<std::monostate, RasterizationSettings, RaytracingSettings> settings = {});
 
     const PipelineLayout* layout{};
@@ -392,7 +395,7 @@ class RendererVulkan : public Renderer {
 
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
-    ShaderStorage shaders;
+    ShaderStorage shader_storage;
     std::deque<PipelineLayout> playouts;
     std::deque<Pipeline> pipelines;
     std::deque<DescriptorPool> descpools;
