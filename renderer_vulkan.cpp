@@ -550,9 +550,8 @@ void RendererVulkan::initialize_resources() {
         fd.constants =
             make_buffer(Buffer{ std::format("constants_{}", i), 512,
                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false });
-        mesh_instance_transform_buffers[i] =
-            new Buffer{ "mesh instance transforms", 0ull,
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        transform_buffers[i] = new Buffer{ std::format("transform_buffer_{}", i), 0ull,
+                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     }
 
     auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -824,17 +823,36 @@ void RendererVulkan::update() {
     auto cmd = fd.cmdpool->begin_onetime();
 
     if(flags.test_clear(RendererFlags::DIRTY_TRANSFORMS_BIT)) {
+        std::swap(transform_buffers[0], transform_buffers[1]);
+        auto buf_barr1 = Vks(VkBufferMemoryBarrier2{
+            .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .size = VK_WHOLE_SIZE,
+        });
+        auto dep_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &buf_barr1 });
+        if(transform_buffers[0]->capacity < transform_buffers[1]->size) {
+            transform_buffers[0]->resize(transform_buffers[1]->size);
+            vkCmdPipelineBarrier2(cmd, &dep_info);
+        }
+        VkBufferCopy copy{ .size = transform_buffers[1]->size };
+        vkCmdCopyBuffer(cmd, transform_buffers[1]->buffer, transform_buffers[0]->buffer, 1, &copy);
+        vkCmdPipelineBarrier2(cmd, &dep_info);
         for(auto e : update_positions) {
             const auto idx = mesh_instance_idxs.at(e);
             const auto offset = idx * sizeof(glm::mat4);
             const auto& t = Engine::get().ecs_storage->get<components::Transform>(e);
             const auto& r = Engine::get().ecs_storage->get<components::Renderable>(e);
-            vkCmdUpdateBuffer(cmd, mesh_instance_transform_buffers[0]->buffer, offset, sizeof(glm::mat4), &t);
+            vkCmdUpdateBuffer(cmd, transform_buffers[0]->buffer, offset, sizeof(glm::mat4), &t);
             if(true /*r.mesh_handle->metadata->blas*/) {
-                assert(false && "TODO: Check if this is correct");
-                flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
+                // assert(false && "TODO: Check if this is correct");
+                ENG_WARN("TODO: update tlas on transform change");
+                // flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
             }
         }
+        buf_barr1.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
+        buf_barr1.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         update_positions.clear();
     }
 
@@ -884,7 +902,7 @@ void RendererVulkan::update() {
         fd.passes.ddgi_radiance.push_constant(cmd, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
         fd.passes.ddgi_radiance.push_constant(cmd, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
         fd.passes.ddgi_radiance.push_constant(cmd, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_geo_inst_id_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 8 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
+        fd.passes.ddgi_radiance.push_constant(cmd, 8 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
         // clang-format on
 
         fd.passes.ddgi_radiance.update_desc_sets();
@@ -984,7 +1002,7 @@ void RendererVulkan::update() {
         // clang-format off
         fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
         fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
+        fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
         fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
         // clang-format on
         vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
@@ -1337,15 +1355,14 @@ void RendererVulkan::upload_instances() {
 }
 
 void RendererVulkan::upload_transforms() {
-    Buffer* dst_transforms = mesh_instance_transform_buffers[1];
-
+    std::swap(transform_buffers[0], transform_buffers[1]);
+    Buffer* dst_transforms = transform_buffers[0];
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
     for(auto e : mesh_instances) {
         transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
     }
     dst_transforms->push_data(transforms, 0ull);
-    std::swap(mesh_instance_transform_buffers[0], mesh_instance_transform_buffers[1]);
 }
 
 void RendererVulkan::build_blas() {
@@ -1967,6 +1984,7 @@ void RenderPass::update_desc_sets() {
                 .descriptorCount = binding.count, // TODO: writes is too small if binding count is > 1
                 .descriptorType = vktype,
             });
+            ++write_count;
             std::visit(Visitor{
                            [&write_info](std::monostate) { assert(false); },
                            [&write, &write_info](const Buffer* e) {
@@ -1979,7 +1997,11 @@ void RenderPass::update_desc_sets() {
                                    .imageView = e->view,
                                    .imageLayout = binding.layout });
                            },
-                           [&write, &write_info](VkAccelerationStructureKHR* e) {
+                           [&write, &write_info, &write_count](VkAccelerationStructureKHR* e) {
+                               if(!e || !*e) {
+                                   --write_count;
+                                   return;
+                               }
                                auto i = Vks(VkWriteDescriptorSetAccelerationStructureKHR{
                                    .accelerationStructureCount = 1,
                                    .pAccelerationStructures = e,
@@ -1997,7 +2019,6 @@ void RenderPass::update_desc_sets() {
                            },
                        },
                        binding.res);
-            ++write_count;
         }
         vkUpdateDescriptorSets(get_renderer().dev, write_count, writes.data(), 0, nullptr);
     }

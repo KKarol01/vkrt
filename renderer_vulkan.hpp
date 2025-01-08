@@ -385,7 +385,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_scratch_buffer;
     Buffer vertex_buffer, index_buffer;
     Buffer indirect_draw_buffer;
-    Buffer* mesh_instance_transform_buffers[2]{};
+    std::array<Buffer*, 2> transform_buffers;
     Buffer mesh_instance_mesh_id_buffer;
     Buffer tlas_mesh_offsets_buffer;
     Buffer tlas_transform_buffer;
