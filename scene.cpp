@@ -154,7 +154,7 @@ static void scene_load_nodes(SceneLoadingState& state, fastgltf::Asset& asset, f
     scene::Node* scene_node = scene->add_node();
     scene_node->name = node.name;
     scene_node->transform = scene_compose_matrix(node.transform);
-    scene_node->final_transform = transform * scene_node->transform;
+    scene_node->final_transform = scene_node->transform * transform;
     parent_node->children.push_back(scene_node);
 
     if(node.meshIndex) {
@@ -197,7 +197,7 @@ Handle<scene::Node> scene::Scene::load_from_file(const std::filesystem::path& pa
     return scene_node->handle;
 }
 
-components::Entity scene::Scene::instance_model(Handle<scene::Node> entity) {
+Handle<scene::NodeInstance> scene::Scene::instance_model(Handle<scene::Node> entity) {
     Node* n = node_handles.at(entity);
     NodeInstance* i = add_instance();
     std::stack<NodeInstance*> i_stack;
@@ -206,12 +206,12 @@ components::Entity scene::Scene::instance_model(Handle<scene::Node> entity) {
         NodeInstance* ni = i_stack.top();
         i_stack.pop();
         ni->node_handle = n->handle;
+        ni->instance_handle = Handle<NodeInstance>{ generate_handle };
         ni->transform = n->transform;
         ni->final_transform = n->transform;
         ni->children.reserve(n->children.size());
         ni->primitives.reserve(n->primitives.size());
-        ni->entity = Engine::get().ecs_storage->create();
-        instance_handles[ni->entity] = ni;
+        instance_handles[ni->instance_handle] = ni;
         for(auto& p : n->primitives) {
             auto pi = ni->primitives.emplace_back(Engine::get().ecs_storage->create());
             Engine::get().ecs_storage->emplace<components::Transform>(pi, ni->final_transform);
@@ -227,7 +227,31 @@ components::Entity scene::Scene::instance_model(Handle<scene::Node> entity) {
         }
     });
     scene.push_back(i);
-    return i->entity;
+    return i->instance_handle;
+}
+
+void scene::Scene::update_transform(Handle<scene::NodeInstance> entity, glm::mat4 transform) {
+    auto* instance = instance_handles.at(entity);
+    std::stack<glm::mat4> stack;
+    // stack.push(glm::mat4{1.0f});
+    stack.push(transform);
+    traverse_node_hierarchy_indexed(instance, [&stack](auto* node, auto idx) {
+        // remove node's transform, leave parent transform.
+        node->final_transform = glm::inverse(node->transform) * node->final_transform;
+        // update to new transform, calc new final transform, pass down.
+        node->transform = stack.top();
+        stack.pop();
+        node->final_transform = node->transform * node->final_transform;
+        for(auto* c : node->children) {
+            if(c) { stack.push(node->final_transform); }
+        }
+        for(auto p : node->primitives) {
+            if(p != components::MAX_ENTITY) {
+                Engine::get().ecs_storage->get<components::Transform>(p).transform = node->final_transform;
+                Engine::get().renderer->update_transform(p);
+            }
+        }
+    });
 }
 
 scene::Node* scene::Scene::add_node() {
@@ -239,7 +263,7 @@ scene::Node* scene::Scene::add_node() {
 
 scene::NodeInstance* scene::Scene::add_instance() {
     auto& n = node_instances.emplace_back();
-    n.entity = Engine::get().ecs_storage->create();
+    n.instance_handle = Handle<NodeInstance>{ generate_handle };
     return &n;
 }
 

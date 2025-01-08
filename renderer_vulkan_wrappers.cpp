@@ -132,7 +132,9 @@ bool Buffer::resize(size_t new_size) {
         VkBufferCopy region{ .size = size };
         vkCmdCopyBuffer(cmd, buffer, new_buffer.buffer, 1, &region);
         get_renderer().get_frame_data().cmdpool->end(cmd);
-        get_renderer().gq.submit(cmd);
+        Fence f{ get_renderer().dev, false };
+        get_renderer().gq.submit(cmd, &f);
+        vkWaitForFences(get_renderer().dev, 1, &f.fence, true, ~0ull);
         flag.test_and_set();
         success = true;
         // assert(false);

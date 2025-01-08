@@ -60,7 +60,7 @@ struct NodeInstance {
     std::vector<components::Entity> primitives;
     glm::mat4 transform{ 1.0f };
     glm::mat4 final_transform{ 1.0f };
-    components::Entity entity;
+    Handle<NodeInstance> instance_handle;
     Handle<Node> node_handle;
 };
 
@@ -99,14 +99,15 @@ void traverse_node_hierarchy_indexed(NodeInstance* node, Func f) {
 class Scene {
   public:
     Handle<Node> load_from_file(const std::filesystem::path& path);
-    components::Entity instance_model(Handle<Node> asset);
-    //glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
+    Handle<NodeInstance> instance_model(Handle<Node> asset);
+    // glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
 
-    //void update_transform(Handle<Entity> entity);
-    //void _update_transform(uint32_t idx, glm::mat4 t = { 1.0f });
+    void update_transform(Handle<scene::NodeInstance> entity, glm::mat4 transform);
+    // void _update_transform(uint32_t idx, glm::mat4 t = { 1.0f });
 
     Node* add_node();
     NodeInstance* add_instance();
+    NodeInstance& get_instance(Handle<scene::NodeInstance> entity) { return *instance_handles.at(entity); }
 
     // TODO: maybe make this private too (used in many places -- possibly bad interface)
   public:
@@ -114,6 +115,6 @@ class Scene {
     std::deque<NodeInstance> node_instances;
     std::vector<NodeInstance*> scene;
     std::unordered_map<Handle<Node>, Node*> node_handles;
-    std::unordered_map<components::Entity, NodeInstance*> instance_handles;
+    std::unordered_map<Handle<NodeInstance>, NodeInstance*> instance_handles;
 };
 } // namespace scene

@@ -829,16 +829,19 @@ void RendererVulkan::update() {
             .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
             .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .buffer = transform_buffers[0]->buffer,
             .size = VK_WHOLE_SIZE,
         });
         auto dep_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &buf_barr1 });
         if(transform_buffers[0]->capacity < transform_buffers[1]->size) {
             transform_buffers[0]->resize(transform_buffers[1]->size);
+            buf_barr1.buffer = transform_buffers[0]->buffer;
             vkCmdPipelineBarrier2(cmd, &dep_info);
         }
         VkBufferCopy copy{ .size = transform_buffers[1]->size };
         vkCmdCopyBuffer(cmd, transform_buffers[1]->buffer, transform_buffers[0]->buffer, 1, &copy);
         vkCmdPipelineBarrier2(cmd, &dep_info);
+        transform_buffers[0]->size = transform_buffers[1]->size;
         for(auto e : update_positions) {
             const auto idx = mesh_instance_idxs.at(e);
             const auto offset = idx * sizeof(glm::mat4);
