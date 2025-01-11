@@ -18,8 +18,6 @@ enum class ImageFormat {
 struct RenderGeometry;
 struct RenderMesh;
 struct RenderInstance;
-struct RenderBLAS;
-struct RenderBLAS;
 struct Image;
 struct RenderMaterial;
 

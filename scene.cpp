@@ -218,6 +218,7 @@ Handle<scene::NodeInstance> scene::Scene::instance_model(Handle<scene::Node> ent
             Engine::get().ecs_storage->emplace<components::Renderable>(
                 pi, components::Renderable{ .mesh_handle = p.mesh_handle, .material_handle = p.material_handle });
             Engine::get().renderer->instance_mesh(InstanceSettings{ .entity = pi });
+            Engine::get().renderer->instance_blas(BLASInstanceSettings{ .entity = pi });
         }
         for(auto& c : n->children) {
             ni->children.push_back(add_instance());

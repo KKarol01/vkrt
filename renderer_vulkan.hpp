@@ -22,10 +22,10 @@
 #endif
 
 /* Controls renderer's behavior */
-enum class RendererFlags : uint32_t {
+enum class RenderFlags : uint32_t {
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
-    DIRTY_MESH_BLAS_BIT = 0x4,
+    DIRTY_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
     REFIT_TLAS_BIT = 0x10,
     DIRTY_TRANSFORMS_BIT = 0x20,
@@ -33,8 +33,8 @@ enum class RendererFlags : uint32_t {
     RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class GeometryFlags : uint32_t {};
-enum class MeshBatchFlags { DIRTY_BLAS_BIT = 0x1 };
+enum class GeometryFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
+enum class RenderMeshFlags : uint32_t {};
 
 /* Used by mesh instance to index textures in the shader */
 struct RenderMaterial {
@@ -43,12 +43,12 @@ struct RenderMaterial {
     Handle<Image> metallic_roughness_texture;
 };
 
-struct GeometryMetadata {};
-
-struct MeshMetadata {
+struct GeometryMetadata {
     VkAccelerationStructureKHR blas{};
     Buffer blas_buffer{};
 };
+
+struct MeshMetadata {};
 
 /* position inside vertex and index buffer*/
 struct RenderGeometry {
@@ -62,7 +62,7 @@ struct RenderGeometry {
 
 /* subset of geometry's vertex and index buffers */
 struct RenderMesh {
-    Flags<MeshBatchFlags> flags;
+    Flags<RenderMeshFlags> flags;
     Handle<RenderGeometry> geometry;
     Handle<MeshMetadata> metadata;
 };
@@ -360,7 +360,7 @@ class RendererVulkan : public Renderer {
     VkPhysicalDevice pdev;
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
-    Flags<RendererFlags> flags;
+    Flags<RenderFlags> flags;
     SamplerStorage samplers;
     ScreenRect screen_rect;
 

@@ -5,7 +5,7 @@
 #include "engine.hpp"
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
-    : projection{ glm::perspectiveFov(glm::radians(80.0f), static_cast<float>(1024.0f), static_cast<float>(768.0f), min_dist, max_dist) } {
+    : projection{ glm::perspectiveFov(glm::radians(80.0f), static_cast<float>(1280.0f), static_cast<float>(768.0f), min_dist, max_dist) } {
     GLFWwindow* window = Engine::get().window->window;
 
     double pos[2];
@@ -16,7 +16,7 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
 
 void Camera::update() {
     GLFWwindow* window = Engine::get().window->window;
-    const float dt = Engine::get().delta_time() * 1.0f;
+    const float dt = Engine::get().delta_time() * 5.0f;
 
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && glfwGetTime() - last_press_time > 0.3f) {
         last_press_time = glfwGetTime();
@@ -49,7 +49,7 @@ void Camera::update() {
 }
 
 void Camera::on_mouse_move(float px, float py) {
-    const float dt = Engine::get().delta_time() * 1.0f;
+    const float dt = Engine::get().delta_time() * 5.0f;
     if(enabled) {
         pitch += glm::radians((lpy - py) * dt) * 20.0f;
         yaw += glm::radians((lpx - px) * dt) * 20.0f;

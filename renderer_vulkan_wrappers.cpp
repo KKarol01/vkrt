@@ -134,7 +134,7 @@ bool Buffer::resize(size_t new_size) {
         get_renderer().get_frame_data().cmdpool->end(cmd);
         Fence f{ get_renderer().dev, false };
         get_renderer().gq.submit(cmd, &f);
-        vkWaitForFences(get_renderer().dev, 1, &f.fence, true, ~0ull);
+        f.wait();
         flag.test_and_set();
         success = true;
         // assert(false);

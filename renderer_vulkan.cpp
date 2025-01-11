@@ -21,7 +21,7 @@
 #include "set_debug_name.hpp"
 #include "utils.hpp"
 
-ENABLE_FLAGS_OPERATORS(RendererFlags)
+ENABLE_FLAGS_OPERATORS(RenderFlags)
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
@@ -309,7 +309,7 @@ void RendererVulkan::init() {
         on_window_resize();
         return true;
     });
-    flags.set(RendererFlags::RESIZE_SCREEN_RECT_BIT | RendererFlags::RESIZE_SWAPCHAIN_BIT);
+    flags.set(RenderFlags::RESIZE_SCREEN_RECT_BIT | RenderFlags::RESIZE_SWAPCHAIN_BIT);
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -686,20 +686,20 @@ void RendererVulkan::initialize_resources() {
 
 void RendererVulkan::update() {
     if(screen_rect.w * screen_rect.h == 0.0f) { return; }
-    if(flags.test_clear(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
-    if(flags.test_clear(RendererFlags::DIRTY_MESH_INSTANCES)) {
+    if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
+    if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES)) {
         upload_instances();
         upload_transforms();
     }
-    if(flags.test_clear(RendererFlags::DIRTY_MESH_BLAS_BIT)) { build_blas(); }
-    if(flags.test_clear(RendererFlags::DIRTY_TLAS_BIT)) {
+    if(flags.test_clear(RenderFlags::DIRTY_BLAS_BIT)) { build_blas(); }
+    if(flags.test_clear(RenderFlags::DIRTY_TLAS_BIT)) {
         build_tlas();
+        update_ddgi();
         // TODO: prepare ddgi on scene update
-        if(Engine::get().frame_num() < 100) { update_ddgi(); }
     }
-    if(flags.test_clear(RendererFlags::REFIT_TLAS_BIT)) { assert(false && "It's recommended to rebuild."); }
+    if(flags.test_clear(RenderFlags::REFIT_TLAS_BIT)) { assert(false && "It's recommended to rebuild."); }
     // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
-    if(flags.test_clear(RendererFlags::RESIZE_SWAPCHAIN_BIT)) {
+    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
         gq.wait_idle();
         swapchain.create(frame_datas.size(), screen_rect.w, screen_rect.h);
         for(int i = 0; i < frame_datas.size(); ++i) {
@@ -775,7 +775,6 @@ void RendererVulkan::update() {
         }
         swapchain_image = &swapchain.images[swapchain_index];
     }
-
     if(Engine::get().frame_num() > 0) {
         // for(uint32_t i = 0; i < ddgi.debug_probes.size(); ++i) {
         //     auto h = Handle<Entity>{ *ddgi.debug_probes.at(i) };
@@ -822,7 +821,7 @@ void RendererVulkan::update() {
 
     auto cmd = fd.cmdpool->begin_onetime();
 
-    if(flags.test_clear(RendererFlags::DIRTY_TRANSFORMS_BIT)) {
+    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
         std::swap(transform_buffers[0], transform_buffers[1]);
         auto buf_barr1 = Vks(VkBufferMemoryBarrier2{
             .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -851,6 +850,7 @@ void RendererVulkan::update() {
             if(true /*r.mesh_handle->metadata->blas*/) {
                 // assert(false && "TODO: Check if this is correct");
                 ENG_WARN("TODO: update tlas on transform change");
+                flags.set(RenderFlags::DIRTY_TLAS_BIT);
                 // flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
             }
         }
@@ -871,7 +871,7 @@ void RendererVulkan::update() {
                                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     gao_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    if(false && tlas && ddgi.buffer.buffer) {
+    if(tlas && ddgi.buffer.buffer) {
         ddgi.buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI::GPULayout, frame_num));
 
         const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
@@ -1142,7 +1142,7 @@ void RendererVulkan::update() {
     vkQueuePresentKHR(gq.queue, &pinfo);
 }
 
-void RendererVulkan::on_window_resize() { flags.set(RendererFlags::RESIZE_SWAPCHAIN_BIT); }
+void RendererVulkan::on_window_resize() { flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT); }
 
 void RendererVulkan::set_screen(ScreenRect screen) {
     /*const float aspect = 16.0f / 9.0f;
@@ -1206,7 +1206,7 @@ Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& 
 
     Handle<RenderGeometry> handle = geometries.insert(geometry);
 
-    flags.set(RendererFlags::DIRTY_GEOMETRY_BATCHES_BIT);
+    flags.set(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT);
 
     // clang-format off
     ENG_LOG("Batching geometry: [VXS: {:.2f} KB, IXS: {:.2f} KB]", 
@@ -1226,37 +1226,26 @@ Handle<RenderMesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
 }
 
 void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
-    /* assert(settings.entity);
-     Handle<RenderInstance> handle{ generate_handle };
-     mesh_instances.push_back(RenderInstance{
-         .handle = handle,
-         .entity = settings.entity,
-         .mesh = settings.mesh,
-         .material = settings.material,
-     });
-     mesh_instance_idxs[handle] = mesh_instances.size() - 1u;*/
     mesh_instances.push_back(settings.entity);
-    flags.set(RendererFlags::DIRTY_MESH_INSTANCES);
+    flags.set(RenderFlags::DIRTY_MESH_INSTANCES);
 }
 
 void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
-    assert(false && "TODO");
-    // auto& mesh = Engine::ec()->get<cmps::Mesh>(settings.entity);
-    // auto& mesh_instance = Engine::ec()->get<cmps::MeshInstance>(settings.entity);
-    // mesh.blas_handle = Handle<RenderBLAS>{ generate_handle };
-    // blas_instances.push_back(RenderBLAS{
-    //     .handle = mesh.blas_handle, .instance_handle = mesh_instance.instance_handle, .mesh_handle = mesh.mesh_handle });
-    // flags.set(RendererFlags::DIRTY_TLAS_BIT);
-    // auto& rm = meshes.at(mesh.mesh_handle);
-    // if(!rm.metadata->blas) {
-    //     rm.flags.set(MeshBatchFlags::DIRTY_BLAS_BIT);
-    //     flags.set(RendererFlags::DIRTY_MESH_BLAS_BIT);
-    // }
+    auto& r = Engine::get().ecs_storage->get<components::Renderable>(settings.entity);
+    auto& mesh = meshes.at(r.mesh_handle);
+    auto& geometry = geometries.at(mesh.geometry);
+    auto& metadata = geometry_metadatas.at(geometry.metadata);
+    blas_instances.push_back(settings.entity);
+    flags.set(RenderFlags::DIRTY_TLAS_BIT);
+    if(!metadata.blas) {
+        geometry.flags.set(GeometryFlags::DIRTY_BLAS_BIT);
+        flags.set(RenderFlags::DIRTY_BLAS_BIT);
+    }
 }
 
 void RendererVulkan::update_transform(components::Entity entity) {
     update_positions.push_back(entity);
-    flags.set(RendererFlags::DIRTY_TRANSFORMS_BIT);
+    flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
 
 void RendererVulkan::upload_model_textures() {
@@ -1378,20 +1367,19 @@ void RendererVulkan::build_blas() {
         .indexData = { .deviceAddress = index_buffer.bda },
     });
 
-    std::vector<const RenderMesh*> dirty_batches;
+    std::vector<const RenderGeometry*> dirty_batches;
     std::vector<VkAccelerationStructureGeometryKHR> blas_geos;
     std::vector<VkAccelerationStructureBuildGeometryInfoKHR> blas_geo_build_infos;
     std::vector<uint32_t> scratch_sizes;
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
     Buffer scratch_buffer;
 
-    blas_geos.reserve(meshes.size());
+    blas_geos.reserve(geometries.size());
 
-    for(auto& rm : meshes) {
-        if(!rm.flags.test_clear(MeshBatchFlags::DIRTY_BLAS_BIT)) { continue; }
-        RenderGeometry& geometry = geometries.at(rm.geometry);
-        MeshMetadata& meta = mesh_metadatas.at(rm.metadata);
-        dirty_batches.push_back(&rm);
+    for(auto& geometry : geometries) {
+        if(!geometry.flags.test_clear(GeometryFlags::DIRTY_BLAS_BIT)) { continue; }
+        GeometryMetadata& meta = geometry_metadatas.at(geometry.metadata);
+        dirty_batches.push_back(&geometry);
 
         VkAccelerationStructureGeometryKHR& blas_geo = blas_geos.emplace_back();
         blas_geo = Vks(VkAccelerationStructureGeometryKHR{
@@ -1433,9 +1421,8 @@ void RendererVulkan::build_blas() {
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
 
     for(uint32_t i = 0, scratch_offset = 0; const auto& acc_geoms : blas_geos) {
-        const RenderMesh& rm = *dirty_batches.at(i);
-        const RenderGeometry& geom = geometries.at(rm.geometry);
-        const MeshMetadata& meta = mesh_metadatas.at(rm.metadata);
+        const RenderGeometry& geom = *dirty_batches.at(i);
+        const GeometryMetadata& meta = geometry_metadatas.at(geom.metadata);
         blas_geo_build_infos.at(i).scratchData.deviceAddress = scratch_buffer.bda + scratch_offset;
         blas_geo_build_infos.at(i).dstAccelerationStructure = meta.blas;
 
@@ -1446,7 +1433,6 @@ void RendererVulkan::build_blas() {
             .firstVertex = geom.vertex_offset,
             .transformOffset = 0,
         });
-
         scratch_offset += scratch_sizes.at(i);
         ++i;
     }
@@ -1501,7 +1487,7 @@ void RendererVulkan::build_tlas() {
             .mask = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference = mesh_metadatas.at(mb.metadata).blas_buffer.bda,
+            .accelerationStructureReference = geometry_metadatas.at(geom.metadata).blas_buffer.bda,
         });
         tlas_mesh_offsets.push_back(toff);
         blas_mesh_offsets.push_back(boff / 3u);
@@ -1586,7 +1572,7 @@ void RendererVulkan::update_ddgi() {
 
     if(!ddgi.debug_probes.empty()) { return; }
 
-    BoundingBox scene_aabb{ .min = { -1.0f, -1.0f, -1.0f }, .max = { 1.0f, 1.0f, 1.0f } };
+    BoundingBox scene_aabb{ .min = glm::vec3{ -2.0f }, .max = glm::vec3{ 2.0f } };
     /*for(const Node& node : Engine::scene()->nodes) {
         if(!node.has_component<cmps::Mesh>()) { continue; }
         const cmps::Mesh& rm = Engine::ec()->get<cmps::Mesh>(node.handle);
@@ -1599,15 +1585,15 @@ void RendererVulkan::update_ddgi() {
     }*/
 
     ddgi.probe_dims = scene_aabb;
-    const auto dim_scaling = glm::vec3{ 0.95, 0.8, 0.95 };
+    const auto dim_scaling = glm::vec3{ 0.95, 0.7, 0.95 };
     ddgi.probe_dims.min *= dim_scaling;
     ddgi.probe_dims.max *= dim_scaling;
-    ddgi.probe_distance = 1.3;
+    ddgi.probe_distance = 1.5f;
 
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
-    // ddgi.probe_counts = {16, 4, 8};
+    //ddgi.probe_counts = {4, 2, 4};
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
@@ -2001,10 +1987,10 @@ void RenderPass::update_desc_sets() {
                                    .imageLayout = binding.layout });
                            },
                            [&write, &write_info, &write_count](VkAccelerationStructureKHR* e) {
-                               if(!e || !*e) {
-                                   --write_count;
-                                   return;
-                               }
+                               // if(!e || !*e) {
+                               //     --write_count;
+                               //     return;
+                               // }
                                auto i = Vks(VkWriteDescriptorSetAccelerationStructureKHR{
                                    .accelerationStructureCount = 1,
                                    .pAccelerationStructures = e,

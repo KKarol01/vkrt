@@ -1,5 +1,6 @@
-const int num_lights = 6;
+const int num_lights = 1;
 const vec3 lights[] = vec3[](
+    vec3( 0.000,    0.5,  0.000),
     vec3( 0.000,    5.000,  0.000),
     vec3(  10.000,  5.000,  0.000),
     vec3( -10.000,  0.000,  0.000),
@@ -114,7 +115,7 @@ vec3 calc_light(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness, float roug
         vec3 dielectric_fresnel = F_Schlick(f0*specularWeight, f90, abs(VdotH));
         vec3 metal_fresnel = F_Schlick(albedo, vec3(1.0), abs(VdotH));
 
-        float lightIntensity = 16.0 * 1.0 / distance(light, p);
+        float lightIntensity = 1.0 * 1.0 / distance(light, p);
         vec3 l_diffuse = lightIntensity * NdotL * BRDF_lambertian(albedo);
         vec3 l_specular_metal = lightIntensity * NdotL * BRDF_specularGGX(roughness*roughness, NdotL, NdotV, NdotH);
         vec3 l_specular_dielectric = l_specular_metal;
@@ -160,18 +161,17 @@ vec3 calc_direct_lighting1(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness,
 
 vec3 calc_direct_lighting(vec3 p, vec3 n, vec3 cam_pos, vec3 albedo, vec3 indirect, float use_shadows) {
     float sum = 0.0;
-    for(int i=0; i < 4; ++i) {
+    for(int i=0; i < num_lights; ++i) {
         vec3 pl = normalize(lights[i] - p);
-        float inv_dist2 = 1.0 / distance(p, lights[i]);
+        float inv_dist2 = 1.0 / max(1.0, distance(p, lights[i]));
         inv_dist2 = pow(inv_dist2, 2.0);
-        //sum += max(0.0, dot(pl, n)) * inv_dist2;
         vec3 V = normalize(cam_pos - p);
         vec3 O = p + 0.01*n + 0.01*V;
         O = p;
         vec3 L = (lights[i] - O);
         float maxL = length(L);
         L /= maxL;
-        sum += max(0.0, dot(pl, n)) * inv_dist2 * 15.0 * calc_shadow(p, L, maxL);
+        sum += max(0.0, dot(pl, n)) * 1.0 * inv_dist2 * calc_shadow(p, L, maxL);
     }
     sum /= float(num_lights);
     return (sum + indirect) * albedo;

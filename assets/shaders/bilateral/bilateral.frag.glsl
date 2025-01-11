@@ -49,5 +49,6 @@ void main() {
 		}
 	}
 	result /= weights;
-	fs_out_color = vec4(vec3(result * color), 1.0);
+	//fs_out_color = vec4(vec3(result * color), 1.0);
+	fs_out_color = vec4(vec3(color), 1.0);
 }
