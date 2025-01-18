@@ -1,6 +1,6 @@
 const int num_lights = 1;
 const vec3 lights[] = vec3[](
-    vec3( 0.000,    0.5,  0.000),
+    vec3( 0.000,    1.0,  0.000),
     vec3( 0.000,    5.000,  0.000),
     vec3(  10.000,  5.000,  0.000),
     vec3( -10.000,  0.000,  0.000),
@@ -95,6 +95,7 @@ vec3 F_Schlick(vec3 f0, vec3 f90, float VdotH)
     return f0 + (f90 - f0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
 }
 
+#if 0
 vec3 calc_light(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness, float roughness) {
     vec3 l_color = vec3(0.0);
     for(int i = 0; i < num_lights; ++i) {
@@ -158,6 +159,7 @@ vec3 calc_direct_lighting1(vec3 p, vec3 c, vec3 n, vec3 albedo, float metalness,
     }
     return l_color;
 }
+#endif
 
 vec3 calc_direct_lighting(vec3 p, vec3 n, vec3 cam_pos, vec3 albedo, vec3 indirect, float use_shadows) {
     float sum = 0.0;
@@ -167,11 +169,11 @@ vec3 calc_direct_lighting(vec3 p, vec3 n, vec3 cam_pos, vec3 albedo, vec3 indire
         inv_dist2 = pow(inv_dist2, 2.0);
         vec3 V = normalize(cam_pos - p);
         vec3 O = p + 0.01*n + 0.01*V;
-        O = p;
+        //O = p;
         vec3 L = (lights[i] - O);
         float maxL = length(L);
         L /= maxL;
-        sum += max(0.0, dot(pl, n)) * 1.0 * inv_dist2 * calc_shadow(p, L, maxL);
+        sum += max(0.0, dot(pl, n)) * 3.0 * inv_dist2 * calc_shadow(p, L, maxL);
     }
     sum /= float(num_lights);
     return (sum + indirect) * albedo;

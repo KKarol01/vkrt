@@ -21,8 +21,6 @@
 #include "set_debug_name.hpp"
 #include "utils.hpp"
 
-ENABLE_FLAGS_OPERATORS(RenderFlags)
-
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
     /* Creates a halton sequence of values between 0 and 1.
@@ -39,6 +37,7 @@ static float halton(int i, int b) {
     return r;
 }
 
+#if 0
 PipelineLayout::PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, uint32_t push_size)
     : layouts(desc_layouts), push_size(push_size) {
     std::array<VkDescriptorSetLayout, MAX_SETS> vksets{};
@@ -300,6 +299,7 @@ Pipeline::Pipeline(const std::vector<std::filesystem::path>& shaders, const Pipe
         assert(false);
     }
 }
+#endif
 
 void RendererVulkan::init() {
     initialize_vulkan();
@@ -309,7 +309,6 @@ void RendererVulkan::init() {
         on_window_resize();
         return true;
     });
-    flags.set(RenderFlags::RESIZE_SCREEN_RECT_BIT | RenderFlags::RESIZE_SWAPCHAIN_BIT);
 }
 
 void RendererVulkan::initialize_vulkan() {
@@ -370,6 +369,7 @@ void RendererVulkan::initialize_vulkan() {
     auto dev_vk12_features = Vks(VkPhysicalDeviceVulkan12Features{
         .drawIndirectCount = true,
         .shaderSampledImageArrayNonUniformIndexing = true,
+        .shaderStorageBufferArrayNonUniformIndexing = true,
         .shaderStorageImageArrayNonUniformIndexing = true,
         .descriptorBindingUniformBufferUpdateAfterBind = true,
         .descriptorBindingSampledImageUpdateAfterBind = true,
@@ -483,13 +483,14 @@ void RendererVulkan::initialize_imgui() {
 
     VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
 
-    Image img{};
-    VkSampler samp = samplers.get_sampler();
-    PipelineLayout* imgui_layout = &playouts.emplace_back(PipelineLayout{ {
-        DescriptorLayout{ .bindings = { DescriptorBinding{ &img, 1, samp } } },
-    } });
-
-    DescriptorPool* imgui_dpool = &descpools.emplace_back(DescriptorPool{ imgui_layout, 2 });
+    VkDescriptorPoolSize sizes[]{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
+    auto imgui_dpool_info = Vks(VkDescriptorPoolCreateInfo{
+        .maxSets = 1024,
+        .poolSizeCount = 1,
+        .pPoolSizes = sizes,
+    });
+    VkDescriptorPool imgui_dpool;
+    VK_CHECK(vkCreateDescriptorPool(dev, &imgui_dpool_info, nullptr, &imgui_dpool));
 
     ImGui_ImplVulkan_InitInfo init_info = { 
         .Instance = instance,
@@ -497,7 +498,7 @@ void RendererVulkan::initialize_imgui() {
         .Device = dev,
         .QueueFamily = gq.idx,
         .Queue = gq.queue,
-        .DescriptorPool = imgui_dpool->pool,
+        .DescriptorPool = imgui_dpool,
         .MinImageCount = (uint32_t)frame_datas.size(),
         .ImageCount = (uint32_t)frame_datas.size(),
         .UseDynamicRendering = true,
@@ -520,25 +521,42 @@ void RendererVulkan::initialize_imgui() {
 }
 
 void RendererVulkan::initialize_resources() {
-    vertex_buffer = Buffer{ "vertex_buffer", 0ull,
-                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+    vertex_positions_buffer =
+        make_buffer(Buffer{ "vertex_positions_buffer", 0ull,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                            false };
-    index_buffer = Buffer{ "index_buffer", 0ull,
-                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                           false };
+                            false });
+    vertex_attributes_buffer =
+        make_buffer(Buffer{ "vertex_attributes_buffer", 0ull,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false });
+    index_buffer = make_buffer(Buffer{ "index_buffer", 0ull,
+                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                       false });
 
-    ddgi = {
-        .radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-        .irradiance_texture = make_image(Image{ "ddgi irradiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-        .visibility_texture = make_image(Image{ "ddgi visibility", 1, 1, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-        .probe_offsets_texture = make_image(Image{ "ddgi probe offsets", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-    };
+    auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    auto samp_lr = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
+    ddgi.radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                              VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                                       VK_IMAGE_LAYOUT_GENERAL);
+    make_image(ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+
+    ddgi.irradiance_texture = make_image(Image{ "ddgi irradiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                                VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                                         VK_IMAGE_LAYOUT_GENERAL);
+    make_image(ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+
+    ddgi.visibility_texture = make_image(Image{ "ddgi visibility", 1, 1, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                                         VK_IMAGE_LAYOUT_GENERAL);
+    make_image(ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+
+    ddgi.probe_offsets_texture = make_image(Image{ "ddgi probe offsets", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                                   VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                                            VK_IMAGE_LAYOUT_GENERAL);
+    make_image(ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
@@ -550,23 +568,39 @@ void RendererVulkan::initialize_resources() {
         fd.constants =
             make_buffer(Buffer{ std::format("constants_{}", i), 512,
                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false });
-        transform_buffers[i] = new Buffer{ std::format("transform_buffer_{}", i), 0ull,
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
+        transform_buffers[i] =
+            make_buffer(Buffer{ std::format("transform_buffer_{}", i), 0ull,
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false });
     }
+    create_window_sized_resources();
 
-    auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-    auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-    auto samp_lr = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
-    DescriptorLayout dl_default{ .bindings = { { { &tlas },
-                                                 { ddgi.radiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
-                                                 { ddgi.radiance_texture },
-                                                 { ddgi.irradiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
-                                                 { ddgi.visibility_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
-                                                 { ddgi.probe_offsets_texture },
-                                                 { ddgi.irradiance_texture },
-                                                 { ddgi.visibility_texture } } },
-                                 .variable_binding = 15 };
-    dl_default.bindings[15] = { &textures.data_storage(), 1024, samp_lr };
+    // rendergraph::RenderPass radiance_pass{
+    //     .accesses = { {
+    //         rendergraph::Access{ { *ddgi.radiance_texture, rendergraph::ResourceType::STORAGE_IMAGE },
+    //                              rendergraph::AccessType::WRITE_BIT,
+    //                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+    //                              VK_ACCESS_2_SHADER_WRITE_BIT,
+    //                              VK_IMAGE_LAYOUT_GENERAL },
+    //         rendergraph::Access{ { *ddgi.irradiance_texture, rendergraph::ResourceType::COMBINED_IMAGE },
+    //                              rendergraph::AccessType::READ_BIT,
+    //                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+    //                              VK_ACCESS_2_SHADER_READ_BIT,
+    //                              VK_IMAGE_LAYOUT_GENERAL },
+    //     } },
+    //     .shaders = { "asdf", "fds" },
+    //     .callback_render = [] {},
+    // };
+
+    /*   DescriptorLayout dl_default{ .bindings = { { { &tlas },
+                                                    { ddgi.radiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
+                                                    { ddgi.radiance_texture },
+                                                    { ddgi.irradiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
+                                                    { ddgi.visibility_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
+                                                    { ddgi.probe_offsets_texture },
+                                                    { ddgi.irradiance_texture },
+                                                    { ddgi.visibility_texture } } },
+                                    .variable_binding = 15 };
+       dl_default.bindings[15] = { &textures.data_storage(), 1024, samp_lr };*/
 
     {
         std::vector<std::filesystem::path> shaders;
@@ -577,110 +611,200 @@ void RendererVulkan::initialize_resources() {
         shader_storage.precompile_shaders(shaders);
     }
 
-    PipelineLayout* pl_default = &playouts.emplace_back(PipelineLayout{ { dl_default } });
+    for(auto& fd : frame_datas) {
+        fd.render_graph.add_pass(rendergraph::RenderPass{ 
+            .accesses = {
+                rendergraph::Access{
+                    { 0, rendergraph::ResourceType::COLOR_ATTACHMENT,
+                         rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT | rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT },
+                    rendergraph::AccessType::WRITE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                },
+            },
+            .shaders = {
+                "test/test.vert.glsl",
+                "test/test.frag.glsl",
+            },
+            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index) {
+                auto& r = get_renderer();
+                auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
+                    .imageView = r.swapchain.images.at(swapchain_index).view,
+                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+                });
 
-    Pipeline::RasterizationSettings raster_settings_default{
-        .num_vertex_bindings = 1,
-        .num_vertex_attribs = 4,
-        .vertex_bindings = { { { .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX } } },
-        .vertex_attribs = { {
-            { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos) },
-            { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, nor) },
-            { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv) },
-            { .location = 3, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Vertex, tang) },
-        } },
-    };
-    Pipeline::RasterizationSettings raster_settings_lit{
-        .num_col_formats = 3,
-        .col_formats = { VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
-        .num_vertex_bindings = 1,
-        .num_vertex_attribs = 4,
-        .vertex_bindings = { { { .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX } } },
-        .vertex_attribs = { {
-            { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos) },
-            { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, nor) },
-            { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv) },
-            { .location = 3, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Vertex, tang) },
-        } },
-    };
+                VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
+                auto r_dep_att = Vks(VkRenderingAttachmentInfo{
+                    .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).view,
+                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .depthStencil = { 1.0f, 0 } },
+                });
 
-    Pipeline::RasterizationSettings raster_settings_depth_rect{
-        .col_formats = { VK_FORMAT_R32_SFLOAT },
-        .depth_test = false,
-        .num_vertex_bindings = 0,
-        .num_vertex_attribs = 0,
-    };
+                auto rendering_info = Vks(VkRenderingInfo{
+                    .renderArea = { .extent = { .width = (uint32_t)r.screen_rect.w, .height = (uint32_t)r.screen_rect.h } },
+                    .layerCount = 1,
+                    .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
+                    .pColorAttachments = r_col_atts,
+                    .pDepthAttachment = &r_dep_att,
+                });
 
-    Pipeline::RasterizationSettings raster_settings_ao{
-        .depth_test = false,
-        .num_vertex_bindings = 0,
-        .num_vertex_attribs = 0,
-    };
+                VkDeviceSize vb_offsets[]{ 0 };
+                vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBeginRendering(cmd, &rendering_info);
+                VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
+                VkViewport r_view_1{
+                    .x = 0.0f, .y = r.screen_rect.h, .width = r.screen_rect.w, .height = -r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+                };
+                vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
+                vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
+                // clang-format off
+                /*fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
+                fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
+                fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
+                fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);*/
+                // clang-format on
+                vkCmdPushConstants(cmd, r.get_frame_data().render_graph.layout.layout, VK_SHADER_STAGE_ALL, 0, 8,
+                                   &r.get_buffer(r.vertex_positions_buffer).bda);
+                vkCmdDrawIndexedIndirectCount(cmd, r.indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
+                                              r.indirect_draw_buffer.buffer, 0ull, r.max_draw_count,
+                                              sizeof(VkDrawIndexedIndirectCommand));
+                vkCmdEndRendering(cmd);
+            } })
+        .add_pass(rendergraph::RenderPass{
+            .accesses = {
+                rendergraph::Access{
+                    {0, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT},
+                    rendergraph::AccessType::NONE_BIT,
+                    VK_PIPELINE_STAGE_2_NONE,
+                    VK_ACCESS_2_NONE,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                },
+            }
+        })
+        .bake();
+    }
 
-    Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{
-        { "default_unlit/default.vert.glsl", "default_unlit/default.frag.glsl" }, pl_default, raster_settings_lit });
-    Pipeline* pp_ddgi_radiance =
-        &pipelines.emplace_back(Pipeline{ { "rtbasic/raygen.rgen.glsl", "rtbasic/miss.rmiss.glsl", "rtbasic/shadow.rmiss.glsl",
-                                            "rtbasic/closest_hit.rchit.glsl", "rtbasic/shadow.rchit.glsl" },
-                                          pl_default,
-                                          Pipeline::RaytracingSettings{ .recursion_depth = 2 } });
-    Pipeline* pp_ddgi_irradiance =
-        &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_irradiance.comp.glsl" }, pl_default, raster_settings_default });
-    Pipeline* pp_ddgi_offsets =
-        &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_offset.comp.glsl" }, pl_default, raster_settings_default });
+    /* PipelineLayout* pl_default = &playouts.emplace_back(PipelineLayout{ { dl_default } });
+
+     Pipeline::RasterizationSettings raster_settings_default{
+         .num_vertex_bindings = 1,
+         .num_vertex_attribs = 4,
+         .vertex_bindings = { { { .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX } } },
+         .vertex_attribs = { {
+             { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, pos) },
+             { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, nor) },
+             { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv) },
+             { .location = 3, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Vertex, tang) },
+         } },
+     };
+     Pipeline::RasterizationSettings raster_settings_lit{
+         .num_col_formats = 3,
+         .col_formats = { VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
+     };
+
+     Pipeline::RasterizationSettings raster_settings_depth_rect{
+         .col_formats = { VK_FORMAT_R32_SFLOAT },
+         .depth_test = false,
+         .num_vertex_bindings = 0,
+         .num_vertex_attribs = 0,
+     };
+
+     Pipeline::RasterizationSettings raster_settings_ao{
+         .depth_test = false,
+         .num_vertex_bindings = 0,
+         .num_vertex_attribs = 0,
+     };
+
+     Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{
+         { "default_unlit/default.vert.glsl", "default_unlit/default.frag.glsl" }, pl_default, raster_settings_lit });
+     Pipeline* pp_ddgi_radiance =
+         &pipelines.emplace_back(Pipeline{ { "rtbasic/raygen.rgen.glsl", "rtbasic/miss.rmiss.glsl", "rtbasic/shadow.rmiss.glsl",
+                                             "rtbasic/closest_hit.rchit.glsl", "rtbasic/shadow.rchit.glsl" },
+                                           pl_default,
+                                           Pipeline::RaytracingSettings{ .recursion_depth = 2 } });
+     Pipeline* pp_ddgi_irradiance =
+         &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_irradiance.comp.glsl" }, pl_default, raster_settings_default });
+     Pipeline* pp_ddgi_offsets =
+         &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_offset.comp.glsl" }, pl_default, raster_settings_default });*/
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
-        fd.gbuffer = {
-            // TODO: vkformat of rgba32f is a bit fat - check if the precision is needed.
-            .color_image = make_image(Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w,
-                                             (uint32_t)screen_rect.h, 1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
-                                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-            .view_space_positions_image =
-                make_image(Image{ std::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1,
-                                  1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT }),
-            .view_space_normals_image =
-                make_image(Image{ std::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1,
-                                  1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-            .depth_buffer_image = make_image(Image{
-                std::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1, VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }),
-            .ambient_occlusion_image = make_image(Image{
-                std::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1, VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT }),
-        };
+        /* DescriptorLayout dl_depth_rect{ .bindings = { {
+                                             { fd.gbuffer.view_space_positions_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
+                                             { fd.gbuffer.view_space_normals_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
+                                             { fd.gbuffer.depth_buffer_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
+                                             { fd.gbuffer.color_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
+                                         } } };
+         DescriptorLayout dl_ao{ .bindings = { {
+                                     { fd.gbuffer.view_space_positions_image, 1, VK_IMAGE_LAYOUT_GENERAL },
+                                     { fd.gbuffer.ambient_occlusion_image, 1, VK_IMAGE_LAYOUT_GENERAL },
+                                     { fd.gbuffer.color_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
+                                 } } };
+         PipelineLayout* pl_depth_rect = &playouts.emplace_back(PipelineLayout{ { dl_depth_rect } });
+         PipelineLayout* pl_ao = &playouts.emplace_back(PipelineLayout{ { dl_ao } });
+         Pipeline* pp_depth_rect = &pipelines.emplace_back(Pipeline{
+             { "depth/depth_rect_buffer.vert.glsl", "depth/depth_rect_buffer.frag.glsl" }, pl_depth_rect, raster_settings_depth_rect });
+         Pipeline* pp_ao = &pipelines.emplace_back(Pipeline{
+             { "depth/depth_rect_buffer.vert.glsl", "bilateral/bilateral.frag.glsl" }, pl_ao, raster_settings_ao });
 
-        DescriptorLayout dl_depth_rect{ .bindings = { {
-                                            { fd.gbuffer.view_space_positions_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
-                                            { fd.gbuffer.view_space_normals_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
-                                            { fd.gbuffer.depth_buffer_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
-                                            { fd.gbuffer.color_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
-                                        } } };
-        DescriptorLayout dl_ao{ .bindings = { {
-                                    { fd.gbuffer.view_space_positions_image, 1, VK_IMAGE_LAYOUT_GENERAL },
-                                    { fd.gbuffer.ambient_occlusion_image, 1, VK_IMAGE_LAYOUT_GENERAL },
-                                    { fd.gbuffer.color_image, 1, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samp_ne },
-                                } } };
-        PipelineLayout* pl_depth_rect = &playouts.emplace_back(PipelineLayout{ { dl_depth_rect } });
-        PipelineLayout* pl_ao = &playouts.emplace_back(PipelineLayout{ { dl_ao } });
-        Pipeline* pp_depth_rect = &pipelines.emplace_back(Pipeline{
-            { "depth/depth_rect_buffer.vert.glsl", "depth/depth_rect_buffer.frag.glsl" }, pl_depth_rect, raster_settings_depth_rect });
-        Pipeline* pp_ao = &pipelines.emplace_back(Pipeline{
-            { "depth/depth_rect_buffer.vert.glsl", "bilateral/bilateral.frag.glsl" }, pl_ao, raster_settings_ao });
+         DescriptorPool* dp = &descpools.emplace_back(DescriptorPool{ pl_default, 8 });
+         fd.descpool = dp;
+         fd.passes = RenderPasses{
+             .ddgi_radiance = { pp_ddgi_radiance, dp },
+             .ddgi_irradiance = { pp_ddgi_irradiance, dp },
+             .ddgi_offsets = { pp_ddgi_offsets, dp },
+             .default_lit = { pp_lit, dp },
+             .rect_depth_buffer = { pp_depth_rect, dp },
+             .rect_bilateral_filter = { pp_ao, dp },
+         };*/
+    }
+}
 
-        DescriptorPool* dp = &descpools.emplace_back(DescriptorPool{ pl_default, 8 });
-        fd.descpool = dp;
-        fd.passes = RenderPasses{
-            .ddgi_radiance = { pp_ddgi_radiance, dp },
-            .ddgi_irradiance = { pp_ddgi_irradiance, dp },
-            .ddgi_offsets = { pp_ddgi_offsets, dp },
-            .default_lit = { pp_lit, dp },
-            .rect_depth_buffer = { pp_depth_rect, dp },
-            .rect_bilateral_filter = { pp_ao, dp },
-        };
+void RendererVulkan::create_window_sized_resources() {
+    gq.wait_idle();
+    swapchain.create(frame_datas.size(), screen_rect.w, screen_rect.h);
+    for(auto i = 0; i < frame_datas.size(); ++i) {
+        auto& fd = frame_datas.at(i);
+        fd.gbuffer.color_image =
+            make_image(Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                              VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
+                              VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                       VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                       samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
+        fd.gbuffer.depth_buffer_image =
+            make_image(Image{ std::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                              VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
+                              VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                       VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                       samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
+
+        /*make_image(&fd.gbuffer.color_image,
+                   Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                          VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
+                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        make_image(&fd.gbuffer.view_space_positions_image,
+                   Image{ std::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                          VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
+        make_image(&fd.gbuffer.view_space_normals_image,
+                   Image{ std::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                          VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        make_image(&fd.gbuffer.depth_buffer_image,
+                   Image{ std::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                          VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
+                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        make_image(&fd.gbuffer.ambient_occlusion_image,
+                   Image{ std::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                          VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
     }
 }
 
@@ -699,64 +823,10 @@ void RendererVulkan::update() {
     }
     if(flags.test_clear(RenderFlags::REFIT_TLAS_BIT)) { assert(false && "It's recommended to rebuild."); }
     // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
-    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
+    if(flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
         gq.wait_idle();
-        swapchain.create(frame_datas.size(), screen_rect.w, screen_rect.h);
-        for(int i = 0; i < frame_datas.size(); ++i) {
-            *frame_datas[i].gbuffer.color_image =
-                Image{ std::format("g_color_{}", i),
-                       (uint32_t)screen_rect.w,
-                       (uint32_t)screen_rect.h,
-                       1,
-                       1,
-                       1,
-                       VK_FORMAT_R8G8B8A8_SRGB,
-                       VK_SAMPLE_COUNT_1_BIT,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-            *frame_datas[i].gbuffer.view_space_positions_image =
-                Image{ std::format("g_view_pos_{}", i),
-                       (uint32_t)screen_rect.w,
-                       (uint32_t)screen_rect.h,
-                       1,
-                       1,
-                       1,
-                       VK_FORMAT_R32G32B32A32_SFLOAT,
-                       VK_SAMPLE_COUNT_1_BIT,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
-            *frame_datas[i].gbuffer.view_space_normals_image =
-                Image{ std::format("g_view_nor_{}", i),
-                       (uint32_t)screen_rect.w,
-                       (uint32_t)screen_rect.h,
-                       1,
-                       1,
-                       1,
-                       VK_FORMAT_R32G32B32A32_SFLOAT,
-                       VK_SAMPLE_COUNT_1_BIT,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-            *frame_datas[i].gbuffer.depth_buffer_image =
-                Image{ std::format("g_depth_{}", i),
-                       (uint32_t)screen_rect.w,
-                       (uint32_t)screen_rect.h,
-                       1,
-                       1,
-                       1,
-                       VK_FORMAT_D16_UNORM,
-                       VK_SAMPLE_COUNT_1_BIT,
-                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
-            *frame_datas[i].gbuffer.ambient_occlusion_image =
-                Image{ std::format("ao_{}", i),
-                       (uint32_t)screen_rect.w,
-                       (uint32_t)screen_rect.h,
-                       1,
-                       1,
-                       1,
-                       VK_FORMAT_R32_SFLOAT,
-                       VK_SAMPLE_COUNT_1_BIT,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT };
-        }
+        create_window_sized_resources();
     }
-    // if(flags.test_clear(RendererFlags::RESIZE_SCREEN_RECT_BIT)) { gq.wait_idle(); }
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
@@ -775,19 +845,6 @@ void RendererVulkan::update() {
         }
         swapchain_image = &swapchain.images[swapchain_index];
     }
-    if(Engine::get().frame_num() > 0) {
-        // for(uint32_t i = 0; i < ddgi.debug_probes.size(); ++i) {
-        //     auto h = Handle<Entity>{ *ddgi.debug_probes.at(i) };
-        //     auto& t = Engine::ec()->get<cmps::Transform>(h);
-        //     const auto tv =
-        //         ddgi.probe_start +
-        //         ddgi.probe_walk * glm::vec3{ i % ddgi.probe_counts.x, (i / ddgi.probe_counts.x) % ddgi.probe_counts.y,
-        //                                      i / (ddgi.probe_counts.x * ddgi.probe_counts.y) } +
-        //         ((glm::vec3*)ddgi.debug_probe_offsets_buffer.mapped)[i];
-        //     t.transform = glm::translate(glm::mat4{ 1.0f }, tv) * glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f });
-        //     Engine::scene()->update_transform(h);
-        // }
-    }
 
     vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
 
@@ -801,9 +858,12 @@ void RendererVulkan::update() {
         const glm::mat3 rand_mat =
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-        fd.constants->push_data(0ul, view, proj, inv_view, inv_proj, rand_mat);
+        get_buffer(fd.constants).push_data(0ul, view, proj, inv_view, inv_proj, rand_mat);
     }
 
+    auto cmd = fd.cmdpool->begin_onetime();
+
+#if 0
     ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image };
     ImageStatefulBarrier gcolor_image_barrier{ *fd.gbuffer.color_image };
     ImageStatefulBarrier gview_positions_image_barrier{ *fd.gbuffer.view_space_positions_image };
@@ -818,8 +878,6 @@ void RendererVulkan::update() {
                                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
     ImageStatefulBarrier offset_image_barrier{ *ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
                                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-
-    auto cmd = fd.cmdpool->begin_onetime();
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
         std::swap(transform_buffers[0], transform_buffers[1]);
@@ -1013,39 +1071,6 @@ void RendererVulkan::update() {
         vkCmdEndRendering(cmd);
     }
 
-    // Imgui pass
-    {
-        ImDrawData* im_draw_data = ImGui::GetDrawData();
-        if(im_draw_data) {
-            VkRenderingAttachmentInfo i_col_atts[]{
-                VkRenderingAttachmentInfo{
-                    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                    .imageView = swapchain_image->view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-                },
-            };
-            VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
-            VkViewport r_view_1{
-                .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
-            };
-            VkRenderingInfo imgui_rendering_info{
-                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } },
-                .layerCount = 1,
-                .colorAttachmentCount = 1,
-                .pColorAttachments = i_col_atts,
-            };
-            vkCmdBeginRendering(cmd, &imgui_rendering_info);
-            vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
-            vkCmdSetViewport(cmd, 0, 1, &r_view_1);
-            ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
-            vkCmdEndRendering(cmd);
-        }
-    }
-
     {
         auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
             .imageView = fd.gbuffer.ambient_occlusion_image->view,
@@ -1125,7 +1150,54 @@ void RendererVulkan::update() {
         vkCmdEndRendering(cmd);
     }
 
+    // Imgui pass
+    if(!flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
+        ImDrawData* im_draw_data = ImGui::GetDrawData();
+        if(im_draw_data) {
+            VkRenderingAttachmentInfo i_col_atts[]{
+                VkRenderingAttachmentInfo{
+                    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                    .imageView = swapchain_image->view,
+                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+                },
+            };
+            VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
+            VkViewport r_view_1{
+                .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+            };
+            VkRenderingInfo imgui_rendering_info{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } },
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = i_col_atts,
+            };
+            swapchain_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+            vkCmdBeginRendering(cmd, &imgui_rendering_info);
+            vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
+            vkCmdSetViewport(cmd, 0, 1, &r_view_1);
+            ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
+            vkCmdEndRendering(cmd);
+        }
+    }
+    flags.clear(RenderFlags::RESIZE_SWAPCHAIN_BIT);
     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
+#endif
+
+    /*swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);*/
+    /* ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT };
+     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);*/
+    fd.render_graph.render(cmd, swapchain_index);
+
+    // swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE);
+
     fd.cmdpool->end(cmd);
     gq.submit(QueueSubmission{ .cmds = { cmd },
                                .wait_sems = { { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, fd.sem_swapchain } },
@@ -1140,9 +1212,15 @@ void RendererVulkan::update() {
         .pImageIndices = &swapchain_index,
     });
     vkQueuePresentKHR(gq.queue, &pinfo);
+
+    if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
+    flags.clear();
 }
 
-void RendererVulkan::on_window_resize() { flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT); }
+void RendererVulkan::on_window_resize() {
+    flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT);
+    set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
+}
 
 void RendererVulkan::set_screen(ScreenRect screen) {
     /*const float aspect = 16.0f / 9.0f;
@@ -1170,15 +1248,16 @@ static VkFormat deduce_image_format(ImageFormat format) {
         return VK_FORMAT_R8G8B8A8_SRGB;
     default: {
         assert(false);
-        return VK_FORMAT_R8G8B8A8_UNORM;
+        return VK_FORMAT_MAX_ENUM;
     }
     }
 }
 
 Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
-    Handle<Image> handle =
-        textures.insert(Image{ desc.name, desc.width, desc.height, desc.depth, desc.mips, 1u, deduce_image_format(desc.format),
-                               VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    auto handle =
+        make_image(Image{ desc.name, desc.width, desc.height, desc.depth, desc.mips, 1u, deduce_image_format(desc.format),
+                          VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
+                   VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
     upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
     return handle;
 }
@@ -1256,7 +1335,7 @@ void RendererVulkan::upload_model_textures() {
         auto& b = bs.emplace_back(Buffer{ "staging buffer", tex.rgba_data.size(),
                                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, true });
         b.push_data(tex.rgba_data, 0);
-        Image& img = textures.at(tex.image_handle);
+        Image& img = images.at(*tex.image_handle);
         img.transition_layout(cmd, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
                               VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         VkBufferImageCopy copy{
@@ -1283,8 +1362,24 @@ void RendererVulkan::upload_model_textures() {
 
 void RendererVulkan::upload_staged_models() {
     upload_model_textures();
-    vertex_buffer.push_data(upload_vertices);
-    index_buffer.push_data(upload_indices);
+    std::vector<glm::vec3> positions;
+    std::vector<float> attributes;
+    positions.reserve(upload_vertices.size());
+    attributes.reserve(upload_vertices.size() * 8);
+    for(auto& e : upload_vertices) {
+        positions.push_back(e.pos);
+        attributes.push_back(e.nor.x);
+        attributes.push_back(e.nor.y);
+        attributes.push_back(e.nor.z);
+        attributes.push_back(e.uv.x);
+        attributes.push_back(e.uv.y);
+        attributes.push_back(e.tang.x);
+        attributes.push_back(e.tang.y);
+        attributes.push_back(e.tang.z);
+    }
+    get_buffer(vertex_positions_buffer).push_data(positions);
+    get_buffer(vertex_attributes_buffer).push_data(attributes);
+    get_buffer(index_buffer).push_data(upload_indices);
     upload_vertices.clear();
     upload_indices.clear();
 }
@@ -1314,13 +1409,11 @@ void RendererVulkan::upload_instances() {
         const RenderMesh& mb = meshes.at(mi.mesh_handle);
         const RenderGeometry& geom = geometries.at(mb.geometry);
         const RenderMaterial& mat = materials.at(mi.material_handle);
-        gpu_mesh_instances.push_back(GPUMeshInstance{
-            .vertex_offset = geom.vertex_offset,
-            .index_offset = geom.index_offset,
-            .color_texture_idx = (uint32_t)textures.find_idx(mat.color_texture),
-            .normal_texture_idx = (uint32_t)(mat.normal_texture ? textures.find_idx(mat.normal_texture) : *mat.normal_texture),
-            .metallic_roughness_idx = (uint32_t)(mat.metallic_roughness_texture ? textures.find_idx(mat.metallic_roughness_texture)
-                                                                                : *mat.metallic_roughness_texture) });
+        gpu_mesh_instances.push_back(GPUMeshInstance{ .vertex_offset = geom.vertex_offset,
+                                                      .index_offset = geom.index_offset,
+                                                      .color_texture_idx = *mat.color_texture,
+                                                      .normal_texture_idx = *mat.normal_texture,
+                                                      .metallic_roughness_idx = *mat.metallic_roughness_texture });
         if(i == 0 || Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i - 1)).mesh_handle != mi.mesh_handle) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
                                                                       .instanceCount = 1,
@@ -1348,23 +1441,23 @@ void RendererVulkan::upload_instances() {
 
 void RendererVulkan::upload_transforms() {
     std::swap(transform_buffers[0], transform_buffers[1]);
-    Buffer* dst_transforms = transform_buffers[0];
+    Buffer& dst_transforms = get_buffer(transform_buffers[0]);
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
     for(auto e : mesh_instances) {
         transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
     }
-    dst_transforms->push_data(transforms, 0ull);
+    dst_transforms.push_data(transforms, 0ull);
 }
 
 void RendererVulkan::build_blas() {
     auto triangles = Vks(VkAccelerationStructureGeometryTrianglesDataKHR{
         .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-        .vertexData = { .deviceAddress = vertex_buffer.bda },
-        .vertexStride = sizeof(Vertex),
+        .vertexData = { .deviceAddress = get_buffer(vertex_positions_buffer).bda },
+        .vertexStride = sizeof(glm::vec3),
         .maxVertex = get_total_vertices() - 1u,
         .indexType = VK_INDEX_TYPE_UINT32,
-        .indexData = { .deviceAddress = index_buffer.bda },
+        .indexData = { .deviceAddress = get_buffer(index_buffer).bda },
     });
 
     std::vector<const RenderGeometry*> dirty_batches;
@@ -1568,9 +1661,8 @@ void RendererVulkan::build_tlas() {
 }
 
 void RendererVulkan::update_ddgi() {
+#if 0
     // assert(false && "no allocating new pointers for images");
-
-    if(!ddgi.debug_probes.empty()) { return; }
 
     BoundingBox scene_aabb{ .min = glm::vec3{ -2.0f }, .max = glm::vec3{ 2.0f } };
     /*for(const Node& node : Engine::scene()->nodes) {
@@ -1593,7 +1685,7 @@ void RendererVulkan::update_ddgi() {
     ddgi.probe_counts = ddgi.probe_dims.size() / ddgi.probe_distance;
     ddgi.probe_counts = { std::bit_ceil(ddgi.probe_counts.x), std::bit_ceil(ddgi.probe_counts.y),
                           std::bit_ceil(ddgi.probe_counts.z) };
-    //ddgi.probe_counts = {4, 2, 4};
+    // ddgi.probe_counts = {4, 2, 4};
     const auto num_probes = ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z;
 
     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
@@ -1679,18 +1771,44 @@ void RendererVulkan::update_ddgi() {
     }
 
     ddgi.buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI::GPULayout), 0);
-
-    // Handle<ModelAsset> sphere_handle = Engine::scene()->load_from_file("sphere/sphere.glb");
-    ddgi.debug_probes.clear(); // TODO: also remove from the scene
-    for(int i = 0; i < ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z; ++i) {
-        // ddgi.debug_probes.push_back(Engine::scene()->instance_model(sphere_handle, { .transform = glm::mat4{ 1.0f } }));
-    }
     gq.wait_idle();
+#endif
 }
 
-Image* RendererVulkan::make_image(Image&& img) { return &images.emplace_back(std::move(img)); }
+Handle<Image> RendererVulkan::make_image(Image&& img, VkImageLayout layout, VkSampler sampler) {
+    Handle<Image> handle = Handle<Image>{ static_cast<Handle<Image>::Storage_T>(images.size()) };
+    images.push_back(std::move(img));
+    return make_image(handle, layout, sampler);
+}
 
-Buffer* RendererVulkan::make_buffer(Buffer&& buf) { return &buffers.emplace_back(std::move(buf)); }
+Handle<Image> RendererVulkan::make_image(Handle<Image> handle, VkImageLayout layout, VkSampler sampler) {
+    if(!sampler) {
+        bindless_storage_images.push_back(BindlessStorageImage{ handle, layout });
+    } else {
+        bindless_combined_images.push_back(BindlessCombinedImage{ handle, layout, sampler });
+    }
+    return handle;
+}
+
+Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(*handle); }
+
+void RendererVulkan::destroy_image(const Image** img) {
+    assert(false);
+    /*if(img && *img) {
+        std::erase_if(images, [&img](const auto& e) { return e.image == (*img)->image; });
+        *img = nullptr;
+    } else {
+        ENG_WARN("Trying to destroy nullptr image.");
+    }*/
+}
+
+Handle<Buffer> RendererVulkan::make_buffer(Buffer&& buf) {
+    const auto handle = Handle<Buffer>{ static_cast<Handle<Buffer>::Storage_T>(buffers.size()) };
+    buffers.emplace_back(std::move(buf));
+    return handle;
+}
+
+Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(*handle); }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset) {
     return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];
@@ -1863,6 +1981,8 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semapho
     return idx;
 }
 
+#if 0
+
 DescriptorPool::DescriptorPool(const PipelineLayout* layout, uint32_t max_sets) {
     std::unordered_map<VkDescriptorType, uint32_t> idxs;
     std::vector<VkDescriptorPoolSize> sizes;
@@ -2016,6 +2136,7 @@ void RenderPass::update_desc_sets() {
 void RenderPass::push_constant(VkCommandBuffer cmd, uint32_t offset, uint32_t size, const void* value) {
     vkCmdPushConstants(cmd, pipeline->layout->layout, VK_SHADER_STAGE_ALL, offset, size, value);
 }
+#endif
 
 Semaphore::Semaphore(VkDevice dev, bool timeline) {
     auto info = Vks(VkSemaphoreCreateInfo{});
@@ -2038,6 +2159,7 @@ Semaphore::~Semaphore() noexcept {
     semaphore = nullptr;
 }
 
+#if 0
 DescriptorBinding::DescriptorBinding(Resource res, uint32_t count, VkImageLayout layout, std::optional<VkSampler> sampler)
     : res(res), layout(layout), sampler(sampler), count(count) {}
 
@@ -2096,6 +2218,8 @@ VkImageLayout DescriptorBinding::deduce_layout(const Resource& res, const std::o
 
 bool DescriptorLayout::is_empty() const { return bindings[0].res.index() == 0; }
 
+#endif
+
 void Queue::submit(const QueueSubmission& submissions, Fence* fence) { submit(std::span{ &submissions, 1 }, fence); }
 
 void Queue::submit(std::span<const QueueSubmission> submissions, Fence* fence) {
@@ -2117,3 +2241,400 @@ void Queue::submit(std::span<const QueueSubmission> submissions, Fence* fence) {
 void Queue::submit(VkCommandBuffer cmd, Fence* fence) { submit(QueueSubmission{ .cmds = { cmd } }, fence); }
 
 void Queue::wait_idle() { vkQueueWaitIdle(queue); }
+
+rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass pass) {
+    const auto type =
+        pass.shaders.empty() ? VK_PIPELINE_STAGE_NONE : get_renderer().shader_storage.get_stage(pass.shaders.front());
+    if(type & (VK_PIPELINE_STAGE_VERTEX_SHADER_BIT)) {
+        pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        if(pass.pipeline_settings.valueless_by_exception()) { pass.pipeline_settings = RasterizationSettings{}; }
+    } else if(type & (VK_SHADER_STAGE_COMPUTE_BIT)) {
+        pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
+    } else if(type & (VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR)) {
+        pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
+        if(pass.pipeline_settings.valueless_by_exception()) {
+            ENG_WARN("Raytracing pipeline pass does not have defined settings. Not adding...");
+            return *this;
+        }
+    }
+    passes.push_back(pass);
+    return *this;
+}
+
+void rendergraph::RenderGraph::bake() {
+    struct Barrier {
+        VkPipelineStageFlags2 src_stage{}, dst_stage{};
+        VkAccessFlags2 src_access{}, dst_access{};
+        VkImageLayout src_layout{}, dst_layout{};
+    };
+    struct LastAccess {
+        uint32_t first_read{ UINT32_MAX };
+        uint32_t first_write{ UINT32_MAX };
+        int32_t last_read{ -1 };
+        int32_t last_write{ -1 };
+        Barrier last_barrier{};
+    };
+    std::map<Access::Resource, LastAccess> accesses;
+
+    stages.clear();
+    stages.reserve(passes.size());
+
+    if(!layout.layout) { create_descriptor_pool_and_layout(); }
+
+    // TODO: Maybe multithread this later (shaders for now are all precompiled)
+    for(auto& p : passes) {
+        if(!p.pipeline) { create_pipeline(p); }
+    }
+
+    for(uint32_t i = 0; i < passes.size(); ++i) {
+        auto& p = passes.at(i);
+        uint32_t stage = 0;
+        for(auto& a : p.accesses) {
+            if(auto ait = accesses.find(a.resource); ait != accesses.end()) {
+                uint32_t last_stage_plus_1 = 0;
+                // if READ_WRITE_BIT is set, WRITE_BIT case should handle it
+                if((a.type & AccessType::WRITE_BIT) || (a.type == AccessType::NONE_BIT)) {
+                    last_stage_plus_1 = std::max(ait->second.last_write, ait->second.last_read) + 1;
+                } else if(a.type & AccessType::READ_BIT) {
+                    last_stage_plus_1 = ait->second.last_write + 1;
+                } else {
+                    ENG_WARN("Unrecognized Access type. Skipping.");
+                    continue;
+                }
+                stage = std::max(stage, last_stage_plus_1);
+            }
+        }
+        if(stages.size() <= stage) { stages.resize(stage + 1); }
+        auto& s = stages.at(stage);
+        s.passes.push_back(i);
+
+        for(auto& a : p.accesses) {
+            auto& la = accesses[a.resource];
+            la.last_barrier.src_stage = la.last_barrier.dst_stage;
+            la.last_barrier.src_access = la.last_barrier.dst_access;
+            la.last_barrier.src_layout = la.last_barrier.dst_layout;
+            la.last_barrier.dst_stage = a.stage;
+            la.last_barrier.dst_access = a.access;
+            la.last_barrier.dst_layout = a.layout;
+            if(a.type & AccessType::READ_BIT) {
+                la.last_read = stage;
+                la.first_read = std::min(la.first_read, stage);
+            }
+            if(a.type & AccessType::WRITE_BIT) {
+                la.last_write = stage;
+                la.first_write = std::min(la.first_write, stage);
+            }
+
+            if(a.resource.type & ResourceType::ANY_IMAGE) {
+                // swapchain requires special handling, and it's barrier will be the only one
+                // amongst stage image_barriers with barrier's image set to nullptr.
+                if(a.resource.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT) {
+                    assert(!s.swapchain_barrier);
+                    s.swapchain_barrier = [la](uint32_t index) {
+                        return get_renderer().swapchain.images.at(index).image;
+                    };
+                }
+                const auto& img = get_renderer().images.at(a.resource.resource_idx);
+                s.image_barriers.push_back(Vks(VkImageMemoryBarrier2{
+                    .srcStageMask = la.last_barrier.src_stage,
+                    .srcAccessMask = la.last_barrier.src_access,
+                    .dstStageMask = la.last_barrier.dst_stage,
+                    .dstAccessMask = la.last_barrier.dst_access,
+                    .oldLayout = la.last_barrier.src_layout,
+                    .newLayout = la.last_barrier.dst_layout,
+                    .image = (a.resource.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT)
+                                 ? nullptr
+                                 : get_renderer().images.at(a.resource.resource_idx).image,
+                    .subresourceRange = {
+                        .aspectMask = img.aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } }));
+            } else if(a.resource.type == ResourceType::STORAGE_BUFFER) {
+                s.buffer_barriers.push_back(Vks(VkBufferMemoryBarrier2{
+                    .srcStageMask = la.last_barrier.src_stage,
+                    .srcAccessMask = la.last_barrier.src_access,
+                    .dstStageMask = la.last_barrier.dst_stage,
+                    .dstAccessMask = la.last_barrier.dst_access,
+                    .buffer = get_renderer().buffers.at(a.resource.resource_idx).buffer,
+                    .offset = 0,
+                    .size = VK_WHOLE_SIZE,
+                }));
+            } else if(a.resource.type == ResourceType::ACCELERATION_STRUCTURE) {
+                assert(false && "Don't know as of yet if this requires additional handling here.");
+            } else {
+                assert(false);
+            }
+        }
+    }
+
+    // modify the old layout of the first barrier for the image resource type
+    // so that it is same as the last barrier's new layout.
+    std::vector<VkImageMemoryBarrier2> initial_barriers;
+    for(const auto& a : accesses) {
+        if(!(a.first.type & ResourceType::ANY_IMAGE)) { continue; }
+        const auto first_stage = std::min(a.second.first_read, a.second.first_write);
+        const auto last_stage = std::max(a.second.last_read, a.second.last_write);
+        assert(first_stage < stages.size());
+        assert(last_stage > -1 && last_stage < stages.size());
+        auto& first_barrier =
+            *std::find_if(stages.at(first_stage).image_barriers.begin(), stages.at(first_stage).image_barriers.end(),
+                          [img = (a.first.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT)
+                                     ? nullptr
+                                     : get_renderer().images.at(a.first.resource_idx).image](const auto& b) {
+                              return b.image == img;
+                          });
+        const auto& last_barrier = a.second.last_barrier;
+        if(a.first.flags & ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT) { continue; }
+        first_barrier.oldLayout = last_barrier.dst_layout;
+        initial_barriers.push_back(Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+                                                              .srcAccessMask = VK_ACCESS_2_NONE,
+                                                              .dstStageMask = first_barrier.dstStageMask,
+                                                              .dstAccessMask = first_barrier.dstAccessMask,
+                                                              .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                                              .newLayout = first_barrier.oldLayout,
+                                                              .image = first_barrier.image,
+                                                              .subresourceRange = first_barrier.subresourceRange }));
+        if(stages.at(first_stage).swapchain_barrier && !first_barrier.image) {
+            // if it's swapchain image, they'll all need the same starting layout, so just make them be so here.
+            initial_barriers.back().image = stages.at(first_stage).swapchain_barrier(0);
+            for(uint32_t i = 1; i < get_renderer().swapchain.images.size(); ++i) {
+                initial_barriers.push_back(initial_barriers.back());
+                initial_barriers.back().image = stages.at(first_stage).swapchain_barrier(i);
+            }
+        }
+    }
+    auto initial_dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = static_cast<uint32_t>(initial_barriers.size()),
+                                                  .pImageMemoryBarriers = initial_barriers.data() });
+    auto cmd = get_renderer().get_frame_data().cmdpool->begin_onetime();
+    vkCmdPipelineBarrier2(cmd, &initial_dep_info);
+    get_renderer().get_frame_data().cmdpool->end(cmd);
+    Fence f{ get_renderer().dev, false };
+    get_renderer().gq.submit(cmd, &f);
+
+    // make all the swapchain barriers with image == nullptr go to the front for
+    // easy replacing.
+    for(auto& p : stages) {
+        if(!p.swapchain_barrier) { continue; }
+        for(uint32_t i = 0; i < p.image_barriers.size(); ++i) {
+            if(!p.image_barriers.at(i).image) {
+                std::swap(p.image_barriers.at(0), p.image_barriers.at(i));
+                break;
+            }
+        }
+    }
+
+    f.wait();
+}
+
+void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
+    if(pass.shaders.empty()) { return; }
+
+    for(const auto& p : passes) {
+        if(!p.pipeline) { break; }
+        if(pass.shaders.size() != p.shaders.size() || pass.pipeline_bind_point != p.pipeline_bind_point ||
+           !std::visit(Visitor{
+                           [&p](const RasterizationSettings& a) {
+                               return a == *std::get_if<RasterizationSettings>(&p.pipeline_settings);
+                           },
+                           [&p](const RaytracingSettings& a) {
+                               return a == *std::get_if<RaytracingSettings>(&p.pipeline_settings);
+                           },
+                       },
+                       pass.pipeline_settings) ||
+           ![&pass, &p] {
+               for(const auto& s : pass.shaders) {
+                   if(std::find(p.shaders.begin(), p.shaders.end(), s) == p.shaders.end()) { return false; }
+               }
+               return true;
+           }()) {
+            continue;
+        }
+        pass.pipeline = p.pipeline;
+        return;
+    }
+
+    std::vector<VkPipelineShaderStageCreateInfo> stages;
+    for(const auto& p : pass.shaders) {
+        auto stage = Vks(VkPipelineShaderStageCreateInfo{
+            .stage = get_renderer().shader_storage.get_stage(p),
+            .module = get_renderer().shader_storage.get_shader(p),
+            .pName = "main",
+        });
+        stages.push_back(stage);
+    }
+
+    VkPipeline pipeline{};
+
+    if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+        auto& rasterization_settings = *std::get_if<RasterizationSettings>(&pass.pipeline_settings);
+
+        auto pVertexInputState = Vks(VkPipelineVertexInputStateCreateInfo{});
+
+        auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{
+            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .primitiveRestartEnable = false,
+        });
+
+        auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
+
+        auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
+
+        auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = rasterization_settings.culling,
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth = 1.0f,
+        });
+
+        auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        });
+
+        auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
+            .depthTestEnable = rasterization_settings.depth_test,
+            .depthWriteEnable = true,
+            .depthCompareOp = rasterization_settings.depth_op,
+            .depthBoundsTestEnable = false,
+            .stencilTestEnable = false,
+            .front = {},
+            .back = {},
+        });
+
+        std::array<VkPipelineColorBlendAttachmentState, 4> blends;
+        for(uint32_t i = 0; i < rasterization_settings.num_col_formats; ++i) {
+            blends[i] = { .colorWriteMask = 0b1111 /*RGBA*/ };
+        }
+        auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
+            .attachmentCount = rasterization_settings.num_col_formats,
+            .pAttachments = blends.data(),
+        });
+
+        VkDynamicState dynstates[]{
+            VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+            VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+        };
+        auto pDynamicState = Vks(VkPipelineDynamicStateCreateInfo{
+            .dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]),
+            .pDynamicStates = dynstates,
+        });
+
+        auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
+            .colorAttachmentCount = rasterization_settings.num_col_formats,
+            .pColorAttachmentFormats = rasterization_settings.col_formats.data(),
+            .depthAttachmentFormat = rasterization_settings.dep_format,
+        });
+        // pDynamicRendering.stencilAttachmentFormat = rasterization_settings.st_format;
+
+        auto info = Vks(VkGraphicsPipelineCreateInfo{
+            .pNext = &pDynamicRendering,
+            .stageCount = (uint32_t)stages.size(),
+            .pStages = stages.data(),
+            .pVertexInputState = &pVertexInputState,
+            .pInputAssemblyState = &pInputAssemblyState,
+            .pTessellationState = &pTessellationState,
+            .pViewportState = &pViewportState,
+            .pRasterizationState = &pRasterizationState,
+            .pMultisampleState = &pMultisampleState,
+            .pDepthStencilState = &pDepthStencilState,
+            .pColorBlendState = &pColorBlendState,
+            .pDynamicState = &pDynamicState,
+            .layout = layout.layout,
+        });
+        VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
+    } else if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
+        assert(stages.size() == 1);
+        auto info = Vks(VkComputePipelineCreateInfo{
+            .stage = stages.at(0),
+            .layout = layout.layout,
+        });
+        VK_CHECK(vkCreateComputePipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
+    } else if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
+        auto& settings = *std::get_if<RaytracingSettings>(&pass.pipeline_settings);
+        auto info = Vks(VkRayTracingPipelineCreateInfoKHR{
+            .stageCount = (uint32_t)stages.size(),
+            .pStages = stages.data(),
+            .groupCount = (uint32_t)settings.groups.size(),
+            .pGroups = settings.groups.data(),
+            .maxPipelineRayRecursionDepth = settings.recursion_depth,
+            .layout = layout.layout,
+        });
+        VK_CHECK(vkCreateRayTracingPipelinesKHR(get_renderer().dev, nullptr, nullptr, 1, &info, nullptr, &pipeline));
+
+        const uint32_t handleSize = get_renderer().rt_props.shaderGroupHandleSize;
+        const uint32_t handleSizeAligned = align_up(handleSize, get_renderer().rt_props.shaderGroupHandleAlignment);
+        const uint32_t groupCount = static_cast<uint32_t>(settings.groups.size());
+        const uint32_t sbtSize = groupCount * handleSizeAligned;
+
+        std::vector<uint8_t> shaderHandleStorage(sbtSize);
+        vkGetRayTracingShaderGroupHandlesKHR(get_renderer().dev, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
+
+        const VkBufferUsageFlags bufferUsageFlags =
+            VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        settings.sbt = get_renderer().make_buffer(Buffer{ "buffer_sbt", sbtSize, bufferUsageFlags, false });
+        get_renderer().get_buffer(settings.sbt).push_data(shaderHandleStorage);
+    } else {
+        assert(false);
+    }
+    pipelines.push_back(Pipeline{ .pipeline = pipeline });
+    pass.pipeline = &pipelines.back();
+}
+
+void rendergraph::RenderGraph::create_descriptor_pool_and_layout() {
+    {
+        VkDescriptorPoolSize sizes[]{
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 65536 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 65536 },
+            { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536 },
+        };
+        auto info = Vks(VkDescriptorPoolCreateInfo{
+            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+            .maxSets = 1,
+            .poolSizeCount = sizeof(sizes) / sizeof(sizes[0]),
+            .pPoolSizes = sizes,
+        });
+        VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &info, {}, &descriptor_pool));
+    }
+
+    {
+        VkDescriptorSetLayoutBinding bindings[]{
+            { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 65536, VK_SHADER_STAGE_ALL },
+            { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 65536, VK_SHADER_STAGE_ALL },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536, VK_SHADER_STAGE_ALL },
+            { 3, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536, VK_SHADER_STAGE_ALL },
+        };
+
+        auto layout_info = Vks(VkDescriptorSetLayoutCreateInfo{
+            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
+            .bindingCount = sizeof(bindings) / sizeof(bindings[0]),
+            .pBindings = bindings,
+        });
+        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &layout_info, nullptr, &layout.descriptor_layout));
+
+        VkPushConstantRange pc_range{ VK_SHADER_STAGE_ALL, 0, 128 };
+
+        auto info = Vks(VkPipelineLayoutCreateInfo{
+            .setLayoutCount = 1,
+            .pSetLayouts = &layout.descriptor_layout,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pc_range,
+        });
+        VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &info, nullptr, &layout.layout));
+    }
+}
+
+void rendergraph::RenderGraph::render(VkCommandBuffer cmd, uint32_t swapchain_index) {
+    for(auto& s : stages) {
+        for(auto p : s.passes) {
+            auto& pass = passes.at(p);
+            auto dep_info = Vks(VkDependencyInfo{
+                .bufferMemoryBarrierCount = static_cast<uint32_t>(s.buffer_barriers.size()),
+                .pBufferMemoryBarriers = s.buffer_barriers.data(),
+                .imageMemoryBarrierCount = static_cast<uint32_t>(s.image_barriers.size()),
+                .pImageMemoryBarriers = s.image_barriers.data(),
+            });
+            if(s.swapchain_barrier) { s.image_barriers.at(0).image = s.swapchain_barrier(swapchain_index); }
+            vkCmdPipelineBarrier2(cmd, &dep_info);
+            if(pass.pipeline) { vkCmdBindPipeline(cmd, pass.pipeline_bind_point, pass.pipeline->pipeline); }
+            if(pass.callback_render) { pass.callback_render(cmd, swapchain_index); }
+        }
+    }
+}

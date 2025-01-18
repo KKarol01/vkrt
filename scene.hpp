@@ -56,7 +56,7 @@ struct Node {
 struct NodeInstance {
     // children are same size as node's children array, except some pointers can be nullptrs
     std::vector<NodeInstance*> children;
-    // actually rendered primitives (may not all be present as in referenced Node by node_hadle)
+    // actually rendered primitives (may not all be present as in referenced node_hadle)
     std::vector<components::Entity> primitives;
     glm::mat4 transform{ 1.0f };
     glm::mat4 final_transform{ 1.0f };

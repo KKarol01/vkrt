@@ -121,6 +121,7 @@ target_compile_definitions(vkrt
         VC_EXTRALEAN
         NOMINMAX
         ENGINE_BASE_ASSET_PATH="${CMAKE_SOURCE_DIR}/assets/"
+        IMGUI_DEFINE_MATH_OPERATORS
 )
 target_precompile_headers(vkrt
     PRIVATE

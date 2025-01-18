@@ -1,5 +1,4 @@
 #include "engine.hpp"
-#define IMGUI_DEFINE_MATH_OPERATORS
 #include <array>
 #include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_glfw.h>
@@ -9,121 +8,62 @@
 #include "ui.hpp"
 #include "renderer_vulkan.hpp"
 
-static std::array<std::pair<VkImageView, VkDescriptorSet>, 2> output_images;
+static ImTextureID get_imgui_render_output_descriptor();
 
 void UI::update() {
-    //auto renderer = ((RendererVulkan*)Engine::renderer());
-    //if(Engine::window()->height == 0) { return; }
+    return;
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 
-    //ImGui_ImplVulkan_NewFrame();
-    //ImGui_ImplGlfw_NewFrame();
-    //ImGui::NewFrame();
-    //ImGuizmo::BeginFrame();
-
-    //ImGui::SetNextWindowPos({});
-    //ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-    //if(ImGui::Begin("asdf", 0, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground)) {
-    //    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
-    //    ImGuiCur c1;
-    //    node_list.draw();
-    //    auto rs1 = ImGui::GetItemRectSize();
-    //    console.draw();
-    //    ImGuiCur{ c1.x + rs1.x + ImGui::GetStyle().FramePadding.x, c1.y }.set_pos();
-    //    ImGui::PopStyleColor();
-    //    routput.draw();
-    //}
-    //ImGui::End();
-    //ImGui::Render();
-
-    //Engine::renderer()->set_screen(ScreenRect{ routput.window.x, routput.window.y, routput.window.w, routput.window.h });
-}
-
-ImGuiCur::ImGuiCur() { get_screen_pos(); }
-
-ImGuiCur::ImGuiCur(float x, float y) : x(x), y(y) {}
-
-void ImGuiCur::get_pos() { std::tie(x, y) = std::tuple{ ImGui::GetCursorPos().x, ImGui::GetCursorPos().y }; }
-
-void ImGuiCur::get_screen_pos() {
-    std::tie(x, y) = std::tuple{ ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y };
-}
-
-void ImGuiCur::set_pos() { ImGui::SetCursorPos({ x, y }); }
-
-void ImGuiCur::offset(float x, float y) {
-    this->x += x;
-    this->y += y;
-}
-
-void UIWindow::get_window_pos() { std::tie(x, y) = std::tuple{ ImGui::GetWindowPos().x, ImGui::GetWindowPos().y }; }
-
-void UIWindow::get_window_size() { std::tie(w, h) = std::tuple{ ImGui::GetWindowSize().x, ImGui::GetWindowSize().y }; }
-
-void UIWindow::set_window_pos() { ImGui::SetNextWindowPos({ x, y }); }
-
-void UIWindow::set_window_size() { ImGui::SetNextWindowSize({ w, h }); }
-
-void NodeList::draw() {
-   /* if(Engine::frame_num() == 0) {
-        window.w = 200.0f;
-        window.h = ImGui::GetIO().DisplaySize.y * 0.7f;
-    }
-    if(ImGui::BeginChild("Scene", { window.w, window.h }, ImGuiChildFlags_Border)) {
-        for(auto rnidx : Engine::scene()->root_nodes) {
-            auto& rn = Engine::scene()->nodes.at(rnidx);
-            ImGui::PushID(&rn);
-            if(ImGui::Selectable(rn.name.c_str(), selected_node == &rn)) { selected_node = &rn; }
-            ImGui::PopID();
+    ImGui::SetNextWindowPos({});
+    ImGui::SetNextWindowSize(ImVec2{ Engine::get().window->width, Engine::get().window->height });
+    if(ImGui::Begin("main ui panel", 0,
+                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_MenuBar)) {
+        if(ImGui::BeginMenuBar()) {
+            ImGui::MenuItem("LOLOLOL", "CTRL-S");
+            ImGui::EndMenuBar();
         }
+        const auto render_output_size = ImGui::GetContentRegionMax() * ImVec2{ 0.8f, 0.7f };
+        // used primarily for render output
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
+        if(ImGui::BeginChild("render output panel", render_output_size, ImGuiChildFlags_Border)) {
+            ImGui::Image(get_imgui_render_output_descriptor(), render_output_size);
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+
+        const auto render_output_next_row = ImGui::GetCursorScreenPos();
+        ImGui::SameLine();
+        // used for scene manipulation
+        if(ImGui::BeginChild("scene panel", {}, ImGuiChildFlags_Border)) {}
+        ImGui::EndChild();
+
+        // used primarily for debug output
+        ImGui::SetCursorScreenPos(render_output_next_row);
+        if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {}
+        ImGui::EndChild();
     }
-    ImGui::EndChild();
-    window.w = ImGui::GetItemRectSize().x;
-    window.h = ImGui::GetItemRectSize().y;*/
+    ImGui::End();
+
+    ImGui::Render();
 }
 
-void Console::draw() {
-    window.w = ImGui::GetContentRegionAvail().x;
-    window.h = ImGui::GetContentRegionAvail().y;
-    if(ImGui::BeginChild("Console", { window.w, window.h }, ImGuiChildFlags_Border)) { ImGui::Text("console"); }
-    ImGui::EndChild();
-}
-
-void RenderOutput::draw() {
-    //ImGuiCur pos;
-    //window.x = pos.x;
-    //window.y = pos.y;
-    //window.w = ImGui::GetContentRegionAvail().x;
-    //window.h = Engine::ui()->node_list.window.h;
-    //if(ImGui::BeginChild("Render Output", { window.w, window.h }, ImGuiChildFlags_Border)) {
-    //    if(Engine::ui()->node_list.selected_node) {
-    //        ImGuizmo::SetRect(window.x, window.y, window.w, window.h);
-    //        ImGuizmo::SetDrawlist();
-    //        auto& io = ImGui::GetIO();
-    //        const auto viewmat = Engine::camera()->get_view();
-    //        const auto projmat = Engine::camera()->get_projection();
-    //        ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
-    //        ImGuizmo::MODE mode = ImGuizmo::MODE::LOCAL;
-
-    //        if(Engine::ui()->node_list.selected_node->has_component<cmps::Transform>()) {
-    //            //cmps::RenderMesh& rm = Engine::ec()->get<cmps::RenderMesh>(Engine::ui()->node_list.selected_node->handle);
-    //            glm::mat4 tt = glm::translate(
-    //                Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(
-    //                    Engine::ui()->node_list.selected_node->handle
-    //                )), glm::vec3{Engine::scene()->final_transforms.at(Engine::scene()->entity_node_idxs.at(
-    //                    Engine::ui()->node_list.selected_node->handle
-    //                ))[3]});
-    //            glm::mat4 delta{};
-    //            ImGuizmo::Manipulate(&viewmat[0][0], &projmat[0][0], op, mode, &tt[0][0], &delta[0][0]);
-    //            glm::vec3 t, r, s;
-    //            ImGuizmo::DecomposeMatrixToComponents(&delta[0][0], &t.x, &r.x, &s.x);
-    //            if(ImGuizmo::IsUsing()) {
-    //                glm::mat4& cmps_transform =
-    //                    Engine::ec()->get<cmps::Transform>(Engine::ui()->node_list.selected_node->handle).transform;
-    //                cmps_transform = glm::translate(cmps_transform, t);
-    //                Engine::scene()->update_transform(Engine::ui()->node_list.selected_node->handle);
-    //            }
-    //        }
-    //    }
-    //}
-    //ImGui::EndChild();
+ImTextureID get_imgui_render_output_descriptor() {
+    static std::unordered_map<VkImageView, VkDescriptorSet> render_output_view_sets;
+    static VkSampler sampler = get_renderer().samplers.get_sampler();
+    const auto view = get_renderer().get_image(get_renderer().get_frame_data().gbuffer.color_image).view;
+    if(auto it = render_output_view_sets.find(view); it != render_output_view_sets.end()) {
+        return reinterpret_cast<ImTextureID>(it->second);
+    }
+    if(render_output_view_sets.size() > 512) {
+        for(auto& e : render_output_view_sets) {
+            ImGui_ImplVulkan_RemoveTexture(e.second);
+        }
+        render_output_view_sets.clear();
+    }
+    return reinterpret_cast<ImTextureID>(render_output_view_sets
+                                             .emplace(view, ImGui_ImplVulkan_AddTexture(sampler, view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL))
+                                             .first->second);
 }

@@ -15,6 +15,7 @@ struct HandleGenerate_T {};
 inline constexpr HandleGenerate_T generate_handle{};
 
 template <typename T, typename Storage> struct Handle {
+    using Storage_T = Storage;
     constexpr Handle() = default;
     constexpr explicit Handle(Storage handle) : handle{ handle } {}
     explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage>::gen() } {}
