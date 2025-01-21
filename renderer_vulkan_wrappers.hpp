@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <deque>
 #include <variant>
 #include <utility>
 #include <span>
@@ -8,53 +9,6 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include "common/types.hpp"
 #include "vulkan_structs.hpp"
-
-class Buffer {
-  public:
-    constexpr Buffer() = default;
-    Buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, size_t size, uint32_t alignment, VkBufferUsageFlags usage, bool map);
-    Buffer(const std::string& name, VkBufferCreateInfo create_info, VmaAllocationCreateInfo alloc_info, uint32_t alignment);
-
-    Buffer(Buffer&& other) noexcept;
-    Buffer& operator=(Buffer&& other) noexcept;
-
-    bool push_data(std::span<const std::byte> data, uint32_t offset);
-    bool push_data(std::span<const std::byte> data) { return push_data(data, size); }
-    bool push_data(const void* data, size_t size_bytes) { return push_data(data, size_bytes, size); }
-    bool push_data(const void* data, size_t size_bytes, size_t offset) {
-        return push_data(std::span{ static_cast<const std::byte*>(data), size_bytes }, offset);
-    }
-    template <typename T> bool push_data(const std::vector<T>& vec) { return push_data(vec, size); }
-    template <typename T> bool push_data(const std::vector<T>& vec, uint32_t offset) {
-        return push_data(std::as_bytes(std::span{ vec }), offset);
-    }
-    template <typename... Ts> bool push_data(uint32_t offset, const Ts&... ts) {
-        std::array<std::byte, (sizeof(Ts) + ...)> arr{};
-        uint64_t data_offset = 0;
-        const auto pack = [&arr, &data_offset](const auto& e) {
-            memcpy(&arr[data_offset], std::addressof(e), sizeof(e));
-            data_offset += sizeof(e);
-        };
-        (pack(ts), ...);
-        return push_data(std::span<const std::byte>{ arr.begin(), arr.end() }, offset);
-    }
-
-    void clear() { size = 0; }
-    bool resize(size_t new_size);
-    constexpr size_t get_free_space() const { return capacity - size; }
-    void deallocate();
-
-    std::string name;
-    VkBufferUsageFlags usage{};
-    uint64_t size{};
-    uint64_t capacity{};
-    uint32_t alignment{ 1 };
-    VkBuffer buffer{};
-    VmaAllocation alloc{};
-    void* mapped{};
-    VkDeviceAddress bda{};
-};
 
 class Image {
   public:
@@ -160,18 +114,6 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
 
-// class QueueScheduler {
-//   public:
-//     QueueScheduler() = default;
-//     QueueScheduler(VkQueue queue);
-//
-//     void enqueue(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-//     void enqueue_wait_submit(const RecordingSubmitInfo& info, VkFence fence = nullptr);
-//
-//   private:
-//     VkQueue vkqueue;
-// };
-
 class CommandPool {
   public:
     constexpr CommandPool() noexcept = default;
@@ -189,6 +131,7 @@ class CommandPool {
     void end(VkCommandBuffer buffer);
     void reset();
 
-    std::vector<std::pair<VkCommandBuffer, bool>> buffers;
+    std::deque<VkCommandBuffer> free;
+    std::deque<VkCommandBuffer> used;
     VkCommandPool cmdpool{};
 };

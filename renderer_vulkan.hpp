@@ -30,9 +30,9 @@ enum class RenderFlags : uint32_t {
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
     DIRTY_BLAS_BIT = 0x4,
     DIRTY_TLAS_BIT = 0x8,
-    REFIT_TLAS_BIT = 0x10,
-    DIRTY_TRANSFORMS_BIT = 0x20,
-    RESIZE_SWAPCHAIN_BIT = 0x40,
+    DIRTY_TRANSFORMS_BIT = 0x10,
+    RESIZE_SWAPCHAIN_BIT = 0x20,
+    UPDATE_BINDLESS_SET = 0x40,
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
@@ -48,7 +48,7 @@ struct RenderMaterial {
 
 struct GeometryMetadata {
     VkAccelerationStructureKHR blas{};
-    Buffer blas_buffer{};
+    Handle<Buffer> blas_buffer{};
 };
 
 struct MeshMetadata {};
@@ -137,7 +137,7 @@ struct Fence {
     Fence(Fence&& f) noexcept;
     Fence& operator=(Fence&& f) noexcept;
     ~Fence() noexcept;
-    VkResult wait(uint32_t timeout = ~0u);
+    VkResult wait(uint64_t timeout = ~0ull);
     VkFence fence{};
 };
 
@@ -166,111 +166,12 @@ struct ShaderStorage {
     std::unordered_map<std::filesystem::path, ShaderMetadata> metadatas;
 };
 
-// struct DescriptorBinding {
-//     using Resource =
-//         std::variant<std::monostate, const Buffer*, const Image*, const VkAccelerationStructureKHR*, const std::vector<Image>*>;
-//     DescriptorBinding() = default;
-//     DescriptorBinding(Resource res, uint32_t count, VkImageLayout layout, std::optional<VkSampler> sampler = {});
-//     DescriptorBinding(Resource res, uint32_t count, std::optional<VkSampler> sampler = {});
-//     DescriptorBinding(Resource res);
-//     VkDescriptorType get_vktype() const;
-//     VkImageLayout deduce_layout(const Resource& res, const std::optional<VkSampler>& sampler);
-//     Resource res{};
-//     VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
-//     std::optional<VkSampler> sampler{}; // if not set - storage image; if set, but sampler is nullptr - sampled image; if set and sampler is not nullptr - combined image sampler
-// };
-
-// struct DescriptorLayout {
-//     inline static constexpr uint32_t MAX_BINDINGS = 16;
-//     bool is_empty() const;
-//     std::array<DescriptorBinding, MAX_BINDINGS> bindings{};
-//     VkDescriptorSetLayout layout{};
-//     int32_t variable_binding{ -1 };
-// };
-//
-// struct PipelineLayout {
-//     inline static constexpr uint32_t MAX_SETS = 4;
-//
-//     PipelineLayout() = default;
-//     PipelineLayout(std::array<DescriptorLayout, MAX_SETS> desc_layouts, uint32_t push_size = 128);
-//
-//     std::array<DescriptorLayout, MAX_SETS> layouts{};
-//     VkPipelineLayout layout{};
-//     uint32_t push_size{};
-// };
-//
-// struct Pipeline {
-//     enum Type { None, Raster, Compute, RT };
-//     struct RasterizationSettings {
-//         uint32_t num_col_formats{ 1 };
-//         std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
-//         VkFormat dep_format{ VK_FORMAT_D16_UNORM };
-//         VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
-//         bool depth_test{ true };
-//         VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
-//         // NOTE: removed in favor of vertex pulling
-//         /*uint32_t num_vertex_bindings{};
-//         uint32_t num_vertex_attribs{};
-//         std::array<VkVertexInputBindingDescription, 8> vertex_bindings{};
-//         std::array<VkVertexInputAttributeDescription, 8> vertex_attribs{};*/
-//     };
-//     struct RaytracingSettings {
-//         uint32_t recursion_depth{ 1 };
-//         uint32_t group_count{};
-//         Buffer* sbt;
-//     };
-//
-//     Pipeline() = default;
-//     Pipeline(const std::vector<std::filesystem::path>& shaders, const PipelineLayout* layout,
-//              std::variant<std::monostate, RasterizationSettings, RaytracingSettings> settings = {});
-//
-//     const PipelineLayout* layout{};
-//     VkPipeline pipeline{};
-//     VkPipelineBindPoint bind_point{};
-//     union {
-//         RasterizationSettings rasterization_settings;
-//         RaytracingSettings raytracing_settings;
-//     };
-// };
-
-// struct DescriptorPool {
-//     DescriptorPool() = default;
-//     DescriptorPool(const PipelineLayout* layout, uint32_t max_sets);
-//     void allocate(const VkDescriptorSetLayout* layouts, VkDescriptorSet** sets, uint32_t count = 1,
-//                   std::span<uint32_t> variable_count = {});
-//     void reset();
-//     VkDescriptorPool pool{};
-//     std::deque<VkDescriptorSet> sets;
-// };
-
-// struct RenderPass {
-//     RenderPass() = default;
-//     // TODO: make actual pipeline with layout here
-//     RenderPass(const Pipeline* pipeline, DescriptorPool* desc_pool);
-//     void bind(VkCommandBuffer cmd);
-//     void bind_desc_sets(VkCommandBuffer cmd);
-//     void update_desc_sets();
-//     void push_constant(VkCommandBuffer cmd, uint32_t offset, uint32_t size, const void* value);
-//     const Pipeline* pipeline{};
-//     DescriptorPool* desc_pool{};
-//     std::array<VkDescriptorSet*, PipelineLayout::MAX_SETS> sets{};
-// };
-
 struct Swapchain {
     void create(uint32_t image_count, uint32_t width, uint32_t height);
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     VkSwapchainKHR swapchain{};
     std::vector<Image> images;
 };
-
-// struct RenderPasses {
-//     RenderPass ddgi_radiance;
-//     RenderPass ddgi_irradiance;
-//     RenderPass ddgi_offsets;
-//     RenderPass default_lit;
-//     RenderPass rect_depth_buffer;
-//     RenderPass rect_bilateral_filter;
-// };
 
 struct GBuffer {
     Handle<Image> color_image{};
@@ -300,12 +201,21 @@ struct Queue {
     void submit(const QueueSubmission& submissions, Fence* fence = {});
     void submit(std::span<const QueueSubmission> submissions, Fence* fence = {});
     void submit(VkCommandBuffer cmd, Fence* fence = {});
+    void submit_wait(VkCommandBuffer cmd);
     void wait_idle();
     VkQueue queue{};
     uint32_t idx{ ~0u };
 };
 
-// TODO: rename this (delete the old one)
+struct PipelineLayout {
+    VkPipelineLayout layout{};
+    VkDescriptorSetLayout descriptor_layout{};
+};
+
+struct Pipeline {
+    VkPipeline pipeline{};
+};
+
 namespace rendergraph {
 
 enum class AccessType { NONE_BIT = 0x0, READ_BIT = 0x1, WRITE_BIT = 0x2, READ_WRITE_BIT = 0x3 };
@@ -338,11 +248,6 @@ struct RasterizationSettings {
     VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
     bool depth_test{ false };
     VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
-    // NOTE: removed in favor of vertex pulling
-    /*uint32_t num_vertex_bindings{};
-    uint32_t num_vertex_attribs{};
-    std::array<VkVertexInputBindingDescription, 8> vertex_bindings{};
-    std::array<VkVertexInputAttributeDescription, 8> vertex_attribs{};*/
 };
 
 struct RaytracingSettings {
@@ -362,15 +267,6 @@ struct RaytracingSettings {
     uint32_t recursion_depth{ 1 };
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
     Handle<Buffer> sbt;
-};
-
-struct PipelineLayout {
-    VkPipelineLayout layout{};
-    VkDescriptorSetLayout descriptor_layout{};
-};
-
-struct Pipeline {
-    VkPipeline pipeline{};
 };
 
 struct Access {
@@ -405,7 +301,7 @@ struct RenderPass {
     std::variant<RasterizationSettings, RaytracingSettings> pipeline_settings;
     VkPipelineBindPoint pipeline_bind_point{}; // filled out during baking
     const Pipeline* pipeline{};                // filled out during baking
-    Callback<void(VkCommandBuffer, uint32_t)> callback_render;
+    Callback<void(VkCommandBuffer, uint32_t, RenderPass&)> callback_render;
 };
 
 class RenderGraph {
@@ -420,16 +316,26 @@ class RenderGraph {
     RenderGraph& add_pass(RenderPass pass);
     void bake();
     void create_pipeline(RenderPass& pass);
-    void create_descriptor_pool_and_layout();
     void render(VkCommandBuffer cmd, uint32_t swapchain_index);
 
     std::vector<RenderPass> passes;
     std::vector<Stage> stages;
     std::deque<Pipeline> pipelines;
-    PipelineLayout layout;
-    VkDescriptorPool descriptor_pool{};
 };
 } // namespace rendergraph
+
+struct Buffer {
+    std::string name;
+    VkBuffer buffer{};
+    VmaAllocation allocation{};
+    VkDeviceAddress bda{};
+    void* memory{};
+    size_t capacity{ 0 };
+    size_t size{ 0 };
+    uint32_t alignment{ 0 };
+    VkBufferUsageFlags usage{};
+    bool is_bindless{ false };
+};
 
 struct FrameData {
     Semaphore sem_swapchain{};
@@ -439,6 +345,18 @@ struct FrameData {
     rendergraph::RenderGraph render_graph;
     Handle<Buffer> constants{};
     GBuffer gbuffer{};
+};
+
+struct StagingBuffer {
+    StagingBuffer();
+    bool send(Buffer& dst, size_t dst_offset, std::span<const std::byte> src);
+    bool send(Buffer& dst, size_t dst_offset, Buffer& src, size_t src_offset, size_t size);
+    bool send(Image& dst, std::span<const std::byte> src, VkBufferImageCopy copy);
+    void begin();
+    void stage();
+    CommandPool** pool{};
+    VkCommandBuffer cmd{};
+    Buffer buffer{};
 };
 
 class RendererVulkan : public Renderer {
@@ -466,6 +384,7 @@ class RendererVulkan : public Renderer {
     void upload_staged_models();
     void upload_instances();
     void upload_transforms();
+    void update_bindless_set();
 
     void build_blas();
     void build_tlas();
@@ -476,8 +395,21 @@ class RendererVulkan : public Renderer {
     Handle<Image> make_image(Handle<Image> handle, VkImageLayout layout, VkSampler sampler = nullptr);
     Image& get_image(Handle<Image> handle);
     void destroy_image(const Image** img);
-    Handle<Buffer> make_buffer(Buffer&& buf);
+    Handle<Buffer> make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false,
+                               uint32_t alignment = 1);
+    Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
+    void deallocate_buffer(Buffer& buffer);
+    void destroy_buffer(Handle<Buffer> handle);
+    void resize_buffer(Handle<Buffer> handle, size_t new_size);
     Buffer& get_buffer(Handle<Buffer> handle);
+    void update_buffer(Handle<Buffer> handle);
+    void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
+    void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
+    void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
+        send_to(dst, dst_offset, (void*)bytes.data(), bytes.size_bytes());
+    }
+    template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
+
     FrameData& get_frame_data(uint32_t offset = 0);
 
     uint32_t get_total_vertices() const {
@@ -500,27 +432,16 @@ class RendererVulkan : public Renderer {
     Queue gq;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
+    StagingBuffer* staging_buffer{};
+
+    PipelineLayout bindless_layout{};
+    VkDescriptorPool bindless_pool{};
+    std::vector<Handle<Buffer>> bindless_buffers_to_update;
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
     HandleVector<RenderMesh> meshes;
     HandleVector<MeshMetadata> mesh_metadatas;
-
-    struct BindlessCombinedImage {
-        Handle<Image> handle;
-        VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
-        VkSampler sampler{};
-    };
-    struct BindlessStorageImage {
-        Handle<Image> handle;
-        VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
-    };
-    struct BindlessStorageBuffers {
-        Handle<Buffer> handle;
-    };
-    std::vector<BindlessCombinedImage> bindless_combined_images;
-    std::vector<BindlessStorageImage> bindless_storage_images;
-    std::vector<BindlessStorageBuffers> bindless_storage_buffers;
 
     HandleVector<RenderMaterial> materials;
     std::vector<components::Entity> mesh_instances;
@@ -535,21 +456,19 @@ class RendererVulkan : public Renderer {
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
-    Buffer indirect_draw_buffer;
+    Handle<Buffer> indirect_draw_buffer;
     std::array<Handle<Buffer>, 2> transform_buffers;
     Buffer mesh_instance_mesh_id_buffer;
     Buffer tlas_mesh_offsets_buffer;
     Buffer tlas_transform_buffer;
     Buffer blas_mesh_offsets_buffer;
     Buffer triangle_geo_inst_id_buffer;
-    Buffer mesh_instances_buffer;
+    Handle<Buffer> mesh_instances_buffer;
 
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
+    std::array<VkDescriptorSet, 2> bindless_sets;
     ShaderStorage shader_storage;
-    // std::deque<PipelineLayout> playouts;
-    // std::deque<Pipeline> pipelines;
-    // std::deque<DescriptorPool> descpools;
     std::deque<CommandPool> cmdpools;
     std::vector<Image> images;
     std::vector<Buffer> buffers;
