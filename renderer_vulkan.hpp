@@ -12,7 +12,6 @@
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
 #include "handle_vec.hpp"
-#include "gpu_staging_manager.hpp"
 #include "renderer_vulkan_wrappers.hpp"
 #include "engine.hpp"
 #include "common/callback.hpp"
@@ -38,6 +37,42 @@ enum class RenderFlags : uint32_t {
 
 enum class GeometryFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
 enum class RenderMeshFlags : uint32_t {};
+
+struct Buffer {
+    std::string name;
+    VkBuffer buffer{};
+    VmaAllocation allocation{};
+    VkDeviceAddress bda{};
+    void* memory{};
+    size_t capacity{ 0 };
+    size_t size{ 0 };
+    uint32_t alignment{ 0 };
+    VkBufferUsageFlags usage{};
+    bool is_bindless{ false };
+};
+
+class Image {
+  public:
+    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout);
+    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout src_layout,
+                           VkImageLayout dst_layout);
+    void _deduce_aspect(VkImageUsageFlags usage);
+    void _create_default_view(int dims);
+
+    VkImage image{};
+    VmaAllocation alloc{};
+    VkImageView view{};
+    VkFormat format{};
+    VkImageAspectFlags aspect{};
+    VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
+    VkImageUsageFlags usage{};
+    VkExtent3D extent{};
+    uint32_t mips{ 1 };
+    uint32_t layers{ 1 };
+    bool is_bindless{ false };
+};
 
 /* Used by mesh instance to index textures in the shader */
 struct RenderMaterial {
@@ -324,19 +359,6 @@ class RenderGraph {
 };
 } // namespace rendergraph
 
-struct Buffer {
-    std::string name;
-    VkBuffer buffer{};
-    VmaAllocation allocation{};
-    VkDeviceAddress bda{};
-    void* memory{};
-    size_t capacity{ 0 };
-    size_t size{ 0 };
-    uint32_t alignment{ 0 };
-    VkBufferUsageFlags usage{};
-    bool is_bindless{ false };
-};
-
 struct FrameData {
     Semaphore sem_swapchain{};
     Semaphore sem_rendering_finished{};
@@ -357,6 +379,12 @@ struct StagingBuffer {
     CommandPool** pool{};
     VkCommandBuffer cmd{};
     Buffer buffer{};
+};
+
+struct BindlessImage {
+    Image* image{};
+    VkImageLayout layout{};
+    VkSampler sampler{};
 };
 
 class RendererVulkan : public Renderer {
@@ -391,9 +419,13 @@ class RendererVulkan : public Renderer {
     void update_ddgi();
 
     // if sampler is null - it's storage image, if it's not - it's combined sampled
-    Handle<Image> make_image(Image&& img, VkImageLayout layout, VkSampler sampler = nullptr);
-    Handle<Image> make_image(Handle<Image> handle, VkImageLayout layout, VkSampler sampler = nullptr);
-    Image& get_image(Handle<Image> handle);
+    Image* allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips, uint32_t layers,
+                          VkImageUsageFlags usage);
+    Handle<Image> make_image(Image* image, VkImageLayout layout, VkSampler sampler = nullptr);
+    Handle<Image> make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips, uint32_t layers,
+                             VkImageUsageFlags usage, VkImageLayout layout, VkSampler sampler = nullptr);
+    BindlessImage& get_image(Handle<Image> handle);
+    void update_image(Handle<Image> handle, VkSampler sampler);
     void destroy_image(const Image** img);
     Handle<Buffer> make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false,
                                uint32_t alignment = 1);
@@ -436,7 +468,7 @@ class RendererVulkan : public Renderer {
 
     PipelineLayout bindless_layout{};
     VkDescriptorPool bindless_pool{};
-    std::vector<Handle<Buffer>> bindless_buffers_to_update;
+    std::vector<std::variant<Handle<Buffer>, Handle<Image>>> bindless_resources_to_update;
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
@@ -470,7 +502,9 @@ class RendererVulkan : public Renderer {
     std::array<VkDescriptorSet, 2> bindless_sets;
     ShaderStorage shader_storage;
     std::deque<CommandPool> cmdpools;
-    std::vector<Image> images;
+
+    std::forward_list<Image> image_storage;
+    std::vector<BindlessImage> images;
     std::vector<Buffer> buffers;
 
     DDGI ddgi;

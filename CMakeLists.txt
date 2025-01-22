@@ -94,7 +94,7 @@ add_executable(vkrt
     "engine.cpp"  
     "renderer_vulkan.cpp" 
     "camera.cpp"
-    "gpu_staging_manager.cpp"
+    
     "ui.cpp" 
     "scene.cpp"
     "renderer_vulkan_wrappers.cpp"   

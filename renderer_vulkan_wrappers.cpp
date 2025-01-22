@@ -3,78 +3,6 @@
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
 
-Image::Image(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers,
-             VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
-
-    int dims = -1;
-    if(width > 1) { ++dims; }
-    if(height > 1) { ++dims; }
-    if(depth > 1) { ++dims; }
-    if(dims == -1) { dims = 1; }
-    VkImageType types[]{ VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
-
-    auto iinfo = Vks(VkImageCreateInfo{
-        .flags = {},
-        .imageType = types[dims],
-        .format = format,
-        .extent = { width, height, depth },
-        .mipLevels = mips,
-        .arrayLayers = layers,
-        .samples = samples,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    });
-
-    VmaAllocationCreateInfo vmainfo{
-        .usage = VMA_MEMORY_USAGE_AUTO,
-    };
-    VK_CHECK(vmaCreateImage(get_renderer().vma, &iinfo, &vmainfo, &image, &alloc, nullptr));
-    _deduce_aspect(usage);
-    _create_default_view(dims, usage);
-
-    set_debug_name(image, name);
-    set_debug_name(view, std::format("{}_default_view", name));
-}
-
-Image::Image(const std::string& name, VkImage image, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips,
-             uint32_t layers, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage)
-    : image{ image }, format(format), mips(mips), layers(layers), width(width), height(height), depth(depth), usage(usage) {
-    int dims = -1;
-    if(width > 1) { ++dims; }
-    if(height > 1) { ++dims; }
-    if(depth > 1) { ++dims; }
-    if(dims == -1) { dims = 1; }
-
-    _deduce_aspect(usage);
-    _create_default_view(dims, usage);
-
-    set_debug_name(image, name);
-    set_debug_name(view, std::format("{}_default_view", name));
-}
-
-Image::Image(Image&& other) noexcept { *this = std::move(other); }
-
-Image& Image::operator=(Image&& other) noexcept {
-    if(image) { vkDestroyImage(get_renderer().dev, image, nullptr); }
-    if(view) { vkDestroyImageView(get_renderer().dev, view, nullptr); }
-    image = std::exchange(other.image, nullptr);
-    alloc = std::exchange(other.alloc, nullptr);
-    view = std::exchange(other.view, nullptr);
-    format = other.format;
-    aspect = other.aspect;
-    current_layout = other.current_layout;
-    width = other.width;
-    height = other.height;
-    depth = other.depth;
-    mips = other.mips;
-    layers = other.layers;
-    usage = other.usage;
-    return *this;
-}
-
 void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                               VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout) {
     transition_layout(cmd, src_stage, src_access, dst_stage, dst_access, current_layout, dst_layout);
@@ -108,7 +36,6 @@ void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_sta
 
 void Image::_deduce_aspect(VkImageUsageFlags usage) {
     aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-
     if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
         if(format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D16_UNORM) {
             aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -122,9 +49,9 @@ void Image::_deduce_aspect(VkImageUsageFlags usage) {
     }
 }
 
-void Image::_create_default_view(int dims, VkImageUsageFlags usage) {
-    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
-
+void Image::_create_default_view(int dims) {
+    --dims;
+    VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
     auto ivinfo = Vks(VkImageViewCreateInfo{
         .image = image,
         .viewType = view_types[dims],
@@ -161,7 +88,7 @@ VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo info) {
     return sampler;
 }
 
-CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) {
+CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) noexcept {
     auto info = Vks(VkCommandPoolCreateInfo{
         .flags = flags,
         .queueFamilyIndex = queue_index,
