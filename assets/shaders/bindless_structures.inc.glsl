@@ -30,21 +30,17 @@
 #define ENG_TYPE_MAT4 mat4
 
 #define BINDLESS_GET_LAYOUT_NAME(Name) Name##BindlessArray
-#define BINDLESS_GET_LAYOUT_NAME_IMAGE(Dim, Format) StorageImages##BindlessArray##Dim##Format
-#define BINDLESS_GET_LAYOUT_NAME_COMBINED(Dim) CombinedImages##BindlessArray##Dim
 
 #define BINDLESS_DECLARE_STORAGE_BUFFER(access, name, data) \
 	layout(scalar, set=0, binding=BINDLESS_STORAGE_BUFFER_BINDING) access buffer name data BINDLESS_GET_LAYOUT_NAME(name)[]
 
-#define BINDLESS_DECLARE_IMAGE(access, format, dim) \
-	layout(set=0, binding=BINDLESS_STORAGE_IMAGE_BINDING, format) uniform image##dim BINDLESS_GET_LAYOUT_NAME_IMAGE(dim, format)[]
+#define BINDLESS_DECLARE_IMAGE(access, name, format, dim) \
+	layout(set=0, binding=BINDLESS_STORAGE_IMAGE_BINDING, format) uniform image##dim BINDLESS_GET_LAYOUT_NAME(name)[]
 
-#define BINDLESS_DECLARE_COMBINED_IMAGE(dim) \
-	layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler##dim BINDLESS_GET_LAYOUT_NAME_COMBINED(dim)[]
+#define BINDLESS_DECLARE_COMBINED_IMAGE(dim, name) \
+	layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler##dim BINDLESS_GET_LAYOUT_NAME(name)[]
 
-#define GetResource(name, index) BINDLESS_GET_LAYOUT_NAME(name)[index]
-#define GetImage(index, dim, format) BINDLESS_GET_LAYOUT_NAME_IMAGE(dim, format)[index]
-#define GetCombined(index, dim) BINDLESS_GET_LAYOUT_NAME_COMBINED(dim)[index]
+#define GetResource(name, index) BINDLESS_GET_LAYOUT_NAME(name)[nonuniformEXT(index)]
 
 #elif __cplusplus
 #define ENG_TYPE_IVEC2 glm::ivec2
@@ -71,7 +67,26 @@ struct GPUConstants {
 	ENG_TYPE_MAT3 rand_mat;
 };
 
+/* unpacked mesh instance for gpu consumption */
+struct GPUMeshInstance {
+    ENG_TYPE_UINT vertex_offset;
+    ENG_TYPE_UINT index_offset;
+    ENG_TYPE_UINT color_texture_idx;
+    ENG_TYPE_UINT normal_texture_idx;
+    ENG_TYPE_UINT metallic_roughness_idx;
+};
+
+struct GPUVertexAttribute {
+	ENG_TYPE_VEC3 normal;
+	ENG_TYPE_VEC2 uv;
+	ENG_TYPE_VEC4 tangent;
+};
+
 #ifdef VULKAN
+BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUIndicesBuffer, {
+	uint32_t at[];
+});
+
 BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUConstantsBuffer, {
 	GPUConstants constants;
 });
@@ -80,6 +95,43 @@ BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUVertexPositionsBuffer, {
 	ENG_TYPE_VEC3 at[];
 });
 
-BINDLESS_DECLARE_IMAGE(, rgba8, 2D);
-BINDLESS_DECLARE_COMBINED_IMAGE(2D);
+BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUVertexAttributesBuffer, {
+	GPUVertexAttribute at[];
+});
+
+BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUMeshInstancesBuffer, {
+	GPUMeshInstance at[];
+});
+
+BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUTransformsBuffer, {
+	ENG_TYPE_MAT4 at[];
+});
+
+BINDLESS_DECLARE_IMAGE(, StorageImages2Drgba8, rgba8, 2D);
+BINDLESS_DECLARE_COMBINED_IMAGE(2D, CombinedImages2D);
+
+// ---
+
+vec3 get_vertex_position(uint32_t buffer_index, uint32_t vertex_index) {
+	return GetResource(GPUVertexPositionsBuffer, buffer_index).at[vertex_index];
+}
+
+struct Vertex {
+	vec3 position;
+	vec3 normal;
+	vec2 uv;
+	vec3 tangent;
+};
+Vertex get_vertex(uint32_t position_index, uint32_t attributes_index, uint32_t vertex_index) {
+	Vertex vx;
+	vx.position = GetResource(GPUVertexPositionsBuffer, position_index).at[vertex_index];
+	vx.normal = GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].normal;
+	vx.uv = GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].uv;
+	vx.tangent = GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].tangent.xyz;
+	vx.tangent *= GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].tangent.w;
+	return vx;
+}
+
+
+
 #endif

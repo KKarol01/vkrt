@@ -318,7 +318,8 @@ void RendererVulkan::initialize_resources() {
     vertex_attributes_buffer = make_buffer("vertex_attributes_buffer", 0ull,
                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     index_buffer = make_buffer("index_buffer", 0ull,
-                               VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
 
     auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -439,8 +440,12 @@ void RendererVulkan::initialize_resources() {
                 fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
                 fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
                 fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);*/
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, 4, &r.vertex_positions_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 4, 4, &r.get_frame_data().constants.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, 4, &r.index_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 4, 4, &r.vertex_positions_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 8, 4, &r.vertex_attributes_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 12, 4, &r.get_frame_data().constants.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 16, 4, &r.mesh_instances_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 20, 4, &r.transform_buffers[0].handle);
                 vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer, sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
                 // clang-format on
                 vkCmdEndRendering(cmd);
@@ -526,7 +531,7 @@ void RendererVulkan::update() {
     if(screen_rect.w * screen_rect.h == 0.0f) { return; }
     if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
     if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES)) {
-        upload_instances();
+        bake_indirect_commands();
         upload_transforms();
     }
     if(flags.test_clear(RenderFlags::DIRTY_BLAS_BIT)) { build_blas(); }
@@ -593,6 +598,7 @@ void RendererVulkan::update() {
                                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
     ImageStatefulBarrier offset_image_barrier{ *ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
                                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
+#endif
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
         std::swap(transform_buffers[0], transform_buffers[1]);
@@ -601,25 +607,27 @@ void RendererVulkan::update() {
             .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
             .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .buffer = transform_buffers[0]->buffer,
+            .buffer = get_buffer(transform_buffers[0]).buffer,
             .size = VK_WHOLE_SIZE,
         });
         auto dep_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &buf_barr1 });
-        if(transform_buffers[0]->capacity < transform_buffers[1]->size) {
-            transform_buffers[0]->resize(transform_buffers[1]->size);
-            buf_barr1.buffer = transform_buffers[0]->buffer;
+        if(get_buffer(transform_buffers[0]).capacity < get_buffer(transform_buffers[1]).size) {
+            resize_buffer(transform_buffers[0], get_buffer(transform_buffers[1]).size);
+            buf_barr1.buffer = get_buffer(transform_buffers[0]).buffer;
             vkCmdPipelineBarrier2(cmd, &dep_info);
         }
-        VkBufferCopy copy{ .size = transform_buffers[1]->size };
-        vkCmdCopyBuffer(cmd, transform_buffers[1]->buffer, transform_buffers[0]->buffer, 1, &copy);
+        VkBufferCopy copy{ .size = get_buffer(transform_buffers[1]).size };
+        vkCmdCopyBuffer(cmd, get_buffer(transform_buffers[1]).buffer, get_buffer(transform_buffers[0]).buffer, 1, &copy);
         vkCmdPipelineBarrier2(cmd, &dep_info);
-        transform_buffers[0]->size = transform_buffers[1]->size;
+        get_buffer(transform_buffers[0]).size = get_buffer(transform_buffers[1]).size;
+        staging_buffer->begin();
         for(auto e : update_positions) {
             const auto idx = mesh_instance_idxs.at(e);
             const auto offset = idx * sizeof(glm::mat4);
             const auto& t = Engine::get().ecs_storage->get<components::Transform>(e);
             const auto& r = Engine::get().ecs_storage->get<components::Renderable>(e);
-            vkCmdUpdateBuffer(cmd, transform_buffers[0]->buffer, offset, sizeof(glm::mat4), &t);
+            staging_buffer->send(get_buffer(transform_buffers[0]), offset, std::as_bytes(std::span{ &t, 1 }));
+            /*vkCmdUpdateBuffer(cmd, get_buffer(transform_buffers[0]).buffer, offset, sizeof(glm::mat4), &t);*/
             if(true /*r.mesh_handle->metadata->blas*/) {
                 // assert(false && "TODO: Check if this is correct");
                 ENG_WARN("TODO: update tlas on transform change");
@@ -627,11 +635,14 @@ void RendererVulkan::update() {
                 // flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
             }
         }
+        staging_buffer->stage();
         buf_barr1.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
         buf_barr1.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        vkCmdPipelineBarrier2(cmd, &dep_info);
         update_positions.clear();
     }
 
+#if 0
     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     gcolor_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -973,7 +984,6 @@ Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
                              VkExtent3D{ .width = desc.width, .height = desc.height, .depth = 1u }, desc.mips, 1u,
                              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                              samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
-
     upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
     return handle;
 }
@@ -1075,6 +1085,7 @@ void RendererVulkan::upload_staged_models() {
         attributes.push_back(e.tang.x);
         attributes.push_back(e.tang.y);
         attributes.push_back(e.tang.z);
+        attributes.push_back(e.tang.w);
     }
     send_to(vertex_positions_buffer, ~0ull, std::as_bytes(std::span{ positions }));
     send_to(vertex_attributes_buffer, ~0ull, std::as_bytes(std::span{ attributes }));
@@ -1083,7 +1094,7 @@ void RendererVulkan::upload_staged_models() {
     upload_indices.clear();
 }
 
-void RendererVulkan::upload_instances() {
+void RendererVulkan::bake_indirect_commands() {
     std::sort(mesh_instances.begin(), mesh_instances.end(), [](auto a, auto b) {
         const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
         const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
@@ -1117,7 +1128,7 @@ void RendererVulkan::upload_instances() {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
                                                                       .instanceCount = 1,
                                                                       .firstIndex = geom.index_offset,
-                                                                      .vertexOffset = (int32_t)(geom.vertex_offset),
+                                                                      .vertexOffset = (int32_t)geom.vertex_offset, /*(int32_t)(geom.vertex_offset),*/
                                                                       .firstInstance = i });
         } else {
             ++gpu_draw_commands.back().instanceCount;
@@ -1138,7 +1149,7 @@ void RendererVulkan::upload_instances() {
     if(!mesh_instances_buffer) {
         mesh_instances_buffer = make_buffer("mesh instances", gpu_mesh_instances.size() * sizeof(gpu_mesh_instances[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     }
-    send_to(mesh_instances_buffer, 0ull, std::as_bytes(std::span{mesh_instances}));
+    send_to(mesh_instances_buffer, 0ull, std::as_bytes(std::span{gpu_mesh_instances}));
     // clang-format on
 }
 
@@ -1535,9 +1546,9 @@ void RendererVulkan::update_ddgi() {
 Image* RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
                                       uint32_t layers, VkImageUsageFlags usage) {
     const auto info = Vks(VkImageCreateInfo{
-        .imageType = extent.depth > 0    ? VK_IMAGE_TYPE_3D
-                     : extent.height > 0 ? VK_IMAGE_TYPE_2D
-                     : extent.width > 0  ? VK_IMAGE_TYPE_1D
+        .imageType = extent.depth > 1    ? VK_IMAGE_TYPE_3D
+                     : extent.height > 1 ? VK_IMAGE_TYPE_2D
+                     : extent.width > 1  ? VK_IMAGE_TYPE_1D
                                          : VK_IMAGE_TYPE_MAX_ENUM,
         .format = format,
         .extent =
@@ -1556,7 +1567,7 @@ Image* RendererVulkan::allocate_image(const std::string& name, VkFormat format, 
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
     VK_CHECK(vmaCreateImage(vma, &info, &vma_info, &img.image, &img.alloc, nullptr));
     img._deduce_aspect(img.usage);
-    img._create_default_view(extent.depth > 0 ? 3 : extent.height > 0 ? 2 : extent.width > 0 ? 1 : 0);
+    img._create_default_view(extent.depth > 1 ? 3 : extent.height > 1 ? 2 : extent.width > 1 ? 1 : 0);
     set_debug_name(img.image, std::format("image_{}", name));
     set_debug_name(img.view, std::format("image_{}_default_view", name));
     image_storage.push_front(img);
@@ -1640,9 +1651,8 @@ void RendererVulkan::destroy_buffer(Handle<Buffer> handle) { assert(false); }
 
 void RendererVulkan::resize_buffer(Handle<Buffer> handle, size_t new_size) {
     auto& old_buffer = get_buffer(handle);
-    if(new_size < old_buffer.capacity) {
-        old_buffer.capacity = new_size;
-        old_buffer.size = std::min(old_buffer.size, new_size);
+    if(new_size <= old_buffer.capacity) {
+        old_buffer.size = new_size;
         return;
     }
     auto new_buffer = allocate_buffer(old_buffer.name, new_size, old_buffer.usage, !!old_buffer.memory, old_buffer.alignment);

@@ -113,15 +113,6 @@ struct RenderMesh {
 //     Handle<RenderMaterial> material;
 // };
 
-/* unpacked mesh instance for gpu consumption */
-struct GPUMeshInstance {
-    uint32_t vertex_offset{};
-    uint32_t index_offset{};
-    uint32_t color_texture_idx;
-    uint32_t normal_texture_idx;
-    uint32_t metallic_roughness_idx;
-};
-
 struct DDGI {
     struct GPULayout {
         glm::ivec2 radiance_tex_size;
@@ -410,7 +401,7 @@ class RendererVulkan : public Renderer {
 
     void upload_model_textures();
     void upload_staged_models();
-    void upload_instances();
+    void bake_indirect_commands();
     void upload_transforms();
     void update_bindless_set();
 
