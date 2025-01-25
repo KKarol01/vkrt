@@ -49,10 +49,9 @@ void Camera::update() {
 }
 
 void Camera::on_mouse_move(float px, float py) {
-    const float dt = Engine::get().delta_time() * 5.0f;
     if(enabled) {
-        pitch += glm::radians((lpy - py) * dt) * 20.0f;
-        yaw += glm::radians((lpx - px) * dt) * 20.0f;
+        pitch += glm::radians((lpy - py));
+        yaw += glm::radians((lpx - px));
         pitch = glm::clamp(pitch, -glm::half_pi<float>(), glm::half_pi<float>());
     }
     lpx = px;

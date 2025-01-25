@@ -74,6 +74,15 @@ class Image {
     bool is_bindless{ false };
 };
 
+struct BindlessImage {
+    inline static uint32_t last_storage_index{};
+    inline static uint32_t last_combined_index{};
+    uint32_t image_index{ ~0ul };
+    uint32_t descriptor_index{ ~0ul };
+    VkImageLayout layout{};
+    VkSampler sampler{}; // if sampler is null, it's a storage image decsriptor binding
+};
+
 /* Used by mesh instance to index textures in the shader */
 struct RenderMaterial {
     Handle<Image> color_texture;
@@ -244,6 +253,8 @@ struct Pipeline {
 
 namespace rendergraph {
 
+constexpr uint32_t swapchain_index = ~0ul;
+
 enum class AccessType { NONE_BIT = 0x0, READ_BIT = 0x1, WRITE_BIT = 0x2, READ_WRITE_BIT = 0x3 };
 enum class ResourceType {
     STORAGE_IMAGE = 0x1,
@@ -270,7 +281,7 @@ struct RasterizationSettings {
     }
     uint32_t num_col_formats{ 1 };
     std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
-    VkFormat dep_format{ VK_FORMAT_D16_UNORM };
+    VkFormat dep_format{ VK_FORMAT_D24_UNORM_S8_UINT };
     VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
     bool depth_test{ false };
     VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
@@ -372,12 +383,6 @@ struct StagingBuffer {
     Buffer buffer{};
 };
 
-struct BindlessImage {
-    Image* image{};
-    VkImageLayout layout{};
-    VkSampler sampler{};
-};
-
 class RendererVulkan : public Renderer {
   public:
     void init() final;
@@ -386,6 +391,7 @@ class RendererVulkan : public Renderer {
     void initialize_imgui();
     void initialize_resources();
     void create_window_sized_resources();
+    void build_render_graph();
 
     void update() final;
 
@@ -409,14 +415,17 @@ class RendererVulkan : public Renderer {
     void build_tlas();
     void update_ddgi();
 
-    // if sampler is null - it's storage image, if it's not - it's combined sampled
-    Image* allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips, uint32_t layers,
-                          VkImageUsageFlags usage);
-    Handle<Image> make_image(Image* image, VkImageLayout layout, VkSampler sampler = nullptr);
-    Handle<Image> make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips, uint32_t layers,
-                             VkImageUsageFlags usage, VkImageLayout layout, VkSampler sampler = nullptr);
-    BindlessImage& get_image(Handle<Image> handle);
-    void update_image(Handle<Image> handle, VkSampler sampler);
+    Image allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips, uint32_t layers,
+                         VkImageUsageFlags usage);
+    Handle<Image> make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
+                             uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout, VkSampler sampler);
+    Handle<Image> make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
+                             uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout);
+    Handle<Image> make_image(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
+    Handle<Image> make_image(Handle<Image> image, VkImageLayout layout);
+    Image& get_image(Handle<Image> handle);
+    uint32_t get_image_index(Handle<Image> handle);
+    // void update_image(Handle<Image> handle, VkSampler sampler);
     void destroy_image(const Image** img);
     Handle<Buffer> make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false,
                                uint32_t alignment = 1);
@@ -494,8 +503,8 @@ class RendererVulkan : public Renderer {
     ShaderStorage shader_storage;
     std::deque<CommandPool> cmdpools;
 
-    std::forward_list<Image> image_storage;
-    std::vector<BindlessImage> images;
+    std::vector<Image> images;
+    std::vector<BindlessImage> bindless_images;
     std::vector<Buffer> buffers;
 
     DDGI ddgi;

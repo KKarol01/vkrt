@@ -353,23 +353,13 @@ void RendererVulkan::initialize_resources() {
         fd.sem_rendering_finished = Semaphore{ dev, false };
         fd.fen_rendering_finished = Fence{ dev, true };
         fd.cmdpool = cmdgq1;
-        fd.constants = make_buffer(std::format("constants_{}", i), 512,
+        fd.constants = make_buffer(std::format("constants_{}", i), 512ul,
                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
         transform_buffers[i] = make_buffer(std::format("transform_buffer_{}", i), 0ull,
                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     }
-    create_window_sized_resources();
 
-    /*   DescriptorLayout dl_default{ .bindings = { { { &tlas },
-                                                    { ddgi.radiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
-                                                    { ddgi.radiance_texture },
-                                                    { ddgi.irradiance_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
-                                                    { ddgi.visibility_texture, 1, VK_IMAGE_LAYOUT_GENERAL, samp_ll },
-                                                    { ddgi.probe_offsets_texture },
-                                                    { ddgi.irradiance_texture },
-                                                    { ddgi.visibility_texture } } },
-                                    .variable_binding = 15 };
-       dl_default.bindings[15] = { &textures.data_storage(), 1024, samp_lr };*/
+    create_window_sized_resources();
 
     {
         std::vector<std::filesystem::path> shaders;
@@ -380,124 +370,29 @@ void RendererVulkan::initialize_resources() {
         shader_storage.precompile_shaders(shaders);
     }
 
-    for(auto& fd : frame_datas) {
-        fd.render_graph.add_pass(rendergraph::RenderPass{ 
-            .accesses = {
-                rendergraph::Access{
-                    { 0, rendergraph::ResourceType::COLOR_ATTACHMENT,
-                         rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT | rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT },
-                    rendergraph::AccessType::WRITE_BIT,
-                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                },
-            },
-            .shaders = {
-                "default_unlit/unlit.vert.glsl",
-                "default_unlit/unlit.frag.glsl",
-            },
-            .pipeline_settings = rendergraph::RasterizationSettings{
-                
-            },
-            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
-                auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
-                    .imageView = r.swapchain.images.at(swapchain_index).view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-                });
-
-                VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
-                auto r_dep_att = Vks(VkRenderingAttachmentInfo{
-                    .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).image->view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .depthStencil = { 1.0f, 0 } },
-                });
-
-                auto rendering_info = Vks(VkRenderingInfo{
-                    .renderArea = { .extent = { .width = (uint32_t)r.screen_rect.w, .height = (uint32_t)r.screen_rect.h } },
-                    .layerCount = 1,
-                    .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
-                    .pColorAttachments = r_col_atts,
-                    .pDepthAttachment = &r_dep_att,
-                });
-
-                vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindDescriptorSets(cmd,pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_sets[0], 0, nullptr);
-                vkCmdBeginRendering(cmd, &rendering_info);
-                VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
-                VkViewport r_view_1{
-                    .x = 0.0f, .y = r.screen_rect.h, .width = r.screen_rect.w, .height = -r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
-                };
-                vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-                vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-                // clang-format off
-                /*fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
-                fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-                fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
-                fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);*/
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, 4, &r.index_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 4, 4, &r.vertex_positions_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 8, 4, &r.vertex_attributes_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 12, 4, &r.get_frame_data().constants.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 16, 4, &r.mesh_instances_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 20, 4, &r.transform_buffers[0].handle);
-                vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer, sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
-                // clang-format on
-                vkCmdEndRendering(cmd);
-            } })
-        .add_pass(rendergraph::RenderPass{
-            .accesses = {
-                rendergraph::Access{
-                    {0, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT},
-                    rendergraph::AccessType::NONE_BIT,
-                    VK_PIPELINE_STAGE_2_NONE,
-                    VK_ACCESS_2_NONE,
-                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                },
-            }
-        })
-        .bake();
-    }
-
-    // Pipeline* pp_lit = &pipelines.emplace_back(Pipeline{
-    //     { "default_unlit/default.vert.glsl", "default_unlit/default.frag.glsl" }, pl_default, raster_settings_lit });
-    // Pipeline* pp_ddgi_radiance =
-    //     &pipelines.emplace_back(Pipeline{ { "rtbasic/raygen.rgen.glsl", "rtbasic/miss.rmiss.glsl", "rtbasic/shadow.rmiss.glsl",
-    //                                         "rtbasic/closest_hit.rchit.glsl", "rtbasic/shadow.rchit.glsl" },
-    //                                       pl_default,
-    //                                       Pipeline::RaytracingSettings{ .recursion_depth = 2 } });
-    // Pipeline* pp_ddgi_irradiance =
-    //     &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_irradiance.comp.glsl" }, pl_default, raster_settings_default });
-    // Pipeline* pp_ddgi_offsets =
-    //     &pipelines.emplace_back(Pipeline{ { "rtbasic/probe_offset.comp.glsl" }, pl_default, raster_settings_default });
-
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
         auto allocate_info = Vks(VkDescriptorSetAllocateInfo{
             .descriptorPool = bindless_pool, .descriptorSetCount = 1, .pSetLayouts = &bindless_layout.descriptor_layout });
         VK_CHECK(vkAllocateDescriptorSets(dev, &allocate_info, &bindless_sets[i]));
     }
+
+    build_render_graph();
 }
 
 void RendererVulkan::create_window_sized_resources() {
-    gq.wait_idle();
     swapchain.create(frame_datas.size(), screen_rect.w, screen_rect.h);
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
 
-        fd.gbuffer.color_image =
-            make_image(std::format("g_color_{}", i), VK_FORMAT_R8G8B8A8_SRGB,
-                       VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                       VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                       samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
+        fd.gbuffer.color_image = make_image(std::format("g_color_{}", i), VK_FORMAT_R8G8B8A8_SRGB,
+                                            VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
+                                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                            samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
         fd.gbuffer.depth_buffer_image =
-            make_image(std::format("g_depth_{}", i), VK_FORMAT_D16_UNORM,
+            make_image(std::format("g_depth_{}", i), VK_FORMAT_D24_UNORM_S8_UINT,
                        VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
@@ -527,6 +422,144 @@ void RendererVulkan::create_window_sized_resources() {
     }
 }
 
+void RendererVulkan::build_render_graph() {
+    for(auto& fd : frame_datas) {
+        fd.render_graph.passes.clear();
+        fd.render_graph.add_pass(rendergraph::RenderPass{ 
+            .accesses = {
+                rendergraph::Access{
+                    { get_image_index(fd.gbuffer.color_image), rendergraph::ResourceType::COLOR_ATTACHMENT,
+                         rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    rendergraph::AccessType::WRITE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                },
+                rendergraph::Access{
+                    { get_image_index(fd.gbuffer.depth_buffer_image), rendergraph::ResourceType::COLOR_ATTACHMENT,
+                         rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    rendergraph::AccessType::READ_WRITE_BIT,
+                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                },
+            },
+            .shaders = {
+                "default_unlit/unlit.vert.glsl",
+                "default_unlit/unlit.frag.glsl",
+            },
+            .pipeline_settings = rendergraph::RasterizationSettings{
+                .depth_test = true
+            },
+            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
+                auto& r = get_renderer();
+                auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
+                    .imageView = r.get_image(r.get_frame_data().gbuffer.color_image).view,
+                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+                });
+
+                VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
+                auto r_dep_att = Vks(VkRenderingAttachmentInfo{
+                    .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).view,
+                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .depthStencil = { 1.0f, 0 } },
+                });
+
+                auto rendering_info = Vks(VkRenderingInfo{
+                    .renderArea = { .extent = { .width = (uint32_t)r.screen_rect.w, .height = (uint32_t)r.screen_rect.h } },
+                    .layerCount = 1,
+                    .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
+                    .pColorAttachments = r_col_atts,
+                    .pDepthAttachment = &r_dep_att,
+                });
+
+                vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindDescriptorSets(cmd,pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_sets[0], 0, nullptr);
+                vkCmdBeginRendering(cmd, &rendering_info);
+                VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
+                VkViewport r_view_1{
+                    .x = 0.0f, .y = r.screen_rect.h, .width = r.screen_rect.w, .height = -r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+                };
+                vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
+                vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, 4, &r.index_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 4, 4, &r.vertex_positions_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 8, 4, &r.vertex_attributes_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 12, 4, &r.get_frame_data().constants.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 16, 4, &r.mesh_instances_buffer.handle);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 20, 4, &r.transform_buffers[0].handle);
+                vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer, sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+                vkCmdEndRendering(cmd);
+            } })
+        .add_pass(rendergraph::RenderPass{
+            .accesses = {
+                rendergraph::Access{
+                    {rendergraph::swapchain_index, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT | rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    rendergraph::AccessType::WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                },
+                rendergraph::Access{
+                    { get_image_index(fd.gbuffer.color_image), rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    rendergraph::AccessType::READ_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                },
+            },
+            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass&) {
+                if(get_renderer().flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) { return; }
+                    ImDrawData* im_draw_data = ImGui::GetDrawData();
+                    if(im_draw_data) {
+                        VkRenderingAttachmentInfo r_col_atts[]{
+                            Vks(VkRenderingAttachmentInfo{
+                                .imageView = get_renderer().swapchain.images.at(swapchain_index).view,
+                                .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+                            }),
+                        };
+                        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)get_renderer().screen_rect.w, (uint32_t)get_renderer().screen_rect.h } };
+                        VkViewport r_view_1{
+                            .x = 0.0f, .y = get_renderer().screen_rect.h, .width = get_renderer().screen_rect.w, .height = -get_renderer().screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+                        };
+                        auto rendering_info = Vks(VkRenderingInfo{
+                            .renderArea = { .extent = { .width = (uint32_t)get_renderer().screen_rect.w, .height = (uint32_t)get_renderer().screen_rect.h } },
+                            .layerCount = 1,
+                            .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
+                            .pColorAttachments = r_col_atts,
+                        });
+                        /*swapchain_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);*/
+                        vkCmdBeginRendering(cmd, &rendering_info);
+                        vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
+                        vkCmdSetViewport(cmd, 0, 1, &r_view_1);
+                        ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
+                        vkCmdEndRendering(cmd);
+                    }
+            },
+        })
+        .add_pass(rendergraph::RenderPass{
+            .accesses = {
+                rendergraph::Access{
+                    {rendergraph::swapchain_index, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT  },
+                    rendergraph::AccessType::NONE_BIT,
+                    VK_PIPELINE_STAGE_2_NONE,
+                    VK_ACCESS_2_NONE,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                },
+            }
+        })
+        .bake();
+    }
+}
+
 void RendererVulkan::update() {
     if(screen_rect.w * screen_rect.h == 0.0f) { return; }
     if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
@@ -540,10 +573,10 @@ void RendererVulkan::update() {
         update_ddgi();
         // TODO: prepare ddgi on scene update
     }
-    // if(flags.test_clear(RendererFlags::UPLOAD_MESH_INSTANCE_TRANSFORMS_BIT)) { upload_transforms(); }
     if(flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
         gq.wait_idle();
         create_window_sized_resources();
+        build_render_graph();
     }
     if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) { update_bindless_set(); }
 
@@ -583,23 +616,6 @@ void RendererVulkan::update() {
 
     auto cmd = fd.cmdpool->begin_onetime();
 
-#if 0
-    ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image };
-    ImageStatefulBarrier gcolor_image_barrier{ *fd.gbuffer.color_image };
-    ImageStatefulBarrier gview_positions_image_barrier{ *fd.gbuffer.view_space_positions_image };
-    ImageStatefulBarrier gview_normals_image_barrier{ *fd.gbuffer.view_space_normals_image };
-    ImageStatefulBarrier gdepth_image_barrier{ *fd.gbuffer.depth_buffer_image };
-    ImageStatefulBarrier gao_image_barrier{ *fd.gbuffer.ambient_occlusion_image };
-    ImageStatefulBarrier radiance_image_barrier{ *ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                 VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT };
-    ImageStatefulBarrier irradiance_image_barrier{ *ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-    ImageStatefulBarrier visibility_image_barrier{ *ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-    ImageStatefulBarrier offset_image_barrier{ *ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL,
-                                               VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT };
-#endif
-
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
         std::swap(transform_buffers[0], transform_buffers[1]);
         auto buf_barr1 = Vks(VkBufferMemoryBarrier2{
@@ -627,12 +643,10 @@ void RendererVulkan::update() {
             const auto& t = Engine::get().ecs_storage->get<components::Transform>(e);
             const auto& r = Engine::get().ecs_storage->get<components::Renderable>(e);
             staging_buffer->send(get_buffer(transform_buffers[0]), offset, std::as_bytes(std::span{ &t, 1 }));
-            /*vkCmdUpdateBuffer(cmd, get_buffer(transform_buffers[0]).buffer, offset, sizeof(glm::mat4), &t);*/
-            if(true /*r.mesh_handle->metadata->blas*/) {
+            if(false /*r.mesh_handle->metadata->blas*/) {
                 // assert(false && "TODO: Check if this is correct");
                 ENG_WARN("TODO: update tlas on transform change");
-                flags.set(RenderFlags::DIRTY_TLAS_BIT);
-                // flags.set(RendererFlags::DIRTY_TLAS_BIT); // TODO: SHould be refit tlas
+                // flags.set(RenderFlags::DIRTY_TLAS_BIT);
             }
         }
         staging_buffer->stage();
@@ -642,287 +656,7 @@ void RendererVulkan::update() {
         update_positions.clear();
     }
 
-#if 0
-    swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    gcolor_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    gview_positions_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    gview_normals_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    gdepth_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-    gao_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-    if(tlas && ddgi.buffer.buffer) {
-        ddgi.buffer.push_data(&frame_num, sizeof(uint32_t), offsetof(DDGI::GPULayout, frame_num));
-
-        const uint32_t handle_size_aligned = align_up(rt_props.shaderGroupHandleSize, rt_props.shaderGroupHandleAlignment);
-
-        auto raygen_sbt = Vks(VkStridedDeviceAddressRegionKHR{
-            .deviceAddress = fd.passes.ddgi_radiance.pipeline->raytracing_settings.sbt->bda,
-            .stride = handle_size_aligned,
-            .size = handle_size_aligned * 1,
-        });
-        auto miss_sbt = Vks(VkStridedDeviceAddressRegionKHR{
-            .deviceAddress = fd.passes.ddgi_radiance.pipeline->raytracing_settings.sbt->bda,
-            .stride = handle_size_aligned,
-            .size = handle_size_aligned * 2,
-        });
-        auto hit_sbt = Vks(VkStridedDeviceAddressRegionKHR{
-            .deviceAddress = fd.passes.ddgi_radiance.pipeline->raytracing_settings.sbt->bda,
-            .stride = handle_size_aligned,
-            .size = handle_size_aligned * 2,
-        });
-
-        auto callable_sbt = Vks(VkStridedDeviceAddressRegionKHR{});
-
-        const auto* window = Engine::get().window;
-        uint32_t mode = 0;
-        // clang-format off
-        fd.passes.ddgi_radiance.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &vertex_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &index_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 4 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 5 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &tlas_mesh_offsets_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 6 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &blas_mesh_offsets_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 7 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &triangle_geo_inst_id_buffer.bda);
-        fd.passes.ddgi_radiance.push_constant(cmd, 8 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
-        // clang-format on
-
-        fd.passes.ddgi_radiance.update_desc_sets();
-        fd.passes.ddgi_radiance.bind(cmd);
-        fd.passes.ddgi_radiance.bind_desc_sets(cmd);
-
-        // radiance pass
-        mode = 1;
-        fd.passes.ddgi_radiance.push_constant(cmd, 9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdTraceRaysKHR(cmd, &raygen_sbt, &miss_sbt, &hit_sbt, &callable_sbt, ddgi.rays_per_probe,
-                          ddgi.probe_counts.x * ddgi.probe_counts.y * ddgi.probe_counts.z, 1);
-
-        radiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-
-        fd.passes.ddgi_irradiance.update_desc_sets();
-        fd.passes.ddgi_irradiance.bind(cmd);
-        fd.passes.ddgi_irradiance.bind_desc_sets(cmd);
-
-        // irradiance pass, only need radiance texture
-        mode = 0;
-        fd.passes.ddgi_irradiance.push_constant(cmd, 9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdDispatch(cmd, std::ceilf((float)ddgi.irradiance_texture->width / 8u),
-                      std::ceilf((float)ddgi.irradiance_texture->height / 8u), 1u);
-
-        // visibility pass, only need radiance texture
-        mode = 1;
-        fd.passes.ddgi_irradiance.push_constant(cmd, 9 * sizeof(VkDeviceAddress), sizeof(mode), &mode);
-        vkCmdDispatch(cmd, std::ceilf((float)ddgi.visibility_texture->width / 8u),
-                      std::ceilf((float)ddgi.visibility_texture->height / 8u), 1u);
-
-        // probe offset pass, only need radiance texture to complete
-        fd.passes.ddgi_offsets.bind(cmd);
-        vkCmdDispatch(cmd, std::ceilf((float)ddgi.probe_offsets_texture->width / 8.0f),
-                      std::ceilf((float)ddgi.probe_offsets_texture->height / 8.0f), 1u);
-
-        irradiance_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        visibility_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        offset_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-    }
-
-    // default pass
-    {
-        auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
-            .imageView = fd.gbuffer.color_image->view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-        });
-        auto r_col_att_2 = Vks(VkRenderingAttachmentInfo{
-            .imageView = fd.gbuffer.view_space_positions_image->view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 0.0f } },
-        });
-        auto r_col_att_3 = Vks(VkRenderingAttachmentInfo{
-            .imageView = fd.gbuffer.view_space_normals_image->view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .color = { 0.0f, 0.0f, -1.0f, 0.0f } },
-        });
-
-        VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1, r_col_att_2, r_col_att_3 };
-        auto r_dep_att = Vks(VkRenderingAttachmentInfo{
-            .imageView = fd.gbuffer.depth_buffer_image->view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .depthStencil = { 1.0f, 0 } },
-        });
-
-        auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = (uint32_t)screen_rect.w, .height = (uint32_t)screen_rect.h } },
-            .layerCount = 1,
-            .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
-            .pColorAttachments = r_col_atts,
-            .pDepthAttachment = &r_dep_att,
-        });
-
-        VkDeviceSize vb_offsets[]{ 0 };
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, vb_offsets);
-        vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        fd.passes.default_lit.update_desc_sets();
-        fd.passes.default_lit.bind(cmd);
-        fd.passes.default_lit.bind_desc_sets(cmd);
-
-        vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
-        VkViewport r_view_1{
-            .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
-        };
-        vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-        vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-        // clang-format off
-        fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
-        fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &transform_buffers[0]->bda);
-        fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);
-        // clang-format on
-        vkCmdDrawIndexedIndirectCount(cmd, indirect_draw_buffer.buffer, sizeof(IndirectDrawCommandBufferHeader),
-                                      indirect_draw_buffer.buffer, 0ull, max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
-        vkCmdEndRendering(cmd);
-    }
-
-    {
-        auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
-            .imageView = fd.gbuffer.ambient_occlusion_image->view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-        });
-
-        VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
-        auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = (uint32_t)screen_rect.w, .height = (uint32_t)screen_rect.h } },
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = r_col_atts,
-        });
-
-        fd.passes.rect_depth_buffer.update_desc_sets();
-        fd.passes.rect_depth_buffer.bind(cmd);
-        fd.passes.rect_depth_buffer.bind_desc_sets(cmd);
-
-        gcolor_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        gview_positions_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        gview_normals_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        gdepth_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-
-        vkCmdBeginRendering(cmd, &rendering_info);
-        VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
-        VkViewport r_view_1{
-            .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
-        };
-        vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-        vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-        // clang-format off
-        /*fd.passes.default_lit.push_constant(cmd, 0 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &fd.constants->bda);
-        fd.passes.default_lit.push_constant(cmd, 1 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instances_buffer.bda);
-        fd.passes.default_lit.push_constant(cmd, 2 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &mesh_instance_transform_buffers[0]->bda);
-        fd.passes.default_lit.push_constant(cmd, 3 * sizeof(VkDeviceAddress), sizeof(VkDeviceAddress), &ddgi.buffer.bda);*/
-        // clang-format on
-        vkCmdPushConstants(cmd, fd.passes.rect_depth_buffer.pipeline->layout->layout, VK_SHADER_STAGE_ALL, 0, 64, &proj);
-        vkCmdDraw(cmd, 6, 1, 0, 0);
-        vkCmdEndRendering(cmd);
-    }
-
-    {
-        auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
-            .imageView = swapchain_image->view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-        });
-
-        VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
-        auto rendering_info = Vks(VkRenderingInfo{
-            .renderArea = { .extent = { .width = (uint32_t)screen_rect.w, .height = (uint32_t)screen_rect.h } },
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = r_col_atts,
-        });
-
-        gview_positions_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_GENERAL,
-                                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        gao_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-        vkCmdBeginRendering(cmd, &rendering_info);
-        fd.passes.rect_bilateral_filter.update_desc_sets();
-        fd.passes.rect_bilateral_filter.bind(cmd);
-        fd.passes.rect_bilateral_filter.bind_desc_sets(cmd);
-        glm::vec2 ao_res{ fd.gbuffer.ambient_occlusion_image->width, fd.gbuffer.ambient_occlusion_image->height };
-        vkCmdPushConstants(cmd, fd.passes.rect_bilateral_filter.pipeline->layout->layout, VK_SHADER_STAGE_ALL, 64,
-                           sizeof(ao_res), &ao_res);
-        vkCmdDraw(cmd, 6, 1, 0, 0);
-        vkCmdEndRendering(cmd);
-    }
-
-    // Imgui pass
-    if(!flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
-        ImDrawData* im_draw_data = ImGui::GetDrawData();
-        if(im_draw_data) {
-            VkRenderingAttachmentInfo i_col_atts[]{
-                VkRenderingAttachmentInfo{
-                    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                    .imageView = swapchain_image->view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-                },
-            };
-            VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } };
-            VkViewport r_view_1{
-                .x = 0.0f, .y = screen_rect.h, .width = screen_rect.w, .height = -screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
-            };
-            VkRenderingInfo imgui_rendering_info{
-                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = VkRect2D{ .offset = { 0, 0 }, .extent = { (uint32_t)screen_rect.w, (uint32_t)screen_rect.h } },
-                .layerCount = 1,
-                .colorAttachmentCount = 1,
-                .pColorAttachments = i_col_atts,
-            };
-            swapchain_image_barrier.insert_barrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-            vkCmdBeginRendering(cmd, &imgui_rendering_info);
-            vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
-            vkCmdSetViewport(cmd, 0, 1, &r_view_1);
-            ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
-            vkCmdEndRendering(cmd);
-        }
-    }
-    flags.clear(RenderFlags::RESIZE_SWAPCHAIN_BIT);
-    swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE);
-#endif
-
-    /*swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);*/
-    /* ImageStatefulBarrier swapchain_image_barrier{ *swapchain_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT };
-     swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);*/
     fd.render_graph.render(cmd, swapchain_index);
-
-    // swapchain_image_barrier.insert_barrier(cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE);
 
     fd.cmdpool->end(cmd);
     gq.submit(QueueSubmission{ .cmds = { cmd },
@@ -938,7 +672,6 @@ void RendererVulkan::update() {
         .pImageIndices = &swapchain_index,
     });
     vkQueuePresentKHR(gq.queue, &pinfo);
-
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
     flags.clear();
 }
@@ -949,21 +682,8 @@ void RendererVulkan::on_window_resize() {
 }
 
 void RendererVulkan::set_screen(ScreenRect screen) {
-    /*const float aspect = 16.0f / 9.0f;
-    float sw = screen.h * aspect;
-    float sh = screen.w / aspect;
     screen_rect = screen;
-    if(sh <= screen.h) {
-        screen_rect.h = sh;
-    } else {
-        screen_rect.w = sw;
-    }
-    screen_rect.x = screen.x + std::fabsf(screen.w - screen_rect.w) * 0.5f;
-    screen_rect.y = screen.y + std::fabsf(screen.h - screen_rect.h) * 0.5f;*/
-    screen_rect = screen;
-    // TODO:
     ENG_WARN("TODO: Resize resources on new set_screen()");
-    // Engine::camera()->update_projection(glm::perspective(glm::radians(75.0f), screen_rect.w / screen_rect.h, 0.01f, 15.0f));
 }
 
 static VkFormat deduce_image_format(ImageFormat format) {
@@ -980,10 +700,10 @@ static VkFormat deduce_image_format(ImageFormat format) {
 }
 
 Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
-    auto handle = make_image(desc.name, deduce_image_format(desc.format),
-                             VkExtent3D{ .width = desc.width, .height = desc.height, .depth = 1u }, desc.mips, 1u,
-                             VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                             samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
+    const auto handle = make_image(desc.name, deduce_image_format(desc.format),
+                                   VkExtent3D{ .width = desc.width, .height = desc.height, .depth = 1u }, desc.mips, 1u,
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                   samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
     upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
     return handle;
 }
@@ -1056,7 +776,7 @@ void RendererVulkan::update_transform(components::Entity entity) {
 void RendererVulkan::upload_model_textures() {
     staging_buffer->begin();
     for(auto& tex : upload_images) {
-        Image& img = *get_image(tex.image_handle).image;
+        Image& img = get_image(tex.image_handle);
         img.current_layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
         VkBufferImageCopy copy{
             .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 },
@@ -1188,18 +908,16 @@ void RendererVulkan::update_bindless_set() {
                            }
                        },
                        [this, &writes, &image_writes](Handle<Image> handle) {
-                           const auto& img = get_image(handle);
-                           const auto desc_type = img.sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                                                              : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                           const auto& img = bindless_images.at(*handle);
                            writes.push_back(Vks(VkWriteDescriptorSet{
                                .dstSet = bindless_sets[0],
                                .dstBinding = static_cast<uint32_t>(img.sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
-                               .dstArrayElement = *handle,
+                               .dstArrayElement = img.descriptor_index,
                                .descriptorCount = 1,
-                               .descriptorType = desc_type,
+                               .descriptorType = img.sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                .pImageInfo = &image_writes.emplace_back(VkDescriptorImageInfo{
                                    .sampler = img.sampler,
-                                   .imageView = img.image->view,
+                                   .imageView = images.at(img.image_index).view,
                                    .imageLayout = img.layout,
                                }),
                            }));
@@ -1543,8 +1261,8 @@ void RendererVulkan::update_ddgi() {
 #endif
 }
 
-Image* RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
-                                      uint32_t layers, VkImageUsageFlags usage) {
+Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
+                                     uint32_t layers, VkImageUsageFlags usage) {
     const auto info = Vks(VkImageCreateInfo{
         .imageType = extent.depth > 1    ? VK_IMAGE_TYPE_3D
                      : extent.height > 1 ? VK_IMAGE_TYPE_2D
@@ -1570,31 +1288,63 @@ Image* RendererVulkan::allocate_image(const std::string& name, VkFormat format, 
     img._create_default_view(extent.depth > 1 ? 3 : extent.height > 1 ? 2 : extent.width > 1 ? 1 : 0);
     set_debug_name(img.image, std::format("image_{}", name));
     set_debug_name(img.view, std::format("image_{}_default_view", name));
-    image_storage.push_front(img);
-    return &image_storage.front();
-}
-
-Handle<Image> RendererVulkan::make_image(Image* image, VkImageLayout layout, VkSampler sampler) {
-    const auto handle = Handle<Image>{ static_cast<Handle<Image>::Storage_T>(images.size()) };
-    images.push_back(BindlessImage{ .image = image, .layout = layout, .sampler = sampler });
-    image->is_bindless = true;
-    update_image(handle, sampler);
-    return handle;
+    return img;
 }
 
 Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
                                          uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout, VkSampler sampler) {
-    return make_image(allocate_image(name, format, extent, mips, layers, usage), layout, sampler);
-}
-
-BindlessImage& RendererVulkan::get_image(Handle<Image> handle) { return images.at(*handle); }
-
-void RendererVulkan::update_image(Handle<Image> handle, VkSampler sampler) {
-    const auto& image = get_image(handle);
-    if(!image.image->is_bindless) { return; }
-    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED && sampler);
+    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
+    bindless_images.push_back(BindlessImage{ (uint32_t)images.size(), BindlessImage::last_combined_index++, layout, sampler });
+    images.push_back(allocate_image(name, format, extent, mips, layers, usage));
+    images.back().is_bindless = true;
     bindless_resources_to_update.push_back(handle);
+    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+    return handle;
 }
+
+Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
+                                         uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout) {
+    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED);
+    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
+    bindless_images.push_back(BindlessImage{ (uint32_t)images.size(), BindlessImage::last_storage_index++, layout });
+    images.push_back(allocate_image(name, format, extent, mips, layers, usage));
+    images.back().is_bindless = true;
+    bindless_resources_to_update.push_back(handle);
+    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+    return handle;
+}
+
+Handle<Image> RendererVulkan::make_image(Handle<Image> image, VkImageLayout layout, VkSampler sampler) {
+    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED && sampler);
+    const auto& bindless = bindless_images.at(*image);
+    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
+    bindless_images.push_back(BindlessImage{ bindless.image_index, BindlessImage::last_combined_index++, layout, sampler });
+    bindless_resources_to_update.push_back(handle);
+    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+    return handle;
+}
+
+Handle<Image> RendererVulkan::make_image(Handle<Image> image, VkImageLayout layout) {
+    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED);
+    const auto& bindless = bindless_images.at(*image);
+    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
+    bindless_images.push_back(BindlessImage{ bindless.image_index, BindlessImage::last_storage_index++, layout, nullptr });
+    bindless_resources_to_update.push_back(handle);
+    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+    return handle;
+}
+
+Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(bindless_images.at(*handle).image_index); }
+
+uint32_t RendererVulkan::get_image_index(Handle<Image> handle) { return bindless_images.at(*handle).image_index; }
+
+// void RendererVulkan::update_image(Handle<Image> handle, VkSampler sampler) {
+//     const auto& image = get_image(handle);
+//     if(!image.is_bindless) { return; }
+//     bindless_resources_to_update.push_back(handle);
+//     flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+// }
 
 void RendererVulkan::destroy_image(const Image** img) {
     assert(false);
@@ -2007,19 +1757,21 @@ void rendergraph::RenderGraph::bake() {
                         return get_renderer().swapchain.images.at(index).image;
                     };
                 }
-                const auto& img = get_renderer().images.at(a.resource.resource_idx);
-                s.image_barriers.push_back(Vks(VkImageMemoryBarrier2{
-                    .srcStageMask = la.last_barrier.src_stage,
-                    .srcAccessMask = la.last_barrier.src_access,
-                    .dstStageMask = la.last_barrier.dst_stage,
-                    .dstAccessMask = la.last_barrier.dst_access,
-                    .oldLayout = la.last_barrier.src_layout,
-                    .newLayout = la.last_barrier.dst_layout,
-                    .image = (a.resource.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT)
-                                 ? nullptr
-                                 : get_renderer().images.at(a.resource.resource_idx).image->image,
-                    .subresourceRange = {
-                        .aspectMask = img.image->aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } }));
+                const auto* img = a.resource.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT
+                                      ? nullptr
+                                      : &get_renderer().images.at(a.resource.resource_idx);
+                s.image_barriers.push_back(Vks(VkImageMemoryBarrier2{ .srcStageMask = la.last_barrier.src_stage,
+                                                                      .srcAccessMask = la.last_barrier.src_access,
+                                                                      .dstStageMask = la.last_barrier.dst_stage,
+                                                                      .dstAccessMask = la.last_barrier.dst_access,
+                                                                      .oldLayout = la.last_barrier.src_layout,
+                                                                      .newLayout = la.last_barrier.dst_layout,
+                                                                      .image = !img ? nullptr : img->image,
+                                                                      .subresourceRange = { .aspectMask = img ? img->aspect : VK_IMAGE_ASPECT_COLOR_BIT,
+                                                                                            .baseMipLevel = 0,
+                                                                                            .levelCount = 1,
+                                                                                            .baseArrayLayer = 0,
+                                                                                            .layerCount = 1 } }));
             } else if(a.resource.type == ResourceType::STORAGE_BUFFER) {
                 s.buffer_barriers.push_back(Vks(VkBufferMemoryBarrier2{
                     .srcStageMask = la.last_barrier.src_stage,
@@ -2051,7 +1803,7 @@ void rendergraph::RenderGraph::bake() {
             *std::find_if(stages.at(first_stage).image_barriers.begin(), stages.at(first_stage).image_barriers.end(),
                           [img = (a.first.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT)
                                      ? nullptr
-                                     : get_renderer().images.at(a.first.resource_idx).image->image](const auto& b) {
+                                     : get_renderer().images.at(a.first.resource_idx).image](const auto& b) {
                               return b.image == img;
                           });
         const auto& last_barrier = a.second.last_barrier;

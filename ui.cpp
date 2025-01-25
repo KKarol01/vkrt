@@ -11,7 +11,6 @@
 static ImTextureID get_imgui_render_output_descriptor();
 
 void UI::update() {
-    return;
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -53,7 +52,7 @@ void UI::update() {
 ImTextureID get_imgui_render_output_descriptor() {
     static std::unordered_map<VkImageView, VkDescriptorSet> render_output_view_sets;
     static VkSampler sampler = get_renderer().samplers.get_sampler();
-    const auto view = get_renderer().get_image(get_renderer().get_frame_data().gbuffer.color_image).image->view;
+    const auto view = get_renderer().get_image(get_renderer().get_frame_data().gbuffer.color_image).view;
     if(auto it = render_output_view_sets.find(view); it != render_output_view_sets.end()) {
         return reinterpret_cast<ImTextureID>(it->second);
     }
@@ -66,4 +65,5 @@ ImTextureID get_imgui_render_output_descriptor() {
     return reinterpret_cast<ImTextureID>(render_output_view_sets
                                              .emplace(view, ImGui_ImplVulkan_AddTexture(sampler, view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL))
                                              .first->second);
+    return ImTextureID{};
 }

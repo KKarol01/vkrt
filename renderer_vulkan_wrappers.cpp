@@ -52,7 +52,8 @@ void Image::_deduce_aspect(VkImageUsageFlags usage) {
 void Image::_create_default_view(int dims) {
     --dims;
     VkImageViewType view_types[]{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D };
-    auto ivinfo = Vks(VkImageViewCreateInfo{
+    const auto aspect = (this->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) ? VK_IMAGE_ASPECT_DEPTH_BIT : this->aspect;
+    const auto ivinfo = Vks(VkImageViewCreateInfo{
         .image = image,
         .viewType = view_types[dims],
         .format = format,
