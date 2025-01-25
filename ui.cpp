@@ -24,7 +24,7 @@ void UI::update() {
             ImGui::MenuItem("LOLOLOL", "CTRL-S");
             ImGui::EndMenuBar();
         }
-        const auto render_output_size = ImGui::GetContentRegionMax() * ImVec2{ 0.8f, 0.7f };
+        const auto render_output_size = ImGui::GetContentRegionMax() - ImVec2{ 256.0f, 230.0f };
         // used primarily for render output
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
         if(ImGui::BeginChild("render output panel", render_output_size, ImGuiChildFlags_Border)) {
