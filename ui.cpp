@@ -7,6 +7,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "ui.hpp"
 #include "renderer_vulkan.hpp"
+#include "scene.hpp"
 
 static ImTextureID get_imgui_render_output_descriptor();
 
@@ -36,7 +37,16 @@ void UI::update() {
         const auto render_output_next_row = ImGui::GetCursorScreenPos();
         ImGui::SameLine();
         // used for scene manipulation
-        if(ImGui::BeginChild("scene panel", {}, ImGuiChildFlags_Border)) {}
+        if(ImGui::BeginChild("scene panel", {}, ImGuiChildFlags_Border)) {
+            for(auto& e : Engine::get().scene->scene) {
+                if(ImGui::TreeNode(&e, "%llu", &e)) {
+                    scene::traverse_node_hierarchy_indexed(e, [](scene::NodeInstance* n, uint32_t i) {
+
+                    });
+                    ImGui::TreePop();
+                }
+            }
+        }
         ImGui::EndChild();
 
         // used primarily for debug output
@@ -65,5 +75,4 @@ ImTextureID get_imgui_render_output_descriptor() {
     return reinterpret_cast<ImTextureID>(render_output_view_sets
                                              .emplace(view, ImGui_ImplVulkan_AddTexture(sampler, view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL))
                                              .first->second);
-    return ImTextureID{};
 }

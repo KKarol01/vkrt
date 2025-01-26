@@ -14,6 +14,7 @@ enum class ImageFormat {
     UNORM,
     SRGB,
 };
+enum class ImageType { DIM_INVALID, DIM_1D, DIM_2D, DIM_3D };
 
 struct RenderGeometry;
 struct RenderMesh;
@@ -40,6 +41,7 @@ struct ImageDescriptor {
     uint32_t depth{ 1 };
     uint32_t mips{ 1 };
     ImageFormat format{ ImageFormat::UNORM };
+    ImageType type{ ImageType::DIM_2D };
     std::span<const std::byte> data;
 };
 

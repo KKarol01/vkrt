@@ -48,7 +48,6 @@ struct Buffer {
     size_t size{ 0 };
     uint32_t alignment{ 0 };
     VkBufferUsageFlags usage{};
-    bool is_bindless{ false };
 };
 
 class Image {
@@ -71,16 +70,6 @@ class Image {
     VkExtent3D extent{};
     uint32_t mips{ 1 };
     uint32_t layers{ 1 };
-    bool is_bindless{ false };
-};
-
-struct BindlessImage {
-    inline static uint32_t last_storage_index{};
-    inline static uint32_t last_combined_index{};
-    uint32_t image_index{ ~0ul };
-    uint32_t descriptor_index{ ~0ul };
-    VkImageLayout layout{};
-    VkSampler sampler{}; // if sampler is null, it's a storage image decsriptor binding
 };
 
 /* Used by mesh instance to index textures in the shader */
@@ -383,6 +372,48 @@ struct StagingBuffer {
     Buffer buffer{};
 };
 
+enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
+
+struct BindlessEntry {
+    bool operator==(const BindlessEntry& a) const {
+        return resource_handle == a.resource_handle && type == a.type && layout == a.layout && sampler == a.sampler;
+    }
+    VkDescriptorType to_vk_descriptor_type() const {
+        return type == BindlessType::STORAGE_BUFFER   ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+               : type == BindlessType::STORAGE_IMAGE  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+               : type == BindlessType::COMBINED_IMAGE ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                                      : VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    }
+    uint32_t resource_handle{};
+    BindlessType type{};
+    VkImageLayout layout{};
+    VkSampler sampler{};
+};
+
+namespace std {
+template <typename T> void hash_combine(size_t& seed, const T& t) {
+    seed ^= std::hash<T>{}(t) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+template <> class hash<BindlessEntry> {
+  public:
+    size_t operator()(const BindlessEntry& e) const {
+        size_t seed{};
+        hash_combine(seed, e.resource_handle);
+        hash_combine(seed, e.type);
+        hash_combine(seed, e.layout);
+        hash_combine(seed, e.sampler);
+        return seed;
+    }
+};
+} // namespace std
+
+struct BindlessStorage {
+    using resource_index_t = uint32_t;
+    inline static uint32_t resource_indices_arr[3]{};
+    std::unordered_map<BindlessEntry, resource_index_t> indices;
+    std::vector<BindlessEntry> cached_resources;
+};
+
 class RendererVulkan : public Renderer {
   public:
     void init() final;
@@ -415,26 +446,26 @@ class RendererVulkan : public Renderer {
     void build_tlas();
     void update_ddgi();
 
-    Image allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips, uint32_t layers,
-                         VkImageUsageFlags usage);
-    Handle<Image> make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
-                             uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout, VkSampler sampler);
-    Handle<Image> make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
-                             uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout);
-    Handle<Image> make_image(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
-    Handle<Image> make_image(Handle<Image> image, VkImageLayout layout);
-    Image& get_image(Handle<Image> handle);
-    uint32_t get_image_index(Handle<Image> handle);
-    // void update_image(Handle<Image> handle, VkSampler sampler);
-    void destroy_image(const Image** img);
+    Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
+                         uint32_t layers, VkImageUsageFlags usage);
+    Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
+    Handle<Image> make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
+                             uint32_t mips, uint32_t layers, VkImageUsageFlags usage);
     Handle<Buffer> make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false,
                                uint32_t alignment = 1);
-    Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
+    Image& get_image(Handle<Image> handle);
+    Buffer& get_buffer(Handle<Buffer> handle);
+    uint32_t get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler);
+    uint32_t get_bindless_index(Handle<Buffer> handle, BindlessType type);
+
+    void update_bindless_resource(Handle<Image> handle);
+    void update_bindless_resource(Handle<Buffer> handle);
+
+    void destroy_image(const Image** img);
     void deallocate_buffer(Buffer& buffer);
     void destroy_buffer(Handle<Buffer> handle);
     void resize_buffer(Handle<Buffer> handle, size_t new_size);
-    Buffer& get_buffer(Handle<Buffer> handle);
-    void update_buffer(Handle<Buffer> handle);
+
     void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
     void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
     void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
@@ -468,7 +499,7 @@ class RendererVulkan : public Renderer {
 
     PipelineLayout bindless_layout{};
     VkDescriptorPool bindless_pool{};
-    std::vector<std::variant<Handle<Buffer>, Handle<Image>>> bindless_resources_to_update;
+    std::vector<BindlessEntry> bindless_resources_to_update;
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
@@ -499,13 +530,13 @@ class RendererVulkan : public Renderer {
 
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
-    std::array<VkDescriptorSet, 2> bindless_sets;
+    VkDescriptorSet bindless_set;
     ShaderStorage shader_storage;
     std::deque<CommandPool> cmdpools;
 
     std::vector<Image> images;
-    std::vector<BindlessImage> bindless_images;
     std::vector<Buffer> buffers;
+    BindlessStorage bindless;
 
     DDGI ddgi;
 

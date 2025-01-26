@@ -370,12 +370,9 @@ void RendererVulkan::initialize_resources() {
         shader_storage.precompile_shaders(shaders);
     }
 
-    for(uint32_t i = 0; i < frame_datas.size(); ++i) {
-        auto& fd = frame_datas[i];
-        auto allocate_info = Vks(VkDescriptorSetAllocateInfo{
-            .descriptorPool = bindless_pool, .descriptorSetCount = 1, .pSetLayouts = &bindless_layout.descriptor_layout });
-        VK_CHECK(vkAllocateDescriptorSets(dev, &allocate_info, &bindless_sets[i]));
-    }
+    auto allocate_info = Vks(VkDescriptorSetAllocateInfo{
+        .descriptorPool = bindless_pool, .descriptorSetCount = 1, .pSetLayouts = &bindless_layout.descriptor_layout });
+    VK_CHECK(vkAllocateDescriptorSets(dev, &allocate_info, &bindless_set));
 
     build_render_graph();
 }
@@ -385,18 +382,14 @@ void RendererVulkan::create_window_sized_resources() {
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
 
-        fd.gbuffer.color_image = make_image(std::format("g_color_{}", i), VK_FORMAT_R8G8B8A8_SRGB,
+        fd.gbuffer.color_image = make_image(std::format("g_color_{}", i), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TYPE_2D,
                                             VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
                                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                                            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                            samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
+                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         fd.gbuffer.depth_buffer_image =
-            make_image(std::format("g_depth_{}", i), VK_FORMAT_D24_UNORM_S8_UINT,
+            make_image(std::format("g_depth_{}", i), VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_TYPE_2D,
                        VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
-                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                       VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                       samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
+                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
         /*make_image(&fd.gbuffer.color_image,
                    Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
@@ -428,16 +421,14 @@ void RendererVulkan::build_render_graph() {
         fd.render_graph.add_pass(rendergraph::RenderPass{ 
             .accesses = {
                 rendergraph::Access{
-                    { get_image_index(fd.gbuffer.color_image), rendergraph::ResourceType::COLOR_ATTACHMENT,
-                         rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *fd.gbuffer.color_image, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::WRITE_BIT,
                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { get_image_index(fd.gbuffer.depth_buffer_image), rendergraph::ResourceType::COLOR_ATTACHMENT,
-                         rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::READ_WRITE_BIT,
                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -479,7 +470,7 @@ void RendererVulkan::build_render_graph() {
                 });
 
                 vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindDescriptorSets(cmd,pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_sets[0], 0, nullptr);
+                vkCmdBindDescriptorSets(cmd,pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
                 vkCmdBeginRendering(cmd, &rendering_info);
                 VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
                 VkViewport r_view_1{
@@ -487,12 +478,15 @@ void RendererVulkan::build_render_graph() {
                 };
                 vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
                 vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, 4, &r.index_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 4, 4, &r.vertex_positions_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 8, 4, &r.vertex_attributes_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 12, 4, &r.get_frame_data().constants.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 16, 4, &r.mesh_instances_buffer.handle);
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 20, 4, &r.transform_buffers[0].handle);
+                uint32_t bindless_indices[]{
+                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.mesh_instances_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
+                };
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
                 vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer, sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
                 vkCmdEndRendering(cmd);
             } })
@@ -506,7 +500,7 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { get_image_index(fd.gbuffer.color_image), rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *fd.gbuffer.color_image,rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
@@ -578,7 +572,10 @@ void RendererVulkan::update() {
         create_window_sized_resources();
         build_render_graph();
     }
-    if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) { update_bindless_set(); }
+    if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) {
+        gq.wait_idle();
+        update_bindless_set();
+    }
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
@@ -618,46 +615,25 @@ void RendererVulkan::update() {
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
         std::swap(transform_buffers[0], transform_buffers[1]);
-        auto buf_barr1 = Vks(VkBufferMemoryBarrier2{
-            .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .buffer = get_buffer(transform_buffers[0]).buffer,
-            .size = VK_WHOLE_SIZE,
-        });
-        auto dep_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &buf_barr1 });
-        if(get_buffer(transform_buffers[0]).capacity < get_buffer(transform_buffers[1]).size) {
-            resize_buffer(transform_buffers[0], get_buffer(transform_buffers[1]).size);
-            buf_barr1.buffer = get_buffer(transform_buffers[0]).buffer;
-            vkCmdPipelineBarrier2(cmd, &dep_info);
+        Buffer& dst_transforms = get_buffer(transform_buffers[0]);
+        std::vector<glm::mat4> transforms;
+        transforms.reserve(mesh_instances.size());
+        for(auto e : mesh_instances) {
+            transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
         }
-        VkBufferCopy copy{ .size = get_buffer(transform_buffers[1]).size };
-        vkCmdCopyBuffer(cmd, get_buffer(transform_buffers[1]).buffer, get_buffer(transform_buffers[0]).buffer, 1, &copy);
-        vkCmdPipelineBarrier2(cmd, &dep_info);
-        get_buffer(transform_buffers[0]).size = get_buffer(transform_buffers[1]).size;
-        staging_buffer->begin();
-        for(auto e : update_positions) {
-            const auto idx = mesh_instance_idxs.at(e);
-            const auto offset = idx * sizeof(glm::mat4);
-            const auto& t = Engine::get().ecs_storage->get<components::Transform>(e);
-            const auto& r = Engine::get().ecs_storage->get<components::Renderable>(e);
-            staging_buffer->send(get_buffer(transform_buffers[0]), offset, std::as_bytes(std::span{ &t, 1 }));
-            if(false /*r.mesh_handle->metadata->blas*/) {
-                // assert(false && "TODO: Check if this is correct");
-                ENG_WARN("TODO: update tlas on transform change");
-                // flags.set(RenderFlags::DIRTY_TLAS_BIT);
-            }
-        }
-        staging_buffer->stage();
-        buf_barr1.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
-        buf_barr1.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        vkCmdPipelineBarrier2(cmd, &dep_info);
+        send_to(transform_buffers[0], 0ull, std::as_bytes(std::span{ transforms }));
+        auto barr = Vks(VkBufferMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                                .srcAccessMask = VK_ACCESS_NONE,
+                                                .dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                                .dstAccessMask = VK_ACCESS_NONE,
+                                                .buffer = get_buffer(transform_buffers[0]).buffer,
+                                                .size = VK_WHOLE_SIZE });
+        auto info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
+        vkCmdPipelineBarrier2(cmd, &info);
         update_positions.clear();
     }
 
     fd.render_graph.render(cmd, swapchain_index);
-
     fd.cmdpool->end(cmd);
     gq.submit(QueueSubmission{ .cmds = { cmd },
                                .wait_sems = { { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, fd.sem_swapchain } },
@@ -673,7 +649,7 @@ void RendererVulkan::update() {
     });
     vkQueuePresentKHR(gq.queue, &pinfo);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
-    flags.clear();
+    // flags.clear();
 }
 
 void RendererVulkan::on_window_resize() {
@@ -699,11 +675,25 @@ static VkFormat deduce_image_format(ImageFormat format) {
     }
 }
 
+static VkImageType deduce_image_type(ImageType dim) {
+    switch(dim) {
+    case ImageType::DIM_1D:
+        return VK_IMAGE_TYPE_1D;
+    case ImageType::DIM_2D:
+        return VK_IMAGE_TYPE_2D;
+    case ImageType::DIM_3D:
+        return VK_IMAGE_TYPE_3D;
+    default: {
+        assert(false);
+        return VK_IMAGE_TYPE_MAX_ENUM;
+    }
+    }
+}
+
 Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
-    const auto handle = make_image(desc.name, deduce_image_format(desc.format),
+    const auto handle = make_image(desc.name, deduce_image_format(desc.format), deduce_image_type(desc.type),
                                    VkExtent3D{ .width = desc.width, .height = desc.height, .depth = 1u }, desc.mips, 1u,
-                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                   samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
     upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
     return handle;
 }
@@ -839,11 +829,23 @@ void RendererVulkan::bake_indirect_commands() {
         const RenderMesh& mb = meshes.at(mi.mesh_handle);
         const RenderGeometry& geom = geometries.at(mb.geometry);
         const RenderMaterial& mat = materials.at(mi.material_handle);
-        gpu_mesh_instances.push_back(GPUMeshInstance{ .vertex_offset = geom.vertex_offset,
-                                                      .index_offset = geom.index_offset,
-                                                      .color_texture_idx = *mat.color_texture,
-                                                      .normal_texture_idx = *mat.normal_texture,
-                                                      .metallic_roughness_idx = *mat.metallic_roughness_texture });
+        gpu_mesh_instances.push_back(GPUMeshInstance{
+            .vertex_offset = geom.vertex_offset,
+            .index_offset = geom.index_offset,
+            .color_texture_idx =
+                mat.color_texture ? get_bindless_index(mat.color_texture, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                                       samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))
+                                  : *mat.color_texture,
+            .normal_texture_idx =
+                mat.normal_texture ? get_bindless_index(mat.normal_texture, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                                        samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))
+                                   : *mat.normal_texture,
+            .metallic_roughness_idx =
+                mat.metallic_roughness_texture
+                    ? get_bindless_index(mat.metallic_roughness_texture, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                         samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))
+                    : *mat.metallic_roughness_texture,
+        });
         if(i == 0 || Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i - 1)).mesh_handle != mi.mesh_handle) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
                                                                       .instanceCount = 1,
@@ -881,11 +883,10 @@ void RendererVulkan::upload_transforms() {
     for(auto e : mesh_instances) {
         transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
     }
-    send_to(transform_buffers[0], 0ull, transforms.data(), transforms.size());
+    send_to(transform_buffers[0], 0ull, std::as_bytes(std::span{ transforms }));
 }
 
 void RendererVulkan::update_bindless_set() {
-    std::swap(bindless_sets[0], bindless_sets[1]);
     std::vector<VkWriteDescriptorSet> writes;
     std::vector<VkDescriptorBufferInfo> buffer_writes;
     std::vector<VkDescriptorImageInfo> image_writes;
@@ -893,37 +894,26 @@ void RendererVulkan::update_bindless_set() {
     buffer_writes.reserve(bindless_resources_to_update.size());
     image_writes.reserve(bindless_resources_to_update.size());
     for(const auto& e : bindless_resources_to_update) {
-        std::visit(Visitor{
-                       [this, &writes, &buffer_writes](Handle<Buffer> handle) {
-                           const auto& b = get_buffer(handle);
-                           if(b.usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) {
-                               writes.push_back(Vks(VkWriteDescriptorSet{
-                                   .dstSet = bindless_sets[0],
-                                   .dstBinding = 0,
-                                   .dstArrayElement = *handle,
-                                   .descriptorCount = 1,
-                                   .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                   .pBufferInfo = &buffer_writes.emplace_back(VkDescriptorBufferInfo{
-                                       .buffer = b.buffer, .offset = 0, .range = VK_WHOLE_SIZE }) }));
-                           }
-                       },
-                       [this, &writes, &image_writes](Handle<Image> handle) {
-                           const auto& img = bindless_images.at(*handle);
-                           writes.push_back(Vks(VkWriteDescriptorSet{
-                               .dstSet = bindless_sets[0],
-                               .dstBinding = static_cast<uint32_t>(img.sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
-                               .dstArrayElement = img.descriptor_index,
-                               .descriptorCount = 1,
-                               .descriptorType = img.sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                               .pImageInfo = &image_writes.emplace_back(VkDescriptorImageInfo{
-                                   .sampler = img.sampler,
-                                   .imageView = images.at(img.image_index).view,
-                                   .imageLayout = img.layout,
-                               }),
-                           }));
-                       },
-                   },
-                   e);
+        auto& write = writes.emplace_back(Vks(VkWriteDescriptorSet{
+            .dstSet = bindless_set,
+            .dstBinding = e.type == BindlessType::STORAGE_BUFFER   ? BINDLESS_STORAGE_BUFFER_BINDING
+                          : e.type == BindlessType::STORAGE_IMAGE  ? BINDLESS_STORAGE_IMAGE_BINDING
+                          : e.type == BindlessType::COMBINED_IMAGE ? BINDLESS_COMBINED_IMAGE_BINDING
+                                                                   : ~0ul,
+            .dstArrayElement = bindless.indices.at(e),
+            .descriptorCount = 1,
+            .descriptorType = e.to_vk_descriptor_type(),
+        }));
+        if(e.type == BindlessType::STORAGE_BUFFER) {
+            write.pBufferInfo = &buffer_writes.emplace_back(VkDescriptorBufferInfo{
+                .buffer = buffers.at(e.resource_handle).buffer, .offset = 0, .range = VK_WHOLE_SIZE });
+        } else if(e.type == BindlessType::STORAGE_IMAGE || e.type == BindlessType::COMBINED_IMAGE) {
+            write.pImageInfo = &image_writes.emplace_back(VkDescriptorImageInfo{
+                .sampler = e.sampler,
+                .imageView = images.at(e.resource_handle).view,
+                .imageLayout = e.layout,
+            });
+        }
     }
     vkUpdateDescriptorSets(dev, writes.size(), writes.data(), 0, nullptr);
 }
@@ -1261,13 +1251,10 @@ void RendererVulkan::update_ddgi() {
 #endif
 }
 
-Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
-                                     uint32_t layers, VkImageUsageFlags usage) {
+Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
+                                     uint32_t mips, uint32_t layers, VkImageUsageFlags usage) {
     const auto info = Vks(VkImageCreateInfo{
-        .imageType = extent.depth > 1    ? VK_IMAGE_TYPE_3D
-                     : extent.height > 1 ? VK_IMAGE_TYPE_2D
-                     : extent.width > 1  ? VK_IMAGE_TYPE_1D
-                                         : VK_IMAGE_TYPE_MAX_ENUM,
+        .imageType = type,
         .format = format,
         .extent =
             VkExtent3D{
@@ -1285,66 +1272,52 @@ Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, V
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
     VK_CHECK(vmaCreateImage(vma, &info, &vma_info, &img.image, &img.alloc, nullptr));
     img._deduce_aspect(img.usage);
-    img._create_default_view(extent.depth > 1 ? 3 : extent.height > 1 ? 2 : extent.width > 1 ? 1 : 0);
+    img._create_default_view(type == VK_IMAGE_TYPE_3D   ? 3
+                             : type == VK_IMAGE_TYPE_2D ? 2
+                             : type == VK_IMAGE_TYPE_1D ? 1
+                                                        : 0);
     set_debug_name(img.image, std::format("image_{}", name));
     set_debug_name(img.view, std::format("image_{}_default_view", name));
     return img;
 }
 
-Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
-                                         uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout, VkSampler sampler) {
-    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED && sampler);
-    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
-    bindless_images.push_back(BindlessImage{ (uint32_t)images.size(), BindlessImage::last_combined_index++, layout, sampler });
-    images.push_back(allocate_image(name, format, extent, mips, layers, usage));
-    images.back().is_bindless = true;
-    bindless_resources_to_update.push_back(handle);
-    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
+Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
+                                         uint32_t mips, uint32_t layers, VkImageUsageFlags usage) {
+    const auto handle = Handle<Image>{ (uint32_t)images.size() };
+    images.push_back(allocate_image(name, format, type, extent, mips, layers, usage));
     return handle;
 }
 
-Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat format, VkExtent3D extent, uint32_t mips,
-                                         uint32_t layers, VkImageUsageFlags usage, VkImageLayout layout) {
-    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED);
-    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
-    bindless_images.push_back(BindlessImage{ (uint32_t)images.size(), BindlessImage::last_storage_index++, layout });
-    images.push_back(allocate_image(name, format, extent, mips, layers, usage));
-    images.back().is_bindless = true;
-    bindless_resources_to_update.push_back(handle);
-    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
-    return handle;
+Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(*handle); }
+
+uint32_t RendererVulkan::get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler) {
+    const BindlessEntry entry{ .resource_handle = *handle, .type = type, .layout = layout, .sampler = sampler };
+    if(auto it = bindless.indices.find(entry); it != bindless.indices.end()) { return it->second; }
+    const auto index = bindless.resource_indices_arr[std::to_underlying(type) - 1]++;
+    bindless.indices[entry] = index;
+    auto cached_it = std::lower_bound(bindless.cached_resources.begin(), bindless.cached_resources.end(), entry,
+                                      [](auto& a, auto& b) { return a.resource_handle < b.resource_handle; });
+    bindless.cached_resources.insert(cached_it, entry);
+    update_bindless_resource(handle);
+    return index;
 }
 
-Handle<Image> RendererVulkan::make_image(Handle<Image> image, VkImageLayout layout, VkSampler sampler) {
-    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED && sampler);
-    const auto& bindless = bindless_images.at(*image);
-    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
-    bindless_images.push_back(BindlessImage{ bindless.image_index, BindlessImage::last_combined_index++, layout, sampler });
-    bindless_resources_to_update.push_back(handle);
-    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
-    return handle;
+uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle, BindlessType type) {
+    return get_bindless_index(Handle<Image>{ *handle }, type, VK_IMAGE_LAYOUT_UNDEFINED, nullptr);
 }
 
-Handle<Image> RendererVulkan::make_image(Handle<Image> image, VkImageLayout layout) {
-    assert(layout != VK_IMAGE_LAYOUT_UNDEFINED);
-    const auto& bindless = bindless_images.at(*image);
-    const auto handle = Handle<Image>{ (uint32_t)bindless_images.size() };
-    bindless_images.push_back(BindlessImage{ bindless.image_index, BindlessImage::last_storage_index++, layout, nullptr });
-    bindless_resources_to_update.push_back(handle);
+void RendererVulkan::update_bindless_resource(Handle<Image> handle) {
+    auto cached_it = std::lower_bound(bindless.cached_resources.begin(), bindless.cached_resources.end(), *handle,
+                                      [](auto& a, auto& b) { return a.resource_handle < b; });
+    for(auto it = cached_it; it != bindless.cached_resources.end() && it->resource_handle == *handle; ++it) {
+        bindless_resources_to_update.push_back(*it);
+    }
     flags.set(RenderFlags::UPDATE_BINDLESS_SET);
-    return handle;
 }
 
-Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(bindless_images.at(*handle).image_index); }
-
-uint32_t RendererVulkan::get_image_index(Handle<Image> handle) { return bindless_images.at(*handle).image_index; }
-
-// void RendererVulkan::update_image(Handle<Image> handle, VkSampler sampler) {
-//     const auto& image = get_image(handle);
-//     if(!image.is_bindless) { return; }
-//     bindless_resources_to_update.push_back(handle);
-//     flags.set(RenderFlags::UPDATE_BINDLESS_SET);
-// }
+void RendererVulkan::update_bindless_resource(Handle<Buffer> handle) {
+    update_bindless_resource(Handle<Image>{ *handle });
+}
 
 void RendererVulkan::destroy_image(const Image** img) {
     assert(false);
@@ -1359,8 +1332,6 @@ void RendererVulkan::destroy_image(const Image** img) {
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map, uint32_t alignment) {
     auto handle = Handle<Buffer>{ static_cast<Handle<Buffer>::Storage_T>(buffers.size()) };
     buffers.push_back(allocate_buffer(name, size, usage, map, alignment));
-    buffers.back().is_bindless = true;
-    update_buffer(handle);
     return handle;
 }
 
@@ -1410,20 +1381,21 @@ void RendererVulkan::resize_buffer(Handle<Buffer> handle, size_t new_size) {
     new_buffer.size = old_buffer.size;
     deallocate_buffer(old_buffer);
     old_buffer = new_buffer;
-    update_buffer(handle);
+    update_bindless_resource(handle);
 }
 
 Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(*handle); }
 
-void RendererVulkan::update_buffer(Handle<Buffer> handle) {
-    // notify bindless system about buffer's handle change after e.g. reallocation.
-    if(!get_buffer(handle).is_bindless) { return; }
-    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
-    bindless_resources_to_update.push_back(handle);
-}
-
 void RendererVulkan::send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size) {
-    assert(false);
+    assert(dst && src);
+    auto& dstb = get_buffer(dst);
+    auto& srcb = get_buffer(src);
+    dst_offset = (dst_offset == ~0ull) ? dstb.size : dst_offset;
+    const auto total_size = dst_offset + size;
+    if(dstb.capacity < total_size) { resize_buffer(dst, total_size); }
+    assert(dst_offset + size <= dstb.capacity && src_offset + size <= srcb.size);
+    staging_buffer->send(dstb, dst_offset, srcb, src_offset, size);
+    dstb.size = total_size;
 }
 
 void RendererVulkan::send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size) {

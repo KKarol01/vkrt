@@ -13,11 +13,11 @@
 int main() {
     Engine::get().init();
     {
-        Handle<scene::Node> model = Engine::get().scene->load_from_file("test1.glb");
+        Handle<scene::Node> model = Engine::get().scene->load_from_file("cornell/cornell1.glb");
         // Handle<Entity> model = Engine::scene()->load_from_file("bistro.glb");
         /* Engine::scene()->instance_model(sphere_handle, { .flags = {}, .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) }); */
         auto cornell_instance = Engine::get().scene->instance_model(model);
-        //Engine::get().scene->update_transform(cornell_instance, glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 2.0f }));
+        // Engine::get().scene->update_transform(cornell_instance, glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 2.0f }));
 
         Engine::get().set_on_update_callback([&]() {
             auto& ni = Engine::get().scene->get_instance(cornell_instance);

@@ -111,8 +111,11 @@ class Scene {
 
     // TODO: maybe make this private too (used in many places -- possibly bad interface)
   public:
+    // Storage for all nodes so they can reference one another.
     std::deque<Node> nodes;
+    // Instances of particular node
     std::deque<NodeInstance> node_instances;
+    // Actual actors present on the scene
     std::vector<NodeInstance*> scene;
     std::unordered_map<Handle<Node>, Node*> node_handles;
     std::unordered_map<Handle<NodeInstance>, NodeInstance*> instance_handles;
