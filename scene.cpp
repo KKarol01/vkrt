@@ -205,6 +205,7 @@ Handle<scene::NodeInstance> scene::Scene::instance_model(Handle<scene::Node> ent
     traverse_node_hierarchy_indexed(n, [&](Node* n, uint32_t idx) {
         NodeInstance* ni = i_stack.top();
         i_stack.pop();
+        ni->name = n->name;
         ni->node_handle = n->handle;
         ni->instance_handle = Handle<NodeInstance>{ generate_handle };
         ni->transform = n->transform;
@@ -286,3 +287,10 @@ scene::NodeInstance* scene::Scene::add_instance() {
 //      _update_transform(node.children_offset + i, final_transforms.at(idx));
 //  }
 //}
+
+bool scene::NodeInstance::has_children() const {
+    for(const auto& e : children) {
+        if(e) { return true; }
+    }
+    return false;
+}

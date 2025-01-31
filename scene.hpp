@@ -11,29 +11,6 @@
 #include "ecs.hpp"
 #include "renderer.hpp"
 
-// struct MaterialAsset {
-//     std::string name;
-//     Handle<RenderMaterial> material_handle;
-//     Handle<Image> color_texture_handle;
-//     Handle<Image> normal_texture_handle;
-//     Handle<Image> metallic_roughness_texture_handle;
-// };
-//
-// struct MeshAsset {
-//     std::string name;
-//     Handle<RenderMesh> rm_handle;
-//     MaterialAsset* material;
-//     BoundingBox aabb;
-// };
-//
-// struct ModelAsset {
-//     std::filesystem::path path;
-//     Handle<RenderGeometry> geometry;
-//     std::vector<MeshAsset> meshes;
-//     std::vector<MaterialAsset> materials;
-//     std::vector<Handle<Image>> textures;
-// };
-
 namespace scene {
 
 struct Primitive {
@@ -54,6 +31,9 @@ struct Node {
 };
 
 struct NodeInstance {
+    bool has_children() const;
+
+    std::string name;
     // children are same size as node's children array, except some pointers can be nullptrs
     std::vector<NodeInstance*> children;
     // actually rendered primitives (may not all be present as in referenced node_hadle)

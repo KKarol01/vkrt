@@ -15,12 +15,13 @@ enum class ImageFormat {
     SRGB,
 };
 enum class ImageType { DIM_INVALID, DIM_1D, DIM_2D, DIM_3D };
+enum class ImageFilter { LINEAR, NEAREST };
+enum class ImageAddressing { REPEAT, CLAMP };
 
 struct RenderGeometry;
 struct RenderMesh;
 struct RenderInstance;
 struct Image;
-struct RenderMaterial;
 
 struct Vertex {
     glm::vec3 pos;
@@ -45,10 +46,20 @@ struct ImageDescriptor {
     std::span<const std::byte> data;
 };
 
+struct MaterialImageDescriptor {
+    Handle<Image> handle;
+    ImageFilter filter{ ImageFilter::LINEAR };
+    ImageAddressing addressing{ ImageAddressing::REPEAT };
+};
+
 struct MaterialDescriptor {
-    Handle<Image> base_color_texture;
-    Handle<Image> normal_texture;
-    Handle<Image> metallic_roughness_texture;
+    MaterialImageDescriptor base_color_texture;
+    MaterialImageDescriptor normal_texture;
+    MaterialImageDescriptor metallic_roughness_texture;
+};
+
+struct RenderMaterial {
+    MaterialDescriptor textures{};
 };
 
 struct MeshDescriptor {
@@ -85,4 +96,6 @@ class Renderer {
     virtual void instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
     virtual void update_transform(components::Entity entity) = 0;
+    virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) = 0;
+    virtual RenderMaterial get_material(Handle<RenderMaterial> handle) const = 0;
 };

@@ -9,11 +9,13 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include "common/types.hpp"
 #include "vulkan_structs.hpp"
+#include "renderer.hpp"
 
 class SamplerStorage {
   public:
     VkSampler get_sampler();
     VkSampler get_sampler(VkFilter filter, VkSamplerAddressMode address);
+    VkSampler get_sampler(ImageFilter filter, ImageAddressing address);
     VkSampler get_sampler(VkSamplerCreateInfo info);
 
   private:

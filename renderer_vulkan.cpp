@@ -508,7 +508,6 @@ void RendererVulkan::build_render_graph() {
                 },
             },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass&) {
-                if(get_renderer().flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) { return; }
                     ImDrawData* im_draw_data = ImGui::GetDrawData();
                     if(im_draw_data) {
                         VkRenderingAttachmentInfo r_col_atts[]{
@@ -567,7 +566,7 @@ void RendererVulkan::update() {
         update_ddgi();
         // TODO: prepare ddgi on scene update
     }
-    if(flags.test(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
+    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
         gq.wait_idle();
         create_window_sized_resources();
         build_render_graph();
@@ -659,7 +658,7 @@ void RendererVulkan::on_window_resize() {
 
 void RendererVulkan::set_screen(ScreenRect screen) {
     screen_rect = screen;
-    ENG_WARN("TODO: Resize resources on new set_screen()");
+    //ENG_WARN("TODO: Resize resources on new set_screen()");
 }
 
 static VkFormat deduce_image_format(ImageFormat format) {
@@ -699,11 +698,7 @@ Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
 }
 
 Handle<RenderMaterial> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
-    return Handle<RenderMaterial>{ *materials.insert(RenderMaterial{
-        .color_texture = desc.base_color_texture,
-        .normal_texture = desc.normal_texture,
-        .metallic_roughness_texture = desc.metallic_roughness_texture,
-    }) };
+    return Handle<RenderMaterial>{ *materials.insert(RenderMaterial{ .textures = desc }) };
 }
 
 Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
@@ -761,6 +756,43 @@ void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
 void RendererVulkan::update_transform(components::Entity entity) {
     update_positions.push_back(entity);
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
+}
+
+size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) {
+    struct ImguiTextureId {
+        ImTextureID id;
+        VkImage image;
+        ImageFilter filter;
+        ImageAddressing addressing;
+    };
+    static std::unordered_multimap<Handle<Image>, ImguiTextureId> tex_ids;
+    auto range = tex_ids.equal_range(handle);
+    auto delete_it = tex_ids.end();
+    for(auto it = range.first; it != range.second; ++it) {
+        if(it->second.filter == filter && it->second.addressing == addressing) {
+            if(it->second.image != get_image(handle).image) {
+                ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(it->second.id));
+                delete_it = it;
+                break;
+            }
+            return it->second.id;
+        }
+    }
+    if(delete_it != tex_ids.end()) { tex_ids.erase(delete_it); }
+    ImguiTextureId id{
+        .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(samplers.get_sampler(filter, addressing),
+                                                                        get_image(handle).view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
+        .image = get_image(handle).image,
+        .filter = filter,
+        .addressing = addressing,
+    };
+    tex_ids.emplace(handle, id);
+    return id.id;
+}
+
+RenderMaterial RendererVulkan::get_material(Handle<RenderMaterial> handle) const {
+    if(!handle) { return RenderMaterial{}; }
+    return materials.at(handle);
 }
 
 void RendererVulkan::upload_model_textures() {
@@ -832,19 +864,16 @@ void RendererVulkan::bake_indirect_commands() {
         gpu_mesh_instances.push_back(GPUMeshInstance{
             .vertex_offset = geom.vertex_offset,
             .index_offset = geom.index_offset,
-            .color_texture_idx =
-                mat.color_texture ? get_bindless_index(mat.color_texture, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                       samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))
-                                  : *mat.color_texture,
+            .color_texture_idx = get_bindless_index(mat.textures.base_color_texture.handle, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                                    samplers.get_sampler(mat.textures.base_color_texture.filter,
+                                                                         mat.textures.base_color_texture.addressing)),
             .normal_texture_idx =
-                mat.normal_texture ? get_bindless_index(mat.normal_texture, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                        samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))
-                                   : *mat.normal_texture,
-            .metallic_roughness_idx =
-                mat.metallic_roughness_texture
-                    ? get_bindless_index(mat.metallic_roughness_texture, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                         samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))
-                    : *mat.metallic_roughness_texture,
+                get_bindless_index(mat.textures.normal_texture.handle, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                   samplers.get_sampler(mat.textures.normal_texture.filter, mat.textures.normal_texture.addressing)),
+            .metallic_roughness_idx = get_bindless_index(mat.textures.metallic_roughness_texture.handle,
+                                                         BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                                         samplers.get_sampler(mat.textures.metallic_roughness_texture.filter,
+                                                                              mat.textures.metallic_roughness_texture.addressing)),
         });
         if(i == 0 || Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i - 1)).mesh_handle != mi.mesh_handle) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
@@ -1291,6 +1320,7 @@ Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat forma
 Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(*handle); }
 
 uint32_t RendererVulkan::get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler) {
+    if(!handle) { return *handle; }
     const BindlessEntry entry{ .resource_handle = *handle, .type = type, .layout = layout, .sampler = sampler };
     if(auto it = bindless.indices.find(entry); it != bindless.indices.end()) { return it->second; }
     const auto index = bindless.resource_indices_arr[std::to_underlying(type) - 1]++;

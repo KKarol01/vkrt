@@ -20,8 +20,12 @@ template <typename T, typename Storage = uint32_t> class HandleVector {
     constexpr auto& front() { return storage.front(); }
     constexpr auto size() const { return storage.size(); }
     constexpr auto& at(uint64_t idx) { return storage.at(idx); }
+    constexpr const auto& at(uint64_t idx) const { return storage.at(idx); }
     constexpr auto& at(Handle handle) { return at(find_idx(handle)); }
+    constexpr const auto& at(Handle handle) const { return at(find_idx(handle)); }
     constexpr auto& operator[](uint64_t idx) { return storage.at(idx); }
+    constexpr const auto& operator[](uint64_t idx) const { return storage.at(idx); }
+    constexpr const auto& operator[](Handle handle) const { return at(handle); }
     constexpr auto data() { return storage.data(); }
     constexpr auto& data_storage() { return storage; }
 

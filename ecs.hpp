@@ -145,6 +145,7 @@ class Storage {
     }
 
     template <typename Component> Component& get(Entity e) { return *get_or_make_comp_arr<Component>().try_get(e); }
+    template <typename Component> Component* try_get(Entity e) { return get_or_make_comp_arr<Component>().try_get(e); }
 
     template <typename... Components> void for_each(auto f) {
         std::array<size_t, sizeof...(Components)> comp_ids;
@@ -161,6 +162,12 @@ class Storage {
                 --min_size;
             }
         }
+    }
+
+    template <typename Component> bool has_component(Entity e) const {
+        const auto idx = ComponentIdGenerator::generate<Component>();
+        if(!component_arrays.at(idx)) { return false; }
+        return static_cast<ComponentArray<Component>*>(&*component_arrays.at(idx))->has(e);
     }
 
   private:

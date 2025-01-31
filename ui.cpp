@@ -10,6 +10,8 @@
 #include "scene.hpp"
 
 static ImTextureID get_imgui_render_output_descriptor();
+static void draw_scene_instance_tree(scene::NodeInstance* i);
+static void draw_render_mesh(scene::NodeInstance* i);
 
 void UI::update() {
     ImGui_ImplVulkan_NewFrame();
@@ -37,15 +39,24 @@ void UI::update() {
         const auto render_output_next_row = ImGui::GetCursorScreenPos();
         ImGui::SameLine();
         // used for scene manipulation
-        if(ImGui::BeginChild("scene panel", {}, ImGuiChildFlags_Border)) {
-            for(auto& e : Engine::get().scene->scene) {
-                if(ImGui::TreeNode(&e, "%llu", &e)) {
-                    scene::traverse_node_hierarchy_indexed(e, [](scene::NodeInstance* n, uint32_t i) {
-
-                    });
-                    ImGui::TreePop();
+        if(ImGui::BeginChild("right vertical panel", {})) {
+            const auto scene_panel_height = ImGui::GetContentRegionAvail().y * 0.5f;
+            const auto scene_panel_next_row = ImGui::GetCursorScreenPos();
+            if(ImGui::BeginChild("scene panel", { 0.0f, scene_panel_height }, ImGuiChildFlags_Border)) {
+                for(auto& e : Engine::get().scene->scene) {
+                    draw_scene_instance_tree(e);
                 }
             }
+            ImGui::EndChild();
+
+            {
+                // TODO: apply invisible button to regulate the height of the panels
+                ImGui::Separator();
+            }
+
+            // ImGui::SetCursorScreenPos({ scene_panel_next_row.x, ImGui::GetCursorScreenPos().y });
+            if(ImGui::BeginChild("actor panel", {}, ImGuiChildFlags_Border)) { ImGui::Text("adddsd"); }
+            ImGui::EndChild();
         }
         ImGui::EndChild();
 
@@ -60,19 +71,30 @@ void UI::update() {
 }
 
 ImTextureID get_imgui_render_output_descriptor() {
-    static std::unordered_map<VkImageView, VkDescriptorSet> render_output_view_sets;
-    static VkSampler sampler = get_renderer().samplers.get_sampler();
-    const auto view = get_renderer().get_image(get_renderer().get_frame_data().gbuffer.color_image).view;
-    if(auto it = render_output_view_sets.find(view); it != render_output_view_sets.end()) {
-        return reinterpret_cast<ImTextureID>(it->second);
-    }
-    if(render_output_view_sets.size() > 512) {
-        for(auto& e : render_output_view_sets) {
-            ImGui_ImplVulkan_RemoveTexture(e.second);
-        }
-        render_output_view_sets.clear();
-    }
-    return reinterpret_cast<ImTextureID>(render_output_view_sets
-                                             .emplace(view, ImGui_ImplVulkan_AddTexture(sampler, view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL))
-                                             .first->second);
+    return static_cast<ImTextureID>(get_renderer().get_imgui_texture_id(get_renderer().get_frame_data().gbuffer.color_image,
+                                                                        ImageFilter::LINEAR, ImageAddressing::CLAMP));
 }
+
+void draw_scene_instance_tree(scene::NodeInstance* i) {
+    if(!i->has_children()) {
+        ImGui::Selectable(i->name.c_str());
+    } else {
+        if(ImGui::TreeNode(i, "%s", i->name.c_str())) {
+            for(auto& e : i->children) {
+                if(e) { draw_scene_instance_tree(e); }
+            }
+            ImGui::TreePop();
+        }
+    }
+    for(auto& p : i->primitives) {
+        if(auto* r = Engine::get().ecs_storage->try_get<components::Renderable>(p); r) {
+            const auto material = Engine::get().renderer->get_material(r->material_handle);
+            const auto imid = Engine::get().renderer->get_imgui_texture_id(material.textures.base_color_texture.handle,
+                                                                           material.textures.base_color_texture.filter,
+                                                                           material.textures.base_color_texture.addressing);
+            ImGui::Image(imid, { 25.0f, 25.0f });
+        }
+    }
+}
+
+void draw_render_mesh(scene::NodeInstance* i) {}

@@ -72,13 +72,6 @@ class Image {
     uint32_t layers{ 1 };
 };
 
-/* Used by mesh instance to index textures in the shader */
-struct RenderMaterial {
-    Handle<Image> color_texture;
-    Handle<Image> normal_texture;
-    Handle<Image> metallic_roughness_texture;
-};
-
 struct GeometryMetadata {
     VkAccelerationStructureKHR blas{};
     Handle<Buffer> blas_buffer{};
@@ -435,6 +428,8 @@ class RendererVulkan : public Renderer {
     void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(components::Entity entity) final;
+    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) final;
+    RenderMaterial get_material(Handle<RenderMaterial> handle) const final;
 
     void upload_model_textures();
     void upload_staged_models();
@@ -505,8 +500,8 @@ class RendererVulkan : public Renderer {
     HandleVector<GeometryMetadata> geometry_metadatas;
     HandleVector<RenderMesh> meshes;
     HandleVector<MeshMetadata> mesh_metadatas;
-
     HandleVector<RenderMaterial> materials;
+
     std::vector<components::Entity> mesh_instances;
     std::unordered_map<components::Entity, uint32_t> mesh_instance_idxs;
     std::vector<components::Entity> blas_instances;
