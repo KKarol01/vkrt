@@ -91,6 +91,8 @@ class Scene {
 
     // TODO: maybe make this private too (used in many places -- possibly bad interface)
   public:
+    float debug_dir_light_dir[3]{ 0.1f, -0.8f, 0.0f };
+
     // Storage for all nodes so they can reference one another.
     std::deque<Node> nodes;
     // Instances of particular node

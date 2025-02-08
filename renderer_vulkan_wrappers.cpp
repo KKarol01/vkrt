@@ -93,6 +93,11 @@ VkSampler SamplerStorage::get_sampler(ImageFilter filter, ImageAddressing addres
 }
 
 VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo info) {
+    for(const auto& s : samplers) {
+        if(s.first.magFilter == info.magFilter && s.first.minFilter == info.minFilter && s.first.addressModeU == info.addressModeU) {
+            return s.second;
+        }
+    }
     VkSampler sampler;
     VK_CHECK(vkCreateSampler(get_renderer().dev, &info, nullptr, &sampler));
     samplers.emplace_back(info, sampler);

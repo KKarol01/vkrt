@@ -266,6 +266,7 @@ struct RasterizationSettings {
     VkFormat dep_format{ VK_FORMAT_D24_UNORM_S8_UINT };
     VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
     bool depth_test{ false };
+    bool depth_write{ true };
     VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
 };
 
@@ -511,6 +512,11 @@ class RendererVulkan : public Renderer {
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
+    Handle<Buffer> vsm_data_buffer;
+    Handle<Buffer> vsm_free_allocs_buffer;
+    Handle<Image> vsm_shadow_map_0;
+    Handle<Image> vsm_dir_light_page_table;
+    Handle<Image> vsm_dir_light_page_table_rgb8;
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;

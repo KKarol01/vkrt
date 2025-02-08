@@ -29,13 +29,21 @@
 #define ENG_TYPE_MAT3 mat3
 #define ENG_TYPE_MAT4 mat4
 
+#define ENT_TYPE_UNSIZED(type, name) type name[]
+
 #define BINDLESS_GET_LAYOUT_NAME(Name) Name##BindlessArray
 
 #define BINDLESS_DECLARE_STORAGE_BUFFER(access, name, data) \
 	layout(scalar, set=0, binding=BINDLESS_STORAGE_BUFFER_BINDING) access buffer name data BINDLESS_GET_LAYOUT_NAME(name)[]
 
+#define BINDLESS_DECLARE_STORAGE_BUFFER2(access, name, data) \
+	layout(scalar, set=0, binding=BINDLESS_STORAGE_BUFFER_BINDING) access buffer name data BINDLESS_GET_LAYOUT_NAME(name)[]
+
 #define BINDLESS_DECLARE_IMAGE(access, name, format, dim) \
 	layout(set=0, binding=BINDLESS_STORAGE_IMAGE_BINDING, format) uniform image##dim BINDLESS_GET_LAYOUT_NAME(name)[]
+
+#define BINDLESS_DECLARE_UIMAGE(access, name, format, dim) \
+	layout(set=0, binding=BINDLESS_STORAGE_IMAGE_BINDING, format) uniform uimage##dim BINDLESS_GET_LAYOUT_NAME(name)[]
 
 #define BINDLESS_DECLARE_COMBINED_IMAGE(dim, name) \
 	layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler##dim BINDLESS_GET_LAYOUT_NAME(name)[]
@@ -57,6 +65,11 @@
 
 #define ENG_TYPE_MAT3 glm::mat3
 #define ENG_TYPE_MAT4 glm::mat4
+
+#define ENT_TYPE_UNSIZED(type, name) type name
+
+#define BINDLESS_DECLARE_STORAGE_BUFFER2(access, name, data) \
+	struct GPU##name data
 #endif
 
 struct GPUConstants {
@@ -81,6 +94,22 @@ struct GPUVertexAttribute {
 	ENG_TYPE_VEC2 uv;
 	ENG_TYPE_VEC4 tangent;
 };
+
+BINDLESS_DECLARE_STORAGE_BUFFER2(, VsmBuffer, {
+	ENG_TYPE_MAT4 dir_light_view;
+	ENG_TYPE_MAT4 dir_light_proj;
+	ENG_TYPE_VEC3 dir_light_dir;
+	ENG_TYPE_UINT num_pages_xy;
+	ENG_TYPE_UINT max_clipmap_index;
+	ENG_TYPE_FLOAT texel_resolution;
+	ENG_TYPE_UINT num_frags;
+	ENT_TYPE_UNSIZED(ENG_TYPE_UINT, pages);
+});
+
+BINDLESS_DECLARE_STORAGE_BUFFER2(, VsmAllocBuffer, {
+	ENG_TYPE_UINT max_allocs;
+	ENG_TYPE_UINT alloc_head;
+});
 
 #ifdef VULKAN
 BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUIndicesBuffer, {
@@ -108,6 +137,8 @@ BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUTransformsBuffer, {
 });
 
 BINDLESS_DECLARE_IMAGE(, StorageImages2Drgba8, rgba8, 2D);
+BINDLESS_DECLARE_IMAGE(, StorageImages2Dr32f, r32f, 2D);
+BINDLESS_DECLARE_UIMAGE(, StorageImages2Dr32ui, r32ui, 2D);
 BINDLESS_DECLARE_COMBINED_IMAGE(2D, CombinedImages2D);
 
 // ---
@@ -131,7 +162,5 @@ Vertex get_vertex(uint32_t position_index, uint32_t attributes_index, uint32_t v
 	vx.tangent *= GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].tangent.w;
 	return vx;
 }
-
-
 
 #endif

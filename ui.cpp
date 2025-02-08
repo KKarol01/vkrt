@@ -62,7 +62,16 @@ void UI::update() {
 
         // used primarily for debug output
         ImGui::SetCursorScreenPos(render_output_next_row);
-        if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {}
+        if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {
+            ImGui::Image(get_renderer().get_imgui_texture_id(get_renderer().vsm_dir_light_page_table_rgb8,
+                                                             ImageFilter::LINEAR, ImageAddressing::CLAMP),
+                         { 128.0f, 128.0 });
+            if(ImGui::SliderFloat3("debug dir light", Engine::get().scene->debug_dir_light_dir, -1.0f, 1.0f)) {
+                glm::vec3 v;
+                memcpy(&v, Engine::get().scene->debug_dir_light_dir, sizeof(v));
+                *((glm::vec3*)Engine::get().scene->debug_dir_light_dir) = glm::normalize(v);
+            }
+        }
         ImGui::EndChild();
     }
     ImGui::End();

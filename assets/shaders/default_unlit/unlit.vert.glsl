@@ -18,6 +18,7 @@ layout(scalar, push_constant) uniform PushConstants {
 };
 
 layout(location = 0) out VsOut {
+    vec3 position;
     vec3 normal;
     vec3 tangent;
     vec2 uv;
@@ -26,11 +27,12 @@ layout(location = 0) out VsOut {
 
 void main() {
     Vertex vertex = get_vertex(vertex_positions_index, vertex_attributes_index, gl_VertexIndex);
+    vsout.position = vec3(GetResource(GPUTransformsBuffer, transform_buffer_index).at[gl_InstanceIndex] * vec4(vertex.position, 1.0));
     vsout.normal = vertex.normal;
     vsout.tangent = vertex.tangent;
     vsout.uv = vertex.uv;
     vsout.instance_index = gl_InstanceIndex;
 
     GPUConstants constants = GetResource(GPUConstantsBuffer, constants_index).constants;
-    gl_Position = constants.proj * (constants.view * (GetResource(GPUTransformsBuffer, transform_buffer_index).at[gl_InstanceIndex] * vec4(vertex.position, 1.0)));
+    gl_Position = constants.proj * (constants.view * vec4(vsout.position, 1.0));
 }
