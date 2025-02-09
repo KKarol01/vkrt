@@ -68,14 +68,16 @@ class Engine {
 
     void set_on_update_callback(const std::function<void()>& on_update_callback);
     void add_on_window_resize_callback(const std::function<bool()>& on_update_callback);
+    void add_on_window_focus_callback(const std::function<void()>& on_focus);
     void notify_on_window_resize();
+    void notify_on_window_focus();
 
     static Engine& get();
     Window* window{};
     Camera* camera{};
     components::Storage* ecs_storage{};
     Renderer* renderer{};
-    UI* ui{};
+    UI ui{};
     scene::Scene* scene{};
     double get_time_secs();
     double last_frame_time() { return _last_frame_time; }
@@ -91,4 +93,5 @@ class Engine {
     float _refresh_rate{ 60.0f };
     std::function<void()> _on_update_callback;
     std::vector<std::function<bool()>> _on_window_resize_callbacks;
+    std::vector<std::function<void()>> m_on_window_focus_callbacks;
 };

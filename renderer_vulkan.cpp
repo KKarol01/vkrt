@@ -17,6 +17,7 @@
 #include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_vulkan.h>
+#include <ImGuizmo/ImGuizmo.h>
 #include "engine.hpp"
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
@@ -215,7 +216,10 @@ void RendererVulkan::initialize_vulkan() {
 
 void RendererVulkan::initialize_imgui() {
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    void* user_data;
+    Engine::get().ui.context->imgui_ctx = ImGui::CreateContext();
+    ImGui::GetAllocatorFunctions(&Engine::get().ui.context->alloc_cbs.imgui_alloc,
+                                 &Engine::get().ui.context->alloc_cbs.imgui_free, &user_data);
     ImGui::StyleColorsDark();
 
     ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
@@ -776,13 +780,20 @@ void RendererVulkan::build_render_graph() {
             },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass&) {
                     auto& r = get_renderer();
+                    ImGui::SetCurrentContext(Engine::get().ui.context->imgui_ctx);
+                        ImGui_ImplVulkan_NewFrame();
+                    ImGui_ImplGlfw_NewFrame();
+                    ImGui::NewFrame();
+                    ImGuizmo::BeginFrame();
+                    Engine::get().ui.update();
+                    ImGui::Render();
                     ImDrawData* im_draw_data = ImGui::GetDrawData();
                     if(im_draw_data) {
                         VkRenderingAttachmentInfo r_col_atts[]{
                             Vks(VkRenderingAttachmentInfo{
                                 .imageView = get_renderer().swapchain.images.at(swapchain_index).view,
                                 .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                                 .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
                             }),

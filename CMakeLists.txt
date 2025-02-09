@@ -88,29 +88,33 @@ target_include_directories(imguizmo
         "third_party/imgui"
 )
 
+add_library(eng_ui SHARED "ui.cpp")
+target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS)
+target_compile_features(eng_ui PRIVATE cxx_std_23)
+target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
+
 add_executable(vkrt 
     "main.cpp"
     "model_importer.cpp" 
     "engine.cpp"  
     "renderer_vulkan.cpp" 
     "camera.cpp"
-    
-    "ui.cpp" 
     "scene.cpp"
     "renderer_vulkan_wrappers.cpp"   
 )
 
-target_include_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
+target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
 target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_link_libraries(vkrt
     PRIVATE
-    glm
     build_header_only
     vk-bootstrap
-    glfw
+    glm 
     imgui
     imguizmo
+    glfw
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
@@ -123,6 +127,7 @@ target_compile_definitions(vkrt
         ENGINE_BASE_ASSET_PATH="${CMAKE_SOURCE_DIR}/assets/"
         IMGUI_DEFINE_MATH_OPERATORS
 )
+
 target_precompile_headers(vkrt
     PRIVATE
         <vector>
@@ -148,10 +153,10 @@ target_precompile_headers(vkrt
         <glm/gtx/quaternion.hpp>
         <glm/gtx/transform.hpp>
         <GLFW/glfw3.h>
-        <VulkanMemoryAllocator/include/vk_mem_alloc.h>
-        <vk-bootstrap/src/VkBootstrap.h>
-        <shaderc/shaderc.hpp>
         <imgui/imgui.h>
         <imgui/backends/imgui_impl_glfw.h>
         <imgui/backends/imgui_impl_vulkan.h>
+        <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+        <vk-bootstrap/src/VkBootstrap.h>
+        <shaderc/shaderc.hpp>
 )
