@@ -31,13 +31,25 @@ static void eng_ui_reload_dll(HMODULE hnew) {
     Engine::get().ui = _ui;
 }
 
-static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free) {
+static void load_dll(const std::filesystem::path& path_dll, bool use_hot_reload, auto cb_dll_load_transfer_free) {
     if(!std::filesystem::exists(path_dll)) { return; }
+    if(!use_hot_reload) {
+        HMODULE dll = LoadLibraryA(path_dll.string().c_str());
+        if(!dll) {
+            ENG_WARN("Cannot load dll {} because (GetLastError(): {})", path_dll.string(), GetLastError());
+            return;
+        }
+        cb_dll_load_transfer_free(dll);
+        return;
+    }
     const auto path_noext = std::filesystem::path{ path_dll }.replace_extension();
     const std::filesystem::path paths[]{ std::filesystem::path{ path_noext }.concat("1.dll"),
                                          std::filesystem::path{ path_noext }.concat("2.dll") };
     uint32_t src_idx = 0, dst_idx = 1;
     HMODULE dlls[]{ GetModuleHandleA(paths[src_idx].string().c_str()), GetModuleHandleA(paths[dst_idx].string().c_str()) };
+    if(!dlls[0] && !dlls[1]) {
+        Engine::get().add_on_window_focus_callback([=] { load_dll(path_dll, true, cb_dll_load_transfer_free); });
+    }
     if(dlls[dst_idx]) {
         dst_idx = 0;
         src_idx = 1;
@@ -89,8 +101,7 @@ void Engine::init() {
 
     renderer = new RendererVulkan{};
     scene = new scene::Scene{};
-    load_dll("./eng_ui.dll", eng_ui_reload_dll);
-    add_on_window_focus_callback([] { load_dll("./eng_ui.dll", eng_ui_reload_dll); });
+    load_dll("eng_ui.dll", true, eng_ui_reload_dll);
     renderer->init();
 }
 

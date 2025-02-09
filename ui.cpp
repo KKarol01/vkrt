@@ -33,8 +33,8 @@ void eng_ui_update() {
     ImGui::SetAllocatorFunctions(g_ctx->alloc_cbs.imgui_alloc, g_ctx->alloc_cbs.imgui_free);
     // ImGui::SetNextWindowSize(ImVec2{ g_ctx->engine->window->width, g_ctx->engine->window->height });
     // ImGui::SetNextWindowSize(ImVec2{ 100.0f, 100.0f });
-    ImGui::Begin("asd");
-    ImGui::Text(g_ctx->asdf.back().c_str());
+    ImGui::Begin("asdd"); 
+    ImGui::Text(g_ctx->asdf.back().c_str());  
     ImGui::End();
     return;
 
