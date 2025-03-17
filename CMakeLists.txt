@@ -89,7 +89,7 @@ target_include_directories(imguizmo
 )
 
 add_library(eng_ui SHARED "ui.cpp")
-target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS)
+target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS ENG_BUILD_AS_DLL)
 target_compile_features(eng_ui PRIVATE cxx_std_23)
 target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
@@ -118,6 +118,7 @@ target_link_libraries(vkrt
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
+    eng_ui
 )
 target_compile_definitions(vkrt
     PRIVATE

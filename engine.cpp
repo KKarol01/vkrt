@@ -19,59 +19,33 @@ static void on_window_focus(GLFWwindow* window, int focus) {
 }
 
 static void eng_ui_reload_dll(HMODULE hnew) {
-    UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
-            .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
-    // TODO: transition data
-    UIContext context{
-        .engine = &Engine::get(),
-        .imgui_ctx = nullptr,
-        .alloc_cbs = { malloc, free },
-    };
-    _ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
-    Engine::get().ui = _ui;
+    // UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
+    //         .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
+    //// TODO: transition data
+    // UIContext context{
+    //     .engine = &Engine::get(),
+    //     .imgui_ctx = nullptr,
+    //     .alloc_cbs = { malloc, free },
+    // };
+    //_ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
+    // Engine::get().ui = _ui;
 }
 
-static void load_dll(const std::filesystem::path& path_dll, bool use_hot_reload, auto cb_dll_load_transfer_free) {
+// static void eng_vkrenderer_reload_dll(HMODULE hnew) {
+//     UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
+//             .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
+//     // TODO: transition data
+//     UIContext context{
+//         .engine = &Engine::get(),
+//         .imgui_ctx = nullptr,
+//         .alloc_cbs = { malloc, free },
+//     };
+//     _ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
+//     Engine::get().ui = _ui;
+// }
+
+static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free) {
     if(!std::filesystem::exists(path_dll)) { return; }
-    if(!use_hot_reload) {
-        HMODULE dll = LoadLibraryA(path_dll.string().c_str());
-        if(!dll) {
-            ENG_WARN("Cannot load dll {} because (GetLastError(): {})", path_dll.string(), GetLastError());
-            return;
-        }
-        cb_dll_load_transfer_free(dll);
-        return;
-    }
-    const auto path_noext = std::filesystem::path{ path_dll }.replace_extension();
-    const std::filesystem::path paths[]{ std::filesystem::path{ path_noext }.concat("1.dll"),
-                                         std::filesystem::path{ path_noext }.concat("2.dll") };
-    uint32_t src_idx = 0, dst_idx = 1;
-    HMODULE dlls[]{ GetModuleHandleA(paths[src_idx].string().c_str()), GetModuleHandleA(paths[dst_idx].string().c_str()) };
-    if(!dlls[0] && !dlls[1]) {
-        Engine::get().add_on_window_focus_callback([=] { load_dll(path_dll, true, cb_dll_load_transfer_free); });
-    }
-    if(dlls[dst_idx]) {
-        dst_idx = 0;
-        src_idx = 1;
-    }
-    if(dlls[src_idx] && std::filesystem::last_write_time(path_dll) <= std::filesystem::last_write_time(paths[src_idx])) {
-        return;
-    }
-    if(!std::filesystem::copy_file(path_dll, paths[dst_idx], std::filesystem::copy_options::overwrite_existing)) {
-        ENG_WARN("Failed copying file {} to {}", path_dll.string(), paths[dst_idx].string());
-        return;
-    }
-    dlls[dst_idx] = LoadLibrary(paths[dst_idx].string().c_str());
-    if(!dlls[0] && !dlls[1]) {
-        ENG_WARN("Could not load library {}; Winapi error: {}", paths[dst_idx].string(), GetLastError());
-        std::filesystem::remove(paths[dst_idx]);
-        return;
-    }
-    cb_dll_load_transfer_free(dlls[dst_idx]);
-    if(dlls[src_idx]) {
-        FreeLibrary(dlls[src_idx]);
-        std::filesystem::remove(paths[src_idx]);
-    }
 }
 
 Window::Window(float width, float height) : width(width), height(height) {
@@ -99,9 +73,11 @@ void Engine::init() {
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { _refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
+    // load_dll("eng_vk_renderer.dll", true, );
     renderer = new RendererVulkan{};
     scene = new scene::Scene{};
-    load_dll("eng_ui.dll", true, eng_ui_reload_dll);
+    UIInitData ui_init_data{ .engine = this, .callbacks = { .alloc = malloc, .free = free }, .context = &ui_ctx };
+    eng_ui_init(&ui_init_data);
     renderer->init();
 }
 
@@ -118,7 +94,6 @@ void Engine::update() {
     const float now = get_time_secs();
     if(_on_update_callback) { _on_update_callback(); }
     camera->update();
-    // ui.update();
     renderer->update();
     ++_frame_num;
     _last_frame_time = now;

@@ -1,13 +1,13 @@
 #ifndef VSM_COMMON_H
 #define VSM_COMMON_H
 
-const float dk = 256.0;
-const float md = 200.0;
-const mat4 proj_view = mat4(
-    2.0 / dk, 0.0, 0.0, 0.0,
-    0.0, 2.0 / dk, 0.0, 0.0,
-    0.0, 0.0, 1.0 / md, 0.0,
-    0.0, 0.0, 0.0, 1.0);
+//const float dk = 128;
+//const float md = 200.0;
+//const mat4 proj_view = mat4(
+//    2.0 / dk, 0.0, 0.0, 0.0,
+//    0.0, 2.0 / dk, 0.0, 0.0,
+//    0.0, 0.0, 1.0 / md, 0.0,
+//    0.0, 0.0, 0.0, 1.0);
 
 vec3 cam_pos = vec3(0.0, 0.0, 0.0);
 mat4 light_view = mat4(1.0);
@@ -33,6 +33,12 @@ vec2 vsm_calc_virtual_coords(vec3 world_pos) {
 ivec2 vsm_calc_page_index(vec3 world_pos, uint vsm_buffer_index) {
     vec2 vtc = vsm_calc_virtual_coords(world_pos);
     return ivec2(floor(vtc * GetResource(VsmBuffer, vsm_buffer_index).num_pages_xy));
+}
+
+vec2 vsm_calc_page_uv(vec3 world_pos, ivec2 page_index, uint vsm_buffer_index) {
+    const vec2 vtc = vsm_calc_virtual_coords(world_pos);
+    const vec2 page_start_vtc = fract(vec2(page_index) / vec2(GetResource(VsmBuffer, vsm_buffer_index).num_pages_xy));
+    return fract(vtc - page_start_vtc);
 }
 
 #endif

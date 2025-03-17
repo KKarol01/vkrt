@@ -77,7 +77,7 @@ class Engine {
     Camera* camera{};
     components::Storage* ecs_storage{};
     Renderer* renderer{};
-    UI ui{};
+    UIContext* ui_ctx{};
     scene::Scene* scene{};
     double get_time_secs();
     double last_frame_time() { return _last_frame_time; }
@@ -90,7 +90,7 @@ class Engine {
     double _last_frame_time{};
     double _delta_time{};
     uint64_t _frame_num{};
-    float _refresh_rate{ 60.0f };
+    float _refresh_rate{ 1.0f / 60.0f };
     std::function<void()> _on_update_callback;
     std::vector<std::function<bool()>> _on_window_resize_callbacks;
     std::vector<std::function<void()>> m_on_window_focus_callbacks;

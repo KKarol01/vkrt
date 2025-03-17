@@ -32,7 +32,7 @@ static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& i
     }, img.data);
     // clang-format on
     if(!result) { return Handle<Image>{}; }
-    return get_renderer().batch_texture(ImageDescriptor{
+    return Engine::get().renderer->batch_texture(ImageDescriptor{
         .name = img.name.c_str(),
         .width = static_cast<uint32_t>(width),
         .height = static_cast<uint32_t>(height),
@@ -99,8 +99,8 @@ static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fa
     fastgltf::copyFromAccessor<uint32_t>(asset, indices_accesor, indices.data());
 
     auto& node_primitive = node->primitives.emplace_back();
-    node_primitive.geometry_handle = get_renderer().batch_geometry({ .vertices = vertices, .indices = indices });
-    node_primitive.mesh_handle = get_renderer().batch_mesh(MeshDescriptor{ .geometry = node_primitive.geometry_handle });
+    node_primitive.geometry_handle = Engine::get().renderer->batch_geometry({ .vertices = vertices, .indices = indices });
+    node_primitive.mesh_handle = Engine::get().renderer->batch_mesh(MeshDescriptor{ .geometry = node_primitive.geometry_handle });
 
     if(prim.materialIndex) {
         if(state.materials.size() > *prim.materialIndex) {
@@ -121,7 +121,7 @@ static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fa
                 state_material.metallic_roughness_handle =
                     scene_get_or_load_image(state, asset, material.pbrData.metallicRoughnessTexture->textureIndex, ImageFormat::UNORM);
             }
-            state_material.handle = get_renderer().batch_material(MaterialDescriptor{
+            state_material.handle = Engine::get().renderer->batch_material(MaterialDescriptor{
                 .base_color_texture = state_material.base_color_image_handle,
                 .normal_texture = state_material.normal_image_handle,
                 .metallic_roughness_texture = state_material.metallic_roughness_handle,
@@ -281,7 +281,7 @@ scene::NodeInstance* scene::Scene::add_instance() {
 //  cmps::Transform& tr = Engine::ec()->get<cmps::Transform>(node.handle);
 //  final_transforms.at(idx) = tr.transform * t;
 //  if(node.has_component<cmps::Mesh>()) {
-//      get_renderer().update_transform(Engine::ec()->get<cmps::Mesh>(node.handle).ri_handle);
+//      Engine::get().renderer->update_transform(Engine::ec()->get<cmps::Mesh>(node.handle).ri_handle);
 //  }
 //  for(uint32_t i = 0; i < node.children_count; ++i) {
 //      _update_transform(node.children_offset + i, final_transforms.at(idx));

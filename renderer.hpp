@@ -22,6 +22,7 @@ struct RenderGeometry;
 struct RenderMesh;
 struct RenderInstance;
 struct Image;
+struct Buffer;
 
 struct Vertex {
     glm::vec3 pos;
@@ -82,6 +83,14 @@ struct ScreenRect {
     float h;
 };
 
+struct VsmData {
+    Handle<Buffer> data_buffer;
+    Handle<Buffer> free_allocs_buffer;
+    Handle<Image> shadow_map_0;
+    Handle<Image> dir_light_page_table;
+    Handle<Image> dir_light_page_table_rgb8;
+};
+
 class Renderer {
   public:
     virtual ~Renderer() = default;
@@ -97,5 +106,7 @@ class Renderer {
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
     virtual void update_transform(components::Entity entity) = 0;
     virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) = 0;
+    virtual Handle<Image> get_color_output_texture() const = 0;
     virtual RenderMaterial get_material(Handle<RenderMaterial> handle) const = 0;
+    virtual VsmData& get_vsm_data() = 0;
 };

@@ -3,6 +3,10 @@
 #include "renderer_vulkan.hpp"
 #include "set_debug_name.hpp"
 
+// clang-format off
+inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
+// clang-format on
+
 void Image::transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                               VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout) {
     transition_layout(cmd, src_stage, src_access, dst_stage, dst_access, current_layout, dst_layout);

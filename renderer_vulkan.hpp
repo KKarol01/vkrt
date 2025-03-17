@@ -410,8 +410,9 @@ struct BindlessStorage {
 
 class RendererVulkan : public Renderer {
   public:
-    void init() final;
+    ~RendererVulkan() override = default;
 
+    void init() final;
     void initialize_vulkan();
     void initialize_imgui();
     void initialize_resources();
@@ -430,7 +431,9 @@ class RendererVulkan : public Renderer {
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(components::Entity entity) final;
     size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) final;
+    Handle<Image> get_color_output_texture() const final;
     RenderMaterial get_material(Handle<RenderMaterial> handle) const final;
+    VsmData& get_vsm_data() final;
 
     void upload_model_textures();
     void upload_staged_models();
@@ -470,6 +473,7 @@ class RendererVulkan : public Renderer {
     template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
 
     FrameData& get_frame_data(uint32_t offset = 0);
+    const FrameData& get_frame_data(uint32_t offset = 0) const;
 
     uint32_t get_total_vertices() const {
         return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
@@ -512,11 +516,7 @@ class RendererVulkan : public Renderer {
     Buffer tlas_buffer;
     Buffer tlas_instance_buffer;
     Buffer tlas_scratch_buffer;
-    Handle<Buffer> vsm_data_buffer;
-    Handle<Buffer> vsm_free_allocs_buffer;
-    Handle<Image> vsm_shadow_map_0;
-    Handle<Image> vsm_dir_light_page_table;
-    Handle<Image> vsm_dir_light_page_table_rgb8;
+    VsmData vsm;
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
@@ -551,7 +551,3 @@ class RendererVulkan : public Renderer {
     std::vector<UploadImage> upload_images;
     std::vector<components::Entity> update_positions;
 };
-
-// clang-format off
-inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
-// clang-format on

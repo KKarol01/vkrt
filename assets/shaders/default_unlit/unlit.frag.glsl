@@ -35,6 +35,7 @@ void main() {
 
     vec2 vpi = vsm_calc_page_index(vsout.position, vsm_buffer_index);
     OUT_COLOR = vec4(pow(vec2(vpi) / 64.0, vec2(8.0)) * 8.0, 0.0, 1.0);
+    OUT_COLOR = vec4(vsm_calc_page_uv(vsout.position, ivec2(vpi), vsm_buffer_index), 0.0, 1.0);
     if(use_vsm == 1) {
         // imageStore(GetResource(StorageImages2Dr32f, vsm_clip0_index), ivec2(vpi * 128.0), vec4(0.2));
         // for(int i=0; i<16; ++i) {
