@@ -3,12 +3,8 @@
 #include "./vsm_common.inc.glsl"
 
 void main() {
-    vec3 vertex = vec3(
-        GetResource(GPUTransformsBuffer, transform_buffer_index).at[gl_InstanceIndex] * vec4(get_vertex_position(vertex_positions_index, gl_VertexIndex), 1.0)
-    );
-    light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
-    vsm_rclip_0_mat = GetResource(VsmBuffer, vsm_buffer_index).dir_light_proj * light_view;
-    vec4 proj_pos = vsm_rclip_0_mat * vec4(vertex, 1.0);
+    vec4 vertex = transforms[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0);
+    vec4 proj_pos = vsm_constants.dir_light_proj_view * vertex;
     gl_Position = vec4(vsm_calc_virtual_coords(vertex), proj_pos.z, 1.0);
 
 #if 0
