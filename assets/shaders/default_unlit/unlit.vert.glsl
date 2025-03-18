@@ -1,38 +1,22 @@
 #version 460
 
-#extension GL_EXT_nonuniform_qualifier : enable
-#extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_buffer_reference : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
-
-#include "../bindless_structures.inc.glsl"
-
-layout(scalar, push_constant) uniform PushConstants {
-    uint32_t indices_index;
-    uint32_t vertex_positions_index;
-    uint32_t vertex_attributes_index;
-    uint32_t constants_index;
-    uint32_t mesh_instances_index;
-    uint32_t transform_buffer_index;
-};
+#include "../vsm/bindless_structures.inc.glsl"
+#define NO_BINDLESS_STRUCTS_INCLUDE
+#include "../vsm/vsm_common.inc.glsl"
 
 layout(location = 0) out VsOut {
     vec3 position;
     vec3 normal;
-    vec3 tangent;
     vec2 uv;
+    vec3 tangent;
     flat uint32_t instance_index;
 } vsout;
 
 void main() {
-    Vertex vertex = get_vertex(vertex_positions_index, vertex_attributes_index, gl_VertexIndex);
-    vsout.position = vec3(GetResource(GPUTransformsBuffer, transform_buffer_index).at[gl_InstanceIndex] * vec4(vertex.position, 1.0));
-    vsout.normal = vertex.normal;
-    vsout.tangent = vertex.tangent;
-    vsout.uv = vertex.uv;
+    vsout.position = vec3(transforms_arr[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0));
+    vsout.normal = attrib_pos_arr[gl_VertexIndex].normal;
+    vsout.uv = attrib_pos_arr[gl_VertexIndex].uv;
+    vsout.tangent = attrib_pos_arr[gl_VertexIndex].tangent.xyz * attrib_pos_arr[gl_VertexIndex].tangent.w;
     vsout.instance_index = gl_InstanceIndex;
-
-    GPUConstants constants = GetResource(GPUConstantsBuffer, constants_index).constants;
-    gl_Position = constants.proj * (constants.view * vec4(vsout.position, 1.0));
+    gl_Position = constants.proj_view * vec4(vsout.position, 1.0);
 }

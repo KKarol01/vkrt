@@ -1,25 +1,14 @@
 #version 460
 
-#include "../bindless_structures.inc.glsl"
+#include "../vsm/bindless_structures.inc.glsl"
+#define NO_BINDLESS_STRUCTS_INCLUDE
 #include "../vsm/vsm_common.inc.glsl"
-
-layout(scalar, push_constant) uniform PushConstants {
-    uint32_t indices_index;
-    uint32_t vertex_positions_index;
-    uint32_t vertex_attributes_index;
-    uint32_t constants_index;
-    uint32_t mesh_instances_index;
-    uint32_t transform_buffer_index;
-    uint32_t vsm_buffer_index;
-    uint32_t vsm_clip0_index;
-    uint32_t use_vsm;
-};
 
 layout(location = 0) in VsOut {
     vec3 position;
     vec3 normal;
-    vec3 tangent;
     vec2 uv;
+    vec3 tangent;
     flat uint32_t instance_index;
 }
 vsout;
@@ -27,6 +16,8 @@ vsout;
 layout(location = 0) out vec4 OUT_COLOR;
 
 void main() {
+    OUT_COLOR = vec4(0.0);
+#if 0
     cam_pos = vec3(GetResource(GPUConstantsBuffer, constants_index).constants.inv_view * vec4(0.0, 0.0, 0.0, 1.0));
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
     vsm_rclip_0_mat = GetResource(VsmBuffer, vsm_buffer_index).dir_light_proj * light_view;
@@ -47,7 +38,7 @@ void main() {
         uint val = atomicAdd(GetResource(VsmBuffer, vsm_buffer_index).num_frags, 1);
         if(val < 64 * 64) { GetResource(VsmBuffer, vsm_buffer_index).pages[val] = uint(vpi.y * 64 + vpi.x); }
     }
-
+#endif
 #if 0
     OUT_COLOR = vec4(1.0);
     if(dep < lpos.z - 0.001) {

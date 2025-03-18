@@ -10,7 +10,7 @@ vec3 unproject_ZO(float depth, vec2 uv, mat4 inv_proj) {
     return ndc.xyz;
 }
 
-vec3 get_world_pos_from_depth_buffer(sampler2D depth_buffer, ivec2 tc, GPUConstants constants) {
+vec3 get_world_pos_from_depth_buffer(ivec2 tc) {
     const vec2 texel_size = 1.0 / textureSize(depth_buffer, 0);
     const vec2 texel_center = (vec2(tc) + 0.5) * texel_size;
     const float depth = texelFetch(depth_buffer, tc, 0).x;
@@ -20,10 +20,8 @@ vec3 get_world_pos_from_depth_buffer(sampler2D depth_buffer, ivec2 tc, GPUConsta
 
 void main() {
     const ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
-    if(any(greaterThanEqual(gid, textureSize(GetResource(CombinedImages2D, depth_buffer_index), 0)))) { return; }
-    const GPUConstants constants = GetResource(GPUConstantsBuffer, constants_index).constants;
-    vsm_rclip_0_mat = GetResource(VsmBuffer, vsm_buffer_index).dir_light_proj * GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
-    vec3 wpos = get_world_pos_from_depth_buffer(GetResource(CombinedImages2D, depth_buffer_index), gid, constants);
-    ivec2 vpi = vsm_calc_page_index(wpos, vsm_buffer_index);
-    const uint read_val = imageAtomicOr(GetResource(StorageImages2Dr32ui, page_table_index), vpi, 1u);
+    if(any(greaterThanEqual(gid, textureSize(depth_buffer, 0)))) { return; }
+    vec3 wpos = get_world_pos_from_depth_buffer(gid);
+    ivec2 vpi = vsm_calc_page_index(wpos);
+    const uint read_val = imageAtomicOr(vsm_page_table, vpi, 1u);
 }

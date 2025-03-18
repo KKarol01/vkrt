@@ -6,20 +6,21 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
+layout(scalar, push_constant) uniform PushConstants {
+    uint32_t src_image_index;
+    uint32_t dst_image_index;
+    uint32_t vsm_buffer_index;
+};
 #define NO_PUSH_CONSTANTS
 #include "./vsm_common.inc.glsl"
 
-// assuming storage
-layout(scalar, push_constant) uniform PushConstants {
-    uint32_t src_index; // storage
-    uint32_t dst_index; // storage
-};
+#define src_image storageImages_2drgba8[src_image_index]
+#define dst_image storageImages_2drgba8[dst_image_index]
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
 void main() {
     const ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
     if(any(greaterThanEqual(gid, ivec2(64)))) { return; }
-    imageStore(GetResource(StorageImages2Drgba8, dst_index), gid,
-               vec4(imageLoad(GetResource(StorageImages2Dr32ui, src_index), gid).r, 0.0, 0.0, 1.0));
+    imageStore(dst_image, gid, vec4(imageLoad(src_image, gid).r, 0.0, 0.0, 1.0));
 }

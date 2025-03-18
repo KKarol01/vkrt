@@ -62,8 +62,10 @@
 ENG_DECLARE_STORAGE_BUFFERS(GPUConstantsBuffer) {
 	ENG_TYPE_MAT4 view;
 	ENG_TYPE_MAT4 proj;
+	ENG_TYPE_MAT4 proj_view;
 	ENG_TYPE_MAT4 inv_view;
 	ENG_TYPE_MAT4 inv_proj;
+	ENG_TYPE_MAT4 inv_proj_view;
 	ENG_TYPE_MAT3 rand_mat;
 } ENG_DECLARE_BINDLESS(GPUConstantsBuffer);
 
@@ -103,6 +105,7 @@ ENG_DECLARE_STORAGE_BUFFERS(GPUTransformsBuffer) {
 ENG_DECLARE_STORAGE_BUFFERS(GPUVsmConstantsBuffer) {
 	ENG_TYPE_MAT4 dir_light_view;
 	ENG_TYPE_MAT4 dir_light_proj;
+	ENG_TYPE_MAT4 dir_light_proj_view;
 	ENG_TYPE_VEC3 dir_light_dir;
 	ENG_TYPE_UINT num_pages_xy;
 	ENG_TYPE_UINT max_clipmap_index;
@@ -118,10 +121,14 @@ ENG_DECLARE_STORAGE_BUFFERS(GPUVsmAllocConstantsBuffer) {
 
 #ifndef __cplusplus
 
-#define constants u_storageBuffers_GPUConstantsBuffer[constants_index]
-#define vertex_pos_arr u_storageBuffers_GPUVertexPositionsBuffer[vertex_positions_index].positions_us
-#define attrib_pos_arr u_storageBuffers_GPUVertexAttributesBuffer[vertex_attributes_index].attributes_us
-#define transforms_arr u_storageBuffers_GPUTransformsBuffer[transforms_index].transforms
+layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2D combinedImages_2d[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2D storageImages_2dr32ui[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2D storageImages_2drgba8[];
+
+#define constants storageBuffers_GPUConstantsBuffer[constants_index]
+#define vertex_pos_arr storageBuffers_GPUVertexPositionsBuffer[vertex_positions_index].positions_us
+#define attrib_pos_arr storageBuffers_GPUVertexAttributesBuffer[vertex_attributes_index].attributes_us
+#define transforms_arr storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
 
 #endif
 
