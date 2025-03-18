@@ -6,15 +6,16 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
-#include "../bindless_structures.inc.glsl"
-
-layout(local_size_x = 8, local_size_y = 8) in;
+#define NO_PUSH_CONSTANTS
+#include "./vsm_common.inc.glsl"
 
 // assuming storage
 layout(scalar, push_constant) uniform PushConstants {
     uint32_t src_index; // storage
     uint32_t dst_index; // storage
 };
+
+layout(local_size_x = 8, local_size_y = 8) in;
 
 void main() {
     const ivec2 gid = ivec2(gl_GlobalInvocationID.xy);

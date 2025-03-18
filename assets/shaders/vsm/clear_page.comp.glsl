@@ -5,14 +5,15 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
-#include "../bindless_structures.inc.glsl"
-
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+#define NO_PUSH_CONSTANTS
+#include "./vsm_common.inc.glsl"
 
 layout(scalar, push_constant) uniform PushConstants {
-    uint32_t page_table_index;
+    uint32_t page_table_index;		// assume zero for now
 	uint32_t texel_resolution_xy;
 };
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 void main() {
 	if(gl_GlobalInvocationID.x >= texel_resolution_xy || gl_GlobalInvocationID.y >= texel_resolution_xy) { return; }

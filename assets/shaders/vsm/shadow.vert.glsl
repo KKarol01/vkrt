@@ -1,32 +1,15 @@
 #version 460
 
-#extension GL_EXT_nonuniform_qualifier : enable
-#extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_buffer_reference : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
-
-#include "../bindless_structures.inc.glsl"
-#include "vsm_common.inc.glsl"
-
-layout(scalar, push_constant) uniform PushConstants {
-    uint32_t indices_index;
-    uint32_t vertex_positions_index;
-    uint32_t transform_buffer_index;
-    uint32_t vsm_buffer_index;
-};
-
-layout(location = 0) out VsOut { vec3 position; }
-vsout;
+#include "./vsm_common.inc.glsl"
 
 void main() {
-    Vertex vertex = get_vertex_position(vertex_positions_index, gl_VertexIndex);
-    vsout.position =
-        vec3(GetResource(GPUTransformsBuffer, transform_buffer_index).at[gl_InstanceIndex] * vec4(vertex.position, 1.0));
+    vec3 vertex = vec3(
+        GetResource(GPUTransformsBuffer, transform_buffer_index).at[gl_InstanceIndex] * vec4(get_vertex_position(vertex_positions_index, gl_VertexIndex), 1.0)
+    );
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
     vsm_rclip_0_mat = GetResource(VsmBuffer, vsm_buffer_index).dir_light_proj * light_view;
-    vec4 proj_pos = vsm_rclip_0_mat * vec4(vsout.position, 1.0);
-    gl_Position = vec4(vsm_calc_virtual_coords(vsout.position), proj_pos.z, 1.0);
+    vec4 proj_pos = vsm_rclip_0_mat * vec4(vertex, 1.0);
+    gl_Position = vec4(vsm_calc_virtual_coords(vertex), proj_pos.z, 1.0);
 
 #if 0
     vsm_rclip_0_mat = proj_view * light_view;

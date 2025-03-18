@@ -1,17 +1,23 @@
 #ifndef VSM_COMMON_H
 #define VSM_COMMON_H
 
-//const float dk = 128;
-//const float md = 200.0;
-//const mat4 proj_view = mat4(
-//    2.0 / dk, 0.0, 0.0, 0.0,
-//    0.0, 2.0 / dk, 0.0, 0.0,
-//    0.0, 0.0, 1.0 / md, 0.0,
-//    0.0, 0.0, 0.0, 1.0);
+#include "./bindless_structures.inc.glsl"
 
-vec3 cam_pos = vec3(0.0, 0.0, 0.0);
-mat4 light_view = mat4(1.0);
-mat4 vsm_rclip_0_mat = mat4(1.0);
+#ifndef NO_PUSH_CONSTANTS
+layout(scalar, push_constant) uniform PushConstants {
+    uint32_t indices_index;
+    uint32_t vertex_positions_index;
+    uint32_t transforms_index;
+    uint32_t vsm_buffer_index;
+    uint32_t vsm_alloc_index;
+    uint32_t depth_buffer_index;
+    uint32_t page_table_index;
+    uint32_t constants_index;
+};
+#endif
+
+#define vsm_constants u_storageBuffers_GPUVsmConstantsBuffer[vsm_buffer_index]
+#define vsm_alloc_constants u_storageBuffers_GPUVsmConstantsBuffer[vsm_buffer_index]
 
 vec3 vsm_clip0_to_clip_n(vec3 o, int clip_index) { return vec3(o.xy * vec2(1.0 / float(1 << clip_index)), o.z); }
 

@@ -557,6 +557,7 @@ void RendererVulkan::build_render_graph() {
                     .pColorAttachments = nullptr,
                     .pDepthAttachment = &r_dep_att,
                 });
+                vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
                 vkCmdBeginRendering(cmd, &rendering_info);
                 VkRect2D r_sciss_1 = rendering_info.renderArea;

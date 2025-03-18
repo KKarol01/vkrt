@@ -29,7 +29,7 @@ layout(location = 0) out vec4 OUT_COLOR;
 void main() {
     cam_pos = vec3(GetResource(GPUConstantsBuffer, constants_index).constants.inv_view * vec4(0.0, 0.0, 0.0, 1.0));
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
-    vsm_rclip_0_mat = proj_view * light_view;
+    vsm_rclip_0_mat = GetResource(VsmBuffer, vsm_buffer_index).dir_light_proj * light_view;
     GPUMeshInstance mesh = GetResource(GPUMeshInstancesBuffer, mesh_instances_index).at[vsout.instance_index];
     vec4 sampled_color = texture(GetResource(CombinedImages2D, mesh.color_texture_idx), vsout.uv);
 
