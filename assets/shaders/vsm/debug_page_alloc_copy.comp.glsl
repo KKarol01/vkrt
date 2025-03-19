@@ -14,7 +14,7 @@ layout(scalar, push_constant) uniform PushConstants {
 #define NO_PUSH_CONSTANTS
 #include "./vsm_common.inc.glsl"
 
-#define src_image storageImages_2drgba8[src_image_index]
+#define src_image storageImages_2dr32ui[src_image_index]
 #define dst_image storageImages_2drgba8[dst_image_index]
 
 layout(local_size_x = 8, local_size_y = 8) in;

@@ -1,8 +1,6 @@
 #version 460
 
-#include "../vsm/bindless_structures.inc.glsl"
-#define NO_BINDLESS_STRUCTS_INCLUDE
-#include "../vsm/vsm_common.inc.glsl"
+#include "./common.inc.glsl"
 
 layout(location = 0) out VsOut {
     vec3 position;

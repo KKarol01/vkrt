@@ -15,7 +15,7 @@ vec3 get_world_pos_from_depth_buffer(ivec2 tc) {
     const vec2 texel_center = (vec2(tc) + 0.5) * texel_size;
     const float depth = texelFetch(depth_buffer, tc, 0).x;
     if(depth == 1.0) { return vec3(0.0); }
-    return unproject_ZO(depth, texel_center, constants.inv_view * constants.inv_proj);
+    return unproject_ZO(depth, texel_center, constants.inv_proj_view);
 }
 
 void main() {

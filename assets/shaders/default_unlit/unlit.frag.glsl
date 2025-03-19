@@ -1,8 +1,6 @@
 #version 460
 
-#include "../vsm/bindless_structures.inc.glsl"
-#define NO_BINDLESS_STRUCTS_INCLUDE
-#include "../vsm/vsm_common.inc.glsl"
+#include "./common.inc.glsl"
 
 layout(location = 0) in VsOut {
     vec3 position;
@@ -16,7 +14,7 @@ vsout;
 layout(location = 0) out vec4 OUT_COLOR;
 
 void main() {
-    OUT_COLOR = vec4(0.0);
+    OUT_COLOR = vec4(1.0);
 #if 0
     cam_pos = vec3(GetResource(GPUConstantsBuffer, constants_index).constants.inv_view * vec4(0.0, 0.0, 0.0, 1.0));
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;

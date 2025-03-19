@@ -84,7 +84,7 @@ struct ScreenRect {
 };
 
 struct VsmData {
-    Handle<Buffer> data_buffer;
+    Handle<Buffer> constants_buffer;
     Handle<Buffer> free_allocs_buffer;
     Handle<Image> shadow_map_0;
     Handle<Image> dir_light_page_table;

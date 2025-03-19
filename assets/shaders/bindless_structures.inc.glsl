@@ -1,3 +1,6 @@
+#ifndef BINDLESS_STRUCTURES_INC_GLSL
+#define BINDLESS_STRUCTURES_INC_GLSL
+
 #define BINDLESS_STORAGE_BUFFER_BINDING 0
 #define BINDLESS_STORAGE_IMAGE_BINDING 1
 #define BINDLESS_COMBINED_IMAGE_BINDING 2
@@ -5,9 +8,7 @@
 #define ENG_TYPE_UINT uint32_t
 #define ENG_TYPE_FLOAT float
 
-
-#ifdef VULKAN
-
+#ifndef __cplusplus
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_buffer_reference : enable
@@ -29,26 +30,10 @@
 #define ENG_TYPE_MAT3 mat3
 #define ENG_TYPE_MAT4 mat4
 
-#define ENT_TYPE_UNSIZED(type, name) type name[]
+#define ENG_TYPE_UNSIZED(type, name) type name##_us[]
 
-#define BINDLESS_GET_LAYOUT_NAME(Name) Name##BindlessArray
-
-#define BINDLESS_DECLARE_STORAGE_BUFFER(access, name, data) \
-	layout(scalar, set=0, binding=BINDLESS_STORAGE_BUFFER_BINDING) access buffer name data BINDLESS_GET_LAYOUT_NAME(name)[]
-
-#define BINDLESS_DECLARE_STORAGE_BUFFER2(access, name, data) \
-	layout(scalar, set=0, binding=BINDLESS_STORAGE_BUFFER_BINDING) access buffer name data BINDLESS_GET_LAYOUT_NAME(name)[]
-
-#define BINDLESS_DECLARE_IMAGE(access, name, format, dim) \
-	layout(set=0, binding=BINDLESS_STORAGE_IMAGE_BINDING, format) uniform image##dim BINDLESS_GET_LAYOUT_NAME(name)[]
-
-#define BINDLESS_DECLARE_UIMAGE(access, name, format, dim) \
-	layout(set=0, binding=BINDLESS_STORAGE_IMAGE_BINDING, format) uniform uimage##dim BINDLESS_GET_LAYOUT_NAME(name)[]
-
-#define BINDLESS_DECLARE_COMBINED_IMAGE(dim, name) \
-	layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler##dim BINDLESS_GET_LAYOUT_NAME(name)[]
-
-#define GetResource(name, index) BINDLESS_GET_LAYOUT_NAME(name)[nonuniformEXT(index)]
+#define ENG_DECLARE_STORAGE_BUFFERS(type) layout(set = 0, binding = BINDLESS_STORAGE_BUFFER_BINDING, scalar) buffer u_storageBuffers_##type
+#define ENG_DECLARE_BINDLESS(type) storageBuffers_##type[]
 
 #elif __cplusplus
 #define ENG_TYPE_IVEC2 glm::ivec2
@@ -66,19 +51,40 @@
 #define ENG_TYPE_MAT3 glm::mat3
 #define ENG_TYPE_MAT4 glm::mat4
 
-#define ENT_TYPE_UNSIZED(type, name) type name
+#define ENG_TYPE_UNSIZED(type, name) type name##_us
 
-#define BINDLESS_DECLARE_STORAGE_BUFFER2(access, name, data) \
-	struct GPU##name data
+#define ENG_DECLARE_STORAGE_BUFFERS(type) struct type
+#define ENG_DECLARE_BINDLESS(type, body)
 #endif
 
-struct GPUConstants {
+// todo: make those readonly
+
+ENG_DECLARE_STORAGE_BUFFERS(GPUConstantsBuffer) {
 	ENG_TYPE_MAT4 view;
 	ENG_TYPE_MAT4 proj;
+	ENG_TYPE_MAT4 proj_view;
 	ENG_TYPE_MAT4 inv_view;
 	ENG_TYPE_MAT4 inv_proj;
+	ENG_TYPE_MAT4 inv_proj_view;
 	ENG_TYPE_MAT3 rand_mat;
+} ENG_DECLARE_BINDLESS(GPUConstantsBuffer);
+
+ENG_DECLARE_STORAGE_BUFFERS(GPUIndicesBuffer) {
+	ENG_TYPE_UNSIZED(ENG_TYPE_UINT, indices);
+} ENG_DECLARE_BINDLESS(GPUIndicesBuffer);
+
+ENG_DECLARE_STORAGE_BUFFERS(GPUVertexPositionsBuffer) {
+	ENG_TYPE_UNSIZED(ENG_TYPE_VEC3, positions);
+} ENG_DECLARE_BINDLESS(GPUVertexPositionsBuffer);
+
+struct GPUVertexAttribute {
+	ENG_TYPE_VEC3 normal;
+	ENG_TYPE_VEC2 uv;
+	ENG_TYPE_VEC4 tangent;
 };
+ENG_DECLARE_STORAGE_BUFFERS(GPUVertexAttributesBuffer) {
+	ENG_TYPE_UNSIZED(GPUVertexAttribute, attributes);
+} ENG_DECLARE_BINDLESS(GPUVertexAttributesBuffer);
 
 /* unpacked mesh instance for gpu consumption */
 struct GPUMeshInstance {
@@ -88,79 +94,42 @@ struct GPUMeshInstance {
     ENG_TYPE_UINT normal_texture_idx;
     ENG_TYPE_UINT metallic_roughness_idx;
 };
+ENG_DECLARE_STORAGE_BUFFERS(GPUMeshInstancesBuffer) {
+	ENG_TYPE_UNSIZED(GPUMeshInstance, mesh_instances);
+} ENG_DECLARE_BINDLESS(GPUMeshInstancesBuffer);
 
-struct GPUVertexAttribute {
-	ENG_TYPE_VEC3 normal;
-	ENG_TYPE_VEC2 uv;
-	ENG_TYPE_VEC4 tangent;
-};
+ENG_DECLARE_STORAGE_BUFFERS(GPUTransformsBuffer) {
+	ENG_TYPE_UNSIZED(ENG_TYPE_MAT4, transforms);
+} ENG_DECLARE_BINDLESS(GPUTransformsBuffer);
 
-BINDLESS_DECLARE_STORAGE_BUFFER2(, VsmBuffer, {
+ENG_DECLARE_STORAGE_BUFFERS(GPUVsmConstantsBuffer) {
 	ENG_TYPE_MAT4 dir_light_view;
 	ENG_TYPE_MAT4 dir_light_proj;
+	ENG_TYPE_MAT4 dir_light_proj_view;
 	ENG_TYPE_VEC3 dir_light_dir;
 	ENG_TYPE_UINT num_pages_xy;
 	ENG_TYPE_UINT max_clipmap_index;
 	ENG_TYPE_FLOAT texel_resolution;
 	ENG_TYPE_UINT num_frags;
-	ENT_TYPE_UNSIZED(ENG_TYPE_UINT, pages);
-});
+	ENG_TYPE_UNSIZED(ENG_TYPE_UINT, pages);
+} ENG_DECLARE_BINDLESS(GPUVsmConstantsBuffer);
 
-BINDLESS_DECLARE_STORAGE_BUFFER2(, VsmAllocBuffer, {
+ENG_DECLARE_STORAGE_BUFFERS(GPUVsmAllocConstantsBuffer) {
 	ENG_TYPE_UINT max_allocs;
 	ENG_TYPE_UINT alloc_head;
-});
+} ENG_DECLARE_BINDLESS(GPUVsmAllocConstantsBuffer);
 
-#ifdef VULKAN
-BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUIndicesBuffer, {
-	uint32_t at[];
-});
+#ifndef __cplusplus
 
-BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUConstantsBuffer, {
-	GPUConstants constants;
-});
+layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2D combinedImages_2d[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2D storageImages_2dr32ui[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2D storageImages_2drgba8[];
 
-BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUVertexPositionsBuffer, {
-	ENG_TYPE_VEC3 at[];
-});
+#define constants storageBuffers_GPUConstantsBuffer[nonuniformEXT(constants_index)]
+#define vertex_pos_arr storageBuffers_GPUVertexPositionsBuffer[nonuniformEXT(vertex_positions_index)].positions_us
+#define attrib_pos_arr storageBuffers_GPUVertexAttributesBuffer[nonuniformEXT(vertex_attributes_index)].attributes_us
+#define transforms_arr storageBuffers_GPUTransformsBuffer[nonuniformEXT(transforms_index)].transforms_us
 
-BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUVertexAttributesBuffer, {
-	GPUVertexAttribute at[];
-});
-
-BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUMeshInstancesBuffer, {
-	GPUMeshInstance at[];
-});
-
-BINDLESS_DECLARE_STORAGE_BUFFER(readonly, GPUTransformsBuffer, {
-	ENG_TYPE_MAT4 at[];
-});
-
-BINDLESS_DECLARE_IMAGE(, StorageImages2Drgba8, rgba8, 2D);
-BINDLESS_DECLARE_IMAGE(, StorageImages2Dr32f, r32f, 2D);
-BINDLESS_DECLARE_UIMAGE(, StorageImages2Dr32ui, r32ui, 2D);
-BINDLESS_DECLARE_COMBINED_IMAGE(2D, CombinedImages2D);
-
-// ---
-
-vec3 get_vertex_position(uint32_t buffer_index, uint32_t vertex_index) {
-	return GetResource(GPUVertexPositionsBuffer, buffer_index).at[vertex_index];
-}
-
-struct Vertex {
-	vec3 position;
-	vec3 normal;
-	vec2 uv;
-	vec3 tangent;
-};
-Vertex get_vertex(uint32_t position_index, uint32_t attributes_index, uint32_t vertex_index) {
-	Vertex vx;
-	vx.position = GetResource(GPUVertexPositionsBuffer, position_index).at[vertex_index];
-	vx.normal = GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].normal;
-	vx.uv = GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].uv;
-	vx.tangent = GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].tangent.xyz;
-	vx.tangent *= GetResource(GPUVertexAttributesBuffer, attributes_index).at[vertex_index].tangent.w;
-	return vx;
-}
+#endif
 
 #endif

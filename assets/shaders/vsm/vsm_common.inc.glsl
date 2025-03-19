@@ -2,7 +2,7 @@
 #define VSM_COMMON_H
 
 #ifndef NO_BINDLESS_STRUCTS_INCLUDE
-#include "../vsm/bindless_structures.inc.glsl"
+#include "../bindless_structures.inc.glsl"
 #endif
 
 #ifndef NO_PUSH_CONSTANTS
@@ -20,11 +20,11 @@ layout(scalar, push_constant) uniform PushConstants {
 };
 #endif
 
-#define vsm_constants storageBuffers_GPUVsmConstantsBuffer[vsm_buffer_index]
-#define vsm_alloc_constants storageBuffers_GPUVsmAllocConstantsBuffer[vsm_alloc_index]
-#define vsm_page_table storageImages_2dr32ui[page_table_index]
+#define vsm_constants storageBuffers_GPUVsmConstantsBuffer[nonuniformEXT(vsm_buffer_index)]
+#define vsm_alloc_constants storageBuffers_GPUVsmAllocConstantsBuffer[nonuniformEXT(vsm_alloc_index)]
+#define vsm_page_table storageImages_2dr32ui[nonuniformEXT(page_table_index)]
 
-#define depth_buffer combinedImages_2d[depth_buffer_index]
+#define depth_buffer combinedImages_2d[nonuniformEXT(depth_buffer_index)]
 
 vec3 vsm_clip0_to_clip_n(vec3 o, int clip_index) { return vec3(o.xy * vec2(1.0 / float(1 << clip_index)), o.z); }
 

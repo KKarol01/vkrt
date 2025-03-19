@@ -369,17 +369,19 @@ void RendererVulkan::initialize_resources() {
                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     }
 
-    vsm.data_buffer = make_buffer("vms buffer", sizeof(GPUVsmBuffer) + 64 * 64 * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-    GPUVsmBuffer vsm_constants{
+    vsm.constants_buffer =
+        make_buffer("vms buffer", sizeof(GPUVsmConstantsBuffer) + 64 * 64 * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    GPUVsmConstantsBuffer vsm_constants{
         .dir_light_view = glm::mat4{ 1.0f },
         .num_pages_xy = 64,
         .max_clipmap_index = 0,
         .texel_resolution = 1024.0f * 8.0f,
     };
-    send_to(vsm.data_buffer, 0, &vsm_constants, sizeof(vsm_constants));
+    send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
 
-    vsm.free_allocs_buffer = make_buffer("vms alloc buffer", sizeof(GPUVsmAllocBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-    GPUVsmAllocBuffer vsm_allocs{ .max_allocs = vsm_constants.num_pages_xy * vsm_constants.num_pages_xy, .alloc_head = 0 };
+    vsm.free_allocs_buffer =
+        make_buffer("vms alloc buffer", sizeof(GPUVsmAllocConstantsBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    GPUVsmAllocConstantsBuffer vsm_allocs{ .max_allocs = vsm_constants.num_pages_xy * vsm_constants.num_pages_xy, .alloc_head = 0 };
     send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
     vsm.shadow_map_0 =
@@ -468,9 +470,18 @@ void RendererVulkan::build_render_graph() {
             .shaders = { "vsm/clear_page.comp.glsl" },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
             auto& r = get_renderer();
-            uint32_t bindless_indices[]{ r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE,
-                                                              VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                                         64 };
+                uint32_t bindless_indices[]{
+                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
+                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    0,
+                };
             vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
             vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
             vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
@@ -516,12 +527,18 @@ void RendererVulkan::build_render_graph() {
                                  .maxDepth = 1.0f };
             vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
             vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-            uint32_t bindless_indices[]{
-                r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
-                r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-            };
+                uint32_t bindless_indices[]{
+                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
+                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    0,
+                };
             vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
             vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
                                           sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
@@ -540,7 +557,7 @@ void RendererVulkan::build_render_graph() {
             },
             .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" },
             .pipeline_settings =
-                rendergraph::RasterizationSettings{ .num_col_formats = 0, .dep_format = VK_FORMAT_D24_UNORM_S8_UINT, .depth_test = true, .depth_write = true },
+                rendergraph::RasterizationSettings{ .num_col_formats = 0, .dep_format = VK_FORMAT_D32_SFLOAT, .depth_test = true, .depth_write = true },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
                 auto& r = get_renderer();
                 const auto r_dep_att = Vks(VkRenderingAttachmentInfo{
@@ -572,9 +589,14 @@ void RendererVulkan::build_render_graph() {
                 uint32_t bindless_indices[]{
                     r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
+                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    0,
                 };
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
                 vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
@@ -653,12 +675,8 @@ void RendererVulkan::build_render_graph() {
                     r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.mesh_instances_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.data_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.shadow_map_0, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                    0,
+                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
                 };
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
                 vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
@@ -694,12 +712,16 @@ void RendererVulkan::build_render_graph() {
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
                 auto& r = get_renderer();
                 uint32_t bindless_indices[]{
-                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE,
-                                         VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                         r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
+                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
                     r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
                     r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.data_buffer, BindlessType::STORAGE_BUFFER),
+                    0,
                 };
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
                 vkCmdDispatch(cmd, (uint32_t)std::ceilf(r.screen_rect.w / 8.0f), (uint32_t)std::ceilf(r.screen_rect.h / 8.0f), 1);
@@ -810,6 +832,7 @@ void RendererVulkan::build_render_graph() {
                 uint32_t bindless_indices[]{
                     r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
                     r.get_bindless_index(r.vsm.dir_light_page_table_rgb8, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
                 };
                 vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
@@ -956,21 +979,30 @@ void RendererVulkan::update() {
         auto proj_pos = -glm::vec4{ camdir - d * ldir, 0.0f };
         proj_pos = vsm_light_mat * proj_pos;
 
-        GPUVsmBuffer vsmconsts{
-            .dir_light_view = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ glm::vec2{ proj_pos }, 0.0f }) * vsm_light_mat,
-            .dir_light_proj = glm::ortho(-35.0f, 35.0f, -35.0f, 35.0f, 0.1f, 50.0f),
+        const auto dir_light_view = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ glm::vec2{ proj_pos }, 0.0f }) * vsm_light_mat;
+        const auto dir_light_proj = glm::ortho(-35.0f, 35.0f, -35.0f, 35.0f, 0.1f, 50.0f);
+
+        GPUVsmConstantsBuffer vsmconsts{
+            .dir_light_view = dir_light_view,
+            .dir_light_proj = dir_light_proj,
+            .dir_light_proj_view = dir_light_proj * dir_light_view,
+            .dir_light_dir = ldir,
+            .num_pages_xy = 64,
+            .max_clipmap_index = 0,
+            .texel_resolution = 8.0f * 1024.0f,
             .num_frags = 0,
         };
 
-        GPUConstants constants{
+        GPUConstantsBuffer constants{
             .view = Engine::get().camera->get_view(),
             .proj = Engine::get().camera->get_projection(),
+            .proj_view = Engine::get().camera->get_projection() * Engine::get().camera->get_view(),
             .inv_view = glm::inverse(Engine::get().camera->get_view()),
             .inv_proj = glm::inverse(Engine::get().camera->get_projection()),
+            .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
         };
         send_many(fd.constants, 0ull, constants);
-        send_to(vsm.data_buffer, 0ull, &vsmconsts, sizeof(glm::mat4) * 2);
-        send_to(vsm.data_buffer, offsetof(GPUVsmBuffer, num_frags), &vsmconsts.num_frags, 4);
+        send_to(vsm.constants_buffer, 0ull, &vsmconsts, sizeof(vsmconsts));
     }
 
     auto cmd = fd.cmdpool->begin_onetime();
@@ -999,7 +1031,7 @@ void RendererVulkan::update() {
                                             .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
                                             .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                                             .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-                                            .buffer = get_buffer(vsm.data_buffer).buffer,
+                                            .buffer = get_buffer(vsm.constants_buffer).buffer,
                                             .size = VK_WHOLE_SIZE });
     auto info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
     vkCmdPipelineBarrier2(cmd, &info);
@@ -1009,7 +1041,7 @@ void RendererVulkan::update() {
                                        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
                                        .dstStageMask = VK_PIPELINE_STAGE_HOST_BIT,
                                        .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
-                                       .buffer = get_buffer(vsm.data_buffer).buffer,
+                                       .buffer = get_buffer(vsm.constants_buffer).buffer,
                                        .size = VK_WHOLE_SIZE });
     vkCmdPipelineBarrier2(cmd, &info);
 
@@ -1032,15 +1064,15 @@ void RendererVulkan::update() {
     // flags.clear();
     gq.wait_idle();
     return;
-    const auto num_frags = ((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->num_frags;
-    auto* pages = &((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->pages;
-    std::sort(pages, pages + num_frags);
-    auto pages_end = std::unique(pages, pages + num_frags);
-    ENG_LOG("num pages: {}", num_frags);
-    for(auto i = pages; i != pages_end; ++i) {
-        std::print("{} ", *i);
-    }
-    std::print("\n");
+    // const auto num_frags = ((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->num_frags;
+    // auto* pages = &((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->pages;
+    // std::sort(pages, pages + num_frags);
+    // auto pages_end = std::unique(pages, pages + num_frags);
+    // ENG_LOG("num pages: {}", num_frags);
+    // for(auto i = pages; i != pages_end; ++i) {
+    //     std::print("{} ", *i);
+    // }
+    // std::print("\n");
 }
 
 void RendererVulkan::on_window_resize() {
