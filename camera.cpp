@@ -46,6 +46,7 @@ void Camera::update() {
 
     view = glm::lookAt(pos, pos + forward, up);
     ENG_LOG("POS: {} {} {}", pos.x, pos.y, pos.z);
+    ENG_LOG("DIR: {} {} {}", forward.x, forward.y, forward.z);
 }
 
 void Camera::on_mouse_move(float px, float py) {

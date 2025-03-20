@@ -1,11 +1,11 @@
 #version 460
 
-#include "./vsm_common.inc.glsl"
+#include "./vsm/common.inc.glsl"
 
 void main() {
     vec4 vertex = transforms_arr[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0);
-    vec4 proj_pos = vsm_constants.dir_light_proj_view * vertex;
-    gl_Position = vec4(vsm_calc_virtual_coords(vertex.xyz), proj_pos.z, 1.0);
+    vec4 proj_pos = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vertex;
+    gl_Position = proj_pos;
 
 #if 0
     vsm_rclip_0_mat = proj_view * light_view;

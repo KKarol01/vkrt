@@ -125,10 +125,11 @@ layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2D com
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2D storageImages_2dr32ui[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2D storageImages_2drgba8[];
 
-#define constants storageBuffers_GPUConstantsBuffer[constants_index]
-#define vertex_pos_arr storageBuffers_GPUVertexPositionsBuffer[vertex_positions_index].positions_us
-#define attrib_pos_arr storageBuffers_GPUVertexAttributesBuffer[vertex_attributes_index].attributes_us
-#define transforms_arr storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
+#define constants		storageBuffers_GPUConstantsBuffer[constants_index]
+#define vertex_pos_arr	storageBuffers_GPUVertexPositionsBuffer[vertex_positions_index].positions_us
+#define attrib_pos_arr	storageBuffers_GPUVertexAttributesBuffer[vertex_attributes_index].attributes_us
+#define transforms_arr	storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
+#define meshes_arr		storageBuffers_GPUMeshInstancesBuffer[meshes_index].mesh_instances_us
 
 #endif
 

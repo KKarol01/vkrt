@@ -78,11 +78,8 @@ void eng_ui_update() {
             ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
                                                         ImageFilter::LINEAR, ImageAddressing::CLAMP),
                          { 128.0f, 128.0 });
-            if(ImGui::SliderFloat3("debug dir light", g_ctx->engine->scene->debug_dir_light_dir, -1.0f, 1.0f)) {
-                glm::vec3 v;
-                memcpy(&v, g_ctx->engine->scene->debug_dir_light_dir, sizeof(v));
-                *((glm::vec3*)g_ctx->engine->scene->debug_dir_light_dir) = glm::normalize(v);
-            }
+            if(ImGui::SliderFloat3("debug dir light", g_ctx->engine->scene->debug_dir_light_dir, -1.0f, 1.0f)) {}
+            if(ImGui::SliderFloat3("debug dir pos", g_ctx->engine->scene->debug_dir_light_pos, -10.0f, 10.0f)) {}
         }
         ImGui::EndChild();
     }

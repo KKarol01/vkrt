@@ -1,6 +1,6 @@
 #version 460
 
-#include "./common.inc.glsl"
+#include "./default_unlit/common.inc.glsl"
 
 layout(location = 0) out VsOut {
     vec3 position;

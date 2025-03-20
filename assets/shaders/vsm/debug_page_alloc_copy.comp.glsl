@@ -12,7 +12,7 @@ layout(scalar, push_constant) uniform PushConstants {
     uint32_t vsm_buffer_index;
 };
 #define NO_PUSH_CONSTANTS
-#include "./vsm_common.inc.glsl"
+#include "./vsm/common.inc.glsl"
 
 #define src_image storageImages_2dr32ui[src_image_index]
 #define dst_image storageImages_2drgba8[dst_image_index]

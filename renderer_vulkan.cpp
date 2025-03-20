@@ -520,9 +520,9 @@ void RendererVulkan::build_render_graph() {
             vkCmdBeginRendering(cmd, &rendering_info);
             VkRect2D r_sciss_1 = rendering_info.renderArea;
             VkViewport r_view_1{ .x = 0.0f,
-                                 .y = (float)rendering_info.renderArea.extent.height,
+                                 .y = 0.0f,
                                  .width = (float)rendering_info.renderArea.extent.width,
-                                 .height = -(float)rendering_info.renderArea.extent.height,
+                                 .height = (float)rendering_info.renderArea.extent.height,
                                  .minDepth = 0.0f,
                                  .maxDepth = 1.0f };
             vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
@@ -548,7 +548,7 @@ void RendererVulkan::build_render_graph() {
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
                 rendergraph::Access{
-                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::READ_WRITE_BIT,
                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -579,9 +579,9 @@ void RendererVulkan::build_render_graph() {
                 vkCmdBeginRendering(cmd, &rendering_info);
                 VkRect2D r_sciss_1 = rendering_info.renderArea;
                 VkViewport r_view_1{ .x = 0.0f,
-                                     .y = (float)rendering_info.renderArea.extent.height,
+                                     .y = 0.0f,
                                      .width = (float)rendering_info.renderArea.extent.width,
-                                     .height = -(float)rendering_info.renderArea.extent.height,
+                                     .height = (float)rendering_info.renderArea.extent.height,
                                      .minDepth = 0.0f,
                                      .maxDepth = 1.0f };
                 vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
@@ -620,10 +620,10 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
+                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                 },
             },
             .shaders = {
@@ -667,7 +667,7 @@ void RendererVulkan::build_render_graph() {
                 vkCmdBeginRendering(cmd, &rendering_info);
                 VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
                 VkViewport r_view_1{
-                    .x = 0.0f, .y = r.screen_rect.h, .width = r.screen_rect.w, .height = -r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+                    .x = 0.0f, .y = 0.0f, .width = r.screen_rect.w, .height = r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
                 };
                 vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
                 vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
@@ -677,6 +677,9 @@ void RendererVulkan::build_render_graph() {
                     r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.mesh_instances_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.shadow_map_0, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
                 };
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
                 vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
@@ -889,7 +892,7 @@ void RendererVulkan::build_render_graph() {
                     VkViewport r_view_1{ .x = 0.0f,
                                          .y = get_renderer().screen_rect.h,
                                          .width = get_renderer().screen_rect.w,
-                                         .height = -get_renderer().screen_rect.h,
+                                         .height = get_renderer().screen_rect.h,
                                          .minDepth = 0.0f,
                                          .maxDepth = 1.0f };
                     auto rendering_info = Vks(VkRenderingInfo{
@@ -972,15 +975,20 @@ void RendererVulkan::update() {
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
         const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
+        const auto lpos = *(glm::vec3*)Engine::get().scene->debug_dir_light_pos;
+        // const auto ldir = glm::normalize(glm::vec3{ 1.0f, 0.0f, 0.0f });
         const auto eye = -ldir * 25.0f;
-        auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
+        // auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
+        auto vsm_light_mat = glm::lookAt(lpos, glm::vec3{0.0f}, glm::vec3{ 0.0f, 1.0f, 0.0f });
         const auto camdir = Engine::get().camera->pos - eye;
         const auto d = glm::dot(ldir, camdir);
         auto proj_pos = -glm::vec4{ camdir - d * ldir, 0.0f };
         proj_pos = vsm_light_mat * proj_pos;
 
-        const auto dir_light_view = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ glm::vec2{ proj_pos }, 0.0f }) * vsm_light_mat;
-        const auto dir_light_proj = glm::ortho(-35.0f, 35.0f, -35.0f, 35.0f, 0.1f, 50.0f);
+        const auto dir_light_view = vsm_light_mat;
+        // const auto dir_light_view = vsm_light_mat;
+        const auto dir_light_proj = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.1f, 50.0f);
+        // const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
 
         GPUVsmConstantsBuffer vsmconsts{
             .dir_light_view = dir_light_view,
@@ -1936,7 +1944,7 @@ VkShaderStageFlagBits ShaderStorage::get_stage(std::filesystem::path path) const
 VkShaderModule ShaderStorage::compile_shader(std::filesystem::path path) {
     static const auto read_file = [](const std::filesystem::path& path) {
         std::string path_str = path.string();
-        std::string path_to_includes = path.parent_path().string();
+        std::string path_to_includes = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
         char error[256] = {};
         char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
         if(!parsed_file) {

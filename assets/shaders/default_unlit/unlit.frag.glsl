@@ -1,6 +1,6 @@
 #version 460
 
-#include "./common.inc.glsl"
+#include "./default_unlit/common.inc.glsl"
 
 layout(location = 0) in VsOut {
     vec3 position;
@@ -11,10 +11,25 @@ layout(location = 0) in VsOut {
 }
 vsout;
 
+float lindepth(float d, float n, float f) {
+    return n * f / (f - d * (f - n));
+}
+
 layout(location = 0) out vec4 OUT_COLOR;
 
 void main() {
-    OUT_COLOR = vec4(1.0);
+    vec4 col_diffuse = texture(combinedImages_2d[meshes_arr[vsout.instance_index].color_texture_idx], vsout.uv);
+
+    vec2 vcoords = vsm_calc_virtual_coords(vsout.position);
+    vec4 vlight_pos = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vec4(vsout.position, 1.0);
+    vlight_pos /= vlight_pos.w;
+    vlight_pos = vlight_pos * 0.5 + 0.5;
+    float closest_depth = texture(combinedImages_2d[vsm_depth_map], vlight_pos.xy).r;
+    float current_depth = vlight_pos.z - 0.005;
+    float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
+
+    OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
+    //OUT_COLOR = vec4(vec3(vdepth), 1.0);
 #if 0
     cam_pos = vec3(GetResource(GPUConstantsBuffer, constants_index).constants.inv_view * vec4(0.0, 0.0, 0.0, 1.0));
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
