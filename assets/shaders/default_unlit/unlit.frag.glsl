@@ -23,7 +23,7 @@ void main() {
     vec2 vcoords = vsm_calc_virtual_coords(vsout.position);
     vec4 vlight_pos = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vec4(vsout.position, 1.0);
     vlight_pos /= vlight_pos.w;
-    vlight_pos = vlight_pos * 0.5 + 0.5;
+    vlight_pos.xy = vlight_pos.xy * 0.5 + 0.5;
     float closest_depth = texture(combinedImages_2d[vsm_depth_map], vlight_pos.xy).r;
     float current_depth = vlight_pos.z - 0.005;
     float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
