@@ -381,12 +381,12 @@ void RendererVulkan::initialize_resources() {
 
     vsm.free_allocs_buffer =
         make_buffer("vms alloc buffer", sizeof(GPUVsmAllocConstantsBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-    GPUVsmAllocConstantsBuffer vsm_allocs{ .max_allocs = vsm_constants.num_pages_xy * vsm_constants.num_pages_xy, .alloc_head = 0 };
+    GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0, .free_list = {} };
     send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
     vsm.shadow_map_0 =
         make_image("vsm image", VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, { 1024 * 8, 1024 * 8, 1 }, 1, 1,
-                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     vsm.dir_light_page_table = make_image("vsm dir light 0 page table", VK_FORMAT_R32_UINT, VK_IMAGE_TYPE_2D,
                                           { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 }, 1, 1,
@@ -466,10 +466,17 @@ void RendererVulkan::build_render_graph() {
                     VK_ACCESS_2_SHADER_WRITE_BIT,
                     VK_IMAGE_LAYOUT_GENERAL
                 },
+                rendergraph::Access{
+                    { *vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    rendergraph::AccessType::WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                    VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                },
             },
             .shaders = { "vsm/clear_page.comp.glsl" },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-            auto& r = get_renderer();
+                auto& r = get_renderer();
                 uint32_t bindless_indices[]{
                     r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
@@ -482,9 +489,15 @@ void RendererVulkan::build_render_graph() {
                     r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
                     0,
                 };
-            vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-            vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
-            vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
+                vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
+                vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
+
+                VkClearDepthStencilValue clear_value{ .depth = 1.0f, .stencil = 0 };
+                VkImageSubresourceRange clear_range{
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+                };
+                vkCmdClearDepthStencilImage(cmd, r.get_image(r.vsm.shadow_map_0).image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range);
             } })
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
@@ -548,31 +561,73 @@ void RendererVulkan::build_render_graph() {
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
                 rendergraph::Access{
-                    { *vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    rendergraph::AccessType::READ_BIT,
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+                },
+                rendergraph::Access{
+                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_WRITE_BIT,
-                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_GENERAL
+                },
+                rendergraph::Access{
+                    { *get_renderer().vsm.free_allocs_buffer, rendergraph::ResourceType::STORAGE_BUFFER },
+                    rendergraph::AccessType::READ_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
+                },
+            },
+            .shaders = { "vsm/page_alloc.comp.glsl" },
+            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
+                auto& r = get_renderer();
+                uint32_t bindless_indices[]{
+                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
+                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT)), 
+                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
+                    0,
+                };
+                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
+                vkCmdDispatch(cmd, (uint32_t)std::ceilf(r.screen_rect.w / 8.0f), (uint32_t)std::ceilf(r.screen_rect.h / 8.0f), 1);
+            }
+        })
+        .add_pass(rendergraph::RenderPass{
+            .accesses = { 
+                rendergraph::Access{
+                    { *vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    rendergraph::AccessType::READ_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_GENERAL
+                },
+                rendergraph::Access{
+                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    rendergraph::AccessType::READ_BIT,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_GENERAL
                 },
             },
             .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" },
             .pipeline_settings =
-                rendergraph::RasterizationSettings{ .num_col_formats = 0, .dep_format = VK_FORMAT_D32_SFLOAT, .depth_test = true, .depth_write = true },
+                rendergraph::RasterizationSettings{ .num_col_formats = 0, .dep_format = VK_FORMAT_D32_SFLOAT, .depth_test = false, .depth_write = false },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
                 auto& r = get_renderer();
-                const auto r_dep_att = Vks(VkRenderingAttachmentInfo{
-                    .imageView = r.get_image(r.vsm.shadow_map_0).view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .depthStencil = { 1.0f, 0 } },
-                });
                 const auto rendering_info = Vks(VkRenderingInfo{
                     .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).extent.width, .height = r.get_image(r.vsm.shadow_map_0).extent.height }},
                     .layerCount = 1,
                     .colorAttachmentCount = 0,
                     .pColorAttachments = nullptr,
-                    .pDepthAttachment = &r_dep_att,
+                    .pDepthAttachment = nullptr,
                 });
                 vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
@@ -597,12 +652,10 @@ void RendererVulkan::build_render_graph() {
                     r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
                     r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
                     0,
+                    r.get_bindless_index(r.vsm.shadow_map_0, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
                 };
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-                vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
-                                                sizeof(IndirectDrawCommandBufferHeader),
-                                                r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count,
-                                                sizeof(VkDrawIndexedIndirectCommand));
+                vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer, sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
                 vkCmdEndRendering(cmd);
         } })
         .add_pass(rendergraph::RenderPass{ 
@@ -623,7 +676,14 @@ void RendererVulkan::build_render_graph() {
                     { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                    VK_IMAGE_LAYOUT_GENERAL,
+                },
+                rendergraph::Access{
+                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    rendergraph::AccessType::READ_BIT,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_GENERAL
                 },
             },
             .shaders = {
@@ -679,7 +739,8 @@ void RendererVulkan::build_render_graph() {
                     r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.mesh_instances_buffer, BindlessType::STORAGE_BUFFER),
                     r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.shadow_map_0, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
+                    r.get_bindless_index(r.vsm.shadow_map_0, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
                 };
                 vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
                 vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
@@ -688,49 +749,6 @@ void RendererVulkan::build_render_graph() {
                                               sizeof(VkDrawIndexedIndirectCommand));
                 vkCmdEndRendering(cmd);
         } })
-        .add_pass(rendergraph::RenderPass{
-            .accesses = { 
-                rendergraph::Access{
-                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT },
-                    rendergraph::AccessType::READ_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
-                },
-                rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
-                    rendergraph::AccessType::READ_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_GENERAL
-                },
-                rendergraph::Access{
-                    { *get_renderer().vsm.free_allocs_buffer, rendergraph::ResourceType::STORAGE_BUFFER },
-                    rendergraph::AccessType::READ_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
-                },
-            },
-            .shaders = { "vsm/page_alloc.comp.glsl" },
-            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
-                uint32_t bindless_indices[]{
-                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
-                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    0,
-                };
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-                vkCmdDispatch(cmd, (uint32_t)std::ceilf(r.screen_rect.w / 8.0f), (uint32_t)std::ceilf(r.screen_rect.h / 8.0f), 1);
-            }
-        })
-       
        /* .add_pass(rendergraph::RenderPass{ 
             .accesses = {
                 rendergraph::Access{
@@ -979,7 +997,7 @@ void RendererVulkan::update() {
         // const auto ldir = glm::normalize(glm::vec3{ 1.0f, 0.0f, 0.0f });
         const auto eye = -ldir * 25.0f;
         // auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
-        auto vsm_light_mat = glm::lookAt(lpos, glm::vec3{0.0f}, glm::vec3{ 0.0f, 1.0f, 0.0f });
+        auto vsm_light_mat = glm::lookAt(lpos, glm::vec3{ 0.0f }, glm::vec3{ 0.0f, 1.0f, 0.0f });
         const auto camdir = Engine::get().camera->pos - eye;
         const auto d = glm::dot(ldir, camdir);
         auto proj_pos = -glm::vec4{ camdir - d * ldir, 0.0f };

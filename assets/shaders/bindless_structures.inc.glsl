@@ -109,14 +109,17 @@ ENG_DECLARE_STORAGE_BUFFERS(GPUVsmConstantsBuffer) {
 	ENG_TYPE_VEC3 dir_light_dir;
 	ENG_TYPE_UINT num_pages_xy;
 	ENG_TYPE_UINT max_clipmap_index;
-	ENG_TYPE_FLOAT texel_resolution;
+	ENG_TYPE_FLOAT texel_resolution; // todo: rename; reconsider
 	ENG_TYPE_UINT num_frags;
 	ENG_TYPE_UNSIZED(ENG_TYPE_UINT, pages);
 } ENG_DECLARE_BINDLESS(GPUVsmConstantsBuffer);
 
+#define VSM_PHYSICAL_PAGE_RESOLUTION 8192
+#define VSM_VIRTUAL_PAGE_RESOLUTION 128
+#define VSM_MAX_ALLOCS ((VSM_PHYSICAL_PAGE_RESOLUTION / VSM_VIRTUAL_PAGE_RESOLUTION) * (VSM_PHYSICAL_PAGE_RESOLUTION / VSM_VIRTUAL_PAGE_RESOLUTION))
 ENG_DECLARE_STORAGE_BUFFERS(GPUVsmAllocConstantsBuffer) {
-	ENG_TYPE_UINT max_allocs;
-	ENG_TYPE_UINT alloc_head;
+	ENG_TYPE_UINT free_list_head;
+	ENG_TYPE_UINT free_list[VSM_MAX_ALLOCS];
 } ENG_DECLARE_BINDLESS(GPUVsmAllocConstantsBuffer);
 
 #ifndef __cplusplus

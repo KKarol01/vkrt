@@ -17,6 +17,19 @@ float lindepth(float d, float n, float f) {
 
 layout(location = 0) out vec4 OUT_COLOR;
 
+float calc_closest_depth(vec3 wpos, vec2 vpos) {
+    ivec2 vpage_uv = vsm_calc_page_index(wpos);
+    uint vpage = imageLoad(vsm_page_table, vpage_uv).r;
+    if(vsm_is_alloc_backed(vpage)) {
+        vec2 vpos_coords = vec2(vpos * float(VSM_VIRTUAL_PAGE_RESOLUTION));
+        vec2 ppage_offset = mod(vpos_coords, float(VSM_VIRTUAL_PAGE_RESOLUTION));
+        ivec2 ppage_coords = vsm_calc_physical_texel_coords(vpage);
+        ivec2 ppos_coords = ppage_coords + ivec2(ppage_offset);
+        return uintBitsToFloat(imageLoad(vsm_pdepth_uint, ppos_coords).r);
+    }
+    return 1.0;
+}
+
 void main() {
     vec4 col_diffuse = texture(combinedImages_2d[meshes_arr[vsout.instance_index].color_texture_idx], vsout.uv);
 
@@ -24,7 +37,7 @@ void main() {
     vec4 vlight_pos = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vec4(vsout.position, 1.0);
     vlight_pos /= vlight_pos.w;
     vlight_pos.xy = vlight_pos.xy * 0.5 + 0.5;
-    float closest_depth = texture(combinedImages_2d[vsm_depth_map], vlight_pos.xy).r;
+    float closest_depth = calc_closest_depth(vsout.position, vlight_pos.xy);
     float current_depth = vlight_pos.z - 0.005;
     float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
 
