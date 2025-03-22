@@ -385,8 +385,8 @@ void RendererVulkan::initialize_resources() {
     send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
     vsm.shadow_map_0 =
-        make_image("vsm image", VK_FORMAT_D32_SFLOAT, VK_IMAGE_TYPE_2D, { 1024 * 8, 1024 * 8, 1 }, 1, 1,
-                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        make_image("vsm image", VK_FORMAT_R32_SFLOAT, VK_IMAGE_TYPE_2D, { 1024 * 8, 1024 * 8, 1 }, 1, 1,
+                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     vsm.dir_light_page_table = make_image("vsm dir light 0 page table", VK_FORMAT_R32_UINT, VK_IMAGE_TYPE_2D,
                                           { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 }, 1, 1,
@@ -467,7 +467,7 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_GENERAL
                 },
                 rendergraph::Access{
-                    { *vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::WRITE_BIT,
                     VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                     VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -493,11 +493,11 @@ void RendererVulkan::build_render_graph() {
                 vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
                 vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
 
-                VkClearDepthStencilValue clear_value{ .depth = 1.0f, .stencil = 0 };
+                VkClearColorValue clear_value{ .float32 = { 1.0f, 0.0f, 0.0f, 0.0f } };
                 VkImageSubresourceRange clear_range{
-                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
                 };
-                vkCmdClearDepthStencilImage(cmd, r.get_image(r.vsm.shadow_map_0).image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range);
+                vkCmdClearColorImage(cmd, r.get_image(r.vsm.shadow_map_0).image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range);
             } })
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
@@ -603,7 +603,7 @@ void RendererVulkan::build_render_graph() {
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
                 rendergraph::Access{
-                    { *vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
                     rendergraph::AccessType::READ_WRITE_BIT,
                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -619,7 +619,7 @@ void RendererVulkan::build_render_graph() {
             },
             .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" },
             .pipeline_settings =
-                rendergraph::RasterizationSettings{ .num_col_formats = 0, .dep_format = VK_FORMAT_D32_SFLOAT, .depth_test = false, .depth_write = false },
+                rendergraph::RasterizationSettings{ .num_col_formats = 0, .depth_test = false, .depth_write = false },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
                 auto& r = get_renderer();
                 const auto rendering_info = Vks(VkRenderingInfo{
@@ -673,7 +673,7 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_GENERAL,
@@ -880,6 +880,13 @@ void RendererVulkan::build_render_graph() {
                     { *get_renderer().vsm.dir_light_page_table_rgb8, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                },
+                rendergraph::Access{
+                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
+                    rendergraph::AccessType::READ_BIT,
+                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                 },

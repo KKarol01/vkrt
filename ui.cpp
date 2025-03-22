@@ -75,9 +75,9 @@ void eng_ui_update() {
         // used primarily for debug output
         ImGui::SetCursorScreenPos(render_output_next_row);
         if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {
-            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
-                                                        ImageFilter::LINEAR, ImageAddressing::CLAMP),
-                         { 128.0f, 128.0 });
+            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8, ImageFilter::NEAREST, ImageAddressing::CLAMP), { 128.0f, 128.0 });
+            ImGui::SameLine();
+            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().shadow_map_0, ImageFilter::NEAREST, ImageAddressing::CLAMP), { 128.0f, 128.0 });
             if(ImGui::SliderFloat3("debug dir light", g_ctx->engine->scene->debug_dir_light_dir, -1.0f, 1.0f)) {}
             if(ImGui::SliderFloat3("debug dir pos", g_ctx->engine->scene->debug_dir_light_pos, -10.0f, 10.0f)) {}
         }

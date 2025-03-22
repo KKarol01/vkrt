@@ -41,8 +41,8 @@ layout(scalar, push_constant) uniform PushConstants {
 
 #define vsm_is_alloc_dirty(alloc)    ((alloc & VSM_DIRTY_FLAG) > 0)
 #define vsm_is_alloc_backed(alloc)   ((alloc & VSM_BACKED_FLAG) > 0)
-#define vsm_get_alloc_ppos_x(alloc)  (alloc & VSM_PPAGE_X_POS_MASK)
-#define vsm_get_alloc_ppos_y(alloc)  (alloc & VSM_PPAGE_Y_POS_MASK)
+#define vsm_get_alloc_ppos_x(alloc)  ((alloc & VSM_PPAGE_X_POS_MASK) >> 2)
+#define vsm_get_alloc_ppos_y(alloc)  ((alloc & VSM_PPAGE_Y_POS_MASK) >> 10)
 
 vec3 vsm_clip0_to_clip_n(vec3 o, int clip_index) { return vec3(o.xy * vec2(1.0 / float(1 << clip_index)), o.z); }
 

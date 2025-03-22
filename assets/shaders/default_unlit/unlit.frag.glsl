@@ -21,7 +21,7 @@ float calc_closest_depth(vec3 wpos, vec2 vpos) {
     ivec2 vpage_uv = vsm_calc_page_index(wpos);
     uint vpage = imageLoad(vsm_page_table, vpage_uv).r;
     if(vsm_is_alloc_backed(vpage)) {
-        vec2 vpos_coords = vec2(vpos * float(VSM_VIRTUAL_PAGE_RESOLUTION));
+        vec2 vpos_coords = vec2(vpos * float(VSM_PHYSICAL_PAGE_RESOLUTION));
         vec2 ppage_offset = mod(vpos_coords, float(VSM_VIRTUAL_PAGE_RESOLUTION));
         ivec2 ppage_coords = vsm_calc_physical_texel_coords(vpage);
         ivec2 ppos_coords = ppage_coords + ivec2(ppage_offset);
@@ -35,14 +35,16 @@ void main() {
 
     vec2 vcoords = vsm_calc_virtual_coords(vsout.position);
     vec4 vlight_pos = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vec4(vsout.position, 1.0);
+    vec3 light_dir = normalize(vec3(vsm_constants.dir_light_view * vec4(0.0, 0.0, -1.0, 0.0)));
     vlight_pos /= vlight_pos.w;
     vlight_pos.xy = vlight_pos.xy * 0.5 + 0.5;
     float closest_depth = calc_closest_depth(vsout.position, vlight_pos.xy);
-    float current_depth = vlight_pos.z - 0.005;
+    float current_depth = vlight_pos.z - 0.00004;// - max(0.001 * (1.0 - dot(vsout.normal, light_dir)), 0.00001);
     float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
-    //OUT_COLOR = vec4(vec3(vdepth), 1.0);
+    vec2 vpi = vsm_calc_page_index(vsout.position);
+    //OUT_COLOR = vec4(pow(vec2(vpi) / 64.0, vec2(8.0)) * 16.0, 0.0, 1.0);
 #if 0
     cam_pos = vec3(GetResource(GPUConstantsBuffer, constants_index).constants.inv_view * vec4(0.0, 0.0, 0.0, 1.0));
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;
