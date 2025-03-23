@@ -2,10 +2,10 @@
 #include <filesystem>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include "engine.hpp"
-#include "renderer.hpp"
-#include "renderer_vulkan.hpp"
-#include "camera.hpp"
+#include <eng/engine.hpp>
+#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/camera.hpp>
 
 static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::get().camera->on_mouse_move(px, py); }
 static void on_window_resize(GLFWwindow* window, int w, int h) {

@@ -1,8 +1,9 @@
-#include "camera.hpp"
+#include <eng/camera.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
 #include <glfw/glfw3.h>
-#include "engine.hpp"
+#include <eng/engine.hpp>
+#include "logger.hpp"
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
     : projection{ glm::perspectiveFov(glm::radians(80.0f), static_cast<float>(1280.0f), static_cast<float>(768.0f), min_dist, max_dist) } {

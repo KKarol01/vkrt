@@ -1,4 +1,4 @@
-#include "engine.hpp"
+#include <eng/engine.hpp>
 #include <array>
 #include <new>
 #include <vulkan/vulkan.h>
@@ -7,8 +7,8 @@
 #include <imgui/backends/imgui_impl_vulkan.h>
 #include <ImGuizmo/ImGuizmo.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include "ui.hpp"
-// #include "scene.hpp"
+#include <eng/ui.hpp>
+#include <eng/scene.hpp>
 
 static UIContext* g_ctx{};
 static AllocatorCallbacks alloc_callbacks{};

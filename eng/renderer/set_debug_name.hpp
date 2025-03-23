@@ -1,5 +1,10 @@
+#pragma once
+
+#ifndef NDEBUG
+#include <string>
 #include <vulkan/vulkan.h>
-#include "renderer_vulkan.hpp"
+#include <eng/renderer/renderer_vulkan.hpp>
+#endif
 
 // clang-format off
 template<typename VkStruct> struct VkObject {};

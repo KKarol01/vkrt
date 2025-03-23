@@ -11,17 +11,13 @@
 #include <glm/mat4x3.hpp>
 #include "renderer.hpp"
 #include "vulkan_structs.hpp"
-#include "handle_vec.hpp"
+#include "../handle_vec.hpp"
 #include "renderer_vulkan_wrappers.hpp"
-#include "engine.hpp"
-#include "common/callback.hpp"
-
-#ifndef NDEBUG
-#define VK_CHECK(func)                                                                                                 \
-    if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
-#else
-#define VK_CHECK(func) func
-#endif
+#include <eng/engine.hpp>
+#include "../common/callback.hpp"
+#include <eng/renderer/descpool.hpp>
+#include <eng/renderer/buffer.hpp>
+#include <eng/renderer/image.hpp>
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t {
@@ -48,28 +44,6 @@ struct Buffer {
     size_t size{ 0 };
     uint32_t alignment{ 0 };
     VkBufferUsageFlags usage{};
-};
-
-class Image {
-  public:
-    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout dst_layout);
-    void transition_layout(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                           VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout src_layout,
-                           VkImageLayout dst_layout);
-    void _deduce_aspect(VkImageUsageFlags usage);
-    void _create_default_view(int dims);
-
-    VkImage image{};
-    VmaAllocation alloc{};
-    VkImageView view{};
-    VkFormat format{};
-    VkImageAspectFlags aspect{};
-    VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
-    VkImageUsageFlags usage{};
-    VkExtent3D extent{};
-    uint32_t mips{ 1 };
-    uint32_t layers{ 1 };
 };
 
 struct GeometryMetadata {
@@ -498,7 +472,7 @@ class RendererVulkan : public Renderer {
     StagingBuffer* staging_buffer{};
 
     PipelineLayout bindless_layout{};
-    VkDescriptorPool bindless_pool{};
+    BindlessDescriptorPool bindless_pool{};
     std::vector<BindlessEntry> bindless_resources_to_update;
 
     HandleVector<RenderGeometry> geometries;

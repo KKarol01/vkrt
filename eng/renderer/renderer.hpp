@@ -2,11 +2,11 @@
 
 #include <span>
 #include <glm/mat4x3.hpp>
-#include "model_importer.hpp"
-#include "handle.hpp"
-#include "common/flags.hpp"
-#include "common/types.hpp"
-#include "ecs.hpp"
+#include <eng/model_importer.hpp>
+#include "../handle.hpp"
+#include "../common/flags.hpp"
+#include "../common/types.hpp"
+#include "../ecs.hpp"
 
 enum class BatchFlags {};
 enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };

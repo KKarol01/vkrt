@@ -36,7 +36,7 @@ set(FASTGLTF_USE_STD_MODULE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fastgltf)
 
 add_library(build_header_only STATIC
-    "build_header_only.cpp"
+    "eng/build_header_only.cpp"
 )
 target_compile_definitions(build_header_only
     PRIVATE
@@ -88,23 +88,26 @@ target_include_directories(imguizmo
         "third_party/imgui"
 )
 
-add_library(eng_ui SHARED "ui.cpp")
+add_library(eng_ui SHARED "eng/ui.cpp")
 target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS ENG_BUILD_AS_DLL)
 target_compile_features(eng_ui PRIVATE cxx_std_23)
-target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
+target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
 
 add_executable(vkrt 
-    "main.cpp"
-    "model_importer.cpp" 
-    "engine.cpp"  
-    "renderer_vulkan.cpp" 
-    "camera.cpp"
-    "scene.cpp"
-    "renderer_vulkan_wrappers.cpp"   
+    "eng/main.cpp"
+    "eng/model_importer.cpp" 
+    "eng/engine.cpp"  
+    "eng/camera.cpp"
+    "eng/scene.cpp"
+    "eng/renderer/renderer_vulkan.cpp" 
+    "eng/renderer/renderer_vulkan_wrappers.cpp"
+    "eng/renderer/descpool.cpp"
+    "eng/renderer/buffer.cpp"
+    "eng/renderer/image.cpp"
 )
 
-target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
+target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
 target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_link_libraries(vkrt

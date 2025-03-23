@@ -18,11 +18,11 @@
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_vulkan.h>
 #include <ImGuizmo/ImGuizmo.h>
-#include "engine.hpp"
-#include "renderer_vulkan.hpp"
-#include "set_debug_name.hpp"
-#include "utils.hpp"
-#include "assets/shaders/bindless_structures.inc.glsl"
+#include <eng/engine.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/set_debug_name.hpp>
+#include <eng/utils.hpp>
+#include <assets/shaders/bindless_structures.inc>
 
 // clang-format off
 static RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
@@ -292,32 +292,6 @@ void RendererVulkan::initialize_resources() {
             .pPushConstantRanges = &pc_range,
         });
         VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &info, nullptr, &bindless_layout.layout));
-
-        VkDescriptorPoolSize sizes[]{
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 },
-            { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 },
-        };
-        auto pool_info = Vks(VkDescriptorPoolCreateInfo{
-            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
-            .maxSets = 2,
-            .poolSizeCount = sizeof(sizes) / sizeof(sizes[0]),
-            .pPoolSizes = sizes,
-        });
-        VkDescriptorBindingFlags bflags_flags[]{
-            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-                VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-                VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-                VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-                VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-        };
-        auto bflags = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
-            .bindingCount = sizeof(bflags_flags) / sizeof(bflags_flags[0]), .pBindingFlags = bflags_flags });
-        VK_CHECK(vkCreateDescriptorPool(get_renderer().dev, &pool_info, {}, &bindless_pool));
     }
 
     staging_buffer = new StagingBuffer{};

@@ -5,12 +5,12 @@
 #include <fastgltf/tools.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <stb/stb_image.h>
-#include "scene.hpp"
-#include "model_importer.hpp"
-#include "engine.hpp"
-#include "common/components.hpp"
-#include "renderer_vulkan.hpp"
-#include "set_debug_name.hpp"
+#include <eng/scene.hpp>
+#include <eng/model_importer.hpp>
+#include <eng/engine.hpp>
+#include <eng/common/components.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/set_debug_name.hpp>
 
 static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& img, ImageFormat format) {
     std::byte* img_data{};

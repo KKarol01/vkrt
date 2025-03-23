@@ -7,6 +7,15 @@
 
 template <typename T> struct INIT_VK_STYPE;
 
+#ifndef NDEBUG
+#include "../logger.hpp"
+#define VK_CHECK(func)                                                                                                 \
+    if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
+#else
+#define VK_CHECK(func) func
+#endif
+
+
 #define INIT_VK_EXPAND(x) x
 #define INIT_VK_STRUCT_1(name, ...) template <> struct INIT_VK_STYPE<name> {}
 #define INIT_VK_STRUCT_2(name, type, ...) template <> struct INIT_VK_STYPE<name> { inline static constexpr VkStructureType sType = type; }

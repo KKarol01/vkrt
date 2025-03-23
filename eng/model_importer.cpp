@@ -3,10 +3,10 @@
 #include <fastgltf/tools.hpp>
 #include <fastgltf/glm_element_traits.hpp>
 #include <stb/stb_image.h>
-#include "engine.hpp"
-#include "renderer_vulkan.hpp"
-#include "model_importer.hpp"
-#include "set_debug_name.hpp"
+#include <eng/engine.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/model_importer.hpp>
+#include <eng/renderer/set_debug_name.hpp>
 
 static void load_image_load_buffer_view(ImportedModel& model, const fastgltf::Asset& asset,
                                         const fastgltf::Image& image, const fastgltf::sources::BufferView& source) {
