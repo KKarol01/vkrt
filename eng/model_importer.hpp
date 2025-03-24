@@ -5,7 +5,7 @@
 #include <optional>
 #include <filesystem>
 #include <glm/glm.hpp>
-#include "renderer.hpp"
+#include <eng/renderer/renderer.hpp>
 
 struct ImportedModel {
     struct Vertex {

@@ -8,8 +8,8 @@
 #include <vulkan/vulkan.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include "../common/types.hpp"
-#include "vulkan_structs.hpp"
-#include "renderer.hpp"
+#include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/renderer.hpp>
 
 class SamplerStorage {
   public:

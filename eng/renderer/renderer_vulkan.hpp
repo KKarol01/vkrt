@@ -9,12 +9,12 @@
 #include <forward_list>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <glm/mat4x3.hpp>
-#include "renderer.hpp"
-#include "vulkan_structs.hpp"
-#include "../handle_vec.hpp"
-#include "renderer_vulkan_wrappers.hpp"
+#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/vulkan_structs.hpp>
+#include <eng/handle_vec.hpp>
+#include <eng/renderer/renderer_vulkan_wrappers.hpp>
 #include <eng/engine.hpp>
-#include "../common/callback.hpp"
+#include <eng/common/callback.hpp>
 #include <eng/renderer/descpool.hpp>
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/image.hpp>
