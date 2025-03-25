@@ -1,13 +1,13 @@
 #include <eng/renderer/image.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/set_debug_name.hpp>
 
-Image::Image(VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& info) noexcept : dev(dev), vma(vma), info(info) {
+Image::Image(const std::string& name, VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& info) noexcept
+    : name(name), dev(dev), vma(vma), info(info) {
     if(!dev || !vma) { return; }
-
-    this->info = Vks(std::move(this->info));
-
-    // todo: handle info.pNext
-    VK_CHECK(vkCreateImage(dev, &info, nullptr, &image));
+    VmaAllocationCreateInfo alloc_info{ .usage = VMA_MEMORY_USAGE_AUTO };
+    VK_CHECK(vmaCreateImage(vma, &info, &alloc_info, &image, &alloc, nullptr));
+    if(image) { set_debug_name(image, name); }
 }
 
 bool Image::comp_vk_img_view_create_info(const VkImageViewCreateInfo& a, const VkImageViewCreateInfo& b) {
@@ -54,5 +54,6 @@ VkImageView Image::get_view(const VkImageViewCreateInfo& info) {
     VkImageView view{};
     VK_CHECK(vkCreateImageView(dev, &info, nullptr, &view));
     if(!view) { return nullptr; }
+    set_debug_name(view, std::format("{}_view", name));
     return views.emplace(info, view).first->second;
 }

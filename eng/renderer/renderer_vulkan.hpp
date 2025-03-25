@@ -34,18 +34,6 @@ enum class RenderFlags : uint32_t {
 enum class GeometryFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
 enum class RenderMeshFlags : uint32_t {};
 
-struct Buffer {
-    std::string name;
-    VkBuffer buffer{};
-    VmaAllocation allocation{};
-    VkDeviceAddress bda{};
-    void* memory{};
-    size_t capacity{ 0 };
-    size_t size{ 0 };
-    uint32_t alignment{ 0 };
-    VkBufferUsageFlags usage{};
-};
-
 struct GeometryMetadata {
     VkAccelerationStructureKHR blas{};
     Handle<Buffer> blas_buffer{};

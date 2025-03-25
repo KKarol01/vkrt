@@ -9,8 +9,6 @@ class BindlessDescriptorPool {
     constexpr BindlessDescriptorPool() noexcept = default;
     BindlessDescriptorPool(VkDevice dev) noexcept;
 
-
-
   private:
     VkDevice dev{};
     VkDescriptorPool pool{};
