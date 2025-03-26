@@ -160,32 +160,6 @@ struct GBuffer {
     Handle<Image> ambient_occlusion_image{};
 };
 
-struct QueueCmdSubmission : public VkCommandBufferSubmitInfo {
-    QueueCmdSubmission(VkCommandBuffer cmd)
-        : VkCommandBufferSubmitInfo(Vks(VkCommandBufferSubmitInfo{ .commandBuffer = cmd })) {}
-};
-
-struct QueueSemaphoreSubmission : public VkSemaphoreSubmitInfo {
-    QueueSemaphoreSubmission(VkPipelineStageFlags2 stage, Semaphore& sem, uint32_t value = 0)
-        : VkSemaphoreSubmitInfo(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem.semaphore, .value = value, .stageMask = stage })) {}
-};
-
-struct QueueSubmission {
-    std::vector<QueueCmdSubmission> cmds{};
-    std::vector<QueueSemaphoreSubmission> wait_sems{};
-    std::vector<QueueSemaphoreSubmission> signal_sems{};
-};
-
-struct Queue {
-    void submit(const QueueSubmission& submissions, Fence* fence = {});
-    void submit(std::span<const QueueSubmission> submissions, Fence* fence = {});
-    void submit(VkCommandBuffer cmd, Fence* fence = {});
-    void submit_wait(VkCommandBuffer cmd);
-    void wait_idle();
-    VkQueue queue{};
-    uint32_t idx{ ~0u };
-};
-
 struct PipelineLayout {
     VkPipelineLayout layout{};
     VkDescriptorSetLayout descriptor_layout{};
