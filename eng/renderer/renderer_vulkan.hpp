@@ -18,6 +18,8 @@
 #include <eng/renderer/descpool.hpp>
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/image.hpp>
+#include <eng/renderer/vk_submit_queue.hpp>
+#include <eng/renderer/staging_buffer.hpp>
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t {
@@ -290,17 +292,17 @@ struct FrameData {
     GBuffer gbuffer{};
 };
 
-struct StagingBuffer {
-    StagingBuffer();
-    bool send(Buffer& dst, size_t dst_offset, std::span<const std::byte> src);
-    bool send(Buffer& dst, size_t dst_offset, Buffer& src, size_t src_offset, size_t size);
-    bool send(Image& dst, std::span<const std::byte> src, VkBufferImageCopy copy);
-    void begin();
-    void stage();
-    CommandPool** pool{};
-    VkCommandBuffer cmd{};
-    Buffer buffer{};
-};
+// struct StagingBuffer {
+//     StagingBuffer();
+//     bool send(Buffer& dst, size_t dst_offset, std::span<const std::byte> src);
+//     bool send(Buffer& dst, size_t dst_offset, Buffer& src, size_t src_offset, size_t size);
+//     bool send(Image& dst, std::span<const std::byte> src, VkBufferImageCopy copy);
+//     void begin();
+//     void stage();
+//     CommandPool** pool{};
+//     VkCommandBuffer cmd{};
+//     Buffer buffer{};
+// };
 
 enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
 
@@ -318,30 +320,6 @@ struct BindlessEntry {
     BindlessType type{};
     VkImageLayout layout{};
     VkSampler sampler{};
-};
-
-namespace std {
-template <typename T> void hash_combine(size_t& seed, const T& t) {
-    seed ^= std::hash<T>{}(t) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-template <> class hash<BindlessEntry> {
-  public:
-    size_t operator()(const BindlessEntry& e) const {
-        size_t seed{};
-        hash_combine(seed, e.resource_handle);
-        hash_combine(seed, e.type);
-        hash_combine(seed, e.layout);
-        hash_combine(seed, e.sampler);
-        return seed;
-    }
-};
-} // namespace std
-
-struct BindlessStorage {
-    using resource_index_t = uint32_t;
-    inline static uint32_t resource_indices_arr[3]{};
-    std::unordered_map<BindlessEntry, resource_index_t> indices;
-    std::vector<BindlessEntry> cached_resources;
 };
 
 class RendererVulkan : public Renderer {
@@ -425,16 +403,15 @@ class RendererVulkan : public Renderer {
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
     Flags<RenderFlags> flags;
-    SamplerStorage samplers;
-    ScreenRect screen_rect;
 
-    Queue gq;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
-    StagingBuffer* staging_buffer{};
+
+    VkSubmitQueue submit_queue;
+    StagingBuffer staging_buffer;
+    BindlessDescriptorPool bindless_pool{};
 
     PipelineLayout bindless_layout{};
-    BindlessDescriptorPool bindless_pool{};
     std::vector<BindlessEntry> bindless_resources_to_update;
 
     HandleVector<RenderGeometry> geometries;
@@ -467,13 +444,11 @@ class RendererVulkan : public Renderer {
 
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
-    VkDescriptorSet bindless_set;
-    ShaderStorage shader_storage;
-    std::deque<CommandPool> cmdpools;
 
-    std::vector<Image> images;
-    std::vector<Buffer> buffers;
-    BindlessStorage bindless;
+    ShaderStorage shader_storage;
+    SamplerStorage samplers;
+    // std::vector<Image> images;
+    // std::vector<Buffer> buffers;
 
     DDGI ddgi;
 

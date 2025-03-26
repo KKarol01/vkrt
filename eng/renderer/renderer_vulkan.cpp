@@ -23,6 +23,9 @@
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/utils.hpp>
 #include <assets/shaders/bindless_structures.inc>
+#include <eng/renderer/vk_cmd_queue.hpp>
+#include <eng/renderer/buffer.hpp>
+#include <eng/renderer/staging_buffer.hpp>
 
 // clang-format off
 static RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
@@ -1818,7 +1821,7 @@ Buffer RendererVulkan::allocate_buffer(const std::string& name, size_t size, VkB
     if(alloc_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) {
         VmaAllocationInfo allocation{};
         vmaGetAllocationInfo(vma, buffer.allocation, &allocation);
-        buffer.memory = allocation.pMappedData;
+        buffer.mapped = allocation.pMappedData;
     }
     set_debug_name(buffer.buffer, name);
     ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
@@ -1829,7 +1832,7 @@ void RendererVulkan::deallocate_buffer(Buffer& buffer) {
     vmaDestroyBuffer(vma, buffer.buffer, buffer.allocation);
     buffer.buffer = nullptr;
     buffer.allocation = nullptr;
-    buffer.memory = nullptr;
+    buffer.mapped = nullptr;
     buffer.bda = 0ull;
 }
 
@@ -1841,7 +1844,7 @@ void RendererVulkan::resize_buffer(Handle<Buffer> handle, size_t new_size) {
         old_buffer.size = new_size;
         return;
     }
-    auto new_buffer = allocate_buffer(old_buffer.name, new_size, old_buffer.usage, !!old_buffer.memory, old_buffer.alignment);
+    auto new_buffer = allocate_buffer(old_buffer.name, new_size, old_buffer.usage, !!old_buffer.mapped, old_buffer.alignment);
     if(old_buffer.size > 0ull) { staging_buffer->send(new_buffer, 0ull, old_buffer, 0ull, old_buffer.size); }
     new_buffer.size = old_buffer.size;
     deallocate_buffer(old_buffer);
@@ -1867,8 +1870,8 @@ void RendererVulkan::send_to(Handle<Buffer> dst, size_t dst_offset, void* src, s
     dst_offset = (dst_offset == ~0ull) ? get_buffer(dst).size : dst_offset;
     const auto total_size = dst_offset + size;
     if(get_buffer(dst).capacity < total_size) { resize_buffer(dst, total_size); }
-    if(get_buffer(dst).memory) {
-        memcpy((std::byte*)get_buffer(dst).memory + dst_offset, src, size);
+    if(get_buffer(dst).mapped) {
+        memcpy((std::byte*)get_buffer(dst).mapped + dst_offset, src, size);
     } else {
         staging_buffer->send(get_buffer(dst), dst_offset, std::span{ (std::byte*)src, size });
     }
