@@ -1,5 +1,7 @@
 #include "descpool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/buffer.hpp>
+#include <eng/renderer/image.hpp>
 
 BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev) {
     if(!dev) { return; }
@@ -14,4 +16,13 @@ BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
         .pPoolSizes = sizes,
     });
     VK_CHECK(vkCreateDescriptorPool(dev, &pool_info, {}, &pool));
+}
+
+uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
+    if(buffers.find(buffer) == buffers.end()) { buffers[buffer] = buffer_counter++; }
+    return buffers.at(buffer);
+}
+
+uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView image, VkImageLayout layout, VkSampler sampler) {
+    if(images.find)
 }
