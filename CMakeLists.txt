@@ -105,7 +105,7 @@ add_executable(vkrt
     "eng/renderer/descpool.cpp"
     "eng/renderer/buffer.cpp"
     "eng/renderer/image.cpp"
- "eng/renderer/staging_buffer.cpp" "eng/renderer/vk_submit_queue.cpp")
+ "eng/renderer/staging_buffer.cpp" "eng/renderer/submit_queue.cpp")
 
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)

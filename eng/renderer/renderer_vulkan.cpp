@@ -23,7 +23,7 @@
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/utils.hpp>
 #include <assets/shaders/bindless_structures.inc>
-#include <eng/renderer/vk_cmd_queue.hpp>
+#include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 
@@ -177,9 +177,8 @@ void RendererVulkan::initialize_vulkan() {
     instance = vkb_inst.instance;
     dev = device;
     pdev = phys_ret->physical_device;
-    gq = Queue{ .queue = vkb_device.get_queue(vkb::QueueType::graphics).value(),
-                .idx = vkb_device.get_queue_index(vkb::QueueType::graphics).value() };
-    screen_rect = { .w = window->width, .h = window->height };
+    submit_queue = SubmitQueue{ dev, vkb_device.get_queue(vkb::QueueType::graphics).value(),
+                                vkb_device.get_queue_index(vkb::QueueType::graphics).value() };
 
     VmaVulkanFunctions vulkanFunctions = {
         .vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr,
@@ -246,7 +245,7 @@ void RendererVulkan::initialize_imgui() {
         .Instance = instance,
         .PhysicalDevice = pdev,
         .Device = dev,
-        .QueueFamily = gq.idx,
+        .QueueFamily = submit_queue.family_idx,
         .Queue = gq.queue,
         .DescriptorPool = imgui_dpool,
         .MinImageCount = (uint32_t)frame_datas.size(),
@@ -297,7 +296,7 @@ void RendererVulkan::initialize_resources() {
         VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &info, nullptr, &bindless_layout.layout));
     }
 
-    staging_buffer = new StagingBuffer{};
+    staging_buffer = StagingBuffer{ dev, vma, &submit_queue, 64 * 1024 * 1024 };
     vertex_positions_buffer = make_buffer("vertex_positions_buffer", 0ull,
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -361,9 +360,8 @@ void RendererVulkan::initialize_resources() {
     GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0, .free_list = {} };
     send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
-    vsm.shadow_map_0 =
-        make_image("vsm image", VK_FORMAT_R32_SFLOAT, VK_IMAGE_TYPE_2D, { 1024 * 8, 1024 * 8, 1 }, 1, 1,
-                   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vsm.shadow_map_0 = make_image("vsm image", VK_FORMAT_R32_SFLOAT, VK_IMAGE_TYPE_2D, { 1024 * 8, 1024 * 8, 1 }, 1, 1,
+                                  VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     vsm.dir_light_page_table = make_image("vsm dir light 0 page table", VK_FORMAT_R32_UINT, VK_IMAGE_TYPE_2D,
                                           { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 }, 1, 1,
@@ -1091,7 +1089,8 @@ void RendererVulkan::on_window_resize() {
 }
 
 void RendererVulkan::set_screen(ScreenRect screen) {
-    screen_rect = screen;
+    assert(false);
+    //screen_rect = screen;
     // ENG_WARN("TODO: Resize resources on new set_screen()");
 }
 

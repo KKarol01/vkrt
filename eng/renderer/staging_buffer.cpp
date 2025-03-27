@@ -1,7 +1,7 @@
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 
-StagingBuffer::StagingBuffer(VkDevice dev, VmaAllocator vma, VkSubmitQueue* queue, size_t size_bytes) noexcept
+StagingBuffer::StagingBuffer(VkDevice dev, VmaAllocator vma, SubmitQueue* queue, size_t size_bytes) noexcept
     : dev(dev), vma(vma), queue(queue) {
     if(!dev || !vma || !queue) { return; }
     staging_buffer =

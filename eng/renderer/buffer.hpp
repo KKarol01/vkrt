@@ -7,14 +7,15 @@
 class Buffer {
   public:
     Buffer() noexcept = default;
-    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& info,
+    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& create_info,
            const VmaAllocationCreateInfo& alloc_info) noexcept;
     // todo: make destructors and proper move semantics
 
     std::string name;
     VkDevice dev{};
     VmaAllocator vma{};
-    VkBufferCreateInfo info{}; // info.size = capacity
+    VkBufferCreateInfo create_info; // info.size = capacity
+    VmaAllocationCreateInfo alloc_info;
     VkBuffer buffer{};
     VkDeviceAddress bda{};
     void* mapped{};

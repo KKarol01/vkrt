@@ -334,7 +334,6 @@ class RendererVulkan : public Renderer {
     void build_render_graph();
 
     void update() final;
-
     void on_window_resize() final;
     void set_screen(ScreenRect screen) final;
     Handle<Image> batch_texture(const ImageDescriptor& desc) final;
@@ -359,32 +358,32 @@ class RendererVulkan : public Renderer {
     void build_tlas();
     void update_ddgi();
 
-    Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
+    /*Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
                          uint32_t layers, VkImageUsageFlags usage);
     Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
     Handle<Image> make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
                              uint32_t mips, uint32_t layers, VkImageUsageFlags usage);
     Handle<Buffer> make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false,
-                               uint32_t alignment = 1);
+                               uint32_t alignment = 1);*/
     Image& get_image(Handle<Image> handle);
     Buffer& get_buffer(Handle<Buffer> handle);
     uint32_t get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(Handle<Buffer> handle, BindlessType type);
 
-    void update_bindless_resource(Handle<Image> handle);
-    void update_bindless_resource(Handle<Buffer> handle);
+    //void update_bindless_resource(Handle<Image> handle);
+    //void update_bindless_resource(Handle<Buffer> handle);
 
-    void destroy_image(const Image** img);
-    void deallocate_buffer(Buffer& buffer);
-    void destroy_buffer(Handle<Buffer> handle);
-    void resize_buffer(Handle<Buffer> handle, size_t new_size);
+    //void destroy_image(const Image** img);
+    //void deallocate_buffer(Buffer& buffer);
+    //void destroy_buffer(Handle<Buffer> handle);
+    //void resize_buffer(Handle<Buffer> handle, size_t new_size);
 
-    void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
-    void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
-    void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
-        send_to(dst, dst_offset, (void*)bytes.data(), bytes.size_bytes());
-    }
-    template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
+    //void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
+    //void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
+    //void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
+    //    send_to(dst, dst_offset, (void*)bytes.data(), bytes.size_bytes());
+    //}
+    //template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
 
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
@@ -407,7 +406,7 @@ class RendererVulkan : public Renderer {
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
-    VkSubmitQueue submit_queue;
+    SubmitQueue submit_queue;
     StagingBuffer staging_buffer;
     BindlessDescriptorPool bindless_pool{};
 
