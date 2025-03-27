@@ -27,10 +27,6 @@
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 
-// clang-format off
-static RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
-// clang-format on
-
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
     /* Creates a halton sequence of values between 0 and 1.
@@ -269,32 +265,6 @@ void RendererVulkan::initialize_imgui() {
 }
 
 void RendererVulkan::initialize_resources() {
-    {
-        VkDescriptorSetLayoutBinding bindings[]{
-            { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 65536, VK_SHADER_STAGE_ALL },
-            { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 65536, VK_SHADER_STAGE_ALL },
-            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536, VK_SHADER_STAGE_ALL },
-            { 3, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536, VK_SHADER_STAGE_ALL },
-        };
-
-        auto layout_info = Vks(VkDescriptorSetLayoutCreateInfo{
-            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-            .bindingCount = sizeof(bindings) / sizeof(bindings[0]),
-            .pBindings = bindings,
-        });
-        VK_CHECK(vkCreateDescriptorSetLayout(get_renderer().dev, &layout_info, nullptr, &bindless_layout.descriptor_layout));
-
-        VkPushConstantRange pc_range{ VK_SHADER_STAGE_ALL, 0, 128 };
-
-        auto vk_info = Vks(VkPipelineLayoutCreateInfo{
-            .setLayoutCount = 1,
-            .pSetLayouts = &bindless_layout.descriptor_layout,
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &pc_range,
-        });
-        VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &vk_info, nullptr, &bindless_layout.layout));
-    }
-
     staging_buffer = StagingBuffer{
         &submit_queue,
         make_buffer("staging_buffer", VkBufferCreateInfo{ .size = 64 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR },
@@ -349,10 +319,10 @@ void RendererVulkan::initialize_resources() {
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
-        fd.sem_swapchain = Semaphore{ dev, false };
-        fd.sem_rendering_finished = Semaphore{ dev, false };
-        fd.fen_rendering_finished = Fence{ dev, true };
         fd.cmdpool = &submit_queue.make_command_pool();
+        fd.sem_swapchain = submit_queue.make_semaphore();
+        fd.sem_rendering_finished = submit_queue.make_semaphore();
+        fd.fen_rendering_finished = submit_queue.make_fence(true);
         fd.constants = make_buffer(std::format("constants_{}", i),
                                    VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT },
                                    VmaAllocationCreateInfo{});
@@ -381,17 +351,34 @@ void RendererVulkan::initialize_resources() {
     GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0, .free_list = {} };
     send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
-    vsm.shadow_map_0 = make_image("vsm image", VK_FORMAT_R32_SFLOAT, VK_IMAGE_TYPE_2D, { 1024 * 8, 1024 * 8, 1 }, 1, 1,
-                                  VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vsm.shadow_map_0 =
+        make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                   .format = VK_FORMAT_R32_SFLOAT,
+                                                   .extent = { 1024 * 8, 1024 * 8, 1 },
+                                                   .mipLevels = 1,
+                                                   .arrayLayers = 1,
+                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 
-    vsm.dir_light_page_table = make_image("vsm dir light 0 page table", VK_FORMAT_R32_UINT, VK_IMAGE_TYPE_2D,
-                                          { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 }, 1, 1,
-                                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vsm.dir_light_page_table =
+        make_image("vsm dir light 0 page table",
+                   VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                      .format = VK_FORMAT_R32_SFLOAT,
+                                      .extent = { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 },
+                                      .mipLevels = 1,
+                                      .arrayLayers = 1,
+                                      .samples = VK_SAMPLE_COUNT_1_BIT,
+                                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 
     vsm.dir_light_page_table_rgb8 =
-        make_image("vsm dir light 0 page table rgb8", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
-                   { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 }, 1, 1,
-                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+        make_image("vsm dir light 0 page table rgb8",
+                   VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                      .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                      .extent = { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 },
+                                      .mipLevels = 1,
+                                      .arrayLayers = 1,
+                                      .samples = VK_SAMPLE_COUNT_1_BIT,
+                                      .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
 
     create_window_sized_resources();
 
@@ -411,15 +398,25 @@ void RendererVulkan::create_window_sized_resources() {
     swapchain.create(frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
-
-        fd.gbuffer.color_image = make_image(std::format("g_color_{}", i), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TYPE_2D,
-                                            VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
-                                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        fd.gbuffer.color_image =
+            make_image(std::format("g_color_{}", i),
+                       VkImageCreateInfo{
+                           .imageType = VK_IMAGE_TYPE_2D,
+                           .format = VK_FORMAT_R8G8B8A8_SRGB,
+                           .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
+                           .mipLevels = 1,
+                           .arrayLayers = 1,
+                           .samples = VK_SAMPLE_COUNT_1_BIT,
+                           .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         fd.gbuffer.depth_buffer_image =
-            make_image(std::format("g_depth_{}", i), VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_TYPE_2D,
-                       VkExtent3D{ (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1 }, 1, 1,
-                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+            make_image(std::format("g_depth_{}", i), 
+                VkImageCreateInfo{
+            .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_D24_UNORM_S8_UINT,
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
+            .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+                }
 
         /*make_image(&fd.gbuffer.color_image,
                    Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
@@ -944,7 +941,7 @@ void RendererVulkan::build_render_graph() {
 }
 
 void RendererVulkan::update() {
-    if(screen_rect.w * screen_rect.h == 0.0f) { return; }
+    if(flags.test(RenderFlags::PAUSE_RENDERING)) { return; }
     if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
     if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES)) {
         bake_indirect_commands();
@@ -1404,6 +1401,7 @@ void RendererVulkan::update_bindless_set() {
 void RendererVulkan::build_blas() {
     ENG_TODO("IMPLEMENT BACK");
     return;
+#if 0
     auto triangles = Vks(VkAccelerationStructureGeometryTrianglesDataKHR{
         .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
         .vertexData = { .deviceAddress = get_buffer(vertex_positions_buffer).bda },
@@ -1496,6 +1494,7 @@ void RendererVulkan::build_blas() {
     Fence f{ dev, false };
     gq.submit(cmd, &f);
     f.wait();
+#endif
 }
 
 void RendererVulkan::build_tlas() {
@@ -1546,7 +1545,6 @@ void RendererVulkan::build_tlas() {
         ++toff;
         boff += geom.index_count; // TODO: validate this
     }
-#endif
     // tlas_mesh_offsets_buffer = Buffer{ "tlas mesh offsets", tlas_mesh_offsets.size() * sizeof(tlas_mesh_offsets[0]),
     //                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false };
     // tlas_mesh_offsets_buffer.push_data(tlas_mesh_offsets);
@@ -1617,6 +1615,7 @@ void RendererVulkan::build_tlas() {
       Fence f{ dev, false };
       gq.submit(cmd, &f);
       f.wait();*/
+#endif
 }
 
 void RendererVulkan::update_ddgi() {
@@ -1734,180 +1733,39 @@ void RendererVulkan::update_ddgi() {
 #endif
 }
 
-Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
-                                     uint32_t mips, uint32_t layers, VkImageUsageFlags usage) {
-    const auto vk_info = Vks(VkImageCreateInfo{
-        .imageType = type,
-        .format = format,
-        .extent =
-            VkExtent3D{
-                .width = std::max(extent.width, 1u),
-                .height = std::max(extent.height, 1u),
-                .depth = std::max(extent.depth, 1u),
-            },
-        .mipLevels = mips,
-        .arrayLayers = layers,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .usage = usage,
-    });
-
-    Image img{ .format = format, .usage = usage, .extent = vk_info.extent, .mips = mips, .layers = layers };
-    VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
-    VK_CHECK(vmaCreateImage(vma, &vk_info, &vma_info, &img.image, &img.alloc, nullptr));
-    img._deduce_aspect(img.usage);
-    img._create_default_view(type == VK_IMAGE_TYPE_3D   ? 3
-                             : type == VK_IMAGE_TYPE_2D ? 2
-                             : type == VK_IMAGE_TYPE_1D ? 1
-                                                        : 0);
-    set_debug_name(img.image, std::format("image_{}", name));
-    set_debug_name(img.view, std::format("image_{}_default_view", name));
-    return img;
-}
-
-Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
-                                         uint32_t mips, uint32_t layers, VkImageUsageFlags usage) {
-    const auto handle = Handle<Image>{ (uint32_t)images.size() };
-    images.push_back(allocate_image(name, format, type, extent, mips, layers, usage));
-    return handle;
-}
-
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
                                            const VmaAllocationCreateInfo& vma_info) {
-    return *buffers.emplace(Handle<Buffer>{ generate_handle }, Buffer{ name, dev, vma, vk_info, vma_info }).first;
-}
-
-Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(*handle); }
-
-uint32_t RendererVulkan::get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler) {
-    if(!handle) { return *handle; }
-    const BindlessEntry entry{ .resource_handle = *handle, .type = type, .layout = layout, .sampler = sampler };
-    if(auto it = bindless.indices.find(entry); it != bindless.indices.end()) { return it->second; }
-    const auto index = bindless.resource_indices_arr[std::to_underlying(type) - 1]++;
-    bindless.indices[entry] = index;
-    auto cached_it = std::lower_bound(bindless.cached_resources.begin(), bindless.cached_resources.end(), entry,
-                                      [](auto& a, auto& b) { return a.resource_handle < b.resource_handle; });
-    bindless.cached_resources.insert(cached_it, entry);
-    update_bindless_resource(handle);
-    return index;
-}
-
-uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle, BindlessType type) {
-    return get_bindless_index(Handle<Image>{ *handle }, type, VK_IMAGE_LAYOUT_UNDEFINED, nullptr);
-}
-
-void RendererVulkan::update_bindless_resource(Handle<Image> handle) {
-    auto cached_it = std::lower_bound(bindless.cached_resources.begin(), bindless.cached_resources.end(), *handle,
-                                      [](auto& a, auto& b) { return a.resource_handle < b; });
-    for(auto it = cached_it; it != bindless.cached_resources.end() && it->resource_handle == *handle; ++it) {
-        bindless_resources_to_update.push_back(*it);
-    }
-    flags.set(RenderFlags::UPDATE_BINDLESS_SET);
-}
-
-void RendererVulkan::update_bindless_resource(Handle<Buffer> handle) {
-    update_bindless_resource(Handle<Image>{ *handle });
-}
-
-void RendererVulkan::destroy_image(const Image** img) {
-    assert(false);
-    /*if(img && *img) {
-        std::erase_if(images, [&img](const auto& e) { return e.image == (*img)->image; });
-        *img = nullptr;
-    } else {
-        ENG_WARN("Trying to destroy nullptr image.");
-    }*/
-}
-
-Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map, uint32_t alignment) {
-    auto handle = Handle<Buffer>{ static_cast<Handle<Buffer>::Storage_T>(buffers.size()) };
-    buffers.push_back(allocate_buffer(name, size, usage, map, alignment));
+    const auto handle =
+        buffers.emplace(Handle<Buffer>{ generate_handle }, Buffer{ name, dev, vma, vk_info, vma_info }).first->first;
     return handle;
 }
 
-Buffer RendererVulkan::allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map, uint32_t alignment) {
-    size = std::max(size, 128ull);
-    if(!map) { usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT; }
-    Buffer buffer{ .name = name, .capacity = size, .alignment = alignment, .usage = usage };
-    const auto vk_info = Vks(VkBufferCreateInfo{ .size = size, .usage = usage });
-    VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO, .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
-    if(map) {
-        vma_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-        vma_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    }
-    VK_CHECK(vmaCreateBufferWithAlignment(vma, &vk_info, &vma_info, alignment, &buffer.buffer, &buffer.allocation, nullptr));
-    if(usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        const auto vk_info = Vks(VkBufferDeviceAddressInfo{ .buffer = buffer.buffer });
-        buffer.bda = vkGetBufferDeviceAddress(dev, &vk_info);
-    }
-    if(vma_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) {
-        VmaAllocationInfo allocation{};
-        vmaGetAllocationInfo(vma, buffer.allocation, &allocation);
-        buffer.mapped = allocation.pMappedData;
-    }
-    set_debug_name(buffer.buffer, name);
-    ENG_LOG("ALLOCATING BUFFER {} OF SIZE {:.2f} KB", name.c_str(), static_cast<float>(size) / 1024.0f);
-    return buffer;
+Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info) {
+    const auto handle = images.emplace(Handle<Image>{ generate_handle }, Image{ name, dev, vma, vk_info }).first->first;
+    return handle;
 }
 
-void RendererVulkan::deallocate_buffer(Buffer& buffer) {
-    vmaDestroyBuffer(vma, buffer.buffer, buffer.allocation);
-    buffer.buffer = nullptr;
-    buffer.allocation = nullptr;
-    buffer.mapped = nullptr;
-    buffer.bda = 0ull;
+VkImageView RendererVulkan::make_image_view(Handle<Image> handle) { return get_image(handle).get_view(); }
+
+VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info) {
+    return get_image(handle).get_view(vk_info);
 }
 
-void RendererVulkan::destroy_buffer(Handle<Buffer> handle) { assert(false); }
+Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(handle); }
 
-void RendererVulkan::resize_buffer(Handle<Buffer> handle, size_t new_size) {
-    auto& old_buffer = get_buffer(handle);
-    if(new_size <= old_buffer.capacity) {
-        old_buffer.size = new_size;
-        return;
-    }
-    auto new_buffer = allocate_buffer(old_buffer.name, new_size, old_buffer.usage, !!old_buffer.mapped, old_buffer.alignment);
-    if(old_buffer.size > 0ull) { staging_buffer->send(new_buffer, 0ull, old_buffer, 0ull, old_buffer.size); }
-    new_buffer.size = old_buffer.size;
-    deallocate_buffer(old_buffer);
-    old_buffer = new_buffer;
-    update_bindless_resource(handle);
+Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(handle); }
+
+uint32_t RendererVulkan::register_bindless_index(Handle<Buffer> handle) {
+    return bindless_pool.register_buffer(handle);
 }
 
-Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(*handle); }
-
-void RendererVulkan::send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size) {
-    assert(dst && src);
-    auto& dstb = get_buffer(dst);
-    auto& srcb = get_buffer(src);
-    dst_offset = (dst_offset == ~0ull) ? dstb.size : dst_offset;
-    const auto total_size = dst_offset + size;
-    if(dstb.capacity < total_size) { resize_buffer(dst, total_size); }
-    assert(dst_offset + size <= dstb.capacity && src_offset + size <= srcb.size);
-    staging_buffer->send(dstb, dst_offset, srcb, src_offset, size);
-    dstb.size = total_size;
+uint32_t RendererVulkan::register_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler) {
+    return bindless_pool.register_image_view(view, layout, sampler);
 }
 
-void RendererVulkan::send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size) {
-    dst_offset = (dst_offset == ~0ull) ? get_buffer(dst).size : dst_offset;
-    const auto total_size = dst_offset + size;
-    if(get_buffer(dst).capacity < total_size) { resize_buffer(dst, total_size); }
-    if(get_buffer(dst).mapped) {
-        memcpy((std::byte*)get_buffer(dst).mapped + dst_offset, src, size);
-    } else {
-        staging_buffer->send(get_buffer(dst), dst_offset, std::span{ (std::byte*)src, size });
-    }
-    get_buffer(dst).size = total_size;
-}
+uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool.get_bindless_index(handle); }
 
-template <typename... Ts> void RendererVulkan::send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts) {
-    std::array<std::byte, (sizeof(Ts) + ... + 0)> arr;
-    size_t offset = 0;
-    (..., [&arr, &offset](const auto& t) {
-        memcpy(&arr[offset], &t, sizeof(decltype(t)));
-        offset += sizeof(decltype(t));
-    }(ts));
-    send_to(dst, dst_offset, (void*)arr.data(), arr.size());
-}
+uint32_t RendererVulkan::get_bindless_index(VkImageView view) { return bindless_pool.get_bindless_index(view); }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset) {
     return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];

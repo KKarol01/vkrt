@@ -9,7 +9,7 @@ Buffer::Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const Vk
     VmaAllocationInfo alloc_info{};
     if(this->vma_info.usage == VMA_MEMORY_USAGE_UNKNOWN) { this->vma_info.usage = VMA_MEMORY_USAGE_AUTO; }
     if(!(this->vma_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
-        this->vk_info.usage |= VK_BUFFER_USAGE_2_TRANSFER_DST_BIT;
+        this->vk_info.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
     VK_CHECK(vmaCreateBuffer(vma, &this->vk_info, &this->vma_info, &buffer, &alloc, &alloc_info));
     if(buffer) { set_debug_name(buffer, name); }

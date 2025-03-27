@@ -18,7 +18,7 @@
 #include <eng/renderer/descpool.hpp>
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/image.hpp>
-#include <eng/renderer/vk_submit_queue.hpp>
+#include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 
 /* Controls renderer's behavior */
@@ -30,6 +30,7 @@ enum class RenderFlags : uint32_t {
     DIRTY_TRANSFORMS_BIT = 0x10,
     RESIZE_SWAPCHAIN_BIT = 0x20,
     UPDATE_BINDLESS_SET = 0x40,
+    PAUSE_RENDERING = 0x80,
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
@@ -110,25 +111,6 @@ struct DDGI {
 struct IndirectDrawCommandBufferHeader {
     uint32_t draw_count{};
     uint32_t geometry_instance_count{};
-};
-
-struct Fence {
-    Fence() = default;
-    Fence(VkDevice dev, bool signaled);
-    Fence(Fence&& f) noexcept;
-    Fence& operator=(Fence&& f) noexcept;
-    ~Fence() noexcept;
-    VkResult wait(uint64_t timeout = ~0ull);
-    VkFence fence{};
-};
-
-struct Semaphore {
-    Semaphore() = default;
-    Semaphore(VkDevice dev, bool timeline);
-    Semaphore(Semaphore&&) noexcept;
-    Semaphore& operator=(Semaphore&&) noexcept;
-    ~Semaphore() noexcept;
-    VkSemaphore semaphore{};
 };
 
 struct ShaderStorage {
@@ -283,11 +265,11 @@ class RenderGraph {
 } // namespace rendergraph
 
 struct FrameData {
-    Semaphore sem_swapchain{};
-    Semaphore sem_rendering_finished{};
-    Fence fen_rendering_finished{};
     CommandPool* cmdpool{};
     rendergraph::RenderGraph render_graph;
+    VkSemaphore sem_swapchain{};
+    VkSemaphore sem_rendering_finished{};
+    VkFence fen_rendering_finished{};
     Handle<Buffer> constants{};
     Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
@@ -325,6 +307,8 @@ struct BindlessEntry {
 
 class RendererVulkan : public Renderer {
   public:
+    static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
+
     ~RendererVulkan() override = default;
 
     void init() final;
@@ -362,13 +346,16 @@ class RendererVulkan : public Renderer {
     // Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
     //                      uint32_t layers, VkImageUsageFlags usage);
     // Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
-    // Handle<Image> make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
-    //                          uint32_t mips, uint32_t layers, VkImageUsageFlags usage);
     Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
-    Image& get_image(Handle<Image> handle);
+    Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
+    VkImageView make_image_view(Handle<Image> handle);
+    VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
     Buffer& get_buffer(Handle<Buffer> handle);
-    uint32_t get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler);
-    uint32_t get_bindless_index(Handle<Buffer> handle, BindlessType type);
+    Image& get_image(Handle<Image> handle);
+    uint32_t register_bindless_index(Handle<Buffer> handle);
+    uint32_t register_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
+    uint32_t get_bindless_index(Handle<Buffer> handle);
+    uint32_t get_bindless_index(VkImageView view);
 
     // void update_bindless_resource(Handle<Image> handle);
     // void update_bindless_resource(Handle<Buffer> handle);
@@ -410,9 +397,6 @@ class RendererVulkan : public Renderer {
     StagingBuffer staging_buffer;
     BindlessDescriptorPool bindless_pool{};
 
-    PipelineLayout bindless_layout{};
-    std::vector<BindlessEntry> bindless_resources_to_update;
-
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
     HandleVector<RenderMesh> meshes;
@@ -445,8 +429,8 @@ class RendererVulkan : public Renderer {
 
     ShaderStorage shader_storage;
     SamplerStorage samplers;
-    std::unordered_set<Handle<Image>, Image> images;
-    std::unordered_set<Handle<Buffer>, Buffer> buffers;
+    std::unordered_map<Handle<Image>, Image> images;
+    std::unordered_map<Handle<Buffer>, Buffer> buffers;
     // todo: handle recycling
 
     DDGI ddgi;
