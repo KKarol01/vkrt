@@ -16,7 +16,7 @@ class SamplerStorage {
     VkSampler get_sampler();
     VkSampler get_sampler(VkFilter filter, VkSamplerAddressMode address);
     VkSampler get_sampler(ImageFilter filter, ImageAddressing address);
-    VkSampler get_sampler(VkSamplerCreateInfo info);
+    VkSampler get_sampler(VkSamplerCreateInfo vk_info);
 
   private:
     std::vector<std::pair<VkSamplerCreateInfo, VkSampler>> samplers;

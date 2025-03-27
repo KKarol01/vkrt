@@ -33,14 +33,18 @@ class SubmitQueue {
     SubmitQueue() noexcept = default;
     SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept;
 
+    CommandPool& make_command_pool();
     VkFence make_fence(bool signaled);
     VkSemaphore make_semaphore();
+    void destroy_fence(VkFence fence);
+    VkResult wait_fence(VkFence fence, uint64_t timeout);
 
     SubmitQueue& with_fence(VkFence fence);
     SubmitQueue& with_wait_sem(VkSemaphore sem, VkPipelineStageFlags2 stages);
     SubmitQueue& with_sig_sem(VkSemaphore sem, VkPipelineStageFlags2 stages);
     SubmitQueue& with_cmd_buf(VkCommandBuffer cmd);
     void submit();
+    VkResult submit_wait(uint64_t timeout);
 
     VkDevice dev{};
     VkQueue queue{};

@@ -289,6 +289,7 @@ struct FrameData {
     CommandPool* cmdpool{};
     rendergraph::RenderGraph render_graph;
     Handle<Buffer> constants{};
+    Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
 };
 
@@ -358,32 +359,31 @@ class RendererVulkan : public Renderer {
     void build_tlas();
     void update_ddgi();
 
-    /*Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
-                         uint32_t layers, VkImageUsageFlags usage);
-    Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
-    Handle<Image> make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
-                             uint32_t mips, uint32_t layers, VkImageUsageFlags usage);
-    Handle<Buffer> make_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false,
-                               uint32_t alignment = 1);*/
+    // Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
+    //                      uint32_t layers, VkImageUsageFlags usage);
+    // Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
+    // Handle<Image> make_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
+    //                          uint32_t mips, uint32_t layers, VkImageUsageFlags usage);
+    Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
     Image& get_image(Handle<Image> handle);
     Buffer& get_buffer(Handle<Buffer> handle);
     uint32_t get_bindless_index(Handle<Image> handle, BindlessType type, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(Handle<Buffer> handle, BindlessType type);
 
-    //void update_bindless_resource(Handle<Image> handle);
-    //void update_bindless_resource(Handle<Buffer> handle);
+    // void update_bindless_resource(Handle<Image> handle);
+    // void update_bindless_resource(Handle<Buffer> handle);
 
-    //void destroy_image(const Image** img);
-    //void deallocate_buffer(Buffer& buffer);
-    //void destroy_buffer(Handle<Buffer> handle);
-    //void resize_buffer(Handle<Buffer> handle, size_t new_size);
+    // void destroy_image(const Image** img);
+    // void deallocate_buffer(Buffer& buffer);
+    // void destroy_buffer(Handle<Buffer> handle);
+    // void resize_buffer(Handle<Buffer> handle, size_t new_size);
 
-    //void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
-    //void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
-    //void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
-    //    send_to(dst, dst_offset, (void*)bytes.data(), bytes.size_bytes());
-    //}
-    //template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
+    // void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
+    // void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
+    // void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
+    //     send_to(dst, dst_offset, (void*)bytes.data(), bytes.size_bytes());
+    // }
+    // template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
 
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
@@ -425,20 +425,19 @@ class RendererVulkan : public Renderer {
     uint32_t max_draw_count{};
 
     VkAccelerationStructureKHR tlas{};
-    Buffer tlas_buffer;
-    Buffer tlas_instance_buffer;
-    Buffer tlas_scratch_buffer;
+    Handle<Buffer> tlas_buffer;
+    Handle<Buffer> tlas_instance_buffer;
+    Handle<Buffer> tlas_scratch_buffer;
     VsmData vsm;
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
     Handle<Buffer> indirect_draw_buffer;
-    std::array<Handle<Buffer>, 2> transform_buffers;
-    Buffer mesh_instance_mesh_id_buffer;
-    Buffer tlas_mesh_offsets_buffer;
-    Buffer tlas_transform_buffer;
-    Buffer blas_mesh_offsets_buffer;
-    Buffer triangle_geo_inst_id_buffer;
+    Handle<Buffer> mesh_instance_mesh_id_buffer;
+    Handle<Buffer> tlas_mesh_offsets_buffer;
+    Handle<Buffer> tlas_transform_buffer;
+    Handle<Buffer> blas_mesh_offsets_buffer;
+    Handle<Buffer> triangle_geo_inst_id_buffer;
     Handle<Buffer> mesh_instances_buffer;
 
     Swapchain swapchain;
@@ -446,8 +445,9 @@ class RendererVulkan : public Renderer {
 
     ShaderStorage shader_storage;
     SamplerStorage samplers;
-    // std::vector<Image> images;
-    // std::vector<Buffer> buffers;
+    std::unordered_set<Handle<Image>, Image> images;
+    std::unordered_set<Handle<Buffer>, Buffer> buffers;
+    // todo: handle recycling
 
     DDGI ddgi;
 

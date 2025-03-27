@@ -246,7 +246,7 @@ void RendererVulkan::initialize_imgui() {
         .PhysicalDevice = pdev,
         .Device = dev,
         .QueueFamily = submit_queue.family_idx,
-        .Queue = gq.queue,
+        .Queue = submit_queue.queue,
         .DescriptorPool = imgui_dpool,
         .MinImageCount = (uint32_t)frame_datas.size(),
         .ImageCount = (uint32_t)frame_datas.size(),
@@ -262,11 +262,10 @@ void RendererVulkan::initialize_imgui() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
 
-    auto cmdimgui = get_frame_data().cmdpool->begin_onetime();
+    auto cmdimgui = get_frame_data().cmdpool->begin();
     ImGui_ImplVulkan_CreateFontsTexture();
     get_frame_data().cmdpool->end(cmdimgui);
-    gq.submit(QueueSubmission{ .cmds = { cmdimgui } });
-    gq.wait_idle();
+    submit_queue.with_cmd_buf(cmdimgui).submit_wait(-1ULL);
 }
 
 void RendererVulkan::initialize_resources() {
@@ -287,30 +286,46 @@ void RendererVulkan::initialize_resources() {
 
         VkPushConstantRange pc_range{ VK_SHADER_STAGE_ALL, 0, 128 };
 
-        auto info = Vks(VkPipelineLayoutCreateInfo{
+        auto vk_info = Vks(VkPipelineLayoutCreateInfo{
             .setLayoutCount = 1,
             .pSetLayouts = &bindless_layout.descriptor_layout,
             .pushConstantRangeCount = 1,
             .pPushConstantRanges = &pc_range,
         });
-        VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &info, nullptr, &bindless_layout.layout));
+        VK_CHECK(vkCreatePipelineLayout(get_renderer().dev, &vk_info, nullptr, &bindless_layout.layout));
     }
 
-    staging_buffer = StagingBuffer{ dev, vma, &submit_queue, 64 * 1024 * 1024 };
-    vertex_positions_buffer = make_buffer("vertex_positions_buffer", 0ull,
-                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-    vertex_attributes_buffer = make_buffer("vertex_attributes_buffer", 0ull,
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-    index_buffer = make_buffer("index_buffer", 0ull,
-                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    staging_buffer = StagingBuffer{
+        &submit_queue,
+        make_buffer("staging_buffer", VkBufferCreateInfo{ .size = 64 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR },
+                    VmaAllocationCreateInfo{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+                                             .usage = VMA_MEMORY_USAGE_AUTO,
+                                             .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT })
+    };
 
-    auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-    auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-    auto samp_lr = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    vertex_positions_buffer = make_buffer("vertex_positions_buffer",
+                                          VkBufferCreateInfo{
+                                              .size = 1024ull,
+                                              .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                          },
+                                          VmaAllocationCreateInfo{});
+    vertex_attributes_buffer =
+        make_buffer("vertex_attributes_buffer",
+                    VkBufferCreateInfo{ .size = 1024ull, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT },
+                    VmaAllocationCreateInfo{});
+    index_buffer =
+        make_buffer("index_buffer",
+                    VkBufferCreateInfo{ .size = 1024ull,
+                                        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT },
+                    VmaAllocationCreateInfo{});
+
+    // auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    // auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    // auto samp_lr = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
 
     // ddgi.radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
     //                                           VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
@@ -334,19 +349,23 @@ void RendererVulkan::initialize_resources() {
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
-        CommandPool* cmdgq1 = &cmdpools.emplace_back(CommandPool{ gq.idx });
         fd.sem_swapchain = Semaphore{ dev, false };
         fd.sem_rendering_finished = Semaphore{ dev, false };
         fd.fen_rendering_finished = Fence{ dev, true };
-        fd.cmdpool = cmdgq1;
-        fd.constants = make_buffer(std::format("constants_{}", i), 512ul,
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-        transform_buffers[i] = make_buffer(std::format("transform_buffer_{}", i), 0ull,
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+        fd.cmdpool = &submit_queue.make_command_pool();
+        fd.constants = make_buffer(std::format("constants_{}", i),
+                                   VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT },
+                                   VmaAllocationCreateInfo{});
+        fd.transform_buffers =
+            make_buffer(std::format("transform_buffer_{}", i),
+                        VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT },
+                        VmaAllocationCreateInfo{});
     }
 
-    vsm.constants_buffer =
-        make_buffer("vms buffer", sizeof(GPUVsmConstantsBuffer) + 64 * 64 * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    vsm.constants_buffer = make_buffer("vms buffer",
+                                       VkBufferCreateInfo{ .size = sizeof(GPUVsmConstantsBuffer) + 64 * 64 * 4,
+                                                           .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT },
+                                       VmaAllocationCreateInfo{});
     GPUVsmConstantsBuffer vsm_constants{
         .dir_light_view = glm::mat4{ 1.0f },
         .num_pages_xy = 64,
@@ -356,7 +375,9 @@ void RendererVulkan::initialize_resources() {
     send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
 
     vsm.free_allocs_buffer =
-        make_buffer("vms alloc buffer", sizeof(GPUVsmAllocConstantsBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        make_buffer("vms alloc buffer",
+                    VkBufferCreateInfo{ .size = sizeof(GPUVsmAllocConstantsBuffer), .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT },
+                    VmaAllocationCreateInfo{});
     GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0, .free_list = {} };
     send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
@@ -383,15 +404,11 @@ void RendererVulkan::initialize_resources() {
         shader_storage.precompile_shaders(shaders);
     }
 
-    auto allocate_info = Vks(VkDescriptorSetAllocateInfo{
-        .descriptorPool = bindless_pool, .descriptorSetCount = 1, .pSetLayouts = &bindless_layout.descriptor_layout });
-    VK_CHECK(vkAllocateDescriptorSets(dev, &allocate_info, &bindless_set));
-
     build_render_graph();
 }
 
 void RendererVulkan::create_window_sized_resources() {
-    swapchain.create(frame_datas.size(), screen_rect.w, screen_rect.h);
+    swapchain.create(frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
 
@@ -1030,8 +1047,8 @@ void RendererVulkan::update() {
                                                 .dstAccessMask = VK_ACCESS_NONE,
                                                 .buffer = get_buffer(transform_buffers[0]).buffer,
                                                 .size = VK_WHOLE_SIZE });
-        auto info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
-        vkCmdPipelineBarrier2(cmd, &info);
+        auto vk_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
+        vkCmdPipelineBarrier2(cmd, &vk_info);
         update_positions.clear();
     }
 
@@ -1041,8 +1058,8 @@ void RendererVulkan::update() {
                                             .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
                                             .buffer = get_buffer(vsm.constants_buffer).buffer,
                                             .size = VK_WHOLE_SIZE });
-    auto info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
-    vkCmdPipelineBarrier2(cmd, &info);
+    auto vk_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
+    vkCmdPipelineBarrier2(cmd, &vk_info);
 
     fd.render_graph.render(cmd, swapchain_index);
     barr = Vks(VkBufferMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -1051,7 +1068,7 @@ void RendererVulkan::update() {
                                        .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
                                        .buffer = get_buffer(vsm.constants_buffer).buffer,
                                        .size = VK_WHOLE_SIZE });
-    vkCmdPipelineBarrier2(cmd, &info);
+    vkCmdPipelineBarrier2(cmd, &vk_info);
 
     fd.cmdpool->end(cmd);
     gq.submit(QueueSubmission{ .cmds = { cmd },
@@ -1090,8 +1107,8 @@ void RendererVulkan::on_window_resize() {
 
 void RendererVulkan::set_screen(ScreenRect screen) {
     assert(false);
-    //screen_rect = screen;
-    // ENG_WARN("TODO: Resize resources on new set_screen()");
+    // screen_rect = screen;
+    //  ENG_WARN("TODO: Resize resources on new set_screen()");
 }
 
 static VkFormat deduce_image_format(ImageFormat format) {
@@ -1719,7 +1736,7 @@ void RendererVulkan::update_ddgi() {
 
 Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent,
                                      uint32_t mips, uint32_t layers, VkImageUsageFlags usage) {
-    const auto info = Vks(VkImageCreateInfo{
+    const auto vk_info = Vks(VkImageCreateInfo{
         .imageType = type,
         .format = format,
         .extent =
@@ -1734,9 +1751,9 @@ Image RendererVulkan::allocate_image(const std::string& name, VkFormat format, V
         .usage = usage,
     });
 
-    Image img{ .format = format, .usage = usage, .extent = info.extent, .mips = mips, .layers = layers };
+    Image img{ .format = format, .usage = usage, .extent = vk_info.extent, .mips = mips, .layers = layers };
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
-    VK_CHECK(vmaCreateImage(vma, &info, &vma_info, &img.image, &img.alloc, nullptr));
+    VK_CHECK(vmaCreateImage(vma, &vk_info, &vma_info, &img.image, &img.alloc, nullptr));
     img._deduce_aspect(img.usage);
     img._create_default_view(type == VK_IMAGE_TYPE_3D   ? 3
                              : type == VK_IMAGE_TYPE_2D ? 2
@@ -1752,6 +1769,11 @@ Handle<Image> RendererVulkan::make_image(const std::string& name, VkFormat forma
     const auto handle = Handle<Image>{ (uint32_t)images.size() };
     images.push_back(allocate_image(name, format, type, extent, mips, layers, usage));
     return handle;
+}
+
+Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
+                                           const VmaAllocationCreateInfo& vma_info) {
+    return *buffers.emplace(Handle<Buffer>{ generate_handle }, Buffer{ name, dev, vma, vk_info, vma_info }).first;
 }
 
 Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(*handle); }
@@ -1806,18 +1828,18 @@ Buffer RendererVulkan::allocate_buffer(const std::string& name, size_t size, VkB
     size = std::max(size, 128ull);
     if(!map) { usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT; }
     Buffer buffer{ .name = name, .capacity = size, .alignment = alignment, .usage = usage };
-    const auto info = Vks(VkBufferCreateInfo{ .size = size, .usage = usage });
-    VmaAllocationCreateInfo alloc_info{ .usage = VMA_MEMORY_USAGE_AUTO, .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
+    const auto vk_info = Vks(VkBufferCreateInfo{ .size = size, .usage = usage });
+    VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO, .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
     if(map) {
-        alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-        alloc_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        vma_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        vma_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     }
-    VK_CHECK(vmaCreateBufferWithAlignment(vma, &info, &alloc_info, alignment, &buffer.buffer, &buffer.allocation, nullptr));
+    VK_CHECK(vmaCreateBufferWithAlignment(vma, &vk_info, &vma_info, alignment, &buffer.buffer, &buffer.allocation, nullptr));
     if(usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        const auto info = Vks(VkBufferDeviceAddressInfo{ .buffer = buffer.buffer });
-        buffer.bda = vkGetBufferDeviceAddress(dev, &info);
+        const auto vk_info = Vks(VkBufferDeviceAddressInfo{ .buffer = buffer.buffer });
+        buffer.bda = vkGetBufferDeviceAddress(dev, &vk_info);
     }
-    if(alloc_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) {
+    if(vma_info.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) {
         VmaAllocationInfo allocation{};
         vmaGetAllocationInfo(vma, buffer.allocation, &allocation);
         buffer.mapped = allocation.pMappedData;
@@ -1997,23 +2019,6 @@ void ShaderStorage::canonize_path(std::filesystem::path& p) {
     p.make_preferred();
 }
 
-Fence::Fence(VkDevice dev, bool signaled) {
-    auto info = Vks(VkFenceCreateInfo{});
-    if(signaled) { info.flags |= VK_FENCE_CREATE_SIGNALED_BIT; }
-    VK_CHECK(vkCreateFence(dev, &info, nullptr, &fence));
-}
-
-Fence::Fence(Fence&& f) noexcept { *this = std::move(f); }
-
-Fence& Fence::operator=(Fence&& f) noexcept {
-    fence = std::exchange(f.fence, nullptr);
-    return *this;
-}
-
-Fence::~Fence() noexcept { vkDestroyFence(get_renderer().dev, fence, nullptr); }
-
-VkResult Fence::wait(uint64_t timeout) { return vkWaitForFences(get_renderer().dev, 1, &fence, true, timeout); }
-
 void Swapchain::create(uint32_t image_count, uint32_t width, uint32_t height) {
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
@@ -2060,55 +2065,6 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semapho
     if(res) { *res = result; }
     return idx;
 }
-
-Semaphore::Semaphore(VkDevice dev, bool timeline) {
-    auto info = Vks(VkSemaphoreCreateInfo{});
-    auto tinfo = Vks(VkSemaphoreTypeCreateInfo{
-        .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
-    });
-    if(timeline) { info.pNext = &tinfo; }
-    VK_CHECK(vkCreateSemaphore(dev, &info, nullptr, &semaphore));
-}
-
-Semaphore::Semaphore(Semaphore&& o) noexcept { *this = std::move(o); }
-
-Semaphore& Semaphore::operator=(Semaphore&& o) noexcept {
-    semaphore = std::exchange(o.semaphore, nullptr);
-    return *this;
-}
-
-Semaphore::~Semaphore() noexcept {
-    vkDestroySemaphore(get_renderer().dev, semaphore, nullptr);
-    semaphore = nullptr;
-}
-
-void Queue::submit(const QueueSubmission& submissions, Fence* fence) { submit(std::span{ &submissions, 1 }, fence); }
-
-void Queue::submit(std::span<const QueueSubmission> submissions, Fence* fence) {
-    std::vector<VkSubmitInfo2> subs(submissions.size());
-    for(uint32_t i = 0; i < submissions.size(); ++i) {
-        const auto& sub = submissions[i];
-        subs[i] = Vks(VkSubmitInfo2{
-            .waitSemaphoreInfoCount = (uint32_t)sub.wait_sems.size(),
-            .pWaitSemaphoreInfos = sub.wait_sems.data(),
-            .commandBufferInfoCount = (uint32_t)sub.cmds.size(),
-            .pCommandBufferInfos = sub.cmds.data(),
-            .signalSemaphoreInfoCount = (uint32_t)sub.signal_sems.size(),
-            .pSignalSemaphoreInfos = sub.signal_sems.data(),
-        });
-    }
-    VK_CHECK(vkQueueSubmit2(queue, subs.size(), subs.data(), fence ? fence->fence : nullptr));
-}
-
-void Queue::submit(VkCommandBuffer cmd, Fence* fence) { submit(QueueSubmission{ .cmds = { cmd } }, fence); }
-
-void Queue::submit_wait(VkCommandBuffer cmd) {
-    Fence f{ get_renderer().dev, false };
-    submit(cmd, &f);
-    f.wait();
-}
-
-void Queue::wait_idle() { vkQueueWaitIdle(queue); }
 
 rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass pass) {
     const auto type =
@@ -2394,7 +2350,7 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
         });
         // pDynamicRendering.stencilAttachmentFormat = rasterization_settings.st_format;
 
-        auto info = Vks(VkGraphicsPipelineCreateInfo{
+        auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
             .pNext = &pDynamicRendering,
             .stageCount = (uint32_t)stages.size(),
             .pStages = stages.data(),
@@ -2409,17 +2365,17 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
             .pDynamicState = &pDynamicState,
             .layout = get_renderer().bindless_layout.layout,
         });
-        VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
+        VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &vk_info, nullptr, &pipeline));
     } else if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
         assert(stages.size() == 1);
-        auto info = Vks(VkComputePipelineCreateInfo{
+        auto vk_info = Vks(VkComputePipelineCreateInfo{
             .stage = stages.at(0),
             .layout = get_renderer().bindless_layout.layout,
         });
-        VK_CHECK(vkCreateComputePipelines(get_renderer().dev, nullptr, 1, &info, nullptr, &pipeline));
+        VK_CHECK(vkCreateComputePipelines(get_renderer().dev, nullptr, 1, &vk_info, nullptr, &pipeline));
     } else if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
         auto& settings = *std::get_if<RaytracingSettings>(&pass.pipeline_settings);
-        auto info = Vks(VkRayTracingPipelineCreateInfoKHR{
+        auto vk_info = Vks(VkRayTracingPipelineCreateInfoKHR{
             .stageCount = (uint32_t)stages.size(),
             .pStages = stages.data(),
             .groupCount = (uint32_t)settings.groups.size(),
@@ -2427,7 +2383,7 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
             .maxPipelineRayRecursionDepth = settings.recursion_depth,
             .layout = get_renderer().bindless_layout.layout,
         });
-        VK_CHECK(vkCreateRayTracingPipelinesKHR(get_renderer().dev, nullptr, nullptr, 1, &info, nullptr, &pipeline));
+        VK_CHECK(vkCreateRayTracingPipelinesKHR(get_renderer().dev, nullptr, nullptr, 1, &vk_info, nullptr, &pipeline));
 
         const uint32_t handleSize = get_renderer().rt_props.shaderGroupHandleSize;
         const uint32_t handleSizeAligned = align_up(handleSize, get_renderer().rt_props.shaderGroupHandleAlignment);

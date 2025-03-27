@@ -2,11 +2,11 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 
-Image::Image(const std::string& name, VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& info) noexcept
-    : name(name), dev(dev), vma(vma), info(info) {
+Image::Image(const std::string& name, VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& vk_info) noexcept
+    : name(name), dev(dev), vma(vma), vk_info(Vks(VkImageCreateInfo{ vk_info })) {
     if(!dev || !vma) { return; }
-    VmaAllocationCreateInfo alloc_info{ .usage = VMA_MEMORY_USAGE_AUTO };
-    VK_CHECK(vmaCreateImage(vma, &info, &alloc_info, &image, &alloc, nullptr));
+    VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
+    VK_CHECK(vmaCreateImage(vma, &vk_info, &vma_info, &image, &alloc, nullptr));
     if(image) { set_debug_name(image, name); }
 }
 
@@ -35,10 +35,10 @@ VkImageView Image::get_view() {
 
     const auto view_info = Vks(VkImageViewCreateInfo{
         .image = image,
-        .viewType = info.imageType == VK_IMAGE_TYPE_3D   ? VK_IMAGE_VIEW_TYPE_3D
-                    : info.imageType == VK_IMAGE_TYPE_2D ? VK_IMAGE_VIEW_TYPE_2D
+        .viewType = vk_info.imageType == VK_IMAGE_TYPE_3D   ? VK_IMAGE_VIEW_TYPE_3D
+                    : vk_info.imageType == VK_IMAGE_TYPE_2D ? VK_IMAGE_VIEW_TYPE_2D
                                                          : VK_IMAGE_VIEW_TYPE_1D,
-        .format = info.format,
+        .format = vk_info.format,
         .subresourceRange =
             VkImageSubresourceRange{
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -49,11 +49,11 @@ VkImageView Image::get_view() {
     return get_view(view_info);
 }
 
-VkImageView Image::get_view(const VkImageViewCreateInfo& info) {
-    if(auto it = views.find(info); it != views.end()) { return it->second; }
+VkImageView Image::get_view(const VkImageViewCreateInfo& vk_info) {
+    if(auto it = views.find(vk_info); it != views.end()) { return it->second; }
     VkImageView view{};
-    VK_CHECK(vkCreateImageView(dev, &info, nullptr, &view));
+    VK_CHECK(vkCreateImageView(dev, &vk_info, nullptr, &view));
     if(!view) { return nullptr; }
     set_debug_name(view, std::format("{}_view", name));
-    return views.emplace(info, view).first->second;
+    return views.emplace(vk_info, view).first->second;
 }

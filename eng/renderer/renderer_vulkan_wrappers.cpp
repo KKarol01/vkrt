@@ -35,24 +35,24 @@ VkSampler SamplerStorage::get_sampler(ImageFilter filter, ImageAddressing addres
     return get_sampler(_filter, _address);
 }
 
-VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo info) {
+VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo vk_info) {
     for(const auto& s : samplers) {
-        if(s.first.magFilter == info.magFilter && s.first.minFilter == info.minFilter && s.first.addressModeU == info.addressModeU) {
+        if(s.first.magFilter == vk_info.magFilter && s.first.minFilter == vk_info.minFilter && s.first.addressModeU == vk_info.addressModeU) {
             return s.second;
         }
     }
     VkSampler sampler;
-    VK_CHECK(vkCreateSampler(get_renderer().dev, &info, nullptr, &sampler));
-    samplers.emplace_back(info, sampler);
+    VK_CHECK(vkCreateSampler(get_renderer().dev, &vk_info, nullptr, &sampler));
+    samplers.emplace_back(vk_info, sampler);
     return sampler;
 }
 
 CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) noexcept {
-    auto info = Vks(VkCommandPoolCreateInfo{
+    auto vk_info = Vks(VkCommandPoolCreateInfo{
         .flags = flags,
         .queueFamilyIndex = queue_index,
     });
-    VK_CHECK(vkCreateCommandPool(get_renderer().dev, &info, {}, &cmdpool));
+    VK_CHECK(vkCreateCommandPool(get_renderer().dev, &vk_info, {}, &cmdpool));
 }
 
 CommandPool::~CommandPool() noexcept {
@@ -68,13 +68,13 @@ CommandPool& CommandPool::operator=(CommandPool&& other) noexcept {
 
 VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
     if(free.empty()) {
-        auto info = Vks(VkCommandBufferAllocateInfo{
+        auto vk_info = Vks(VkCommandBufferAllocateInfo{
             .commandPool = cmdpool,
             .level = level,
             .commandBufferCount = 1,
         });
         VkCommandBuffer buffer;
-        VK_CHECK(vkAllocateCommandBuffers(get_renderer().dev, &info, &buffer));
+        VK_CHECK(vkAllocateCommandBuffers(get_renderer().dev, &vk_info, &buffer));
         used.push_back(buffer);
     } else {
         used.push_back(free.front());
@@ -84,11 +84,11 @@ VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
 }
 
 VkCommandBuffer CommandPool::begin(VkCommandBufferUsageFlags flags, VkCommandBufferLevel level) {
-    auto info = Vks(VkCommandBufferBeginInfo{
+    auto vk_info = Vks(VkCommandBufferBeginInfo{
         .flags = flags,
     });
     VkCommandBuffer buffer = allocate(level);
-    VK_CHECK(vkBeginCommandBuffer(buffer, &info));
+    VK_CHECK(vkBeginCommandBuffer(buffer, &vk_info));
     return buffer;
 }
 
