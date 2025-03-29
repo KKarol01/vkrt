@@ -319,7 +319,7 @@ void RendererVulkan::initialize_resources() {
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
-        fd.cmdpool = &submit_queue.make_command_pool();
+        fd.cmdpool = submit_queue.make_command_pool();
         fd.sem_swapchain = submit_queue.make_semaphore();
         fd.sem_rendering_finished = submit_queue.make_semaphore();
         fd.fen_rendering_finished = submit_queue.make_fence(true);
@@ -342,14 +342,14 @@ void RendererVulkan::initialize_resources() {
         .max_clipmap_index = 0,
         .texel_resolution = 1024.0f * 8.0f,
     };
-    send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
-
+    // send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
     vsm.free_allocs_buffer =
         make_buffer("vms alloc buffer",
                     VkBufferCreateInfo{ .size = sizeof(GPUVsmAllocConstantsBuffer), .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT },
                     VmaAllocationCreateInfo{});
     GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0, .free_list = {} };
-    send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
+    staging_buffer.send_to(vsm.constants_buffer, 0, vsm_constants).send_to(vsm.free_allocs_buffer, 0, vsm_allocs).submit();
+    // send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
     vsm.shadow_map_0 =
         make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
@@ -449,7 +449,7 @@ void RendererVulkan::build_render_graph() {
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::WRITE_BIT,
                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -557,14 +557,14 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_WRITE_BIT,
                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
                     VK_IMAGE_LAYOUT_GENERAL
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.free_allocs_buffer, rendergraph::ResourceType::STORAGE_BUFFER },
+                    { *RendererVulkan::get_instance()->vsm.free_allocs_buffer, rendergraph::ResourceType::STORAGE_BUFFER },
                     rendergraph::AccessType::READ_WRITE_BIT,
                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
@@ -599,7 +599,7 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_GENERAL
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
@@ -662,13 +662,13 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
+                    { *RendererVulkan::get_instance()->vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_GENERAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
@@ -753,7 +753,7 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
+                    { *RendererVulkan::get_instance()->vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_GENERAL,
@@ -822,14 +822,14 @@ void RendererVulkan::build_render_graph() {
         .add_pass(rendergraph::RenderPass{
             .accesses = {
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_GENERAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table_rgb8, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table_rgb8, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::WRITE_BIT,
                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -866,14 +866,14 @@ void RendererVulkan::build_render_graph() {
                     VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.dir_light_page_table_rgb8, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
+                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table_rgb8, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                 },
                 rendergraph::Access{
-                    { *get_renderer().vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
+                    { *RendererVulkan::get_instance()->vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
                     rendergraph::AccessType::READ_BIT,
                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     VK_ACCESS_2_SHADER_READ_BIT,
@@ -893,7 +893,7 @@ void RendererVulkan::build_render_graph() {
                 if(im_draw_data) {
                     VkRenderingAttachmentInfo r_col_atts[]{
                         Vks(VkRenderingAttachmentInfo{
-                            .imageView = get_renderer().swapchain.images.at(swapchain_index).view,
+                            .imageView = RendererVulkan::get_instance()->swapchain.images.at(swapchain_index).view,
                             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -901,17 +901,17 @@ void RendererVulkan::build_render_graph() {
                         }),
                     };
                     VkRect2D r_sciss_1{ .offset = {},
-                                        .extent = { (uint32_t)get_renderer().screen_rect.w,
-                                                    (uint32_t)get_renderer().screen_rect.h } };
+                                        .extent = { (uint32_t)RendererVulkan::get_instance()->screen_rect.w,
+                                                    (uint32_t)RendererVulkan::get_instance()->screen_rect.h } };
                     VkViewport r_view_1{ .x = 0.0f,
-                                         .y = get_renderer().screen_rect.h,
-                                         .width = get_renderer().screen_rect.w,
-                                         .height = get_renderer().screen_rect.h,
+                                         .y = RendererVulkan::get_instance()->screen_rect.h,
+                                         .width = RendererVulkan::get_instance()->screen_rect.w,
+                                         .height = RendererVulkan::get_instance()->screen_rect.h,
                                          .minDepth = 0.0f,
                                          .maxDepth = 1.0f };
                     auto rendering_info = Vks(VkRenderingInfo{
-                        .renderArea = { .extent = { .width = (uint32_t)get_renderer().screen_rect.w,
-                                                    .height = (uint32_t)get_renderer().screen_rect.h } },
+                        .renderArea = { .extent = { .width = (uint32_t)RendererVulkan::get_instance()->screen_rect.w,
+                                                    .height = (uint32_t)RendererVulkan::get_instance()->screen_rect.h } },
                         .layerCount = 1,
                         .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
                         .pColorAttachments = r_col_atts,
@@ -954,25 +954,25 @@ void RendererVulkan::update() {
         // TODO: prepare ddgi on scene update
     }
     if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
-        gq.wait_idle();
+        submit_queue.wait_idle();
         create_window_sized_resources();
         build_render_graph();
     }
     if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) {
-        gq.wait_idle();
+        submit_queue.wait_idle();
         update_bindless_set();
     }
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
-    fd.fen_rendering_finished.wait();
+    submit_queue.wait_fence(fd.fen_rendering_finished, -1ull); // todo: maybe wait here for 10secs and crash to desktop.
     fd.cmdpool->reset();
 
     uint32_t swapchain_index{};
     Image* swapchain_image{};
     {
         VkResult acquire_ret;
-        swapchain_index = swapchain.acquire(&acquire_ret, ~0ull, fd.sem_swapchain.semaphore);
+        swapchain_index = swapchain.acquire(&acquire_ret, ~0ull, fd.sem_swapchain);
         if(acquire_ret != VK_SUCCESS) {
             ENG_WARN("Acquire image failed with: {}", static_cast<uint32_t>(acquire_ret));
             return;
@@ -980,7 +980,8 @@ void RendererVulkan::update() {
         swapchain_image = &swapchain.images[swapchain_index];
     }
 
-    vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
+    submit_queue.reset_fence(get_frame_data().fen_rendering_finished);
+    // vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
 
     {
         const float hx = (halton(Engine::get().frame_num() % 4u, 2) * 2.0 - 1.0);
@@ -1023,68 +1024,44 @@ void RendererVulkan::update() {
             .inv_proj = glm::inverse(Engine::get().camera->get_projection()),
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
         };
-        send_many(fd.constants, 0ull, constants);
-        send_to(vsm.constants_buffer, 0ull, &vsmconsts, sizeof(vsmconsts));
+        staging_buffer.send_to(fd.constants, 0ull, constants).send_to(vsm.constants_buffer, 0ull, vsmconsts).submit();
     }
 
-    auto cmd = fd.cmdpool->begin_onetime();
-
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
-        std::swap(transform_buffers[0], transform_buffers[1]);
-        Buffer& dst_transforms = get_buffer(transform_buffers[0]);
+        std::swap(fd.transform_buffers, get_frame_data(1).transform_buffers);
+        Buffer& dst_transforms = get_buffer(fd.transform_buffers);
         std::vector<glm::mat4> transforms;
         transforms.reserve(mesh_instances.size());
         for(auto e : mesh_instances) {
             transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
         }
-        send_to(transform_buffers[0], 0ull, std::as_bytes(std::span{ transforms }));
-        auto barr = Vks(VkBufferMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                                .srcAccessMask = VK_ACCESS_NONE,
-                                                .dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                                .dstAccessMask = VK_ACCESS_NONE,
-                                                .buffer = get_buffer(transform_buffers[0]).buffer,
-                                                .size = VK_WHOLE_SIZE });
-        auto vk_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
-        vkCmdPipelineBarrier2(cmd, &vk_info);
+        staging_buffer.send_to(fd.transform_buffers, 0ull, transforms).submit();
         update_positions.clear();
     }
-
-    auto barr = Vks(VkBufferMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_HOST_BIT,
-                                            .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
-                                            .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                                            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-                                            .buffer = get_buffer(vsm.constants_buffer).buffer,
-                                            .size = VK_WHOLE_SIZE });
-    auto vk_info = Vks(VkDependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barr });
-    vkCmdPipelineBarrier2(cmd, &vk_info);
-
+    const auto cmd = fd.cmdpool->begin();
     fd.render_graph.render(cmd, swapchain_index);
-    barr = Vks(VkBufferMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                                       .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-                                       .dstStageMask = VK_PIPELINE_STAGE_HOST_BIT,
-                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
-                                       .buffer = get_buffer(vsm.constants_buffer).buffer,
-                                       .size = VK_WHOLE_SIZE });
-    vkCmdPipelineBarrier2(cmd, &vk_info);
-
     fd.cmdpool->end(cmd);
-    gq.submit(QueueSubmission{ .cmds = { cmd },
-                               .wait_sems = { { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, fd.sem_swapchain } },
-                               .signal_sems = { { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fd.sem_rendering_finished } } },
-              &fd.fen_rendering_finished);
+    submit_queue.with_cmd_buf(cmd)
+        .with_wait_sem(fd.sem_swapchain, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+        .with_sig_sem(fd.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
+        .with_fence(fd.fen_rendering_finished);
+    // gq.submit(QueueSubmission{ .cmds = { cmd },
+    //                            .wait_sems = { { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, fd.sem_swapchain } },
+    //                            .signal_sems = { { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fd.sem_rendering_finished } } },
+    //           &fd.fen_rendering_finished);
 
     auto pinfo = Vks(VkPresentInfoKHR{
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &fd.sem_rendering_finished.semaphore,
+        .pWaitSemaphores = &fd.sem_rendering_finished,
         .swapchainCount = 1,
         .pSwapchains = &swapchain.swapchain,
         .pImageIndices = &swapchain_index,
     });
-    vkQueuePresentKHR(gq.queue, &pinfo);
+    vkQueuePresentKHR(submit_queue.queue, &pinfo);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
 
     // flags.clear();
-    gq.wait_idle();
+    submit_queue.wait_idle();
     return;
     // const auto num_frags = ((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->num_frags;
     // auto* pages = &((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->pages;
@@ -1137,9 +1114,14 @@ static VkImageType deduce_image_type(ImageType dim) {
 }
 
 Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
-    const auto handle = make_image(desc.name, deduce_image_format(desc.format), deduce_image_type(desc.type),
-                                   VkExtent3D{ .width = desc.width, .height = desc.height, .depth = 1u }, desc.mips, 1u,
-                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    const auto handle = make_image(desc.name, Vks(VkImageCreateInfo{ .imageType = deduce_image_type(desc.type),
+                                                                     .format = deduce_image_format(desc.format),
+                                                                     .extent = { desc.width, desc.height, 1u },
+                                                                     .mipLevels = desc.mips,
+                                                                     .arrayLayers = 1u,
+                                                                     .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                                              VK_IMAGE_USAGE_TRANSFER_DST_BIT }));
     upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
     return handle;
 }
@@ -1364,38 +1346,6 @@ void RendererVulkan::upload_transforms() {
         transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
     }
     send_to(transform_buffers[0], 0ull, std::as_bytes(std::span{ transforms }));
-}
-
-void RendererVulkan::update_bindless_set() {
-    std::vector<VkWriteDescriptorSet> writes;
-    std::vector<VkDescriptorBufferInfo> buffer_writes;
-    std::vector<VkDescriptorImageInfo> image_writes;
-    writes.reserve(bindless_resources_to_update.size());
-    buffer_writes.reserve(bindless_resources_to_update.size());
-    image_writes.reserve(bindless_resources_to_update.size());
-    for(const auto& e : bindless_resources_to_update) {
-        auto& write = writes.emplace_back(Vks(VkWriteDescriptorSet{
-            .dstSet = bindless_set,
-            .dstBinding = e.type == BindlessType::STORAGE_BUFFER   ? BINDLESS_STORAGE_BUFFER_BINDING
-                          : e.type == BindlessType::STORAGE_IMAGE  ? BINDLESS_STORAGE_IMAGE_BINDING
-                          : e.type == BindlessType::COMBINED_IMAGE ? BINDLESS_COMBINED_IMAGE_BINDING
-                                                                   : ~0ul,
-            .dstArrayElement = bindless.indices.at(e),
-            .descriptorCount = 1,
-            .descriptorType = e.to_vk_descriptor_type(),
-        }));
-        if(e.type == BindlessType::STORAGE_BUFFER) {
-            write.pBufferInfo = &buffer_writes.emplace_back(VkDescriptorBufferInfo{
-                .buffer = buffers.at(e.resource_handle).buffer, .offset = 0, .range = VK_WHOLE_SIZE });
-        } else if(e.type == BindlessType::STORAGE_IMAGE || e.type == BindlessType::COMBINED_IMAGE) {
-            write.pImageInfo = &image_writes.emplace_back(VkDescriptorImageInfo{
-                .sampler = e.sampler,
-                .imageView = images.at(e.resource_handle).view,
-                .imageLayout = e.layout,
-            });
-        }
-    }
-    vkUpdateDescriptorSets(dev, writes.size(), writes.data(), 0, nullptr);
 }
 
 void RendererVulkan::build_blas() {
@@ -1729,7 +1679,7 @@ void RendererVulkan::update_ddgi() {
     }
 
     ddgi.buffer.push_data(&ddgi_gpu_settings, sizeof(DDGI::GPULayout), 0);
-    gq.wait_idle();
+    submit_queue.wait_idle();
 #endif
 }
 
@@ -1867,7 +1817,7 @@ VkShaderModule ShaderStorage::compile_shader(std::filesystem::path path) {
         .pCode = res.begin(),
     });
     VkShaderModule mod;
-    VK_CHECK(vkCreateShaderModule(get_renderer().dev, &module_info, nullptr, &mod));
+    VK_CHECK(vkCreateShaderModule(RendererVulkan::get_instance()->dev, &module_info, nullptr, &mod));
     return mod;
 }
 
@@ -1881,7 +1831,7 @@ void Swapchain::create(uint32_t image_count, uint32_t width, uint32_t height) {
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
-        .surface = get_renderer().window_surface,
+        .surface = RendererVulkan::get_instance()->window_surface,
         .minImageCount = image_count,
         .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
@@ -1894,39 +1844,36 @@ void Swapchain::create(uint32_t image_count, uint32_t width, uint32_t height) {
         .clipped = true,
     });
 
-    if(swapchain) { vkDestroySwapchainKHR(get_renderer().dev, swapchain, nullptr); }
-    VK_CHECK(vkCreateSwapchainKHR(get_renderer().dev, &sinfo, nullptr, &swapchain));
+    if(swapchain) { vkDestroySwapchainKHR(RendererVulkan::get_instance()->dev, swapchain, nullptr); }
+    VK_CHECK(vkCreateSwapchainKHR(RendererVulkan::get_instance()->dev, &sinfo, nullptr, &swapchain));
     std::vector<VkImage> vk_images(image_count);
     images.resize(image_count);
 
-    VK_CHECK(vkGetSwapchainImagesKHR(get_renderer().dev, swapchain, &image_count, vk_images.data()));
+    VK_CHECK(vkGetSwapchainImagesKHR(RendererVulkan::get_instance()->dev, swapchain, &image_count, vk_images.data()));
 
     for(uint32_t i = 0; i < image_count; ++i) {
-        images[i] = Image{
-            .image = vk_images[i],
-            .format = sinfo.imageFormat,
-            .usage = sinfo.imageUsage,
-            .extent = VkExtent3D{ .width = sinfo.imageExtent.width, .height = sinfo.imageExtent.height, .depth = 1u },
-            .mips = 1,
-            .layers = 1,
-        };
-        images[i]._deduce_aspect(sinfo.imageUsage);
-        images[i]._create_default_view(2);
-        set_debug_name(images[i].image, std::format("swapchain_image_{}", i));
-        set_debug_name(images[i].view, std::format("swapchain_image_default_view_{}", i));
+        images[i] =
+            Image{ std::format("swpachain_image_{}", i), RendererVulkan::get_instance()->dev, vk_images[i],
+                   Vks(VkImageCreateInfo{
+                       .format = sinfo.imageFormat,
+                       .extent = VkExtent3D{ .width = sinfo.imageExtent.width, .height = sinfo.imageExtent.height, .depth = 1u },
+                       .mipLevels = 1,
+                       .arrayLayers = 1,
+                       .usage = sinfo.imageUsage }) };
+        views[i] = images[i].get_view();
     }
 }
 
 uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence) {
     uint32_t idx;
-    auto result = vkAcquireNextImageKHR(get_renderer().dev, swapchain, timeout, semaphore, fence, &idx);
+    auto result = vkAcquireNextImageKHR(RendererVulkan::get_instance()->dev, swapchain, timeout, semaphore, fence, &idx);
     if(res) { *res = result; }
     return idx;
 }
 
 rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass pass) {
-    const auto type =
-        pass.shaders.empty() ? VK_PIPELINE_STAGE_NONE : get_renderer().shader_storage.get_stage(pass.shaders.front());
+    const auto type = pass.shaders.empty() ? VK_PIPELINE_STAGE_NONE
+                                           : RendererVulkan::get_instance()->shader_storage.get_stage(pass.shaders.front());
     if(type & (VK_PIPELINE_STAGE_VERTEX_SHADER_BIT)) {
         pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
         if(pass.pipeline_settings.valueless_by_exception()) { pass.pipeline_settings = RasterizationSettings{}; }
@@ -1943,20 +1890,31 @@ rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass pass) {
     return *this;
 }
 
+rendergraph::RenderPass* rendergraph::RenderGraph::make_pass(const std::string& name) {
+    return &passes.emplace_back(RenderPass{ .name = name });
+}
+
+rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass* pass) {
+    render_list.push_back(pass);
+    return *this;
+}
+
 void rendergraph::RenderGraph::bake() {
+#if 0
     struct Barrier {
         VkPipelineStageFlags2 src_stage{}, dst_stage{};
         VkAccessFlags2 src_access{}, dst_access{};
         VkImageLayout src_layout{}, dst_layout{};
     };
     struct LastAccess {
-        uint32_t first_read{ UINT32_MAX };
-        uint32_t first_write{ UINT32_MAX };
+        int32_t first_read{ INT32_MAX };
+        int32_t first_write{ INT32_MAX };
         int32_t last_read{ -1 };
         int32_t last_write{ -1 };
         Barrier last_barrier{};
     };
-    std::map<Access::Resource, LastAccess> accesses;
+    std::map<decltype(Access::resource), LastAccess> accesses;
+#endif
 
     stages.clear();
     stages.reserve(passes.size());
@@ -1966,6 +1924,163 @@ void rendergraph::RenderGraph::bake() {
         if(!p.pipeline) { create_pipeline(p); }
     }
 
+    // access history for each resource
+    struct Accesses {
+        int32_t first_read{ INT32_MAX };
+        int32_t first_write{ INT32_MAX };
+        int32_t last_read{ -1 };
+        int32_t last_write{ -1 };
+        std::vector<Access*> accesses;
+    };
+    std::map<decltype(Access::resource), Accesses> accesses;
+    const auto get_stage = [this](uint32_t idx) -> decltype(auto) {
+        if(stages.size() <= idx) { stages.resize(idx + 1); }
+        return stages.at(idx);
+    };
+    auto& r = *RendererVulkan::get_instance();
+
+    for(auto i = 0u; i < render_list.size(); ++i) {
+        auto& p = *render_list.at(i);
+        uint32_t stage_idx = 0;
+        Stage stage;
+
+        // 1. find resource used in the latest stage in the graph render list and make the stage after that it's pass's
+        // stage (pass can only happen after the latest stage modifying one of it's resources)
+        // 2. generate appropiate barriers
+        // 3. append to access history
+        for(auto& a : p.accesses) {
+            auto& acc = accesses[a.resource];
+            int32_t a_stage = 0;
+            if((a.type & AccessType::WRITE_BIT) || (a.type == AccessType::NONE_BIT)) {
+                a_stage = std::max(acc.last_read, acc.last_write) + 1;
+            } else if(a.type & AccessType::READ_BIT) {
+                a_stage = std::max(acc.last_write,
+                                   (acc.last_read > -1 && acc.accesses.back()->layout != a.layout) ? acc.last_read : acc.last_write) +
+                          1;
+            } else {
+                ENG_WARN("Unrecognized Access type. Skipping.");
+                assert(false);
+                continue;
+            }
+            stage_idx = std::max(stage_idx, (uint32_t)std::max(0, a_stage));
+
+            if(auto* handle = std::get_if<Handle<Buffer>>(&a.resource)) {
+                stage.buffer_barriers.push_back(Vks(VkBufferMemoryBarrier2{
+                    .srcStageMask = acc.accesses.empty() ? VK_PIPELINE_STAGE_2_NONE : acc.accesses.back()->stage,
+                    .srcAccessMask = acc.accesses.empty() ? VK_ACCESS_2_NONE : acc.accesses.back()->access,
+                    .dstStageMask = a.stage,
+                    .dstAccessMask = a.access,
+                    .buffer = r.get_buffer(*handle).buffer,
+                    .offset = 0ull,
+                    .size = VK_WHOLE_SIZE }));
+            } else if(auto* handle = std::get_if<Handle<Image>>(&a.resource)) {
+                if(a.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT) {
+                    assert(!stage.get_swapchain_image_callback);
+                    stage.get_swapchain_image_callback = [](uint32_t index) -> Image& {
+                        return RendererVulkan::get_instance()->swapchain.images.at(index);
+                    };
+                }
+                stage.image_barriers.push_back(Vks(VkImageMemoryBarrier2{
+                    .srcStageMask = acc.accesses.empty() ? VK_PIPELINE_STAGE_2_NONE : acc.accesses.back()->stage,
+                    .srcAccessMask = acc.accesses.empty() ? VK_ACCESS_2_NONE : acc.accesses.back()->access,
+                    .dstStageMask = a.stage,
+                    .dstAccessMask = a.access,
+                    .oldLayout = (a.flags & ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT) ? VK_IMAGE_LAYOUT_UNDEFINED
+                                 : acc.accesses.empty() ? (*handle ? r.get_image(*handle).current_layout : VK_IMAGE_LAYOUT_UNDEFINED)
+                                                        : acc.accesses.back()->layout,
+                    .newLayout = a.layout,
+                    .image = *handle ? r.get_image(*handle).image : VkImage{},
+                    .subresourceRange = { .aspectMask = *handle ? r.get_image(*handle).deduce_aspect() : VK_IMAGE_ASPECT_COLOR_BIT,
+                                          .levelCount = VK_REMAINING_MIP_LEVELS,
+                                          .layerCount = VK_REMAINING_ARRAY_LAYERS } }));
+            } else {
+                ENG_WARN("Unhandled resource type");
+                assert(false);
+                continue;
+            }
+            acc.accesses.push_back(&a);
+        }
+
+        // 1. update access history
+        for(auto& a : p.accesses) {
+            if(a.type & AccessType::READ_BIT) {
+                accesses.at(a.resource).first_read = std::min(accesses.at(a.resource).first_read, (int32_t)stage_idx);
+                accesses.at(a.resource).last_read = stage_idx;
+            }
+            if(a.type & AccessType::WRITE_BIT) {
+                accesses.at(a.resource).first_write = std::min(accesses.at(a.resource).first_write, (int32_t)stage_idx);
+                accesses.at(a.resource).last_write = stage_idx;
+            }
+        }
+
+        // find actual stage, having considered all previous accesses to specified in this pass resources.
+        Stage& dst_stage = get_stage(stage_idx);
+        dst_stage.get_swapchain_image_callback = stage.get_swapchain_image_callback;
+        dst_stage.buffer_barriers.insert(dst_stage.buffer_barriers.end(), stage.buffer_barriers.begin(),
+                                         stage.buffer_barriers.end());
+        dst_stage.image_barriers.insert(dst_stage.image_barriers.end(), stage.image_barriers.begin(),
+                                        stage.image_barriers.end());
+        dst_stage.passes.push_back(&p);
+    }
+
+    // 1. update oldLayout in first barrier of each image resource to newLayout of it's last barrier, to complete the rendering cycle
+    // 2. transition pre-rendergraph layouts of images to point 1.
+    std::vector<VkImageMemoryBarrier2> initial_barriers;
+    for(auto& a : accesses) {
+        if(!std::holds_alternative<Handle<Image>>(a.first)) { continue; }
+        const auto handle = std::get<Handle<Image>>(a.first);
+        const auto first_stage_index = std::min(a.second.first_read, a.second.first_write);
+        assert(first_stage_index < stages.size());
+        auto& first_stage = get_stage(first_stage_index);
+        auto& first_barrier =
+            *std::find_if(first_stage.image_barriers.begin(), first_stage.image_barriers.end(), [&a, &handle](const auto& b) {
+                if(!handle) { return b.image == nullptr; }
+                return b.image == RendererVulkan::get_instance()->get_image(handle).image;
+            });
+        const auto& last_barrier = a.second.accesses.back();
+        if(a.second.accesses.front()->flags & ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT) { continue; }
+        initial_barriers.push_back(Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+                                                              .srcAccessMask = VK_ACCESS_2_NONE,
+                                                              .dstStageMask = first_barrier.dstStageMask,
+                                                              .dstAccessMask = first_barrier.dstAccessMask,
+                                                              .oldLayout = first_barrier.oldLayout,
+                                                              .newLayout = last_barrier->layout,
+                                                              .image = first_barrier.image,
+                                                              .subresourceRange = first_barrier.subresourceRange }));
+        first_barrier.oldLayout = last_barrier->layout;
+        if(!first_barrier.image) {
+            // if it's swapchain image, they'll all need the same starting layout, so just make them be so here.
+            initial_barriers.back().image = first_stage.get_swapchain_image_callback(0).image;
+            first_stage.get_swapchain_image_callback(0).current_layout = initial_barriers.back().newLayout;
+            for(uint32_t i = 1; i < RendererVulkan::get_instance()->swapchain.images.size(); ++i) {
+                initial_barriers.push_back(initial_barriers.back());
+                initial_barriers.back().image = first_stage.get_swapchain_image_callback(i).image;
+                first_stage.get_swapchain_image_callback(i).current_layout = initial_barriers.back().newLayout;
+            }
+        } else {
+            r.get_image(handle).current_layout = initial_barriers.back().newLayout;
+        }
+    }
+    auto initial_dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = static_cast<uint32_t>(initial_barriers.size()),
+                                                  .pImageMemoryBarriers = initial_barriers.data() });
+    auto cmd = r.get_frame_data().cmdpool->begin();
+    vkCmdPipelineBarrier2(cmd, &initial_dep_info);
+    r.get_frame_data().cmdpool->end(cmd);
+    r.submit_queue.with_cmd_buf(cmd).submit_wait(-1ull);
+
+    // make all the swapchain barriers with image == nullptr go to the front for
+    // easy replacing.
+    for(auto& p : stages) {
+        if(!p.get_swapchain_image_callback) { continue; }
+        for(auto i = 0u; i < p.image_barriers.size(); ++i) {
+            if(!p.image_barriers.at(i).image) {
+                std::swap(p.image_barriers.at(0), p.image_barriers.at(i));
+                break;
+            }
+        }
+    }
+
+#if 0
     for(uint32_t i = 0; i < passes.size(); ++i) {
         auto& p = passes.at(i);
         uint32_t stage = 0;
@@ -2012,14 +2127,14 @@ void rendergraph::RenderGraph::bake() {
                 // swapchain requires special handling, and it's barrier will be the only one
                 // amongst stage image_barriers with barrier's image set to nullptr.
                 if(a.resource.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT) {
-                    assert(!s.swapchain_barrier);
-                    s.swapchain_barrier = [la](uint32_t index) {
-                        return get_renderer().swapchain.images.at(index).image;
+                    assert(!s.get_swapchain_image_callback);
+                    s.get_swapchain_image_callback = [la](uint32_t index) {
+                        return RendererVulkan::get_instance()->swapchain.images.at(index).image;
                     };
                 }
                 const auto* img = a.resource.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT
                                       ? nullptr
-                                      : &get_renderer().images.at(a.resource.resource_idx);
+                                      : &RendererVulkan::get_instance()->images.at(a.resource.resource_idx);
                 s.image_barriers.push_back(Vks(VkImageMemoryBarrier2{ .srcStageMask = la.last_barrier.src_stage,
                                                                       .srcAccessMask = la.last_barrier.src_access,
                                                                       .dstStageMask = la.last_barrier.dst_stage,
@@ -2038,7 +2153,7 @@ void rendergraph::RenderGraph::bake() {
                     .srcAccessMask = la.last_barrier.src_access,
                     .dstStageMask = la.last_barrier.dst_stage,
                     .dstAccessMask = la.last_barrier.dst_access,
-                    .buffer = get_renderer().buffers.at(a.resource.resource_idx).buffer,
+                    .buffer = RendererVulkan::get_instance()->buffers.at(a.resource.resource_idx).buffer,
                     .offset = 0,
                     .size = VK_WHOLE_SIZE,
                 }));
@@ -2063,7 +2178,7 @@ void rendergraph::RenderGraph::bake() {
             *std::find_if(stages.at(first_stage).image_barriers.begin(), stages.at(first_stage).image_barriers.end(),
                           [img = (a.first.flags & ResourceFlags::SWAPCHAIN_IMAGE_BIT)
                                      ? nullptr
-                                     : get_renderer().images.at(a.first.resource_idx).image](const auto& b) {
+                                     : RendererVulkan::get_instance()->images.at(a.first.resource_idx).image](const auto& b) {
                               return b.image == img;
                           });
         const auto& last_barrier = a.second.last_barrier;
@@ -2077,27 +2192,27 @@ void rendergraph::RenderGraph::bake() {
                                                               .newLayout = first_barrier.oldLayout,
                                                               .image = first_barrier.image,
                                                               .subresourceRange = first_barrier.subresourceRange }));
-        if(stages.at(first_stage).swapchain_barrier && !first_barrier.image) {
+        if(stages.at(first_stage).get_swapchain_image_callback && !first_barrier.image) {
             // if it's swapchain image, they'll all need the same starting layout, so just make them be so here.
-            initial_barriers.back().image = stages.at(first_stage).swapchain_barrier(0);
-            for(uint32_t i = 1; i < get_renderer().swapchain.images.size(); ++i) {
+            initial_barriers.back().image = stages.at(first_stage).get_swapchain_image_callback(0);
+            for(uint32_t i = 1; i < RendererVulkan::get_instance()->swapchain.images.size(); ++i) {
                 initial_barriers.push_back(initial_barriers.back());
-                initial_barriers.back().image = stages.at(first_stage).swapchain_barrier(i);
+                initial_barriers.back().image = stages.at(first_stage).get_swapchain_image_callback(i);
             }
         }
     }
     auto initial_dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = static_cast<uint32_t>(initial_barriers.size()),
                                                   .pImageMemoryBarriers = initial_barriers.data() });
-    auto cmd = get_renderer().get_frame_data().cmdpool->begin_onetime();
+    auto cmd = RendererVulkan::get_instance()->get_frame_data().cmdpool->begin_onetime();
     vkCmdPipelineBarrier2(cmd, &initial_dep_info);
-    get_renderer().get_frame_data().cmdpool->end(cmd);
-    Fence f{ get_renderer().dev, false };
-    get_renderer().gq.submit(cmd, &f);
+    RendererVulkan::get_instance()->get_frame_data().cmdpool->end(cmd);
+    Fence f{ RendererVulkan::get_instance()->dev, false };
+    RendererVulkan::get_instance()->gq.submit(cmd, &f);
 
     // make all the swapchain barriers with image == nullptr go to the front for
     // easy replacing.
     for(auto& p : stages) {
-        if(!p.swapchain_barrier) { continue; }
+        if(!p.get_swapchain_image_callback) { continue; }
         for(uint32_t i = 0; i < p.image_barriers.size(); ++i) {
             if(!p.image_barriers.at(i).image) {
                 std::swap(p.image_barriers.at(0), p.image_barriers.at(i));
@@ -2107,6 +2222,7 @@ void rendergraph::RenderGraph::bake() {
     }
 
     f.wait();
+#endif
 }
 
 void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
@@ -2139,8 +2255,8 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     for(const auto& p : pass.shaders) {
         auto stage = Vks(VkPipelineShaderStageCreateInfo{
-            .stage = get_renderer().shader_storage.get_stage(p),
-            .module = get_renderer().shader_storage.get_shader(p),
+            .stage = RendererVulkan::get_instance()->shader_storage.get_stage(p),
+            .module = RendererVulkan::get_instance()->shader_storage.get_shader(p),
             .pName = "main",
         });
         stages.push_back(stage);
@@ -2221,16 +2337,16 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
             .pDepthStencilState = &pDepthStencilState,
             .pColorBlendState = &pColorBlendState,
             .pDynamicState = &pDynamicState,
-            .layout = get_renderer().bindless_layout.layout,
+            .layout = RendererVulkan::get_instance()->bindless_pool.get_pipeline_layout(),
         });
-        VK_CHECK(vkCreateGraphicsPipelines(get_renderer().dev, nullptr, 1, &vk_info, nullptr, &pipeline));
+        VK_CHECK(vkCreateGraphicsPipelines(RendererVulkan::get_instance()->dev, nullptr, 1, &vk_info, nullptr, &pipeline));
     } else if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_COMPUTE) {
         assert(stages.size() == 1);
         auto vk_info = Vks(VkComputePipelineCreateInfo{
             .stage = stages.at(0),
-            .layout = get_renderer().bindless_layout.layout,
+            .layout = RendererVulkan::get_instance()->bindless_pool.get_pipeline_layout(),
         });
-        VK_CHECK(vkCreateComputePipelines(get_renderer().dev, nullptr, 1, &vk_info, nullptr, &pipeline));
+        VK_CHECK(vkCreateComputePipelines(RendererVulkan::get_instance()->dev, nullptr, 1, &vk_info, nullptr, &pipeline));
     } else if(pass.pipeline_bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
         auto& settings = *std::get_if<RaytracingSettings>(&pass.pipeline_settings);
         auto vk_info = Vks(VkRayTracingPipelineCreateInfoKHR{
@@ -2239,22 +2355,23 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
             .groupCount = (uint32_t)settings.groups.size(),
             .pGroups = settings.groups.data(),
             .maxPipelineRayRecursionDepth = settings.recursion_depth,
-            .layout = get_renderer().bindless_layout.layout,
+            .layout = RendererVulkan::get_instance()->bindless_pool.get_pipeline_layout(),
         });
-        VK_CHECK(vkCreateRayTracingPipelinesKHR(get_renderer().dev, nullptr, nullptr, 1, &vk_info, nullptr, &pipeline));
+        VK_CHECK(vkCreateRayTracingPipelinesKHR(RendererVulkan::get_instance()->dev, nullptr, nullptr, 1, &vk_info, nullptr, &pipeline));
 
-        const uint32_t handleSize = get_renderer().rt_props.shaderGroupHandleSize;
-        const uint32_t handleSizeAligned = align_up(handleSize, get_renderer().rt_props.shaderGroupHandleAlignment);
+        const uint32_t handleSize = RendererVulkan::get_instance()->rt_props.shaderGroupHandleSize;
+        const uint32_t handleSizeAligned = align_up(handleSize, RendererVulkan::get_instance()->rt_props.shaderGroupHandleAlignment);
         const uint32_t groupCount = static_cast<uint32_t>(settings.groups.size());
         const uint32_t sbtSize = groupCount * handleSizeAligned;
 
         std::vector<uint8_t> shaderHandleStorage(sbtSize);
-        vkGetRayTracingShaderGroupHandlesKHR(get_renderer().dev, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
+        vkGetRayTracingShaderGroupHandlesKHR(RendererVulkan::get_instance()->dev, pipeline, 0, groupCount, sbtSize,
+                                             shaderHandleStorage.data());
 
         const VkBufferUsageFlags bufferUsageFlags =
             VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        settings.sbt = get_renderer().make_buffer("buffer_sbt", sbtSize, bufferUsageFlags);
-        get_renderer().send_to(settings.sbt, 0ull, &shaderHandleStorage, sizeof(shaderHandleStorage));
+        settings.sbt = RendererVulkan::get_instance()->make_buffer("buffer_sbt", sbtSize, bufferUsageFlags);
+        RendererVulkan::get_instance()->send_to(settings.sbt, 0ull, &shaderHandleStorage, sizeof(shaderHandleStorage));
     } else {
         assert(false);
     }
@@ -2264,7 +2381,9 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
 
 void rendergraph::RenderGraph::render(VkCommandBuffer cmd, uint32_t swapchain_index) {
     for(auto& s : stages) {
-        if(s.swapchain_barrier) { s.image_barriers.at(0).image = s.swapchain_barrier(swapchain_index); }
+        if(s.get_swapchain_image_callback) {
+            s.image_barriers.at(0).image = s.get_swapchain_image_callback(swapchain_index);
+        }
         auto dep_info = Vks(VkDependencyInfo{
             .bufferMemoryBarrierCount = static_cast<uint32_t>(s.buffer_barriers.size()),
             .pBufferMemoryBarriers = s.buffer_barriers.data(),
@@ -2278,85 +2397,4 @@ void rendergraph::RenderGraph::render(VkCommandBuffer cmd, uint32_t swapchain_in
             if(pass.callback_render) { pass.callback_render(cmd, swapchain_index, pass); }
         }
     }
-}
-
-StagingBuffer::StagingBuffer() {
-    buffer = get_renderer().allocate_buffer("staging_ring_buffer", 1024 * 1024 * 32,
-                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, 8u);
-}
-
-bool StagingBuffer::send(Buffer& dst, size_t dst_offset, std::span<const std::byte> src) {
-    if(buffer.capacity - buffer.size < src.size_bytes()) {
-        // TODO:
-        ENG_WARN("Resource too big. split into parts");
-        return false;
-    }
-    memcpy((std::byte*)buffer.memory + buffer.size, src.data(), src.size_bytes());
-    VkBufferCopy copy{ .srcOffset = buffer.size, .dstOffset = dst_offset, .size = src.size_bytes() };
-    buffer.size += src.size_bytes();
-    if(!cmd) {
-        begin();
-        vkCmdCopyBuffer(cmd, buffer.buffer, dst.buffer, 1, &copy);
-        stage();
-    } else {
-        vkCmdCopyBuffer(cmd, buffer.buffer, dst.buffer, 1, &copy);
-    }
-    return true;
-}
-
-bool StagingBuffer::send(Buffer& dst, size_t dst_offset, Buffer& src, size_t src_offset, size_t size) {
-    VkBufferCopy copy{ .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
-    if(!cmd) {
-        begin();
-        vkCmdCopyBuffer(cmd, src.buffer, dst.buffer, 1, &copy);
-        stage();
-    } else {
-        vkCmdCopyBuffer(cmd, src.buffer, dst.buffer, 1, &copy);
-    }
-    return true;
-}
-
-bool StagingBuffer::send(Image& dst, std::span<const std::byte> src, VkBufferImageCopy copy) {
-    if(buffer.capacity - buffer.size < src.size_bytes()) {
-        // TODO:
-        ENG_WARN("Resource too big. split into parts");
-        return false;
-    }
-    const auto old_layout = dst.current_layout;
-    dst.current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    memcpy((std::byte*)buffer.memory + buffer.size, src.data(), src.size_bytes());
-    copy.bufferOffset = buffer.size;
-    buffer.size += src.size_bytes();
-    if(!cmd) {
-        begin();
-        dst.transition_layout(cmd, VK_PIPELINE_STAGE_2_NONE_KHR, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                              VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        vkCmdCopyBufferToImage(cmd, buffer.buffer, dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-        dst.transition_layout(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, old_layout);
-        stage();
-    } else {
-        dst.transition_layout(cmd, VK_PIPELINE_STAGE_2_NONE_KHR, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                              VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        vkCmdCopyBufferToImage(cmd, buffer.buffer, dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-        dst.transition_layout(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, old_layout);
-    }
-    return true;
-}
-
-void StagingBuffer::begin() {
-    if(cmd) {
-        ENG_WARN("Starting new batch when previous one was staged yet.");
-        (*pool)->end(cmd);
-    }
-    pool = &get_renderer().get_frame_data().cmdpool;
-    cmd = (*pool)->begin_onetime();
-}
-
-void StagingBuffer::stage() {
-    (*pool)->end(cmd);
-    get_renderer().gq.submit_wait(cmd);
-    buffer.size = 0;
-    cmd = nullptr;
 }

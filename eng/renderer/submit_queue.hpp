@@ -8,12 +8,14 @@
 class CommandPool {
   public:
     CommandPool() noexcept = default;
-    CommandPool(VkDevice dev, uint32_t family_index) noexcept;
+    CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept;
 
     VkCommandBuffer allocate();
     VkCommandBuffer begin();
+    VkCommandBuffer begin(VkCommandBuffer cmd);
     void end(VkCommandBuffer cmd);
     void reset();
+    void reset(VkCommandBuffer cmd);
 
     VkDevice dev{};
     std::deque<VkCommandBuffer> free;
@@ -33,9 +35,10 @@ class SubmitQueue {
     SubmitQueue() noexcept = default;
     SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept;
 
-    CommandPool& make_command_pool();
+    CommandPool* make_command_pool(VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     VkFence make_fence(bool signaled);
     VkSemaphore make_semaphore();
+    void reset_fence(VkFence fence);
     void destroy_fence(VkFence fence);
     VkResult wait_fence(VkFence fence, uint64_t timeout);
 
@@ -43,8 +46,9 @@ class SubmitQueue {
     SubmitQueue& with_wait_sem(VkSemaphore sem, VkPipelineStageFlags2 stages);
     SubmitQueue& with_sig_sem(VkSemaphore sem, VkPipelineStageFlags2 stages);
     SubmitQueue& with_cmd_buf(VkCommandBuffer cmd);
-    void submit();
+    VkResult submit();
     VkResult submit_wait(uint64_t timeout);
+    void wait_idle();
 
     VkDevice dev{};
     VkQueue queue{};

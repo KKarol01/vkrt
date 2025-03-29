@@ -134,6 +134,7 @@ struct Swapchain {
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     VkSwapchainKHR swapchain{};
     std::vector<Image> images;
+    std::vector<VkImageView> views;
 };
 
 struct GBuffer {
@@ -210,57 +211,49 @@ struct RaytracingSettings {
 };
 
 struct Access {
-    struct Resource {
-        bool operator==(const Resource& o) const {
-            return resource_idx == o.resource_idx && type == o.type && flags == o.flags;
-        }
-        bool operator<(const Resource& o) const {
-            return (type < o.type) || (type == o.type && resource_idx < o.resource_idx);
-        }
-        uint32_t resource_idx{ ~0ul };
-        Flags<ResourceType> type{};
-        Flags<ResourceFlags> flags{};
-    };
+    // bool operator==(const Access& o) const {
+    //     return resource == o.resource && resource_flags == o.resource_flags && type == o.type && stage == o.stage &&
+    //            access == o.access && layout == o.layout && count == o.count;
+    // }
 
-    bool operator==(const Access& o) const {
-        return resource == o.resource && type == o.type && stage == o.stage && access == o.access &&
-               layout == o.layout && count == o.count;
-    }
-
-    Resource resource{};
-    Flags<AccessType> type{ AccessType::NONE_BIT };
+    std::variant<Handle<Buffer>, Handle<Image>> resource;
+    Flags<ResourceFlags> flags{};
+    Flags<AccessType> type{};
     VkPipelineStageFlags2 stage{};
     VkAccessFlags2 access{};
     VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
-    uint32_t count{ 1 };
+    // uint32_t count{ 1 };
 };
 
 struct RenderPass {
+    std::string name;
     std::vector<Access> accesses;
     std::vector<std::filesystem::path> shaders; // if empty - no pipeline generated (only for synchronization)
     std::variant<RasterizationSettings, RaytracingSettings> pipeline_settings;
+    Callback<void(VkCommandBuffer, uint32_t, RenderPass&)> callback_render;
     VkPipelineBindPoint pipeline_bind_point{}; // filled out during baking
     const Pipeline* pipeline{};                // filled out during baking
-    Callback<void(VkCommandBuffer, uint32_t, RenderPass&)> callback_render;
 };
 
 class RenderGraph {
     struct Stage {
-        std::vector<uint32_t> passes;
+        std::vector<RenderPass*> passes;
         std::vector<VkImageMemoryBarrier2> image_barriers;
         std::vector<VkBufferMemoryBarrier2> buffer_barriers;
-        Callback<VkImage(uint32_t)> swapchain_barrier;
+        Callback<Image&(uint32_t)> get_swapchain_image_callback;
     };
 
   public:
-    RenderGraph& add_pass(RenderPass pass);
+    RenderPass* make_pass(const std::string& name);
+    RenderGraph& add_pass(RenderPass* pass);
     void bake();
     void create_pipeline(RenderPass& pass);
     void render(VkCommandBuffer cmd, uint32_t swapchain_index);
 
-    std::vector<RenderPass> passes;
-    std::vector<Stage> stages;
+    std::deque<RenderPass> passes;
     std::deque<Pipeline> pipelines;
+    std::vector<RenderPass*> render_list;
+    std::vector<Stage> stages;
 };
 } // namespace rendergraph
 

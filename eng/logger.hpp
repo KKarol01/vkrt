@@ -5,6 +5,8 @@
 #include <string>
 #include <cassert>
 
+#define ENG_ERROR(fmt, ...) std::println("[ERROR][{} : {}]" fmt, __FILE__, __LINE__, __VA_ARGS__)
+
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__)
 
 #define ENG_LOG(fmt, ...)                                                                                              \
@@ -23,6 +25,7 @@
 
 #define ENG_TODO(fmt, ...) std::println("[TODO][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__)
 #else
+#define ENG_ERROR(fmt, ...)
 #define ENG_WARN(fmt, ...)
 #define ENG_LOG(fmt, ...)
 #define ENG_ASSERT(expr, fmt, ...)

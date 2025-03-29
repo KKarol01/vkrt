@@ -3,10 +3,15 @@
 #include <eng/renderer/set_debug_name.hpp>
 
 Image::Image(const std::string& name, VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& vk_info) noexcept
-    : name(name), dev(dev), vma(vma), vk_info(Vks(VkImageCreateInfo{ vk_info })) {
+    : name(name), dev(dev), vma(vma), vk_info(Vks(VkImageCreateInfo{ vk_info })), current_layout(vk_info.initialLayout) {
     if(!dev || !vma) { return; }
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
     VK_CHECK(vmaCreateImage(vma, &vk_info, &vma_info, &image, &alloc, nullptr));
+    if(image) { set_debug_name(image, name); }
+}
+
+Image::Image(const std::string& name, VkDevice dev, VkImage image, const VkImageCreateInfo& vk_info) noexcept
+    : name(name), image(image), vk_info(vk_info) {
     if(image) { set_debug_name(image, name); }
 }
 
@@ -34,4 +39,9 @@ VkImageView Image::get_view(const VkImageViewCreateInfo& vk_info) {
     if(!view) { return nullptr; }
     set_debug_name(view, std::format("{}_view", name));
     return views.emplace_back(view);
+}
+
+VkImageAspectFlags Image::deduce_aspect() const {
+    if(vk_info.usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) { return VK_IMAGE_ASPECT_DEPTH_BIT; }
+    return VK_IMAGE_ASPECT_COLOR_BIT;
 }

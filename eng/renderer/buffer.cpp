@@ -19,3 +19,9 @@ Buffer::Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const Vk
         bda = vkGetBufferDeviceAddress(dev, &bda_info);
     }
 }
+
+Buffer::Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, buffer_resizable_t resizable,
+               const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) noexcept
+    : Buffer(name, dev, vma, vk_info, vma_info) {
+    this->is_resizable = true;
+}

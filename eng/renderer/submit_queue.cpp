@@ -1,9 +1,8 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 
-CommandPool::CommandPool(VkDevice dev, uint32_t family_index) noexcept : dev(dev) {
-    const auto vk_info =
-        Vks(VkCommandPoolCreateInfo{ .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, .queueFamilyIndex = family_index });
+CommandPool::CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev) {
+    const auto vk_info = Vks(VkCommandPoolCreateInfo{ .flags = flags, .queueFamilyIndex = family_index });
     VK_CHECK(vkCreateCommandPool(dev, &vk_info, nullptr, &pool));
 }
 
@@ -21,20 +20,31 @@ VkCommandBuffer CommandPool::allocate() {
 }
 
 VkCommandBuffer CommandPool::begin() {
-    const auto vk_info = Vks(VkCommandBufferBeginInfo{ .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT });
     auto cmd = allocate();
-    VK_CHECK(vkBeginCommandBuffer(cmd, &vk_info));
+    begin(cmd);
     return cmd;
 }
 
+VkCommandBuffer CommandPool::begin(VkCommandBuffer cmd) {
+    const auto vk_info = Vks(VkCommandBufferBeginInfo{ .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT });
+    VK_CHECK(vkBeginCommandBuffer(cmd, &vk_info));
+}
+
+void CommandPool::reset(VkCommandBuffer cmd) { vkResetCommandBuffer(cmd, {}); }
+
 void CommandPool::end(VkCommandBuffer cmd) { vkEndCommandBuffer(cmd); }
 
-void CommandPool::reset() { VK_CHECK(vkResetCommandPool(dev, pool, VkCommandPoolResetFlags{})); }
+void CommandPool::reset() {
+    VK_CHECK(vkResetCommandPool(dev, pool, VkCommandPoolResetFlags{}));
+    free = std::move(used);
+}
 
 SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
     : dev(dev), queue(queue), family_idx(family_idx) {}
 
-CommandPool& SubmitQueue::make_command_pool() { return command_pools.emplace_back(dev, family_idx); }
+CommandPool* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags) {
+    return &command_pools.emplace_back(dev, family_idx, flags);
+}
 
 VkFence SubmitQueue::make_fence(bool signaled) {
     const auto vk_info = Vks(VkFenceCreateInfo{ .flags = signaled ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
@@ -49,6 +59,8 @@ VkSemaphore SubmitQueue::make_semaphore() {
     VK_CHECK(vkCreateSemaphore(dev, &vk_info, nullptr, &sem));
     return sem;
 }
+
+void SubmitQueue::reset_fence(VkFence fence) { VK_CHECK(vkResetFences(dev, 1, &fence)); }
 
 void SubmitQueue::destroy_fence(VkFence fence) {
     if(fence) {
@@ -86,7 +98,7 @@ SubmitQueue& SubmitQueue::with_cmd_buf(VkCommandBuffer cmd) {
     return *this;
 }
 
-void SubmitQueue::submit() {
+VkResult SubmitQueue::submit() {
     const auto vk_info = Vks(VkSubmitInfo2{
         .waitSemaphoreInfoCount = (uint32_t)submission.wait_sems.size(),
         .pWaitSemaphoreInfos = submission.wait_sems.data(),
@@ -95,8 +107,10 @@ void SubmitQueue::submit() {
         .signalSemaphoreInfoCount = (uint32_t)submission.sig_sems.size(),
         .pSignalSemaphoreInfos = submission.sig_sems.data(),
     });
-    VK_CHECK(vkQueueSubmit2(queue, 1, &vk_info, submission.fence));
+    const auto sres = vkQueueSubmit2(queue, 1, &vk_info, submission.fence);
+    VK_CHECK(sres);
     submission = Submission{};
+    return sres;
 }
 
 VkResult SubmitQueue::submit_wait(uint64_t timeout) {
@@ -111,8 +125,11 @@ VkResult SubmitQueue::submit_wait(uint64_t timeout) {
     }
     assert(fence);
     if(!fence) { return VK_ERROR_DEVICE_LOST; }
-    submit();
+    const auto sres = submit();
     const auto res = wait_fence(fence, timeout);
     if(is_fence_temp) { destroy_fence(fence); }
+    if(res == VK_SUCCESS) { return sres; }
     return res;
 }
+
+void SubmitQueue::wait_idle() { vkQueueWaitIdle(queue); }

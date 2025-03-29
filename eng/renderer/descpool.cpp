@@ -51,31 +51,22 @@ BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
     assert(set);
 }
 
+void BindlessDescriptorPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point) {
+    update();
+    vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
+}
+
 uint32_t BindlessDescriptorPool::register_buffer(Handle<Buffer> buffer) {
     assert(!buffers.contains(buffer));
     buffers[buffer] = buffer_counter;
-    buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
-        .buffer = RendererVulkan::get_instance()->get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
-    updates.push_back(Vks(VkWriteDescriptorSet{ .dstSet = set,
-                                                .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
-                                                .dstArrayElement = buffer_counter,
-                                                .descriptorCount = 1,
-                                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                                .pBufferInfo = &buffer_updates.back() }));
+    update_bindless_resource(buffer);
     return buffer_counter++;
 }
 
 uint32_t BindlessDescriptorPool::register_image_view(VkImageView view, VkImageLayout layout, VkSampler sampler) {
     assert(!views.contains(view));
     views[view] = view_counter;
-    image_updates.push_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
-    updates.push_back(Vks(VkWriteDescriptorSet{
-        .dstSet = set,
-        .dstBinding = (uint32_t)(sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
-        .dstArrayElement = view_counter,
-        .descriptorCount = 1,
-        .descriptorType = sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &image_updates.back() }));
+    update_bindless_resource(view, layout, sampler);
     return view_counter++;
 }
 
@@ -89,6 +80,28 @@ uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView image) {
     if(auto it = views.find(image); it != views.end()) { return it->second; }
     assert(false);
     return -1ul;
+}
+
+void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer) {
+    buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
+        .buffer = RendererVulkan::get_instance()->get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
+    updates.push_back(Vks(VkWriteDescriptorSet{ .dstSet = set,
+                                                .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
+                                                .dstArrayElement = buffer_counter,
+                                                .descriptorCount = 1,
+                                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                .pBufferInfo = &buffer_updates.back() }));
+}
+
+void BindlessDescriptorPool::update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler) {
+    image_updates.push_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
+    updates.push_back(Vks(VkWriteDescriptorSet{
+        .dstSet = set,
+        .dstBinding = (uint32_t)(sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
+        .dstArrayElement = view_counter,
+        .descriptorCount = 1,
+        .descriptorType = sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo = &image_updates.back() }));
 }
 
 void BindlessDescriptorPool::update() {
