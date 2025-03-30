@@ -83,11 +83,12 @@ uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView image) {
 }
 
 void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer) {
+    if(!buffers.contains(buffer)) { return; }
     buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
         .buffer = RendererVulkan::get_instance()->get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
     updates.push_back(Vks(VkWriteDescriptorSet{ .dstSet = set,
                                                 .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
-                                                .dstArrayElement = buffer_counter,
+                                                .dstArrayElement = buffers.at(buffer),
                                                 .descriptorCount = 1,
                                                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                                 .pBufferInfo = &buffer_updates.back() }));

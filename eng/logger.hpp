@@ -5,7 +5,11 @@
 #include <string>
 #include <cassert>
 
-#define ENG_ERROR(fmt, ...) std::println("[ERROR][{} : {}]" fmt, __FILE__, __LINE__, __VA_ARGS__)
+#define ENG_ERROR(fmt, ...)                                                                                            \
+    do {                                                                                                               \
+        std::println("[ERROR][{} : {}]" fmt, __FILE__, __LINE__, __VA_ARGS__);                                         \
+        assert(false);                                                                                                 \
+    } while(0)
 
 #define ENG_WARN(fmt, ...) std::println("[WARN][{} : {}]: " fmt, __FILE__, __LINE__, __VA_ARGS__)
 

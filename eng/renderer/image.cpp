@@ -17,25 +17,22 @@ Image::Image(const std::string& name, VkDevice dev, VkImage image, const VkImage
 
 VkImageView Image::get_view() {
     if(default_view) { return default_view; }
-    const auto view_info = Vks(VkImageViewCreateInfo{
-        .image = image,
-        .viewType = vk_info.imageType == VK_IMAGE_TYPE_3D   ? VK_IMAGE_VIEW_TYPE_3D
-                    : vk_info.imageType == VK_IMAGE_TYPE_2D ? VK_IMAGE_VIEW_TYPE_2D
-                                                            : VK_IMAGE_VIEW_TYPE_1D,
-        .format = vk_info.format,
-        .subresourceRange =
-            VkImageSubresourceRange{
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = VK_REMAINING_MIP_LEVELS,
-                .layerCount = VK_REMAINING_ARRAY_LAYERS,
-            },
-    });
-    return get_view(view_info);
+    default_view = get_view(Vks(VkImageViewCreateInfo{}));
+    return default_view;
 }
 
 VkImageView Image::get_view(const VkImageViewCreateInfo& vk_info) {
     VkImageView view{};
-    VK_CHECK(vkCreateImageView(dev, &vk_info, nullptr, &view));
+    auto info = vk_info;
+    info.image = image;
+    if(info.format = VK_FORMAT_UNDEFINED) {
+        info.viewType = this->vk_info.imageType == VK_IMAGE_TYPE_3D   ? VK_IMAGE_VIEW_TYPE_3D
+                        : this->vk_info.imageType == VK_IMAGE_TYPE_2D ? VK_IMAGE_VIEW_TYPE_2D
+                                                                      : VK_IMAGE_VIEW_TYPE_1D,
+        info.format = this->vk_info.format;
+        info.subresourceRange = { .aspectMask = deduce_aspect(), .levelCount = VK_REMAINING_MIP_LEVELS, .layerCount = VK_REMAINING_ARRAY_LAYERS };
+    }
+    VK_CHECK(vkCreateImageView(dev, &info, nullptr, &view));
     if(!view) { return nullptr; }
     set_debug_name(view, std::format("{}_view", name));
     return views.emplace_back(view);

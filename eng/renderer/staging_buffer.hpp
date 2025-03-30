@@ -25,10 +25,17 @@ class StagingBuffer {
         size_t offset{};
         std::vector<std::byte> data;
     };
+    struct TransferFromBuffer {
+        Handle<Buffer> dst_buffer{};
+        size_t dst_offset{};
+        Handle<Buffer> src_buffer{};
+        size_t src_offset{};
+        size_t size{};
+    };
 
     struct Submission {
         bool started() const { return !transfers.empty(); }
-        std::vector<std::variant<TransferBuffer, TransferImage>> transfers;
+        std::vector<std::variant<TransferBuffer, TransferImage, TransferFromBuffer>> transfers;
         VkFence fence{};
     };
 
@@ -41,6 +48,7 @@ class StagingBuffer {
 
     template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const T& t);
     template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts);
+    StagingBuffer& send_to(Handle<Buffer> dst_buffer, size_t dst_offset, Handle<Buffer> src_buffer, size_t src_offset, size_t size);
     void submit(VkFence fence = nullptr);
     void submit_wait(VkFence fence = nullptr);
 

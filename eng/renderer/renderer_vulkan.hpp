@@ -142,6 +142,7 @@ struct GBuffer {
     Handle<Image> view_space_positions_image{};
     Handle<Image> view_space_normals_image{};
     Handle<Image> depth_buffer_image{};
+    VkImageView view_depth_buffer_image_ronly_lr{};
     Handle<Image> ambient_occlusion_image{};
 };
 
@@ -193,21 +194,23 @@ struct RasterizationSettings {
 
 struct RaytracingSettings {
     bool operator==(const RaytracingSettings& o) const {
-        return recursion_depth == o.recursion_depth && sbt == o.sbt && groups.size() == o.groups.size() && [this, &o] {
-            for(const auto& e : groups) {
-                if(std::find_if(o.groups.begin(), o.groups.end(), [&e](auto& g) {
-                       return e.type == g.type && e.generalShader == g.generalShader && e.closestHitShader == g.closestHitShader &&
-                              e.anyHitShader == g.anyHitShader && e.intersectionShader == g.intersectionShader;
-                   }) == o.groups.end()) {
-                    return false;
-                }
-            }
-            return true;
-        }();
+        return recursion_depth == o.recursion_depth && sbt_buffer == o.sbt_buffer && groups.size() == o.groups.size() &&
+               [this, &o] {
+                   for(const auto& e : groups) {
+                       if(std::find_if(o.groups.begin(), o.groups.end(), [&e](auto& g) {
+                              return e.type == g.type && e.generalShader == g.generalShader &&
+                                     e.closestHitShader == g.closestHitShader && e.anyHitShader == g.anyHitShader &&
+                                     e.intersectionShader == g.intersectionShader;
+                          }) == o.groups.end()) {
+                           return false;
+                       }
+                   }
+                   return true;
+               }();
     }
     uint32_t recursion_depth{ 1 };
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
-    Handle<Buffer> sbt;
+    Handle<Buffer> sbt_buffer;
 };
 
 struct Access {
@@ -280,23 +283,23 @@ struct FrameData {
 //     Buffer buffer{};
 // };
 
-enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
-
-struct BindlessEntry {
-    bool operator==(const BindlessEntry& a) const {
-        return resource_handle == a.resource_handle && type == a.type && layout == a.layout && sampler == a.sampler;
-    }
-    VkDescriptorType to_vk_descriptor_type() const {
-        return type == BindlessType::STORAGE_BUFFER   ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-               : type == BindlessType::STORAGE_IMAGE  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-               : type == BindlessType::COMBINED_IMAGE ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                                                      : VK_DESCRIPTOR_TYPE_MAX_ENUM;
-    }
-    uint32_t resource_handle{};
-    BindlessType type{};
-    VkImageLayout layout{};
-    VkSampler sampler{};
-};
+//enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
+//
+//struct BindlessEntry {
+//    bool operator==(const BindlessEntry& a) const {
+//        return resource_handle == a.resource_handle && type == a.type && layout == a.layout && sampler == a.sampler;
+//    }
+//    VkDescriptorType to_vk_descriptor_type() const {
+//        return type == BindlessType::STORAGE_BUFFER   ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+//               : type == BindlessType::STORAGE_IMAGE  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+//               : type == BindlessType::COMBINED_IMAGE ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+//                                                      : VK_DESCRIPTOR_TYPE_MAX_ENUM;
+//    }
+//    uint32_t resource_handle{};
+//    BindlessType type{};
+//    VkImageLayout layout{};
+//    VkSampler sampler{};
+//};
 
 class RendererVulkan : public Renderer {
   public:
@@ -330,7 +333,7 @@ class RendererVulkan : public Renderer {
     void upload_staged_models();
     void bake_indirect_commands();
     void upload_transforms();
-    void update_bindless_set();
+    //void update_bindless_set();
 
     void build_blas();
     void build_tlas();
@@ -341,13 +344,16 @@ class RendererVulkan : public Renderer {
     // Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
     Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
-    VkImageView make_image_view(Handle<Image> handle);
-    VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
+    VkImageView make_image_view(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
+    VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info, VkImageLayout layout, VkSampler sampler);
     Buffer& get_buffer(Handle<Buffer> handle);
     Image& get_image(Handle<Image> handle);
+    void destroy_buffer(Handle<Buffer> buffer);
+    void replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer);
     uint32_t register_bindless_index(Handle<Buffer> handle);
     uint32_t register_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(Handle<Buffer> handle);
+    //uint32_t get_bindless_index(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(VkImageView view);
 
     // void update_bindless_resource(Handle<Image> handle);

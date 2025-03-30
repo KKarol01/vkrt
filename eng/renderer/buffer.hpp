@@ -23,8 +23,8 @@ class Buffer {
     std::string name;
     VkDevice dev{};
     VmaAllocator vma{};
-    VkBufferCreateInfo vk_info; // info.size = capacity
-    VmaAllocationCreateInfo vma_info;
+    VkBufferCreateInfo vk_info{}; // info.size = capacity
+    VmaAllocationCreateInfo vma_info{};
     VkBuffer buffer{};
     VkDeviceAddress bda{};
     void* mapped{};

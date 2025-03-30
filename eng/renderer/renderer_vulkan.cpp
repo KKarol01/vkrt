@@ -224,7 +224,7 @@ void RendererVulkan::initialize_imgui() {
                                  &Engine::get().ui_ctx->alloc_callbacks->imgui_free, &user_data);
     ImGui::StyleColorsDark();
 
-    ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
+    ImGui_ImplGlfw_InitForVulkan(Engine::get().window->widthindow, true);
 
     VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
 
@@ -359,6 +359,7 @@ void RendererVulkan::initialize_resources() {
                                                    .arrayLayers = 1,
                                                    .samples = VK_SAMPLE_COUNT_1_BIT,
                                                    .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    vsm.view_shadow_map_0_general = make_image_view(vsm.shadow_map_0, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     vsm.dir_light_page_table =
         make_image("vsm dir light 0 page table",
@@ -369,6 +370,7 @@ void RendererVulkan::initialize_resources() {
                                       .arrayLayers = 1,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
                                       .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    vsm.view_dir_light_page_table_general = make_image_view(vsm.dir_light_page_table, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     vsm.dir_light_page_table_rgb8 =
         make_image("vsm dir light 0 page table rgb8",
@@ -379,6 +381,7 @@ void RendererVulkan::initialize_resources() {
                                       .arrayLayers = 1,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
                                       .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
+    vsm.view_dir_light_page_table_rgb8_general = make_image_view(vsm.dir_light_page_table_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     create_window_sized_resources();
 
@@ -395,28 +398,34 @@ void RendererVulkan::initialize_resources() {
 }
 
 void RendererVulkan::create_window_sized_resources() {
-    swapchain.create(frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
+    swapchain.create(frame_datas.size(), Engine::get().window->widthidth, Engine::get().window->heighteight);
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
         fd.gbuffer.color_image =
             make_image(std::format("g_color_{}", i),
-                       VkImageCreateInfo{
-                           .imageType = VK_IMAGE_TYPE_2D,
-                           .format = VK_FORMAT_R8G8B8A8_SRGB,
-                           .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-                           .mipLevels = 1,
-                           .arrayLayers = 1,
-                           .samples = VK_SAMPLE_COUNT_1_BIT,
-                           .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+                       VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                          .format = VK_FORMAT_R8G8B8A8_SRGB,
+                                          .extent = { (uint32_t)Engine::get().window->widthidth,
+                                                      (uint32_t)Engine::get().window->heighteight, 1 },
+                                          .mipLevels = 1,
+                                          .arrayLayers = 1,
+                                          .samples = VK_SAMPLE_COUNT_1_BIT,
+                                          .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         fd.gbuffer.depth_buffer_image =
-            make_image(std::format("g_depth_{}", i), 
-                VkImageCreateInfo{
-            .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_D24_UNORM_S8_UINT,
-            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-            .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
-            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
-                }
+            make_image(std::format("g_depth_{}", i),
+                       VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                          .format = VK_FORMAT_D24_UNORM_S8_UINT,
+                                          .extent = { (uint32_t)Engine::get().window->widthidth,
+                                                      (uint32_t)Engine::get().window->heighteight, 1 },
+                                          .mipLevels = 1,
+                                          .arrayLayers = 1,
+                                          .samples = VK_SAMPLE_COUNT_1_BIT,
+                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        fd.gbuffer.view_depth_buffer_image_ronly_lr =
+            make_image_view(fd.gbuffer.depth_buffer_image, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                            samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
 
         /*make_image(&fd.gbuffer.color_image,
                    Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
@@ -443,152 +452,166 @@ void RendererVulkan::create_window_sized_resources() {
 }
 
 void RendererVulkan::build_render_graph() {
+
     for(auto& fd : frame_datas) {
         fd.render_graph.passes.clear();
-        fd.render_graph
-        .add_pass(rendergraph::RenderPass{
-            .accesses = { 
-                rendergraph::Access{
-                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
-                    rendergraph::AccessType::WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_GENERAL
-                },
-                rendergraph::Access{
-                    { *vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
-                    rendergraph::AccessType::WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                    VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                },
-            },
-            .shaders = { "vsm/clear_page.comp.glsl" },
-            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
-                uint32_t bindless_indices[]{
-                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
-                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    0,
-                };
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-                vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
-                vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
+        fd.render_graph.render_list.clear();
+        auto* vsm_clear_pages = fd.render_graph.make_pass("vsm/clear_pages");
+        auto* z_prepass = fd.render_graph.make_pass("z_prepass");
+        auto* vsm_page_alloc = fd.render_graph.make_pass("vsm/page_alloc");
+        auto* vsm_shadow = fd.render_graph.make_pass("vsm/shadow");
+        auto* default_unlit = fd.render_graph.make_pass("default_unlit");
+        auto* vsm_debug_page_copy = fd.render_graph.make_pass("vsm/debug_page_copy");
+        fd.render_graph.add_pass(vsm_clear_pages);
+        fd.render_graph.add_pass(z_prepass);
+        fd.render_graph.add_pass(vsm_page_alloc);
+        fd.render_graph.add_pass(vsm_shadow);
+        fd.render_graph.add_pass(default_unlit);
+        fd.render_graph.add_pass(vsm_debug_page_copy);
 
-                VkClearColorValue clear_value{ .float32 = { 1.0f, 0.0f, 0.0f, 0.0f } };
-                VkImageSubresourceRange clear_range{
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-                };
-                vkCmdClearColorImage(cmd, r.get_image(r.vsm.shadow_map_0).image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range);
-            } })
-        .add_pass(rendergraph::RenderPass{
-            .accesses = { 
-                rendergraph::Access{
-                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
-                    rendergraph::AccessType::READ_WRITE_BIT,
-                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
-                },
-            },
+        *vsm_clear_pages = rendergraph::RenderPass{
+            .accesses = { rendergraph::Access{ .resource = vsm.dir_light_page_table,
+                                               .flags = rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
+                                               .type = rendergraph::AccessType::WRITE_BIT,
+                                               .stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                               .access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                                               .layout = VK_IMAGE_LAYOUT_GENERAL },
+                          rendergraph::Access{ .resource = vsm.shadow_map_0,
+                                               .flags = rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
+                                               .type = rendergraph::AccessType::WRITE_BIT,
+                                               .stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                               .access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                               .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL } },
+            .shaders = { "vsm/clear_page.comp.glsl" },
+            .callback_render =
+                [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
+                    auto& r = *RendererVulkan::get_instance();
+                    uint32_t bindless_indices[]{
+                        r.bindless_pool.get_bindless_index(r.index_buffer),
+                        r.bindless_pool.get_bindless_index(r.vertex_positions_buffer),
+                        r.bindless_pool.get_bindless_index(r.vertex_attributes_buffer),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().transform_buffers),
+                        r.bindless_pool.get_bindless_index(r.vsm.constants_buffer),
+                        r.bindless_pool.get_bindless_index(r.vsm.free_allocs_buffer),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().gbuffer.view_depth_buffer_image_ronly_lr),
+                        r.bindless_pool.get_bindless_index(r.vsm.view_dir_light_page_table_general),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().constants),
+                        0,
+                    };
+                    vkCmdPushConstants(cmd, r.bindless_pool.get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
+                                       sizeof(bindless_indices), bindless_indices);
+                    r.bindless_pool.bind(cmd, pass.pipeline_bind_point);
+                    vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
+                    VkClearColorValue clear_value{ .float32 = { 1.0f, 0.0f, 0.0f, 0.0f } };
+                    VkImageSubresourceRange clear_range{
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+                    };
+                    vkCmdClearColorImage(cmd, r.get_image(r.vsm.shadow_map_0).image,
+                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range);
+                }
+        };
+
+        *vsm_clear_pages = rendergraph::RenderPass{
+            .accesses = { rendergraph::Access{ .resource = fd.gbuffer.depth_buffer_image,
+                                               .flags = rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
+                                               .type = rendergraph::AccessType::READ_WRITE_BIT,
+                                               .stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+                                               .access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                                               .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL } },
             .shaders = { "vsm/zprepass.vert.glsl", "vsm/zprepass.frag.glsl" },
-            .pipeline_settings =
-                rendergraph::RasterizationSettings{ .num_col_formats = 0, .dep_format = VK_FORMAT_D24_UNORM_S8_UINT, .depth_test = true },
-            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-            auto& r = get_renderer();
-            const auto r_dep_att = Vks(VkRenderingAttachmentInfo{
-                .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).view,
-                .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = { .depthStencil = { 1.0f, 0 } },
-            });
-            const auto rendering_info = Vks(VkRenderingInfo{
-                .renderArea = { .extent = { .width = (uint32_t)r.screen_rect.w, .height = (uint32_t)r.screen_rect.h } },
-                .layerCount = 1,
-                .colorAttachmentCount = 0,
-                .pColorAttachments = nullptr,
-                .pDepthAttachment = &r_dep_att,
-            });
-            vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
-            vkCmdBeginRendering(cmd, &rendering_info);
-            VkRect2D r_sciss_1 = rendering_info.renderArea;
-            VkViewport r_view_1{ .x = 0.0f,
-                                 .y = 0.0f,
-                                 .width = (float)rendering_info.renderArea.extent.width,
-                                 .height = (float)rendering_info.renderArea.extent.height,
-                                 .minDepth = 0.0f,
-                                 .maxDepth = 1.0f };
-            vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-            vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-                uint32_t bindless_indices[]{
-                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)), 
-                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    0,
-                };
-            vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-            vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
-                                          sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
-                                          0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
-            vkCmdEndRendering(cmd);
-        } })
-        .add_pass(rendergraph::RenderPass{
-            .accesses = { 
-                rendergraph::Access{
-                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT },
-                    rendergraph::AccessType::READ_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
-                },
-                rendergraph::Access{
-                    { *RendererVulkan::get_instance()->vsm.dir_light_page_table, rendergraph::ResourceType::COLOR_ATTACHMENT },
-                    rendergraph::AccessType::READ_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_GENERAL
-                },
-                rendergraph::Access{
-                    { *RendererVulkan::get_instance()->vsm.free_allocs_buffer, rendergraph::ResourceType::STORAGE_BUFFER },
-                    rendergraph::AccessType::READ_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
-                },
-            },
+            .callback_render =
+                [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
+                    auto& r = *RendererVulkan::get_instance();
+                    const auto r_dep_att = Vks(VkRenderingAttachmentInfo{
+                        .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).get_view(),
+                        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                        .clearValue = { .depthStencil = { 1.0f, 0 } },
+                    });
+                    const auto rendering_info = Vks(VkRenderingInfo{
+                        .renderArea = { .extent = { .width = (uint32_t)Engine::get().window->width,
+                                                    .height = (uint32_t)Engine::get().window->height } },
+                        .layerCount = 1,
+                        .colorAttachmentCount = 0,
+                        .pColorAttachments = nullptr,
+                        .pDepthAttachment = &r_dep_att,
+                    });
+                    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1,
+                                            &r.bindless_set, 0, nullptr);
+                    vkCmdBeginRendering(cmd, &rendering_info);
+                    VkRect2D r_sciss_1 = rendering_info.renderArea;
+                    VkViewport r_view_1{ .x = 0.0f,
+                                         .y = 0.0f,
+                                         .width = (float)rendering_info.renderArea.extent.width,
+                                         .height = (float)rendering_info.renderArea.extent.height,
+                                         .minDepth = 0.0f,
+                                         .maxDepth = 1.0f };
+                    vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
+                    vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
+                    uint32_t bindless_indices[]{
+                        r.bindless_pool.get_bindless_index(r.index_buffer),
+                        r.bindless_pool.get_bindless_index(r.vertex_positions_buffer),
+                        r.bindless_pool.get_bindless_index(r.vertex_attributes_buffer),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().transform_buffers),
+                        r.bindless_pool.get_bindless_index(r.vsm.constants_buffer),
+                        r.bindless_pool.get_bindless_index(r.vsm.free_allocs_buffer),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().gbuffer.view_depth_buffer_image_ronly_lr),
+                        r.bindless_pool.get_bindless_index(r.vsm.view_dir_light_page_table_general),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().constants),
+                        0,
+                    };
+                    vkCmdPushConstants(cmd, r.bindless_pool.get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
+                                       sizeof(bindless_indices), bindless_indices);
+                    r.bindless_pool.bind(cmd, pass.pipeline_bind_point);
+                    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
+                                                  sizeof(IndirectDrawCommandBufferHeader),
+                                                  r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count,
+                                                  sizeof(VkDrawIndexedIndirectCommand));
+                    vkCmdEndRendering(cmd);
+                }
+        };
+
+        *vsm_page_alloc = rendergraph::RenderPass{
+            .accesses = { rendergraph::Access{ .resource = fd.gbuffer.depth_buffer_image,
+                                               .type = rendergraph::AccessType::READ_BIT,
+                                               .stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                               .access = VK_ACCESS_2_SHADER_READ_BIT,
+                                               .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL },
+                          rendergraph::Access{ .resource = vsm.dir_light_page_table,
+                                               .type = rendergraph::AccessType::READ_WRITE_BIT,
+                                               .stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                               .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                                               .layout = VK_IMAGE_LAYOUT_GENERAL },
+                          rendergraph::Access{ .resource = vsm.free_allocs_buffer,
+                                               .type = rendergraph::AccessType::READ_WRITE_BIT,
+                                               .stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                               .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT } },
             .shaders = { "vsm/page_alloc.comp.glsl" },
-            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
-                uint32_t bindless_indices[]{
-                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.constants_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.free_allocs_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().gbuffer.depth_buffer_image, BindlessType::COMBINED_IMAGE, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, r.samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT)), 
-                    r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    0,
-                };
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-                vkCmdDispatch(cmd, (uint32_t)std::ceilf(r.screen_rect.w / 8.0f), (uint32_t)std::ceilf(r.screen_rect.h / 8.0f), 1);
-            }
-        })
+            .callback_render =
+                [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
+                    auto& r = *RendererVulkan::get_instance();
+                    uint32_t bindless_indices[]{
+                        r.bindless_pool.get_bindless_index(r.index_buffer),
+                        r.bindless_pool.get_bindless_index(r.vertex_positions_buffer),
+                        r.bindless_pool.get_bindless_index(r.vertex_attributes_buffer),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().transform_buffers),
+                        r.bindless_pool.get_bindless_index(r.vsm.constants_buffer),
+                        r.bindless_pool.get_bindless_index(r.vsm.free_allocs_buffer),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().gbuffer.view_depth_buffer_image_ronly_lr),
+                        r.bindless_pool.get_bindless_index(r.vsm.view_dir_light_page_table_general),
+                        r.bindless_pool.get_bindless_index(r.get_frame_data().constants),
+                        0,
+                    };
+                    vkCmdPushConstants(cmd, r.bindless_pool.get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
+                                       sizeof(bindless_indices), bindless_indices);
+                    r.bindless_pool.bind(cmd, pass.pipeline_bind_point);
+                    vkCmdDispatch(cmd, (uint32_t)std::ceilf(Engine::get().window->width / 8.0f),
+                                  (uint32_t)std::ceilf(Engine::get().window->height / 8.0f), 1);
+                }
+        };
+       
         .add_pass(rendergraph::RenderPass{
             .accesses = { 
                 rendergraph::Access{
@@ -610,7 +633,7 @@ void RendererVulkan::build_render_graph() {
             .pipeline_settings =
                 rendergraph::RasterizationSettings{ .num_col_formats = 0, .depth_test = false, .depth_write = false },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
+                auto& r = *RendererVulkan::get_instance();
                 const auto rendering_info = Vks(VkRenderingInfo{
                     .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).extent.width, .height = r.get_image(r.vsm.shadow_map_0).extent.height }},
                     .layerCount = 1,
@@ -685,7 +708,7 @@ void RendererVulkan::build_render_graph() {
                 .depth_op = VK_COMPARE_OP_LESS_OR_EQUAL,
             },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
+                auto& r = *RendererVulkan::get_instance();
                 auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
                     .imageView = r.get_image(r.get_frame_data().gbuffer.color_image).view,
                     .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
@@ -704,7 +727,7 @@ void RendererVulkan::build_render_graph() {
                 });
 
                 auto rendering_info = Vks(VkRenderingInfo{
-                    .renderArea = { .extent = { .width = (uint32_t)r.screen_rect.w, .height = (uint32_t)r.screen_rect.h } },
+                    .renderArea = { .extent = { .width = (uint32_t)Engine::get().window->width, .height = (uint32_t)Engine::get().window->height } },
                     .layerCount = 1,
                     .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
                     .pColorAttachments = r_col_atts,
@@ -714,9 +737,9 @@ void RendererVulkan::build_render_graph() {
                 vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdBindDescriptorSets(cmd, pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
                 vkCmdBeginRendering(cmd, &rendering_info);
-                VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
+                VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
                 VkViewport r_view_1{
-                    .x = 0.0f, .y = 0.0f, .width = r.screen_rect.w, .height = r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
+                    .x = 0.0f, .y = 0.0f, .width = Engine::get().window->width, .height = Engine::get().window->height, .minDepth = 0.0f, .maxDepth = 1.0f
                 };
                 vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
                 vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
@@ -738,87 +761,6 @@ void RendererVulkan::build_render_graph() {
                                               sizeof(VkDrawIndexedIndirectCommand));
                 vkCmdEndRendering(cmd);
         } })
-       /* .add_pass(rendergraph::RenderPass{ 
-            .accesses = {
-                rendergraph::Access{
-                    { *fd.gbuffer.color_image, rendergraph::ResourceType::COLOR_ATTACHMENT, rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT },
-                    rendergraph::AccessType::WRITE_BIT,
-                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                },
-                rendergraph::Access{
-                    { *fd.gbuffer.depth_buffer_image, rendergraph::ResourceType::COLOR_ATTACHMENT },
-                    rendergraph::AccessType::READ_BIT,
-                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
-                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                },
-                rendergraph::Access{
-                    { *RendererVulkan::get_instance()->vsm.shadow_map_0, rendergraph::ResourceType::STORAGE_IMAGE },
-                    rendergraph::AccessType::READ_BIT,
-                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_GENERAL,
-                },
-            },
-            .shaders = {
-                "default_unlit/unlit.vert.glsl",
-                "default_unlit/unlit.frag.glsl",
-            },
-            .pipeline_settings = rendergraph::RasterizationSettings{
-                .depth_test = true,
-                .depth_write = false,
-                .depth_op = VK_COMPARE_OP_LESS_OR_EQUAL,
-            },
-            .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
-                auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
-                    .imageView = r.get_image(r.get_frame_data().gbuffer.color_image).view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-                });
-
-                VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };
-                auto r_dep_att = Vks(VkRenderingAttachmentInfo{
-                    .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_NONE,
-                    .clearValue = { .depthStencil = { 1.0f, 0 } },
-                });
-
-                auto rendering_info = Vks(VkRenderingInfo{
-                    .renderArea = { .extent = { .width = (uint32_t)r.screen_rect.w, .height = (uint32_t)r.screen_rect.h } },
-                    .layerCount = 1,
-                    .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
-                    .pColorAttachments = r_col_atts,
-                    .pDepthAttachment = &r_dep_att,
-                });
-
-                vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindDescriptorSets(cmd,pass.pipeline_bind_point, r.bindless_layout.layout, 0, 1, &r.bindless_set, 0, nullptr);
-                vkCmdBeginRendering(cmd, &rendering_info);
-                VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)r.screen_rect.w, (uint32_t)r.screen_rect.h } };
-                VkViewport r_view_1{
-                    .x = 0.0f, .y = r.screen_rect.h, .width = r.screen_rect.w, .height = -r.screen_rect.h, .minDepth = 0.0f, .maxDepth = 1.0f
-                };
-                vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-                vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-                uint32_t bindless_indices[]{
-                    r.get_bindless_index(r.index_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_positions_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vertex_attributes_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.get_frame_data().constants, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.mesh_instances_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.transform_buffers[0], BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.data_buffer, BindlessType::STORAGE_BUFFER),
-                    r.get_bindless_index(r.vsm.shadow_map_0, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-                    1,
-                };
-                vkCmdPushConstants(cmd, r.bindless_layout.layout, VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-                vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer, sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer, 0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
-                vkCmdEndRendering(cmd);
-            } })*/
         .add_pass(rendergraph::RenderPass{
             .accesses = {
                 rendergraph::Access{
@@ -838,7 +780,7 @@ void RendererVulkan::build_render_graph() {
             },
             .shaders = { "vsm/debug_page_alloc_copy.comp.glsl" },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
-                auto& r = get_renderer();
+                auto& r = *RendererVulkan::get_instance();
                 uint32_t bindless_indices[]{
                     r.get_bindless_index(r.vsm.dir_light_page_table, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
                     r.get_bindless_index(r.vsm.dir_light_page_table_rgb8, BindlessType::STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, nullptr),
@@ -881,7 +823,7 @@ void RendererVulkan::build_render_graph() {
                 },
             },
             .callback_render = [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass&) {
-                auto& r = get_renderer();
+                auto& r = *RendererVulkan::get_instance();
                 ImGui::SetCurrentContext(Engine::get().ui_ctx->imgui_ctx);
                 ImGui_ImplVulkan_NewFrame();
                 ImGui_ImplGlfw_NewFrame();
@@ -959,8 +901,9 @@ void RendererVulkan::update() {
         build_render_graph();
     }
     if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) {
+        assert(false);
         submit_queue.wait_idle();
-        update_bindless_set();
+        // update_bindless_set();
     }
 
     auto& fd = get_frame_data();
@@ -1028,15 +971,16 @@ void RendererVulkan::update() {
     }
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
-        std::swap(fd.transform_buffers, get_frame_data(1).transform_buffers);
-        Buffer& dst_transforms = get_buffer(fd.transform_buffers);
-        std::vector<glm::mat4> transforms;
-        transforms.reserve(mesh_instances.size());
-        for(auto e : mesh_instances) {
-            transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
-        }
-        staging_buffer.send_to(fd.transform_buffers, 0ull, transforms).submit();
-        update_positions.clear();
+        upload_transforms();
+        // std::swap(fd.transform_buffers, get_frame_data(1).transform_buffers);
+        // Buffer& dst_transforms = get_buffer(fd.transform_buffers);
+        // std::vector<glm::mat4> transforms;
+        // transforms.reserve(mesh_instances.size());
+        // for(auto e : mesh_instances) {
+        //     transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
+        // }
+        // staging_buffer.send_to(fd.transform_buffers, 0ull, transforms).submit();
+        // update_positions.clear();
     }
     const auto cmd = fd.cmdpool->begin();
     fd.render_graph.render(cmd, swapchain_index);
@@ -1063,20 +1007,11 @@ void RendererVulkan::update() {
     // flags.clear();
     submit_queue.wait_idle();
     return;
-    // const auto num_frags = ((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->num_frags;
-    // auto* pages = &((GPUVsmBuffer*)get_buffer(vsm.data_buffer).memory)->pages;
-    // std::sort(pages, pages + num_frags);
-    // auto pages_end = std::unique(pages, pages + num_frags);
-    // ENG_LOG("num pages: {}", num_frags);
-    // for(auto i = pages; i != pages_end; ++i) {
-    //     std::print("{} ", *i);
-    // }
-    // std::print("\n");
 }
 
 void RendererVulkan::on_window_resize() {
     flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT);
-    set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
+    set_screen(ScreenRect{ .w = Engine::get().window->widthidth, .h = Engine::get().window->heighteight });
 }
 
 void RendererVulkan::set_screen(ScreenRect screen) {
@@ -1210,7 +1145,7 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter fi
     if(delete_it != tex_ids.end()) { tex_ids.erase(delete_it); }
     ImguiTextureId id{
         .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(samplers.get_sampler(filter, addressing),
-                                                                        get_image(handle).view, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
+                                                                        get_image(handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
         .image = get_image(handle).image,
         .filter = filter,
         .addressing = addressing,
@@ -1262,9 +1197,10 @@ void RendererVulkan::upload_staged_models() {
         attributes.push_back(e.tang.z);
         attributes.push_back(e.tang.w);
     }
-    send_to(vertex_positions_buffer, ~0ull, std::as_bytes(std::span{ positions }));
-    send_to(vertex_attributes_buffer, ~0ull, std::as_bytes(std::span{ attributes }));
-    send_to(index_buffer, ~0ull, std::as_bytes(std::span{ upload_indices }));
+    staging_buffer.send_to(vertex_positions_buffer, ~0ull, positions)
+        .send_to(vertex_attributes_buffer, ~0ull, attributes)
+        .send_to(index_buffer, ~0ull, upload_indices)
+        .submit();
     upload_vertices.clear();
     upload_indices.clear();
 }
@@ -1338,14 +1274,14 @@ void RendererVulkan::bake_indirect_commands() {
 }
 
 void RendererVulkan::upload_transforms() {
-    std::swap(transform_buffers[0], transform_buffers[1]);
-    Buffer& dst_transforms = get_buffer(transform_buffers[0]);
+    std::swap(get_frame_data().transform_buffers, get_frame_data(1).transform_buffers);
+    Buffer& dst_transforms = get_buffer(get_frame_data().transform_buffers);
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
     for(auto e : mesh_instances) {
         transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
     }
-    send_to(transform_buffers[0], 0ull, std::as_bytes(std::span{ transforms }));
+    staging_buffer.send_to(get_frame_data().transform_buffers, 0ull, transforms).submit();
 }
 
 void RendererVulkan::build_blas() {
@@ -1687,6 +1623,7 @@ Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBuff
                                            const VmaAllocationCreateInfo& vma_info) {
     const auto handle =
         buffers.emplace(Handle<Buffer>{ generate_handle }, Buffer{ name, dev, vma, vk_info, vma_info }).first->first;
+    bindless_pool.register_buffer(handle);
     return handle;
 }
 
@@ -1695,15 +1632,34 @@ Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageC
     return handle;
 }
 
-VkImageView RendererVulkan::make_image_view(Handle<Image> handle) { return get_image(handle).get_view(); }
+VkImageView RendererVulkan::make_image_view(Handle<Image> handle, VkImageLayout layout, VkSampler sampler) {
+    const auto view = get_image(handle).get_view();
+    bindless_pool.register_image_view(view, layout, sampler);
+    return view;
+}
 
-VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info) {
-    return get_image(handle).get_view(vk_info);
+VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info,
+                                            VkImageLayout layout, VkSampler sampler) {
+    const auto view = get_image(handle).get_view(vk_info);
+    bindless_pool.register_image_view(view, layout, sampler);
+    return view;
 }
 
 Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(handle); }
 
 Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(handle); }
+
+void RendererVulkan::destroy_buffer(Handle<Buffer> buffer) {
+    auto& b = get_buffer(buffer);
+    vmaDestroyBuffer(b.vma, b.buffer, b.alloc);
+    b = Buffer{};
+}
+
+void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer) {
+    destroy_buffer(dst_buffer);
+    buffers.at(dst_buffer) = std::move(src_buffer);
+    bindless_pool.update_bindless_resource(dst_buffer);
+}
 
 uint32_t RendererVulkan::register_bindless_index(Handle<Buffer> handle) {
     return bindless_pool.register_buffer(handle);
@@ -1871,22 +1827,22 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semapho
     return idx;
 }
 
-rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass pass) {
-    const auto type = pass.shaders.empty() ? VK_PIPELINE_STAGE_NONE
-                                           : RendererVulkan::get_instance()->shader_storage.get_stage(pass.shaders.front());
+rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass* pass) {
+    const auto type = pass->shaders.empty() ? VK_PIPELINE_STAGE_NONE
+                                            : RendererVulkan::get_instance()->shader_storage.get_stage(pass->shaders.front());
     if(type & (VK_PIPELINE_STAGE_VERTEX_SHADER_BIT)) {
-        pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        if(pass.pipeline_settings.valueless_by_exception()) { pass.pipeline_settings = RasterizationSettings{}; }
+        pass->pipeline_bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        if(pass->pipeline_settings.valueless_by_exception()) { pass->pipeline_settings = RasterizationSettings{}; }
     } else if(type & (VK_SHADER_STAGE_COMPUTE_BIT)) {
-        pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
+        pass->pipeline_bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
     } else if(type & (VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR)) {
-        pass.pipeline_bind_point = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
-        if(pass.pipeline_settings.valueless_by_exception()) {
+        pass->pipeline_bind_point = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
+        if(pass->pipeline_settings.valueless_by_exception()) {
             ENG_WARN("Raytracing pipeline pass does not have defined settings. Not adding...");
             return *this;
         }
     }
-    passes.push_back(pass);
+    render_list.push_back(pass);
     return *this;
 }
 
@@ -2370,8 +2326,11 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
 
         const VkBufferUsageFlags bufferUsageFlags =
             VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        settings.sbt = RendererVulkan::get_instance()->make_buffer("buffer_sbt", sbtSize, bufferUsageFlags);
-        RendererVulkan::get_instance()->send_to(settings.sbt, 0ull, &shaderHandleStorage, sizeof(shaderHandleStorage));
+        settings.sbt_buffer =
+            RendererVulkan::get_instance()->make_buffer("buffer_sbt",
+                                                        Vks(VkBufferCreateInfo{ .size = sbtSize, .usage = bufferUsageFlags }),
+                                                        VmaAllocationCreateInfo{});
+        RendererVulkan::get_instance()->staging_buffer.send_to(settings.sbt_buffer, 0ull, shaderHandleStorage).submit();
     } else {
         assert(false);
     }
@@ -2382,7 +2341,7 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
 void rendergraph::RenderGraph::render(VkCommandBuffer cmd, uint32_t swapchain_index) {
     for(auto& s : stages) {
         if(s.get_swapchain_image_callback) {
-            s.image_barriers.at(0).image = s.get_swapchain_image_callback(swapchain_index);
+            s.image_barriers.at(0).image = s.get_swapchain_image_callback(swapchain_index).image;
         }
         auto dep_info = Vks(VkDependencyInfo{
             .bufferMemoryBarrierCount = static_cast<uint32_t>(s.buffer_barriers.size()),
@@ -2392,7 +2351,7 @@ void rendergraph::RenderGraph::render(VkCommandBuffer cmd, uint32_t swapchain_in
         });
         vkCmdPipelineBarrier2(cmd, &dep_info);
         for(auto p : s.passes) {
-            auto& pass = passes.at(p);
+            auto& pass = *p;
             if(pass.pipeline) { vkCmdBindPipeline(cmd, pass.pipeline_bind_point, pass.pipeline->pipeline); }
             if(pass.callback_render) { pass.callback_render(cmd, swapchain_index, pass); }
         }
