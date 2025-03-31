@@ -4,7 +4,7 @@
 
 Buffer::Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& vk_info,
                const VmaAllocationCreateInfo& vma_info) noexcept
-    : name(name), dev(dev), vma(vma), vk_info(vk_info), vma_info(vma_info) {
+    : name(name), dev(dev), vma(vma), vk_info(Vks(VkBufferCreateInfo{ vk_info })), vma_info(vma_info) {
     if(!dev || !vma) { return; }
     VmaAllocationInfo alloc_info{};
     if(this->vma_info.usage == VMA_MEMORY_USAGE_UNKNOWN) { this->vma_info.usage = VMA_MEMORY_USAGE_AUTO; }

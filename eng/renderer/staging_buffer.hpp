@@ -19,6 +19,7 @@ class StagingBuffer {
     };
     struct TransferImage {
         Handle<Image> handle{};
+        VkImageLayout final_layout{};
         VkBufferImageCopy2 region{};
         std::vector<std::byte> data;
     };
@@ -58,6 +59,7 @@ class StagingBuffer {
     StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
                            const std::span<const std::byte> ts);
     void resize(Handle<Buffer> buffer, size_t new_size);
+    VkImageMemoryBarrier2 generate_image_barrier(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
     void transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
     void process_submission();
     size_t push_data(const std::vector<std::byte>& data);

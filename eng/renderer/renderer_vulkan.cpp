@@ -270,7 +270,7 @@ void RendererVulkan::initialize_resources() {
     staging_buffer = new StagingBuffer{
         submit_queue,
         make_buffer("staging_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 64 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR }),
+                    Vks(VkBufferCreateInfo{ .size = 64 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR }),
                     VmaAllocationCreateInfo{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
                                              .usage = VMA_MEMORY_USAGE_AUTO,
                                              .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT })
@@ -322,6 +322,7 @@ void RendererVulkan::initialize_resources() {
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
+        fd.render_graph = rendergraph::RenderGraph{ dev };
         fd.cmdpool = submit_queue->make_command_pool();
         fd.sem_swapchain = submit_queue->make_semaphore();
         fd.sem_rendering_finished = submit_queue->make_semaphore();
@@ -355,14 +356,14 @@ void RendererVulkan::initialize_resources() {
     staging_buffer->send_to(vsm.constants_buffer, 0, vsm_constants).send_to(vsm.free_allocs_buffer, 0, &vsm_allocs).submit();
     // send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
-    vsm.shadow_map_0 =
-        make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                                   .format = VK_FORMAT_R32_SFLOAT,
-                                                   .extent = { 1024 * 8, 1024 * 8, 1 },
-                                                   .mipLevels = 1,
-                                                   .arrayLayers = 1,
-                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+    vsm.shadow_map_0 = make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                                  .format = VK_FORMAT_R32_SFLOAT,
+                                                                  .extent = { 1024 * 8, 1024 * 8, 1 },
+                                                                  .mipLevels = 1,
+                                                                  .arrayLayers = 1,
+                                                                  .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                                  .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                                           VK_IMAGE_USAGE_TRANSFER_DST_BIT });
     vsm.view_shadow_map_0_general = make_image_view(vsm.shadow_map_0, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     vsm.dir_light_page_table =
@@ -373,7 +374,7 @@ void RendererVulkan::initialize_resources() {
                                       .mipLevels = 1,
                                       .arrayLayers = 1,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
-                                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+                                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT });
     vsm.view_dir_light_page_table_general = make_image_view(vsm.dir_light_page_table, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     vsm.dir_light_page_table_rgb8 =
@@ -402,7 +403,7 @@ void RendererVulkan::initialize_resources() {
 }
 
 void RendererVulkan::create_window_sized_resources() {
-    swapchain.create(frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
+    swapchain.create(dev, frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
         fd.gbuffer.color_image =
@@ -460,24 +461,17 @@ void RendererVulkan::build_render_graph() {
     for(auto& fd : frame_datas) {
         fd.render_graph.passes.clear();
         fd.render_graph.render_list.clear();
-        auto* vsm_clear_pages = fd.render_graph.make_pass("vsm/clear_pages");
-        auto* z_prepass = fd.render_graph.make_pass("z_prepass");
-        auto* vsm_page_alloc = fd.render_graph.make_pass("vsm/page_alloc");
-        auto* vsm_shadow = fd.render_graph.make_pass("vsm/shadow");
-        auto* default_unlit = fd.render_graph.make_pass("default_unlit");
-        auto* vsm_debug_page_copy = fd.render_graph.make_pass("vsm/debug_page_copy");
-        auto* imgui = fd.render_graph.make_pass("imgui");
-        auto* swapchain_present = fd.render_graph.make_pass("swapchain present");
-        fd.render_graph.add_pass(vsm_clear_pages);
-        fd.render_graph.add_pass(z_prepass);
-        fd.render_graph.add_pass(vsm_page_alloc);
-        fd.render_graph.add_pass(vsm_shadow);
-        fd.render_graph.add_pass(default_unlit);
-        fd.render_graph.add_pass(vsm_debug_page_copy);
-        fd.render_graph.add_pass(imgui);
-        fd.render_graph.add_pass(swapchain_present);
+        auto* vsm_clear_pages = fd.render_graph.make_pass();
+        auto* z_prepass = fd.render_graph.make_pass();
+        auto* vsm_page_alloc = fd.render_graph.make_pass();
+        auto* vsm_shadow = fd.render_graph.make_pass();
+        auto* default_unlit = fd.render_graph.make_pass();
+        auto* vsm_debug_page_copy = fd.render_graph.make_pass();
+        auto* imgui = fd.render_graph.make_pass();
+        auto* swapchain_present = fd.render_graph.make_pass();
 
         *vsm_clear_pages = rendergraph::RenderPass{
+            .name = "vsm/clear_pages",
             .accesses = { rendergraph::Access{ .resource = vsm.dir_light_page_table,
                                                .flags = rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
                                                .type = rendergraph::AccessType::WRITE_BIT,
@@ -519,7 +513,8 @@ void RendererVulkan::build_render_graph() {
                 }
         };
 
-        *vsm_clear_pages = rendergraph::RenderPass{
+        *z_prepass = rendergraph::RenderPass{
+            .name = "z_prepass",
             .accesses = { rendergraph::Access{ .resource = fd.gbuffer.depth_buffer_image,
                                                .flags = rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
                                                .type = rendergraph::AccessType::READ_WRITE_BIT,
@@ -580,6 +575,7 @@ void RendererVulkan::build_render_graph() {
         };
 
         *vsm_page_alloc = rendergraph::RenderPass{
+            .name = "vsm/page_alloc",
             .accesses = { rendergraph::Access{ .resource = fd.gbuffer.depth_buffer_image,
                                                .type = rendergraph::AccessType::READ_BIT,
                                                .stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -619,6 +615,7 @@ void RendererVulkan::build_render_graph() {
         };
 
         *vsm_shadow = rendergraph::RenderPass{
+            .name = "vsm/shadow",
             .accesses = { rendergraph::Access{ .resource = vsm.dir_light_page_table,
                                                .type = rendergraph::AccessType::READ_BIT,
                                                .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
@@ -677,6 +674,7 @@ void RendererVulkan::build_render_graph() {
         };
 
         *default_unlit = rendergraph::RenderPass{
+            .name = "vsm/default_unlit",
             .accesses = { rendergraph::Access{ .resource = fd.gbuffer.color_image,
                                                .flags = rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
                                                .type = rendergraph::AccessType::WRITE_BIT,
@@ -870,7 +868,15 @@ void RendererVulkan::build_render_graph() {
                                                .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR } },
         };
 
-        fd.render_graph.bake();
+        fd.render_graph.add_pass(vsm_clear_pages)
+            .add_pass(z_prepass)
+            .add_pass(vsm_page_alloc)
+            .add_pass(vsm_shadow)
+            .add_pass(default_unlit)
+            .add_pass(vsm_debug_page_copy)
+            .add_pass(imgui)
+            .add_pass(swapchain_present)
+            .bake();
     }
 }
 
@@ -960,32 +966,17 @@ void RendererVulkan::update() {
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
         };
         staging_buffer->send_to(fd.constants, 0ull, constants).send_to(vsm.constants_buffer, 0ull, vsmconsts).submit();
-        // staging_buffer->send_to(fd.constants, 0ull, &constants).send_to(vsm.constants_buffer, 0ull, &vsmconsts).submit();
     }
 
-    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) {
-        upload_transforms();
-        // std::swap(fd.transform_buffers, get_frame_data(1).transform_buffers);
-        // Buffer& dst_transforms = get_buffer(fd.transform_buffers);
-        // std::vector<glm::mat4> transforms;
-        // transforms.reserve(mesh_instances.size());
-        // for(auto e : mesh_instances) {
-        //     transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
-        // }
-        // staging_buffer->send_to(fd.transform_buffers, 0ull, transforms).submit();
-        // update_positions.clear();
-    }
+    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { upload_transforms(); }
     const auto cmd = fd.cmdpool->begin();
     fd.render_graph.render(cmd, swapchain_index);
     fd.cmdpool->end(cmd);
     submit_queue->with_cmd_buf(cmd)
         .with_wait_sem(fd.sem_swapchain, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
         .with_sig_sem(fd.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
-        .with_fence(fd.fen_rendering_finished);
-    // gq.submit(QueueSubmission{ .cmds = { cmd },
-    //                            .wait_sems = { { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, fd.sem_swapchain } },
-    //                            .signal_sems = { { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fd.sem_rendering_finished } } },
-    //           &fd.fen_rendering_finished);
+        .with_fence(fd.fen_rendering_finished)
+        .submit();
 
     auto pinfo = Vks(VkPresentInfoKHR{
         .waitSemaphoreCount = 1,
@@ -1159,7 +1150,6 @@ VsmData& RendererVulkan::get_vsm_data() { return vsm; }
 void RendererVulkan::upload_model_textures() {
     for(auto& tex : upload_images) {
         Image& img = get_image(tex.image_handle);
-        img.current_layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
         // VkBufferImageCopy copy{
         //     .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
         //     .layerCount = 1 }, .imageOffset = {}, .imageExtent = img.extent,
@@ -1681,6 +1671,7 @@ uint32_t RendererVulkan::register_bindless_index(VkImageView view, VkImageLayout
 uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_bindless_index(handle); }
 
 uint32_t RendererVulkan::get_bindless_index(Handle<Image> handle, VkImageLayout layout, VkSampler sampler) {
+    if(!handle) { return -1ull; }
     for(const auto& e : image_view_storage.configs[handle]) {
         if(e.layout == layout && e.sampler == sampler) { return get_bindless_index(e.view); }
     }
@@ -1801,7 +1792,7 @@ void ShaderStorage::canonize_path(std::filesystem::path& p) {
     p.make_preferred();
 }
 
-void Swapchain::create(uint32_t image_count, uint32_t width, uint32_t height) {
+void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height) {
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
@@ -1818,17 +1809,19 @@ void Swapchain::create(uint32_t image_count, uint32_t width, uint32_t height) {
         .clipped = true,
     });
 
-    if(swapchain) { vkDestroySwapchainKHR(RendererVulkan::get_instance()->dev, swapchain, nullptr); }
-    VK_CHECK(vkCreateSwapchainKHR(RendererVulkan::get_instance()->dev, &sinfo, nullptr, &swapchain));
+    if(swapchain) { vkDestroySwapchainKHR(dev, swapchain, nullptr); }
+    VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
     std::vector<VkImage> vk_images(image_count);
     images.resize(image_count);
+    views.resize(image_count);
 
-    VK_CHECK(vkGetSwapchainImagesKHR(RendererVulkan::get_instance()->dev, swapchain, &image_count, vk_images.data()));
+    VK_CHECK(vkGetSwapchainImagesKHR(dev, swapchain, &image_count, vk_images.data()));
 
     for(uint32_t i = 0; i < image_count; ++i) {
         images[i] =
-            Image{ std::format("swpachain_image_{}", i), RendererVulkan::get_instance()->dev, vk_images[i],
+            Image{ std::format("swpachain_image_{}", i), dev, vk_images[i],
                    Vks(VkImageCreateInfo{
+                       .imageType = VK_IMAGE_TYPE_2D,
                        .format = sinfo.imageFormat,
                        .extent = VkExtent3D{ .width = sinfo.imageExtent.width, .height = sinfo.imageExtent.height, .depth = 1u },
                        .mipLevels = 1,
@@ -1866,9 +1859,9 @@ rendergraph::RenderGraph& rendergraph::RenderGraph::add_pass(RenderPass* pass) {
     return *this;
 }
 
-rendergraph::RenderPass* rendergraph::RenderGraph::make_pass(const std::string& name) {
-    return &passes.emplace_back(RenderPass{ .name = name });
-}
+rendergraph::RenderGraph::RenderGraph(VkDevice dev) noexcept : dev(dev) {}
+
+rendergraph::RenderPass* rendergraph::RenderGraph::make_pass() { return &passes.emplace_back(RenderPass{}); }
 
 void rendergraph::RenderGraph::bake() {
 #if 0
@@ -2220,6 +2213,9 @@ void rendergraph::RenderGraph::create_pipeline(RenderPass& pass) {
             continue;
         }
         pass.pipeline = p.pipeline;
+        if(pass.pipeline && !pass.name.empty()) {
+            set_debug_name(pass.pipeline->pipeline, std::format("{}_render_pass_pipeline", pass.name));
+        }
         return;
     }
 

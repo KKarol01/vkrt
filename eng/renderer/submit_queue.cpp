@@ -90,7 +90,7 @@ SubmitQueue& SubmitQueue::with_wait_sem(VkSemaphore sem, VkPipelineStageFlags2 s
 }
 
 SubmitQueue& SubmitQueue::with_sig_sem(VkSemaphore sem, VkPipelineStageFlags2 stages) {
-    submission.wait_sems.push_back(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem, .stageMask = stages }));
+    submission.sig_sems.push_back(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem, .stageMask = stages }));
     return *this;
 }
 

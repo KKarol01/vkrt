@@ -128,7 +128,7 @@ struct ShaderStorage {
 };
 
 struct Swapchain {
-    void create(uint32_t image_count, uint32_t width, uint32_t height);
+    void create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height);
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     VkSwapchainKHR swapchain{};
     std::vector<Image> images;
@@ -245,12 +245,16 @@ class RenderGraph {
     };
 
   public:
-    RenderPass* make_pass(const std::string& name);
+    RenderGraph() noexcept = default;
+    RenderGraph(VkDevice dev) noexcept;
+
+    RenderPass* make_pass();
     RenderGraph& add_pass(RenderPass* pass);
     void bake();
     void create_pipeline(RenderPass& pass);
     void render(VkCommandBuffer cmd, uint32_t swapchain_index);
 
+    VkDevice dev{};
     std::deque<RenderPass> passes;
     std::deque<Pipeline> pipelines;
     std::vector<RenderPass*> render_list;
