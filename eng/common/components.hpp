@@ -1,8 +1,8 @@
 #pragma once
 #include <glm/glm.hpp>
-#include "handle.hpp"
-#include "common/spatial.hpp"
-#include "common/flags.hpp"
+#include "./handle.hpp"
+#include "./common/spatial.hpp"
+#include "./common/flags.hpp"
 
 struct ModelAsset;
 struct MeshAsset;

@@ -55,7 +55,7 @@
 #define ENG_TYPE_UNSIZED(type, name) type name##_us
 
 #define ENG_DECLARE_STORAGE_BUFFERS(type) struct type
-#define ENG_DECLARE_BINDLESS(type, body)
+#define ENG_DECLARE_BINDLESS(type)
 #endif
 
 // todo: make those readonly

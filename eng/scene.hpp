@@ -4,11 +4,11 @@
 #include <stack>
 #include <unordered_map>
 #include <unordered_set>
-#include "common/types.hpp"
-#include "common/spatial.hpp"
+#include "./common/types.hpp"
+#include "./common/spatial.hpp"
 #include <eng/common/components.hpp>
-#include "handle.hpp"
-#include "ecs.hpp"
+#include "./handle.hpp"
+#include "./ecs.hpp"
 #include <eng/renderer/renderer.hpp>
 
 namespace scene {

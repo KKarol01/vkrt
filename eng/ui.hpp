@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 #include <cstdint>
-#include "common/dll_hot_reload.hpp"
+#include "./common/dll_hot_reload.hpp"
 
 struct AllocatorCallbacks {
     void* (*alloc)(size_t size);

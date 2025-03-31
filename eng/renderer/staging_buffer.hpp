@@ -1,6 +1,5 @@
 #pragma once
 
-#include <eng/renderer/buffer.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/handle.hpp>
 #include <vulkan/vulkan.h>
@@ -10,9 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <memory>
-
-class Buffer;
-class Image;
+#include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 
 class StagingBuffer {
     struct TransferBuffer {
@@ -22,7 +19,7 @@ class StagingBuffer {
     };
     struct TransferImage {
         Handle<Image> handle{};
-        size_t offset{};
+        VkBufferImageCopy2 region{};
         std::vector<std::byte> data;
     };
     struct TransferFromBuffer {
@@ -40,7 +37,6 @@ class StagingBuffer {
     };
 
   public:
-    StagingBuffer() noexcept = default;
     StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept;
 
     StagingBuffer(StagingBuffer&& o) noexcept;
@@ -48,6 +44,9 @@ class StagingBuffer {
 
     template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const T& t);
     template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts);
+    template <typename T>
+    StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
+                           const std::vector<T>& ts);
     StagingBuffer& send_to(Handle<Buffer> dst_buffer, size_t dst_offset, Handle<Buffer> src_buffer, size_t src_offset, size_t size);
     void submit(VkFence fence = nullptr);
     void submit_wait(VkFence fence = nullptr);
@@ -55,8 +54,11 @@ class StagingBuffer {
   private:
     Submission& get_submission() { return *submissions[0]; }
     void swap_submissions();
-    StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, std::span<const std::byte> data);
+    StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::span<const std::byte> ts);
+    StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
+                           const std::span<const std::byte> ts);
     void resize(Handle<Buffer> buffer, size_t new_size);
+    void transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
     void process_submission();
     size_t push_data(const std::vector<std::byte>& data);
 
@@ -75,6 +77,12 @@ template <typename T> inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer
 }
 
 template <typename T>
-inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts) {
+inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts) { // todo: maybe vector to span<T>
     return send_to(buffer, offset, std::as_bytes(std::span{ ts.begin(), ts.end() }));
+}
+
+template <typename T>
+inline StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout,
+                                             const VkBufferImageCopy2 region, const std::vector<T>& ts) {
+    return send_to(image, final_layout, region, std::span{ ts.begin(), ts.end() });
 }

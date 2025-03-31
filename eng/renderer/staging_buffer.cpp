@@ -1,6 +1,5 @@
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
 #include <deque>
 
 static size_t align_up2(size_t val, size_t al) { return (val + al - 1) & ~(al - 1); }
@@ -40,7 +39,7 @@ StagingBuffer& StagingBuffer::operator=(StagingBuffer&& o) noexcept {
 }
 
 StagingBuffer& StagingBuffer::send_to(Handle<Buffer> dst_buffer, size_t dst_offset, Handle<Buffer> src_buffer,
-                                      size_t src_offset, size_t size) {
+                                          size_t src_offset, size_t size) {
     if(!dst_buffer || !src_buffer) {
         ENG_ERROR("Invalid src {} or dst {} buffer handles", *dst_buffer, *src_buffer);
         return *this;
@@ -79,23 +78,37 @@ StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, std:
         return *this;
     }
     if(data.size_bytes() == 0) {
-        ENG_WARN("Upload data size is 0. Not Sending");
-        assert(false);
+        ENG_ERROR("Upload data size is 0. Not Sending");
         return *this;
     }
+    // todo: handle multiple offset == ~0ull in one submission
     if(offset == std::numeric_limits<uint32_t>::max()) {
         offset = RendererVulkan::get_instance()->get_buffer(buffer).size();
     }
     if(offset + data.size_bytes() > RendererVulkan::get_instance()->get_buffer(buffer).capacity()) {
         if(!RendererVulkan::get_instance()->get_buffer(buffer).is_resizable) {
-            ENG_WARN("Cannot resize the buffer!");
-            assert(false);
+            ENG_ERROR("Cannot resize the buffer!");
             return *this;
         }
         resize(buffer, offset + data.size_bytes());
     }
     get_submission().transfers.push_back(TransferBuffer{
         .handle = buffer, .offset = offset, .data = std::vector<std::byte>{ data.begin(), data.end() } });
+    return *this;
+}
+
+StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
+                                      std::span<const std::byte> data) {
+    if(!image) {
+        ENG_ERROR("Invalid image. Not Sending");
+        return *this;
+    }
+    if(data.empty()) {
+        ENG_ERROR("Upload data size is 0. Not Sending");
+        return *this;
+    }
+    transition_image(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false);
+    get_submission().transfers.push_back(TransferImage{ .handle = image, .data = { data.begin(), data.end() } });
     return *this;
 }
 
@@ -115,17 +128,51 @@ void StagingBuffer::resize(Handle<Buffer> buffer, size_t new_size) {
                                              .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                              .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT });
     const auto dep_info = Vks(VkDependencyInfo{ .memoryBarrierCount = 1ul, .pMemoryBarriers = &mem_barrier });
-    cmdpool->begin(cmds[0]);
-    vkCmdPipelineBarrier2(cmds[0], &dep_info);
-    vkCmdCopyBuffer2(cmds[0], &copy_info);
+    const auto cmd = cmdpool->begin(cmds[0]);
+    vkCmdPipelineBarrier2(cmd, &dep_info);
+    vkCmdCopyBuffer2(cmd, &copy_info);
     mem_barrier = Vks(VkMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                         .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
                                         .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                         .dstAccessMask = 0 });
-    vkCmdPipelineBarrier2(cmds[0], &dep_info);
-    cmdpool->end(cmds[0]);
-    queue->with_cmd_buf(cmds[0]).submit_wait(-1ull);
-    r.replace_buffer()
+    vkCmdPipelineBarrier2(cmd, &dep_info);
+    cmdpool->end(cmd);
+    queue->with_cmd_buf(cmd).submit_wait(-1ull);
+    nb._size = b.size();
+    r.replace_buffer(buffer, std::move(nb));
+}
+
+void StagingBuffer::transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout) {
+    auto& r = *RendererVulkan::get_instance();
+    auto& i = r.get_image(image);
+    const auto barrier =
+        is_final_layout
+            ? Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                         .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+                                         .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                         .dstAccessMask = VK_ACCESS_2_NONE,
+                                         .oldLayout = i.current_layout,
+                                         .newLayout = layout,
+                                         .image = i.image,
+                                         .subresourceRange = { .aspectMask = i.deduce_aspect(),
+                                                               .levelCount = VK_REMAINING_MIP_LEVELS,
+                                                               .layerCount = VK_REMAINING_ARRAY_LAYERS } })
+            : Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                         .srcAccessMask = VK_ACCESS_2_NONE,
+                                         .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                         .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+                                         .oldLayout = i.current_layout,
+                                         .newLayout = layout,
+                                         .image = i.image,
+                                         .subresourceRange = { .aspectMask = i.deduce_aspect(),
+                                                               .levelCount = VK_REMAINING_MIP_LEVELS,
+                                                               .layerCount = VK_REMAINING_ARRAY_LAYERS } });
+    const auto dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier });
+    const auto cmd = cmdpool->begin(cmds[0]);
+    vkCmdPipelineBarrier2(cmd, &dep_info);
+    cmdpool->end(cmd);
+    queue->with_cmd_buf(cmd).submit_wait(-1ull); // wait because cmd might be pending on subsequent begins
+    i.current_layout = layout;
 }
 
 void StagingBuffer::process_submission() {
@@ -144,9 +191,10 @@ void StagingBuffer::process_submission() {
                 .regionCount = 1,
                 .pRegions = &buffer_copies.emplace_back(Vks(VkBufferCopy2{
                     .srcOffset = offset, .dstOffset = tb->offset, .size = pushed_size })) }));
-        }
-        if(auto* ti = std::get_if<TransferImage>(&e)) { assert(false && "Implement back"); }
-        if(auto* tb = std::get_if<TransferFromBuffer>(&e)) {
+        } else if(auto* ti = std::get_if<TransferImage>(&e)) {
+            assert(false);
+            /*fajoi;fea*/
+        } else if(auto* tb = std::get_if<TransferFromBuffer>(&e)) {
             buffer_copy_infos.push_back(Vks(VkCopyBufferInfo2{
                 .srcBuffer = r.get_buffer(tb->src_buffer).buffer,
                 .dstBuffer = r.get_buffer(tb->dst_buffer).buffer,

@@ -47,58 +47,58 @@ VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo vk_info) {
     return sampler;
 }
 
-CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) noexcept {
-    auto vk_info = Vks(VkCommandPoolCreateInfo{
-        .flags = flags,
-        .queueFamilyIndex = queue_index,
-    });
-    VK_CHECK(vkCreateCommandPool(get_renderer().dev, &vk_info, {}, &cmdpool));
-}
-
-CommandPool::~CommandPool() noexcept {
-    if(cmdpool) { vkDestroyCommandPool(get_renderer().dev, cmdpool, nullptr); }
-}
-
-CommandPool::CommandPool(CommandPool&& other) noexcept { *this = std::move(other); }
-
-CommandPool& CommandPool::operator=(CommandPool&& other) noexcept {
-    cmdpool = std::exchange(other.cmdpool, nullptr);
-    return *this;
-}
-
-VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
-    if(free.empty()) {
-        auto vk_info = Vks(VkCommandBufferAllocateInfo{
-            .commandPool = cmdpool,
-            .level = level,
-            .commandBufferCount = 1,
-        });
-        VkCommandBuffer buffer;
-        VK_CHECK(vkAllocateCommandBuffers(get_renderer().dev, &vk_info, &buffer));
-        used.push_back(buffer);
-    } else {
-        used.push_back(free.front());
-        free.pop_front();
-    }
-    return used.back();
-}
-
-VkCommandBuffer CommandPool::begin(VkCommandBufferUsageFlags flags, VkCommandBufferLevel level) {
-    auto vk_info = Vks(VkCommandBufferBeginInfo{
-        .flags = flags,
-    });
-    VkCommandBuffer buffer = allocate(level);
-    VK_CHECK(vkBeginCommandBuffer(buffer, &vk_info));
-    return buffer;
-}
-
-VkCommandBuffer CommandPool::begin_onetime(VkCommandBufferLevel level) {
-    return begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-}
-
-void CommandPool::end(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
-
-void CommandPool::reset() {
-    vkResetCommandPool(get_renderer().dev, cmdpool, {});
-    free = std::move(used);
-}
+//CommandPool::CommandPool(uint32_t queue_index, VkCommandPoolCreateFlags flags) noexcept {
+//    auto vk_info = Vks(VkCommandPoolCreateInfo{
+//        .flags = flags,
+//        .queueFamilyIndex = queue_index,
+//    });
+//    VK_CHECK(vkCreateCommandPool(get_renderer().dev, &vk_info, {}, &cmdpool));
+//}
+//
+//CommandPool::~CommandPool() noexcept {
+//    if(cmdpool) { vkDestroyCommandPool(get_renderer().dev, cmdpool, nullptr); }
+//}
+//
+//CommandPool::CommandPool(CommandPool&& other) noexcept { *this = std::move(other); }
+//
+//CommandPool& CommandPool::operator=(CommandPool&& other) noexcept {
+//    cmdpool = std::exchange(other.cmdpool, nullptr);
+//    return *this;
+//}
+//
+//VkCommandBuffer CommandPool::allocate(VkCommandBufferLevel level) {
+//    if(free.empty()) {
+//        auto vk_info = Vks(VkCommandBufferAllocateInfo{
+//            .commandPool = cmdpool,
+//            .level = level,
+//            .commandBufferCount = 1,
+//        });
+//        VkCommandBuffer buffer;
+//        VK_CHECK(vkAllocateCommandBuffers(get_renderer().dev, &vk_info, &buffer));
+//        used.push_back(buffer);
+//    } else {
+//        used.push_back(free.front());
+//        free.pop_front();
+//    }
+//    return used.back();
+//}
+//
+//VkCommandBuffer CommandPool::begin(VkCommandBufferUsageFlags flags, VkCommandBufferLevel level) {
+//    auto vk_info = Vks(VkCommandBufferBeginInfo{
+//        .flags = flags,
+//    });
+//    VkCommandBuffer buffer = allocate(level);
+//    VK_CHECK(vkBeginCommandBuffer(buffer, &vk_info));
+//    return buffer;
+//}
+//
+//VkCommandBuffer CommandPool::begin_onetime(VkCommandBufferLevel level) {
+//    return begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+//}
+//
+//void CommandPool::end(VkCommandBuffer buffer) { VK_CHECK(vkEndCommandBuffer(buffer)); }
+//
+//void CommandPool::reset() {
+//    vkResetCommandPool(get_renderer().dev, cmdpool, {});
+//    free = std::move(used);
+//}

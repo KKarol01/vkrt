@@ -4,11 +4,11 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
-#include "ui.hpp"
+#include "./ui.hpp"
 #include <eng/renderer/renderer.hpp>
 #include <eng/camera.hpp>
 #include <eng/scene.hpp>
-#include "ecs.hpp"
+#include "./ecs.hpp"
 
 struct GLFWwindow;
 

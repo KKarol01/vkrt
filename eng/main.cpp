@@ -8,7 +8,7 @@
 #include <glm/mat3x3.hpp>
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "engine.hpp"
+#include "./engine.hpp"
 
 int main() {
     Engine::get().init();

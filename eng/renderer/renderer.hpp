@@ -83,6 +83,7 @@ struct ScreenRect {
     float h;
 };
 
+#include <vulkan/vulkan.h> // todo: remove that
 struct VsmData {
     Handle<Buffer> constants_buffer;
     Handle<Buffer> free_allocs_buffer;

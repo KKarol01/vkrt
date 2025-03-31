@@ -28,6 +28,7 @@ VkCommandBuffer CommandPool::begin() {
 VkCommandBuffer CommandPool::begin(VkCommandBuffer cmd) {
     const auto vk_info = Vks(VkCommandBufferBeginInfo{ .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT });
     VK_CHECK(vkBeginCommandBuffer(cmd, &vk_info));
+    return cmd;
 }
 
 void CommandPool::reset(VkCommandBuffer cmd) { vkResetCommandBuffer(cmd, {}); }

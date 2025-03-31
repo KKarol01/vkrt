@@ -15,11 +15,9 @@
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/callback.hpp>
-#include <eng/renderer/descpool.hpp>
+#include <eng/handle.hpp>
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/image.hpp>
-#include <eng/renderer/submit_queue.hpp>
-#include <eng/renderer/staging_buffer.hpp>
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t {
@@ -260,6 +258,8 @@ class RenderGraph {
 };
 } // namespace rendergraph
 
+class CommandPool;
+
 struct FrameData {
     CommandPool* cmdpool{};
     rendergraph::RenderGraph render_graph;
@@ -283,23 +283,27 @@ struct FrameData {
 //     Buffer buffer{};
 // };
 
-//enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
+// enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
 //
-//struct BindlessEntry {
-//    bool operator==(const BindlessEntry& a) const {
-//        return resource_handle == a.resource_handle && type == a.type && layout == a.layout && sampler == a.sampler;
-//    }
-//    VkDescriptorType to_vk_descriptor_type() const {
-//        return type == BindlessType::STORAGE_BUFFER   ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-//               : type == BindlessType::STORAGE_IMAGE  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-//               : type == BindlessType::COMBINED_IMAGE ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-//                                                      : VK_DESCRIPTOR_TYPE_MAX_ENUM;
-//    }
-//    uint32_t resource_handle{};
-//    BindlessType type{};
-//    VkImageLayout layout{};
-//    VkSampler sampler{};
-//};
+// struct BindlessEntry {
+//     bool operator==(const BindlessEntry& a) const {
+//         return resource_handle == a.resource_handle && type == a.type && layout == a.layout && sampler == a.sampler;
+//     }
+//     VkDescriptorType to_vk_descriptor_type() const {
+//         return type == BindlessType::STORAGE_BUFFER   ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+//                : type == BindlessType::STORAGE_IMAGE  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+//                : type == BindlessType::COMBINED_IMAGE ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+//                                                       : VK_DESCRIPTOR_TYPE_MAX_ENUM;
+//     }
+//     uint32_t resource_handle{};
+//     BindlessType type{};
+//     VkImageLayout layout{};
+//     VkSampler sampler{};
+// };
+
+class SubmitQueue;
+class StagingBuffer;
+class BindlessDescriptorPool;
 
 class RendererVulkan : public Renderer {
   public:
@@ -333,7 +337,7 @@ class RendererVulkan : public Renderer {
     void upload_staged_models();
     void bake_indirect_commands();
     void upload_transforms();
-    //void update_bindless_set();
+    // void update_bindless_set();
 
     void build_blas();
     void build_tlas();
@@ -343,6 +347,8 @@ class RendererVulkan : public Renderer {
     //                      uint32_t layers, VkImageUsageFlags usage);
     // Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
     Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
+    Handle<Buffer> make_buffer(const std::string& name, buffer_resizable_t resizable, const VkBufferCreateInfo& vk_info,
+                               const VmaAllocationCreateInfo& vma_info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
     VkImageView make_image_view(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
     VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info, VkImageLayout layout, VkSampler sampler);
@@ -353,7 +359,7 @@ class RendererVulkan : public Renderer {
     uint32_t register_bindless_index(Handle<Buffer> handle);
     uint32_t register_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(Handle<Buffer> handle);
-    //uint32_t get_bindless_index(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
+    uint32_t get_bindless_index(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(VkImageView view);
 
     // void update_bindless_resource(Handle<Image> handle);
@@ -392,9 +398,9 @@ class RendererVulkan : public Renderer {
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
-    SubmitQueue submit_queue;
-    StagingBuffer staging_buffer;
-    BindlessDescriptorPool bindless_pool{};
+    SubmitQueue* submit_queue{};
+    StagingBuffer* staging_buffer{};
+    BindlessDescriptorPool* bindless_pool{};
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
@@ -430,6 +436,15 @@ class RendererVulkan : public Renderer {
     SamplerStorage samplers;
     std::unordered_map<Handle<Image>, Image> images;
     std::unordered_map<Handle<Buffer>, Buffer> buffers;
+    struct ImageViewStorage {
+        struct Config {
+            VkImageView view{};
+            VkImageLayout layout{};
+            VkSampler sampler{};
+        };
+        std::unordered_map<Handle<Image>, std::vector<Config>> configs;
+    } image_view_storage;
+
     // todo: handle recycling
 
     DDGI ddgi;

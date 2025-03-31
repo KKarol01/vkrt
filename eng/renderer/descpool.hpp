@@ -6,10 +6,7 @@
 #include <deque>
 #include <vector>
 #include <cstdint>
-#include <eng/handle.hpp>
-
-class Buffer;
-class Image;
+#include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 
 class BindlessDescriptorPool {
   public:

@@ -3,7 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <type_traits>
-#include "handle.hpp"
+#include "./handle.hpp"
 
 template <typename T, typename Storage = uint32_t> class HandleVector {
   public:
