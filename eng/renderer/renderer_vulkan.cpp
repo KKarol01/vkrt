@@ -522,6 +522,8 @@ void RendererVulkan::build_render_graph() {
                                                .access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                                                .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL } },
             .shaders = { "vsm/zprepass.vert.glsl", "vsm/zprepass.frag.glsl" },
+            .pipeline_settings =
+                rendergraph::RasterizationSettings{ .num_col_formats = 0, .depth_test = true, .depth_write = true, .depth_op = VK_COMPARE_OP_LESS },
             .callback_render =
                 [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
                     auto& r = *RendererVulkan::get_instance();
@@ -627,6 +629,7 @@ void RendererVulkan::build_render_graph() {
                                                .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
                                                .layout = VK_IMAGE_LAYOUT_GENERAL } },
             .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" },
+            .pipeline_settings = rendergraph::RasterizationSettings{ .num_col_formats = 0, .depth_test = false, .depth_write = false },
             .callback_render =
                 [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass& pass) {
                     auto& r = *RendererVulkan::get_instance();
@@ -1271,7 +1274,9 @@ void RendererVulkan::upload_transforms() {
     for(auto e : mesh_instances) {
         transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
     }
-    staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms).submit();
+    staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms)
+        .send_to(get_frame_data(1).transform_buffers, 0ull, transforms)
+        .submit();
 }
 
 void RendererVulkan::build_blas() {

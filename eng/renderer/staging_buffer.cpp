@@ -202,12 +202,15 @@ void StagingBuffer::process_submission() {
                 .pRegions = &buffer_copies.emplace_back(Vks(VkBufferCopy2{
                     .srcOffset = offset, .dstOffset = real_offset, .size = pushed_size })) }));
         } else if(auto* ti = std::get_if<TransferImage>(&e)) {
+            const auto offset = staging_buffer->size();
+            const auto pushed_size = push_data(ti->data);
             image_copy_infos.push_back(Vks(VkCopyBufferToImageInfo2{
                 .srcBuffer = staging_buffer->buffer,
                 .dstImage = r.get_image(ti->handle).image,
                 .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .regionCount = 1,
                 .pRegions = &image_copies.emplace_back(Vks(VkBufferImageCopy2{
+                    .bufferOffset = offset,
                     .imageSubresource = { .aspectMask = r.get_image(ti->handle).deduce_aspect(), .mipLevel = 0, .layerCount = 1 },
                     .imageExtent = r.get_image(ti->handle).vk_info.extent })) }));
             image_barriers.push_back(generate_image_barrier(ti->handle, ti->final_layout, true));
