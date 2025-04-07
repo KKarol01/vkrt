@@ -117,7 +117,7 @@ void StagingBuffer::resize(Handle<Buffer> buffer, size_t new_size) {
     if(!b.is_resizable) { return; }
     auto vk_info = b.vk_info;
     vk_info.size = new_size;
-    Buffer nb = Buffer{ b.name, b.dev, b.vma, b.vk_info, b.vma_info };
+    Buffer nb = Buffer{ b.name, b.dev, b.vma, b.alignment, b.vk_info, b.vma_info };
 
     const auto region = Vks(VkBufferCopy2{ .srcOffset = 0ull, .dstOffset = 0ull, .size = b.size() });
     const auto copy_info =

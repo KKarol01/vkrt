@@ -88,18 +88,15 @@ struct VsmData {
     Handle<Buffer> constants_buffer;
     Handle<Buffer> free_allocs_buffer;
     Handle<Image> shadow_map_0;
-    VkImageView view_shadow_map_0_general{};
     Handle<Image> dir_light_page_table;
-    VkImageView view_dir_light_page_table_general{};
     Handle<Image> dir_light_page_table_rgb8;
-    VkImageView view_dir_light_page_table_rgb8_general{};
 };
 
 class Renderer {
   public:
     virtual ~Renderer() = default;
     virtual void init() = 0;
-    virtual void update() = 0;
+    virtual void render() = 0;
     virtual void on_window_resize() = 0;
     virtual void set_screen(ScreenRect screen) = 0;
     virtual Handle<Image> batch_texture(const ImageDescriptor& batch) = 0;

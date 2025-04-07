@@ -53,6 +53,19 @@ void BindlessDescriptorPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
+uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
+    if(auto it = buffers.find(buffer); it != buffers.end()) { return it->second; }
+    assert(false);
+    return ~0ul;
+}
+
+uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView view) {
+    if(!view) { return ~0ul; }
+    if(auto it = views.find(view); it != views.end()) { return it->second; }
+    assert(false); 
+    return ~0ul;
+}
+
 uint32_t BindlessDescriptorPool::register_buffer(Handle<Buffer> buffer) {
     assert(!buffers.contains(buffer));
     buffers[buffer] = buffer_counter;
@@ -65,18 +78,6 @@ uint32_t BindlessDescriptorPool::register_image_view(VkImageView view, VkImageLa
     views[view] = view_counter;
     update_bindless_resource(view, layout, sampler);
     return view_counter++;
-}
-
-uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
-    if(auto it = buffers.find(buffer); it != buffers.end()) { return it->second; }
-    assert(false);
-    return -1ul;
-}
-
-uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView image) {
-    if(auto it = views.find(image); it != views.end()) { return it->second; }
-    assert(false);
-    return -1ul;
 }
 
 void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer) {

@@ -10,9 +10,9 @@ static constexpr buffer_resizable_t buffer_resizable;
 class Buffer {
   public:
     Buffer() noexcept = default;
-    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& vk_info,
+    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, size_t alignment, const VkBufferCreateInfo& vk_info,
            const VmaAllocationCreateInfo& vma_info) noexcept;
-    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, buffer_resizable_t resizable,
+    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, buffer_resizable_t resizable, size_t alignment,
            const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) noexcept;
     // todo: make destructors and proper move semantics
 
@@ -23,6 +23,7 @@ class Buffer {
     std::string name;
     VkDevice dev{};
     VmaAllocator vma{};
+    size_t alignment{ 1ull };
     VkBufferCreateInfo vk_info{}; // info.size = capacity
     VmaAllocationCreateInfo vma_info{};
     VkBuffer buffer{};

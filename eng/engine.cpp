@@ -94,7 +94,7 @@ void Engine::update() {
     const float now = get_time_secs();
     if(_on_update_callback) { _on_update_callback(); }
     camera->update();
-    renderer->update();
+    renderer->render();
     ++_frame_num;
     _last_frame_time = now;
     _delta_time = get_time_secs() - _last_frame_time;

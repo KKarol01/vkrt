@@ -21,9 +21,3 @@ class SamplerStorage {
   private:
     std::vector<std::pair<VkSamplerCreateInfo, VkSampler>> samplers;
 };
-
-struct RecordingSubmitInfo {
-    std::vector<VkCommandBuffer> buffers;
-    std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> waits;
-    std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
-};
