@@ -62,7 +62,7 @@ void StagingBuffer::submit(VkFence fence) {
 void StagingBuffer::submit_wait(VkFence fence) {
     get_submission().fence = fence;
     process_submission();
-    submission_done.wait(true);
+    submission_done.wait(false);
 }
 
 void StagingBuffer::swap_submissions() {
@@ -250,9 +250,12 @@ void StagingBuffer::process_submission() {
 
     VkFence fence = get_submission().fence;
     if(!fence) { fence = submission_thread_fence; }
-    if(on_submit_complete_thread.joinable()) { // todo: make another fence, so this line can go lower
-        on_submit_complete_thread.join();
-    }
+
+    // if(on_submit_complete_thread.joinable()) { // todo: make another fence, so this line can go lower
+    //     on_submit_complete_thread.join();
+    // }
+    submission_done.wait(false);
+    submission_done.store(false);
     queue->with_cmd_buf(cmd).with_fence(fence).submit();
     Submission* current_submission = &get_submission();
     on_submit_complete_thread = std::jthread{ [this, fence, subm = current_submission] {
@@ -264,6 +267,8 @@ void StagingBuffer::process_submission() {
                 b._size = std::max(b._size, tb->offset + tb->data.size());
             }
         }
+        submission_done.store(true);
+        submission_done.notify_one();
     } };
     swap_submissions();
 }
