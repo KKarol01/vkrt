@@ -1,23 +1,13 @@
 #pragma once
 
-#include <span>
-#include <filesystem>
-#include <bitset>
-#include <unordered_set>
-#include <unordered_map>
-#include <map>
-#include <forward_list>
-#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+#include <eng/renderer/common.hpp>
 #include <glm/mat4x3.hpp>
+#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/handle_vec.hpp>
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
-#include <eng/engine.hpp>
-#include <eng/common/callback.hpp>
-#include <eng/handle.hpp>
-#include <eng/renderer/buffer.hpp>
-#include <eng/renderer/image.hpp>
+#include <eng/renderer/passes/passes.hpp>
+#include <eng/renderer/passes/rendergraph.hpp>
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t {
