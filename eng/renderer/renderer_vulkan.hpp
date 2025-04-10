@@ -158,7 +158,7 @@ enum class ResourceType {
 };
 enum class ResourceFlags : uint32_t { FROM_UNDEFINED_LAYOUT_BIT = 0x1, SWAPCHAIN_IMAGE_BIT = 0x2 };
 
-ENABLE_FLAGS_OPERATORS(ResourceFlags)
+ENG_ENABLE_FLAGS_OPERATORS(ResourceFlags)
 
 struct RasterizationSettings {
     bool operator==(const RasterizationSettings& o) const {
@@ -303,6 +303,8 @@ class RendererVulkan : public Renderer {
   public:
     static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
 
+    RendererVulkan(const RendererVulkan&) = delete;
+    RendererVulkan& operator=(const RendererVulkan&) = delete;
     ~RendererVulkan() override = default;
 
     void init() final;

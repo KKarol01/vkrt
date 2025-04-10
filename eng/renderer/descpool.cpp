@@ -24,7 +24,21 @@ BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
         { BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536, VK_SHADER_STAGE_ALL },
     };
 
+    const auto binding_flag = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                              VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+    const VkDescriptorBindingFlags binding_flags[]{
+        binding_flag,
+        binding_flag,
+        binding_flag,
+        binding_flag,
+    };
+    const auto binding_flags_info = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
+        .bindingCount = sizeof(binding_flags) / sizeof(binding_flags[0]),
+        .pBindingFlags = binding_flags,
+    });
+
     const auto layout_info = Vks(VkDescriptorSetLayoutCreateInfo{
+        .pNext = &binding_flags_info,
         .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
         .bindingCount = sizeof(bindings) / sizeof(bindings[0]),
         .pBindings = bindings,

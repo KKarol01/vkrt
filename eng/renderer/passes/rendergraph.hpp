@@ -5,10 +5,6 @@
 
 namespace rendergraph2 {
 
-enum class ResourceFlags : uint32_t {
-
-};
-
 using resource_pt = std::variant<Buffer*, Image*>;
 using resource_ht = std::variant<Handle<Buffer>, Handle<Image>>;
 using resource_bt = std::variant<VkBufferMemoryBarrier2, VkImageMemoryBarrier2>;
@@ -34,7 +30,10 @@ class RenderGraph {
     void clear_passes() { passes.clear(); }
     void bake();
 
+    resource_bt generate_barrier(resource_ht resource) const;
+
     std::unordered_map<Handle<Resource>, Resource> resources;
+    std::unordered_map<resource_ht, Handle<Resource>> resource_handles;
     std::vector<std::unique_ptr<RenderPass>> passes;
     std::vector<RenderStage> stages;
 };

@@ -3,7 +3,7 @@
 #include <type_traits>
 #include <compare>
 
-#define ENABLE_FLAGS_OPERATORS(Type)                                                                                   \
+#define ENG_ENABLE_FLAGS_OPERATORS(Type)                                                                                   \
     constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept {                                           \
         return Flags<Type>{ a } | Flags<Type>{ b };                                                                    \
     }
