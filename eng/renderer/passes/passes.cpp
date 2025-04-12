@@ -32,7 +32,7 @@ RenderPass::RenderPass(const std::string& name, const std::vector<std::filesyste
                        const pipeline_settings_t& pipeline_settings) {}
 
 VsmClearPagesPass::VsmClearPagesPass(RenderGraph* rg)
-    : RenderPass("vsm_clear_page_pass", { "vsm/clear_page.comp.glsl" }, RasterizationPipelineSettings{}) {
+    : RenderPass("vsm_clear_page_pass", { "vsm/clear_page.comp.glsl" }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{
                      .resource =
@@ -57,14 +57,13 @@ void VsmClearPagesPass::render(VkCommandBuffer cmd) {
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
     set_pc_vsm_common(cmd);
-    r.bindless_pool->bind(cmd, );
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
     vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
     VkClearColorValue clear_value{ .float32 = { 1.0f, 0.0f, 0.0f, 0.0f } };
     VkImageSubresourceRange clear_range{
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
     };
-    vkCmdClearColorImage(cmd, r.get_image(r.vsm.shadow_map_0).image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value,
-                         1, &clear_range);
+    vkCmdClearColorImage(cmd, r.get_image(r.vsm.shadow_map_0).image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range);
 }
 
 } // namespace rendergraph2

@@ -131,133 +131,13 @@ struct GBuffer {
     Handle<Image> view_space_positions_image{};
     Handle<Image> view_space_normals_image{};
     Handle<Image> depth_buffer_image{};
-    //VkImageView view_depth_buffer_image_ronly_lr{};
     Handle<Image> ambient_occlusion_image{};
 };
-
-struct PipelineLayout {
-    VkPipelineLayout layout{};
-    VkDescriptorSetLayout descriptor_layout{};
-};
-
-//struct Pipeline {
-//    VkPipeline pipeline{};
-//};
-
-namespace rendergraph {
-
-constexpr uint32_t swapchain_index = ~0ul;
-
-enum class AccessType { NONE_BIT = 0x0, READ_BIT = 0x1, WRITE_BIT = 0x2, READ_WRITE_BIT = 0x3 };
-enum class ResourceType {
-    STORAGE_IMAGE = 0x1,
-    COMBINED_IMAGE = 0x2,
-    COLOR_ATTACHMENT = 0x4,
-    ANY_IMAGE = 0x8 - 1,
-    STORAGE_BUFFER = 0x8,
-    ACCELERATION_STRUCTURE = 0x10,
-};
-enum class ResourceFlags : uint32_t { FROM_UNDEFINED_LAYOUT_BIT = 0x1, SWAPCHAIN_IMAGE_BIT = 0x2 };
-
-ENG_ENABLE_FLAGS_OPERATORS(ResourceFlags)
-
-struct RasterizationSettings {
-    bool operator==(const RasterizationSettings& o) const {
-        return num_col_formats == o.num_col_formats &&
-               [this, &o] {
-                   for(auto i = 0; i < num_col_formats; ++i) {
-                       if(col_formats[i] != o.col_formats[i]) { return false; }
-                       return true;
-                   }
-               }() &&
-               dep_format == o.dep_format && culling == o.culling && depth_test == o.depth_test && depth_op == o.depth_op;
-    }
-    uint32_t num_col_formats{ 1 };
-    std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
-    VkFormat dep_format{ VK_FORMAT_D24_UNORM_S8_UINT };
-    VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
-    bool depth_test{ false };
-    bool depth_write{ true };
-    VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
-};
-
-struct RaytracingSettings {
-    bool operator==(const RaytracingSettings& o) const {
-        return recursion_depth == o.recursion_depth && sbt_buffer == o.sbt_buffer && groups.size() == o.groups.size() &&
-               [this, &o] {
-                   for(const auto& e : groups) {
-                       if(std::find_if(o.groups.begin(), o.groups.end(), [&e](auto& g) {
-                              return e.type == g.type && e.generalShader == g.generalShader &&
-                                     e.closestHitShader == g.closestHitShader && e.anyHitShader == g.anyHitShader &&
-                                     e.intersectionShader == g.intersectionShader;
-                          }) == o.groups.end()) {
-                           return false;
-                       }
-                   }
-                   return true;
-               }();
-    }
-    uint32_t recursion_depth{ 1 };
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
-    Handle<Buffer> sbt_buffer;
-};
-
-struct Access {
-    // bool operator==(const Access& o) const {
-    //     return resource == o.resource && resource_flags == o.resource_flags && type == o.type && stage == o.stage &&
-    //            access == o.access && layout == o.layout && count == o.count;
-    // }
-
-    std::variant<Handle<Buffer>, Handle<Image>> resource;
-    Flags<ResourceFlags> flags{};
-    Flags<AccessType> type{};
-    VkPipelineStageFlags2 stage{};
-    VkAccessFlags2 access{};
-    VkImageLayout layout{ VK_IMAGE_LAYOUT_MAX_ENUM };
-    // uint32_t count{ 1 };
-};
-
-struct RenderPass {
-    std::string name;
-    std::vector<Access> accesses;
-    std::vector<std::filesystem::path> shaders; // if empty - no pipeline generated (only for synchronization)
-    std::variant<RasterizationSettings, RaytracingSettings> pipeline_settings;
-    Callback<void(VkCommandBuffer, uint32_t, RenderPass&)> callback_render;
-    VkPipelineBindPoint pipeline_bind_point{}; // filled out during baking
-    const Pipeline* pipeline{};                // filled out during baking
-};
-
-class RenderGraph {
-    struct Stage {
-        std::vector<RenderPass*> passes;
-        std::vector<VkImageMemoryBarrier2> image_barriers;
-        std::vector<VkBufferMemoryBarrier2> buffer_barriers;
-        Callback<Image&(uint32_t)> get_swapchain_image_callback;
-    };
-
-  public:
-    RenderGraph() noexcept = default;
-    RenderGraph(VkDevice dev) noexcept;
-
-    RenderPass* make_pass();
-    RenderGraph& add_pass(RenderPass* pass);
-    void bake();
-    void create_pipeline(RenderPass& pass);
-    void render(VkCommandBuffer cmd, uint32_t swapchain_index);
-
-    VkDevice dev{};
-    std::deque<RenderPass> passes;
-    std::deque<Pipeline> pipelines;
-    std::vector<RenderPass*> render_list;
-    std::vector<Stage> stages;
-};
-} // namespace rendergraph
 
 class CommandPool;
 
 struct FrameData {
     CommandPool* cmdpool{};
-    rendergraph::RenderGraph render_graph;
     VkSemaphore sem_swapchain{};
     VkSemaphore sem_rendering_finished{};
     VkFence fen_rendering_finished{};
@@ -265,36 +145,6 @@ struct FrameData {
     Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
 };
-
-// struct StagingBuffer {
-//     StagingBuffer();
-//     bool send(Buffer& dst, size_t dst_offset, std::span<const std::byte> src);
-//     bool send(Buffer& dst, size_t dst_offset, Buffer& src, size_t src_offset, size_t size);
-//     bool send(Image& dst, std::span<const std::byte> src, VkBufferImageCopy copy);
-//     void begin();
-//     void stage();
-//     CommandPool** pool{};
-//     VkCommandBuffer cmd{};
-//     Buffer buffer{};
-// };
-
-// enum class BindlessType : uint32_t { NONE, STORAGE_BUFFER, STORAGE_IMAGE, COMBINED_IMAGE };
-//
-// struct BindlessEntry {
-//     bool operator==(const BindlessEntry& a) const {
-//         return resource_handle == a.resource_handle && type == a.type && layout == a.layout && sampler == a.sampler;
-//     }
-//     VkDescriptorType to_vk_descriptor_type() const {
-//         return type == BindlessType::STORAGE_BUFFER   ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-//                : type == BindlessType::STORAGE_IMAGE  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-//                : type == BindlessType::COMBINED_IMAGE ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-//                                                       : VK_DESCRIPTOR_TYPE_MAX_ENUM;
-//     }
-//     uint32_t resource_handle{};
-//     BindlessType type{};
-//     VkImageLayout layout{};
-//     VkSampler sampler{};
-// };
 
 class SubmitQueue;
 class StagingBuffer;

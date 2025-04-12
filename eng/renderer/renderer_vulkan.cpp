@@ -321,7 +321,6 @@ void RendererVulkan::initialize_resources() {
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas[i];
-        fd.render_graph = rendergraph::RenderGraph{ dev };
         fd.cmdpool = submit_queue->make_command_pool();
         fd.sem_swapchain = submit_queue->make_semaphore();
         fd.sem_rendering_finished = submit_queue->make_semaphore();
@@ -363,7 +362,6 @@ void RendererVulkan::initialize_resources() {
                                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
                                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                                                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT });
-    vsm.view_shadow_map_0_general = make_image_view(vsm.shadow_map_0, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     vsm.dir_light_page_table =
         make_image("vsm dir light 0 page table",
@@ -374,7 +372,6 @@ void RendererVulkan::initialize_resources() {
                                       .arrayLayers = 1,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
                                       .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT });
-    vsm.view_dir_light_page_table_general = make_image_view(vsm.dir_light_page_table, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     vsm.dir_light_page_table_rgb8 =
         make_image("vsm dir light 0 page table rgb8",
@@ -385,7 +382,6 @@ void RendererVulkan::initialize_resources() {
                                       .arrayLayers = 1,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
                                       .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
-    vsm.view_dir_light_page_table_rgb8_general = make_image_view(vsm.dir_light_page_table_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr);
 
     create_window_sized_resources();
 
@@ -427,9 +423,6 @@ void RendererVulkan::create_window_sized_resources() {
                                           .samples = VK_SAMPLE_COUNT_1_BIT,
                                           .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
                                                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        fd.gbuffer.view_depth_buffer_image_ronly_lr =
-            make_image_view(fd.gbuffer.depth_buffer_image, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                            samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT));
 
         /*make_image(&fd.gbuffer.color_image,
                    Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,

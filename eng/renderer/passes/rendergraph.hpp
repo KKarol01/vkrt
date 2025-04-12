@@ -11,7 +11,6 @@ using resource_bt = std::variant<VkBufferMemoryBarrier2, VkImageMemoryBarrier2>;
 using resource_cb_t = Callback<resource_pt()>;
 
 struct Resource {
-    resource_bt barrier;
     resource_cb_t resource_cb;
 };
 
@@ -30,7 +29,7 @@ class RenderGraph {
     void clear_passes() { passes.clear(); }
     void bake();
 
-    resource_bt generate_barrier(resource_ht resource) const;
+    resource_bt generate_barrier(const Access& access) const;
 
     std::unordered_map<Handle<Resource>, Resource> resources;
     std::unordered_map<resource_ht, Handle<Resource>> resource_handles;
