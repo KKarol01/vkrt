@@ -2,9 +2,10 @@
 
 #include <eng/renderer/common.hpp>
 #include <vulkan/vulkan.h>
+#include <eng/renderer/pipeline.hpp>
 
 namespace rendergraph2 {
-
+using namespace eng::rpp;
 class RenderGraph;
 struct Resource;
 
@@ -28,20 +29,19 @@ struct Access {
     VkImageLayout dst_layout{};
 };
 
-struct RasterizationPipelineSettings {};
-
-using pipeline_settings_t = std::variant<RasterizationPipelineSettings>;
+using pipeline_settings_t = std::variant<RasterizationSettings>;
 
 class RenderPass {
   public:
-    explicit RenderPass(const std::string& name, const std::vector<std::filesystem::path>& shaders,
-                        const pipeline_settings_t& pipeline_settings = {});
+    RenderPass(const std::string& name, const std::vector<std::filesystem::path>& shaders,
+               const pipeline_settings_t& pipeline_settings = {});
     virtual ~RenderPass() noexcept = default;
     virtual void render(VkCommandBuffer cmd) = 0;
     std::span<const Access> get_accesses() const { return accesses; }
 
     std::string name;
     std::vector<Access> accesses;
+    Pipeline* pipeline{};
 };
 
 class VsmClearPagesPass final : public RenderPass {
@@ -49,7 +49,6 @@ class VsmClearPagesPass final : public RenderPass {
     VsmClearPagesPass(RenderGraph* rg);
     ~VsmClearPagesPass() noexcept final = default;
     void render(VkCommandBuffer cmd) final;
-    VkImageView depth_buffer{};
 };
 
 } // namespace rendergraph2

@@ -8,6 +8,7 @@
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
+#include <eng/renderer/pipeline.hpp>
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t {
@@ -130,7 +131,7 @@ struct GBuffer {
     Handle<Image> view_space_positions_image{};
     Handle<Image> view_space_normals_image{};
     Handle<Image> depth_buffer_image{};
-    VkImageView view_depth_buffer_image_ronly_lr{};
+    //VkImageView view_depth_buffer_image_ronly_lr{};
     Handle<Image> ambient_occlusion_image{};
 };
 
@@ -139,9 +140,9 @@ struct PipelineLayout {
     VkDescriptorSetLayout descriptor_layout{};
 };
 
-struct Pipeline {
-    VkPipeline pipeline{};
-};
+//struct Pipeline {
+//    VkPipeline pipeline{};
+//};
 
 namespace rendergraph {
 

@@ -13,8 +13,6 @@
 #include <GLFW/glfw3native.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
-#include <shaderc/shaderc.hpp>
-#include <stb/stb_include.h>
 #include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_vulkan.h>

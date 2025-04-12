@@ -1,6 +1,30 @@
 #include "passes.hpp"
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
+#include <eng/renderer/descpool.hpp>
+
+static void set_pc_vsm_common(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+    auto& fd = r.get_frame_data();
+    auto slr = r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    auto depth_view = r.make_image_view(fd.gbuffer.depth_buffer_image, VK_IMAGE_LAYOUT_GENERAL, slr);
+    auto page_view = r.make_image_view(r.vsm.dir_light_page_table, VK_IMAGE_LAYOUT_GENERAL, nullptr);
+    auto shadow_map = r.make_image_view(r.vsm.shadow_map_0, VK_IMAGE_LAYOUT_GENERAL, nullptr);
+    uint32_t bindless_indices[]{
+        r.get_bindless_index(r.index_buffer),
+        r.get_bindless_index(r.vertex_positions_buffer),
+        r.get_bindless_index(r.vertex_attributes_buffer),
+        r.get_bindless_index(fd.transform_buffers),
+        r.get_bindless_index(r.vsm.constants_buffer),
+        r.get_bindless_index(r.vsm.free_allocs_buffer),
+        r.get_bindless_index(depth_view),
+        r.get_bindless_index(page_view),
+        r.get_bindless_index(fd.constants),
+        0,
+        r.get_bindless_index(shadow_map),
+    };
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
+}
 
 namespace rendergraph2 {
 
@@ -27,25 +51,13 @@ VsmClearPagesPass::VsmClearPagesPass(RenderGraph* rg)
                      .stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                      .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                  } };
-    depth_buffer = r->make_image_view(r->)
 }
 
 void VsmClearPagesPass::render(VkCommandBuffer cmd) {
     auto& r = *RendererVulkan::get_instance();
-    uint32_t bindless_indices[]{
-        r.get_bindless_index(r.index_buffer),
-        r.get_bindless_index(r.vertex_positions_buffer),
-        r.get_bindless_index(r.vertex_attributes_buffer),
-        r.get_bindless_index(r.get_frame_data().transform_buffers),
-        r.get_bindless_index(r.vsm.constants_buffer),
-        r.get_bindless_index(r.vsm.free_allocs_buffer),
-        r.get_bindless_index(r.get_frame_data().gbuffer.view_depth_buffer_image_ronly_lr),
-        r.get_bindless_index(r.vsm.view_dir_light_page_table_general),
-        r.get_bindless_index(r.get_frame_data().constants),
-        0,
-    };
-    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0, sizeof(bindless_indices), bindless_indices);
-    r.bindless_pool->bind(cmd, pass.pipeline_bind_point);
+    auto& fd = r.get_frame_data();
+    set_pc_vsm_common(cmd);
+    r.bindless_pool->bind(cmd, );
     vkCmdDispatch(cmd, 64 / 8, 64 / 8, 1);
     VkClearColorValue clear_value{ .float32 = { 1.0f, 0.0f, 0.0f, 0.0f } };
     VkImageSubresourceRange clear_range{
