@@ -6,7 +6,6 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
-#include <eng/renderer/passes/passes.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/pipeline.hpp>
 
@@ -102,28 +101,15 @@ struct IndirectDrawCommandBufferHeader {
     uint32_t geometry_instance_count{};
 };
 
-struct ShaderStorage {
-    struct ShaderMetadata {
-        VkShaderModule shader{};
-        VkShaderStageFlagBits stage;
-    };
-
-    void precompile_shaders(std::vector<std::filesystem::path> paths);
-    VkShaderModule get_shader(std::filesystem::path path);
-    VkShaderStageFlagBits get_stage(std::filesystem::path path) const;
-    VkShaderModule compile_shader(std::filesystem::path path);
-    // TODO: maybe this should be global tool
-    void canonize_path(std::filesystem::path& p);
-
-    std::unordered_map<std::filesystem::path, ShaderMetadata> metadatas;
-};
-
 struct Swapchain {
     void create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height);
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
+    Image& get_current_image();
+    VkImageView& get_current_view();
     VkSwapchainKHR swapchain{};
     std::vector<Image> images;
     std::vector<VkImageView> views;
+    uint32_t current_index{ 0ul };
 };
 
 struct GBuffer {
@@ -154,6 +140,7 @@ class RendererVulkan : public Renderer {
   public:
     static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
 
+    RendererVulkan() = default;
     RendererVulkan(const RendererVulkan&) = delete;
     RendererVulkan& operator=(const RendererVulkan&) = delete;
     ~RendererVulkan() override = default;
@@ -184,45 +171,23 @@ class RendererVulkan : public Renderer {
     void upload_staged_models();
     void bake_indirect_commands();
     void upload_transforms();
-    // void update_bindless_set();
 
     void build_blas();
     void build_tlas();
     void update_ddgi();
 
-    // Image allocate_image(const std::string& name, VkFormat format, VkImageType type, VkExtent3D extent, uint32_t mips,
-    //                      uint32_t layers, VkImageUsageFlags usage);
-    // Buffer allocate_buffer(const std::string& name, size_t size, VkBufferUsageFlags usage, bool map = false, uint32_t alignment = 1);
     Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
     Handle<Buffer> make_buffer(const std::string& name, buffer_resizable_t resizable, const VkBufferCreateInfo& vk_info,
                                const VmaAllocationCreateInfo& vma_info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
-    VkImageView make_image_view(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
-    VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info, VkImageLayout layout, VkSampler sampler);
-    Buffer& get_buffer(Handle<Buffer> handle);
-    Image& get_image(Handle<Image> handle);
+    VkImageView make_image_view(Handle<Image> handle);
+    VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
+    static Buffer& get_buffer(Handle<Buffer> handle);
+    static Image& get_image(Handle<Image> handle);
     void destroy_buffer(Handle<Buffer> buffer);
     void replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer);
-    uint32_t register_bindless_index(Handle<Buffer> handle);
-    uint32_t register_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
     uint32_t get_bindless_index(Handle<Buffer> handle);
-    uint32_t get_bindless_index(Handle<Image> handle, VkImageLayout layout, VkSampler sampler);
-    uint32_t get_bindless_index(VkImageView view);
-
-    // void update_bindless_resource(Handle<Image> handle);
-    // void update_bindless_resource(Handle<Buffer> handle);
-
-    // void destroy_image(const Image** img);
-    // void deallocate_buffer(Buffer& buffer);
-    // void destroy_buffer(Handle<Buffer> handle);
-    // void resize_buffer(Handle<Buffer> handle, size_t new_size);
-
-    // void send_to(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, size_t src_offset, size_t size);
-    // void send_to(Handle<Buffer> dst, size_t dst_offset, void* src, size_t size);
-    // void send_to(Handle<Buffer> dst, size_t dst_offset, std::span<const std::byte> bytes) {
-    //     send_to(dst, dst_offset, (void*)bytes.data(), bytes.size_bytes());
-    // }
-    // template <typename... Ts> void send_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts);
+    uint32_t get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
 
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
@@ -248,6 +213,7 @@ class RendererVulkan : public Renderer {
     SubmitQueue* submit_queue{};
     StagingBuffer* staging_buffer{};
     BindlessDescriptorPool* bindless_pool{};
+    rendergraph2::RenderGraph rendergraph;
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
@@ -279,20 +245,9 @@ class RendererVulkan : public Renderer {
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
 
-    ShaderStorage shader_storage;
     SamplerStorage samplers;
     std::unordered_map<Handle<Image>, Image> images;
     std::unordered_map<Handle<Buffer>, Buffer> buffers;
-    struct ImageViewStorage {
-        struct Config {
-            VkImageView view{};
-            VkImageLayout layout{};
-            VkSampler sampler{};
-        };
-        std::unordered_map<Handle<Image>, std::vector<Config>> configs;
-    } image_view_storage;
-
-    // todo: handle recycling
 
     DDGI ddgi;
 
@@ -300,7 +255,6 @@ class RendererVulkan : public Renderer {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
     };
-
     std::vector<Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;

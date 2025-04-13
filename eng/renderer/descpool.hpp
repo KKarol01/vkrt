@@ -18,11 +18,8 @@ class BindlessDescriptorPool {
     VkDescriptorSetLayout get_set_layout() const { return set_layout; }
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout; }
 
-    uint32_t register_buffer(Handle<Buffer> buffer);
-    uint32_t register_image_view(VkImageView view, VkImageLayout layout, VkSampler sampler);
-
     uint32_t get_bindless_index(Handle<Buffer> buffer);
-    uint32_t get_bindless_index(VkImageView view);
+    uint32_t get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
 
     void update_bindless_resource(Handle<Buffer> buffer);
     void update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler);

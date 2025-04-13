@@ -5,7 +5,7 @@
 static size_t align_up2(size_t val, size_t al) { return (val + al - 1) & ~(al - 1); }
 
 StagingBuffer::StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept
-    : queue(queue), staging_buffer(&RendererVulkan::get_instance()->get_buffer(staging_buffer)) {
+    : queue(queue), staging_buffer(&RendererVulkan::get_buffer(staging_buffer)) {
     if(!queue) {
         ENG_WARN("Queue is nullptr");
         assert(false);
@@ -82,9 +82,9 @@ StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, std:
         ENG_ERROR("Upload data size is 0. Not Sending");
         return *this;
     }
-    const size_t real_offset = offset == ~0ull ? RendererVulkan::get_instance()->get_buffer(buffer).size() : offset;
-    if(real_offset + data.size_bytes() > RendererVulkan::get_instance()->get_buffer(buffer).capacity()) {
-        if(!RendererVulkan::get_instance()->get_buffer(buffer).is_resizable) {
+    const size_t real_offset = offset == ~0ull ? RendererVulkan::get_buffer(buffer).size() : offset;
+    if(real_offset + data.size_bytes() > RendererVulkan::get_buffer(buffer).capacity()) {
+        if(!RendererVulkan::get_buffer(buffer).is_resizable) {
             ENG_ERROR("Cannot resize the buffer!");
             return *this;
         }
@@ -263,7 +263,7 @@ void StagingBuffer::process_submission() {
         if(fence == submission_thread_fence) { queue->reset_fence(submission_thread_fence); }
         for(auto& e : subm->transfers) {
             if(auto* tb = std::get_if<TransferBuffer>(&e)) {
-                auto& b = RendererVulkan::get_instance()->get_buffer(tb->handle);
+                auto& b = RendererVulkan::get_buffer(tb->handle);
                 b._size = std::max(b._size, tb->offset + tb->data.size());
             }
         }

@@ -67,36 +67,32 @@ void BindlessDescriptorPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
-uint32_t BindlessDescriptorPool::register_buffer(Handle<Buffer> buffer) {
-    assert(!buffers.contains(buffer));
+uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
+    if(!buffer) {
+        ENG_WARN("buffer is null");
+        return ~0ull;
+    }
+    if(auto it = buffers.find(buffer); it != buffers.end()) { return it->second; }
     buffers[buffer] = buffer_counter;
     update_bindless_resource(buffer);
     return buffer_counter++;
 }
 
-uint32_t BindlessDescriptorPool::register_image_view(VkImageView view, VkImageLayout layout, VkSampler sampler) {
-    assert(!views.contains(view));
+uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler) {
+    if(!view) {
+        ENG_WARN("view is null");
+        return ~0ull;
+    }
+    if(auto it = views.find(view); it != views.end()) { return it->second; }
     views[view] = view_counter;
     update_bindless_resource(view, layout, sampler);
     return view_counter++;
 }
 
-uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
-    if(auto it = buffers.find(buffer); it != buffers.end()) { return it->second; }
-    assert(false);
-    return -1ul;
-}
-
-uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView image) {
-    if(auto it = views.find(image); it != views.end()) { return it->second; }
-    assert(false);
-    return -1ul;
-}
-
 void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer) {
     if(!buffers.contains(buffer)) { return; }
     buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
-        .buffer = RendererVulkan::get_instance()->get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
+        .buffer = RendererVulkan::get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
     updates.push_back(Vks(VkWriteDescriptorSet{ .dstSet = set,
                                                 .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
                                                 .dstArrayElement = buffers.at(buffer),

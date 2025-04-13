@@ -14,6 +14,7 @@ class Image {
 
     VkImageView get_view();
     VkImageView get_view(const VkImageViewCreateInfo& vk_info);
+
     VkImageAspectFlags deduce_aspect() const;
 
     std::string name;
