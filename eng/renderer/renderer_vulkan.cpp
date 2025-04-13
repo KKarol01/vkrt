@@ -896,13 +896,17 @@ void RendererVulkan::bake_indirect_commands() {
             .color_texture_idx = get_bindless_index(get_image(mat.textures.base_color_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                                                     samplers.get_sampler(mat.textures.base_color_texture.filter,
                                                                          mat.textures.base_color_texture.addressing)),
-            .normal_texture_idx =
-                get_bindless_index(get_image(mat.textures.normal_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                   samplers.get_sampler(mat.textures.normal_texture.filter, mat.textures.normal_texture.addressing)),
+            .normal_texture_idx = mat.textures.normal_texture.handle
+                                      ? get_bindless_index(get_image(mat.textures.normal_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                                           samplers.get_sampler(mat.textures.normal_texture.filter,
+                                                                                mat.textures.normal_texture.addressing))
+                                      : ~0ul,
             .metallic_roughness_idx =
-                get_bindless_index(get_image(mat.textures.metallic_roughness_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                   samplers.get_sampler(mat.textures.metallic_roughness_texture.filter,
-                                                        mat.textures.metallic_roughness_texture.addressing)),
+                mat.textures.metallic_roughness_texture.handle
+                    ? get_bindless_index(get_image(mat.textures.metallic_roughness_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+                                         samplers.get_sampler(mat.textures.metallic_roughness_texture.filter,
+                                                              mat.textures.metallic_roughness_texture.addressing))
+                    : ~0ul,
         });
         if(i == 0 || Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i - 1)).mesh_handle != mi.mesh_handle) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
