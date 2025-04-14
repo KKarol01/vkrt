@@ -13,7 +13,7 @@ class Image {
     // todo: make destructors and proper move semantics
 
     VkImageView get_view();
-    VkImageView get_view(const VkImageViewCreateInfo& vk_info);
+    VkImageView get_view(VkImageViewCreateInfo vk_info);
 
     VkImageAspectFlags deduce_aspect() const;
 
@@ -24,6 +24,6 @@ class Image {
     VkImage image{};
     VmaAllocation alloc{};
     VkImageView default_view{};
-    std::vector<VkImageView> views;
+    std::vector<std::pair<VkImageViewCreateInfo, VkImageView>> views;
     VkImageLayout current_layout{};
 };

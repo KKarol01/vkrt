@@ -1,8 +1,8 @@
-#include "passes.hpp"
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/descpool.hpp>
 #include <ImGuizmo/ImGuizmo.h>
+#include "passes.hpp"
 
 static void set_pc_vsm_common(VkCommandBuffer cmd) {
     auto& r = *RendererVulkan::get_instance();
@@ -42,12 +42,14 @@ static void set_pc_vsm_debug_copy(VkCommandBuffer cmd) {
 
 namespace rendergraph2 {
 
-RenderPass::RenderPass(const std::string& name, const std::vector<std::filesystem::path>& shaders, const pipeline_settings_t& pipeline_settings)
-    : name(name) {}
+RenderPass::RenderPass(const std::string& name, const eng::rpp::PipelineSettings& settings)
+    : name(name), pipeline(RendererVulkan::get_instance()->pipelines.get_pipeline(settings)) {}
 
 ZPrepassPass::ZPrepassPass(RenderGraph* rg)
-    : RenderPass("ZPrepassPass", { "vsm/zprepass.vert.glsl", "vsm/zprepass.frag.glsl" },
-                 RasterizationSettings{ .num_col_formats = 0, .depth_test = true, .depth_write = true, .depth_op = VK_COMPARE_OP_LESS }) {
+    : RenderPass("ZPrepassPass",
+                 eng::rpp::PipelineSettings{
+                     .settings = RasterizationSettings{ .num_col_formats = 0, .depth_test = true, .depth_write = true, .depth_op = VK_COMPARE_OP_LESS },
+                     .shaders = { "vsm/zprepass.vert.glsl", "vsm/zprepass.frag.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->get_frame_data().gbuffer.depth_buffer_image; },
                                                        ResourceFlags::PER_FRAME_BIT),
@@ -94,7 +96,7 @@ void ZPrepassPass::render(VkCommandBuffer cmd) {
 }
 
 VsmClearPagesPass::VsmClearPagesPass(RenderGraph* rg)
-    : RenderPass("VsmClearPagesPass", { "vsm/clear_page.comp.glsl" }) {
+    : RenderPass("VsmClearPagesPass", eng::rpp::PipelineSettings{ .shaders = { "vsm/clear_page.comp.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{
                      .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
@@ -126,7 +128,8 @@ void VsmClearPagesPass::render(VkCommandBuffer cmd) {
                          1, &clear_range);
 }
 
-VsmPageAllocPass::VsmPageAllocPass(RenderGraph* rg) : RenderPass("VsmPageAllocPass", { "vsm/page_alloc.comp.glsl" }) {
+VsmPageAllocPass::VsmPageAllocPass(RenderGraph* rg)
+    : RenderPass("VsmPageAllocPass", eng::rpp::PipelineSettings{ .shaders = { "vsm/page_alloc.comp.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
                          .flags = AccessFlags::READ_WRITE_BIT,
@@ -157,8 +160,10 @@ void VsmPageAllocPass::render(VkCommandBuffer cmd) {
 }
 
 VsmShadowsPass::VsmShadowsPass(RenderGraph* rg)
-    : RenderPass("VsmShadowsPass", { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" },
-                 RasterizationSettings{ .num_col_formats = 0, .depth_test = false, .depth_write = false }) {
+    : RenderPass("VsmShadowsPass",
+                 eng::rpp::PipelineSettings{
+                     .settings = RasterizationSettings{ .num_col_formats = 0, .depth_test = false, .depth_write = false },
+                     .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
                          .flags = AccessFlags::READ_BIT,
@@ -202,7 +207,8 @@ void VsmShadowsPass::render(VkCommandBuffer cmd) {
 }
 
 VsmDebugPageCopyPass::VsmDebugPageCopyPass(RenderGraph* rg)
-    : RenderPass("VsmDebugPageCopyPass", { "vsm/debug_page_alloc_copy.comp.glsl" }) {
+    : RenderPass("VsmDebugPageCopyPass",
+                 eng::rpp::PipelineSettings{ .shaders = { "vsm/debug_page_alloc_copy.comp.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
                          .flags = AccessFlags::READ_BIT,
@@ -224,8 +230,10 @@ void VsmDebugPageCopyPass::render(VkCommandBuffer cmd) {
 }
 
 DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
-    : RenderPass("DefaultUnlitPass", { "default_unlit/unlit.vert.glsl", "default_unlit/unlit.frag.glsl" },
-                 RasterizationSettings{ .depth_test = true, .depth_write = false, .depth_op = VK_COMPARE_OP_LESS_OR_EQUAL }) {
+    : RenderPass("DefaultUnlitPass",
+                 eng::rpp::PipelineSettings{
+                     .settings = RasterizationSettings{ .depth_test = true, .depth_write = false, .depth_op = VK_COMPARE_OP_LESS_OR_EQUAL },
+                     .shaders = { "default_unlit/unlit.vert.glsl", "default_unlit/unlit.frag.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->get_frame_data().gbuffer.color_image; }, ResourceFlags::PER_FRAME_BIT),
                          .flags = AccessFlags::WRITE_BIT | AccessFlags::FROM_UNDEFINED_LAYOUT_BIT,

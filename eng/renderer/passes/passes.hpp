@@ -26,15 +26,11 @@ struct Access {
     VkImageLayout layout{};
 };
 
-using pipeline_settings_t = std::variant<RasterizationSettings>;
-
 class RenderPass {
   public:
-    RenderPass(const std::string& name, const std::vector<std::filesystem::path>& shaders,
-               const pipeline_settings_t& pipeline_settings = {});
+    RenderPass(const std::string& name, const eng::rpp::PipelineSettings& settings = {});
     virtual ~RenderPass() noexcept = default;
     virtual void render(VkCommandBuffer cmd) = 0;
-    std::span<const Access> get_accesses() const { return accesses; }
 
     std::string name;
     std::vector<Access> accesses;

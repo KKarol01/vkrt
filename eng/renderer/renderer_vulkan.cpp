@@ -582,6 +582,8 @@ void RendererVulkan::update() {
         // update_bindless_set();
     }
 
+    pipelines.threaded_compile();
+
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
     submit_queue->wait_fence(fd.fen_rendering_finished, -1ull); // todo: maybe wait here for 10secs and crash to desktop.

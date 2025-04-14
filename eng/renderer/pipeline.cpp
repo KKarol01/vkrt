@@ -16,6 +16,7 @@ Shader* PipelineCompiler::get_shader(const std::filesystem::path path) {
 }
 
 Pipeline* PipelineCompiler::get_pipeline(const PipelineSettings& settings) {
+    if(settings.shaders.empty()) { return nullptr; }
     for(auto& e : pipelines) {
         if(e.settings.shaders.size() == settings.shaders.size() &&
            std::equal(e.settings.shaders.begin(), e.settings.shaders.end(), settings.shaders.begin()) &&

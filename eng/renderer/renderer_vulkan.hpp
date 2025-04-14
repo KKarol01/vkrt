@@ -214,6 +214,7 @@ class RendererVulkan : public Renderer {
     StagingBuffer* staging_buffer{};
     BindlessDescriptorPool* bindless_pool{};
     rendergraph2::RenderGraph rendergraph;
+    eng::rpp::PipelineCompiler pipelines{};
 
     HandleVector<RenderGeometry> geometries;
     HandleVector<GeometryMetadata> geometry_metadatas;
