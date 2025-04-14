@@ -74,7 +74,11 @@ void RenderGraph::bake() {
             const auto& img = unpack_image(handle);
             const auto layout = (acc.flags & AccessFlags::FROM_UNDEFINED_LAYOUT_BIT) ? VK_IMAGE_LAYOUT_UNDEFINED
                                                                                      : history[acc.resource].last_access.layout;
-            return Vks(VkImageMemoryBarrier2{ .srcStageMask = history[acc.resource].last_access.stage,
+            const auto source_stage =
+                history[acc.resource].last_access.stage == VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                    ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+                    : history[acc.resource].last_access.stage; // vulkan sync cmomplaining about early/late fragment tests, so...
+            return Vks(VkImageMemoryBarrier2{ .srcStageMask = source_stage,
                                               .srcAccessMask = history[acc.resource].last_access.access,
                                               .dstStageMask = acc.stage,
                                               .dstAccessMask = acc.access,
@@ -117,17 +121,17 @@ void RenderGraph::bake() {
         if(std::holds_alternative<Handle<Buffer>>(r.resource)) {
             auto& fb = fs.buffer_barriers.at(hist.first_index);
             auto& lb = fs.buffer_barriers.at(hist.last_index);
-            if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
-                fb.srcStageMask = lb.dstStageMask;
-                fb.srcAccessMask = lb.dstAccessMask;
-            }
+            // if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
+            fb.srcStageMask = lb.dstStageMask;
+            fb.srcAccessMask = lb.dstAccessMask;
+            //}
         } else if(std::holds_alternative<Handle<Image>>(r.resource)) {
             auto& fb = fs.image_barriers.at(hist.first_index);
             auto& lb = ls.image_barriers.at(hist.last_index);
-            if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
-                fb.srcStageMask = lb.dstStageMask;
-                fb.srcAccessMask = lb.dstAccessMask;
-            }
+            // if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
+            fb.srcStageMask = lb.dstStageMask;
+            fb.srcAccessMask = lb.dstAccessMask;
+            //}
             if(!hist.first_access.flags.test(AccessFlags::FROM_UNDEFINED_LAYOUT_BIT)) { fb.oldLayout = lb.newLayout; }
         } else {
             ENG_ERROR("Invalid resource type");

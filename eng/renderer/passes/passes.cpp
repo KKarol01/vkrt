@@ -394,7 +394,7 @@ SwapchainPresentPass::SwapchainPresentPass(RenderGraph* rg) : RenderPass("Swapch
     accesses = {
         Access{ .resource = rg->make_resource([r] { return swapchain_handle; }, ResourceFlags::PER_FRAME_BIT),
                 .flags = AccessFlags::NONE_BIT,
-                .stage = VK_PIPELINE_STAGE_2_NONE,
+                .stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 .access = VK_ACCESS_2_NONE,
                 .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR },
     };
