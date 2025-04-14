@@ -33,10 +33,10 @@ void main() {
     float depth;
     vec3 wpos = get_world_pos_from_depth_buffer(gid, depth);
     if(depth > 1.0 - EPS) { return; }
-    ivec2 vpi = vsm_calc_page_index(wpos);
+    ivec3 vpi = ivec3(vsm_calc_page_index(wpos), 0);
 
     for(;;) {
-        ivec2 brd_vpi = subgroupBroadcastFirst(vpi); // match until your address gets broadcasted
+        ivec3 brd_vpi = subgroupBroadcastFirst(vpi); // match until your address gets broadcasted
         if(brd_vpi == vpi && subgroupElect()) {      // amongst matched ones, prefer only one to do atomic ops
             imageAtomicOr(vsm_page_table, vpi, VSM_DIRTY_FLAG);
             const uint page_bits = imageAtomicOr(vsm_page_table, vpi, VSM_BACKED_FLAG);

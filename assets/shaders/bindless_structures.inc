@@ -126,7 +126,9 @@ ENG_DECLARE_STORAGE_BUFFERS(GPUVsmAllocConstantsBuffer) {
 #ifndef __cplusplus
 
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2D combinedImages_2d[];
+layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2DArray combinedImages_2dArray[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2D storageImages_2dr32ui[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2DArray storageImages_2dr32uiArray[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2D storageImages_2drgba8[];
 
 #define constants		storageBuffers_GPUConstantsBuffer[constants_index]

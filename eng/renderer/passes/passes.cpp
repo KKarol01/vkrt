@@ -9,7 +9,10 @@ static void set_pc_vsm_common(VkCommandBuffer cmd) {
     auto& fd = r.get_frame_data();
     auto slr = r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
     auto depth_view = r.make_image_view(fd.gbuffer.depth_buffer_image);
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table);
+    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
+                                       Vks(VkImageViewCreateInfo{
+                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
     uint32_t bindless_indices[]{
         r.get_bindless_index(r.index_buffer),
@@ -30,8 +33,15 @@ static void set_pc_vsm_common(VkCommandBuffer cmd) {
 static void set_pc_vsm_debug_copy(VkCommandBuffer cmd) {
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table);
-    auto page_view_rgb8 = r.make_image_view(r.vsm.dir_light_page_table_rgb8);
+    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
+                                       Vks(VkImageViewCreateInfo{
+                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
+    auto page_view_rgb8 =
+        r.make_image_view(r.vsm.dir_light_page_table_rgb8,
+                          Vks(VkImageViewCreateInfo{
+                              .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                              .format = RendererVulkan::get_image(r.vsm.dir_light_page_table_rgb8).vk_info.format }));
     uint32_t bindless_indices[]{
         r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
         r.get_bindless_index(page_view_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr),
@@ -45,7 +55,10 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
     auto& fd = r.get_frame_data();
     auto slr = r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
     auto depth_view = r.make_image_view(fd.gbuffer.depth_buffer_image);
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table);
+    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
+                                       Vks(VkImageViewCreateInfo{
+                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
     uint32_t bindless_indices[]{
         r.get_bindless_index(r.index_buffer),

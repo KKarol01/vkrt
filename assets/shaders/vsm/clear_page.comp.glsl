@@ -10,5 +10,5 @@ void main() {
     vsm_alloc_constants.free_list[idx] = idx;
 
     if(gl_GlobalInvocationID.x >= 64 || gl_GlobalInvocationID.y >= 64) { return; }
-    imageStore(vsm_page_table, ivec2(gl_GlobalInvocationID.xy), ivec4(0));
+    imageStore(vsm_page_table, ivec3(gl_GlobalInvocationID.xy, 0), ivec4(0));
 }

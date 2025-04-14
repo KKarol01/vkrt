@@ -369,7 +369,7 @@ void RendererVulkan::initialize_resources() {
                                       .format = VK_FORMAT_R32_SFLOAT,
                                       .extent = { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 },
                                       .mipLevels = 1,
-                                      .arrayLayers = 1,
+                                      .arrayLayers = 4,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
                                       .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT });
 
@@ -379,7 +379,7 @@ void RendererVulkan::initialize_resources() {
                                       .format = VK_FORMAT_R8G8B8A8_UNORM,
                                       .extent = { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 },
                                       .mipLevels = 1,
-                                      .arrayLayers = 1,
+                                      .arrayLayers = 4,
                                       .samples = VK_SAMPLE_COUNT_1_BIT,
                                       .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
 
@@ -1380,7 +1380,7 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
 
     for(uint32_t i = 0; i < image_count; ++i) {
         images[i] =
-            Image{ std::format("swpachain_image_{}", i), dev, vk_images[i],
+            Image{ std::format("swapchain_image_{}", i), dev, vk_images[i],
                    Vks(VkImageCreateInfo{
                        .imageType = VK_IMAGE_TYPE_2D,
                        .format = sinfo.imageFormat,

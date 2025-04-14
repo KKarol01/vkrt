@@ -49,9 +49,15 @@ VkImageView Image::get_view(VkImageViewCreateInfo vk_info) {
                            : this->vk_info.imageType == VK_IMAGE_TYPE_2D ? VK_IMAGE_VIEW_TYPE_2D
                                                                          : VK_IMAGE_VIEW_TYPE_1D,
         vk_info.format = this->vk_info.format;
+    }
+    if(vk_info.subresourceRange.aspectMask == 0) {
+        const auto layer_count = (vk_info.viewType == VK_IMAGE_VIEW_TYPE_1D_ARRAY || vk_info.viewType == VK_IMAGE_VIEW_TYPE_2D_ARRAY ||
+                                  vk_info.viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY)
+                                     ? VK_REMAINING_ARRAY_LAYERS
+                                     : 1u;
         vk_info.subresourceRange = { .aspectMask = deduce_aspect() & (VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT),
                                      .levelCount = VK_REMAINING_MIP_LEVELS,
-                                     .layerCount = VK_REMAINING_ARRAY_LAYERS };
+                                     .layerCount = layer_count };
     }
 
     if(auto it = std::find_if(views.begin(), views.end(),

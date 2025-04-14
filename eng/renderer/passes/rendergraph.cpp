@@ -121,17 +121,17 @@ void RenderGraph::bake() {
         if(std::holds_alternative<Handle<Buffer>>(r.resource)) {
             auto& fb = fs.buffer_barriers.at(hist.first_index);
             auto& lb = fs.buffer_barriers.at(hist.last_index);
-            // if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
-            fb.srcStageMask = lb.dstStageMask;
-            fb.srcAccessMask = lb.dstAccessMask;
-            //}
+            if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
+                fb.srcStageMask = lb.dstStageMask;
+                fb.srcAccessMask = lb.dstAccessMask;
+            }
         } else if(std::holds_alternative<Handle<Image>>(r.resource)) {
             auto& fb = fs.image_barriers.at(hist.first_index);
             auto& lb = ls.image_barriers.at(hist.last_index);
-            // if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
-            fb.srcStageMask = lb.dstStageMask;
-            fb.srcAccessMask = lb.dstAccessMask;
-            //}
+            if(!r.flags.test(ResourceFlags::PER_FRAME_BIT)) {
+                fb.srcStageMask = lb.dstStageMask;
+                fb.srcAccessMask = lb.dstAccessMask;
+            }
             if(!hist.first_access.flags.test(AccessFlags::FROM_UNDEFINED_LAYOUT_BIT)) { fb.oldLayout = lb.newLayout; }
         } else {
             ENG_ERROR("Invalid resource type");

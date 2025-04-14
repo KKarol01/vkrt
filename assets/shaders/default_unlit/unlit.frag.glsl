@@ -18,7 +18,7 @@ float lindepth(float d, float n, float f) {
 layout(location = 0) out vec4 OUT_COLOR;
 
 float calc_closest_depth(vec3 wpos, vec2 vpos) {
-    ivec2 vpage_uv = vsm_calc_page_index(wpos);
+    ivec3 vpage_uv = ivec3(vsm_calc_page_index(wpos), 0);
     uint vpage = imageLoad(vsm_page_table, vpage_uv).r;
     if(vsm_is_alloc_backed(vpage)) {
         vec2 vpos_coords = vec2(vpos * float(VSM_PHYSICAL_PAGE_RESOLUTION));

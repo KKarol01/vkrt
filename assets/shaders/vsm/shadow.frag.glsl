@@ -8,7 +8,7 @@ layout(location = 0) in VsOut {
 } vsout;
 
 void main() {
-    ivec2 vpage_uv = vsm_calc_page_index(vsout.wpos);
+    ivec3 vpage_uv = ivec3(vsm_calc_page_index(vsout.wpos), 0);
     uint vpage = imageLoad(vsm_page_table, vpage_uv).r;
     if(vsm_is_alloc_dirty(vpage) && vsm_is_alloc_backed(vpage)) {
         vec2 vpos_coords = vec2(vsout.light_vpos.xy * float(VSM_PHYSICAL_PAGE_RESOLUTION));
