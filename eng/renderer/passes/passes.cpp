@@ -40,6 +40,27 @@ static void set_pc_vsm_debug_copy(VkCommandBuffer cmd) {
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
 
+static void set_pc_default_unlit(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+    auto& fd = r.get_frame_data();
+    auto slr = r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    auto depth_view = r.make_image_view(fd.gbuffer.depth_buffer_image);
+    auto page_view = r.make_image_view(r.vsm.dir_light_page_table);
+    auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
+    uint32_t bindless_indices[]{
+        r.get_bindless_index(r.index_buffer),
+        r.get_bindless_index(r.vertex_positions_buffer),
+        r.get_bindless_index(r.vertex_attributes_buffer),
+        r.get_bindless_index(fd.transform_buffers),
+        r.get_bindless_index(fd.constants),
+        r.get_bindless_index(r.mesh_instances_buffer),
+        r.get_bindless_index(r.vsm.constants_buffer),
+        r.get_bindless_index(shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+    };
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
+}
+
 namespace rendergraph2 {
 
 RenderPass::RenderPass(const std::string& name, const eng::rpp::PipelineSettings& settings)
@@ -293,7 +314,7 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd) {
     };
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-    set_pc_vsm_common(cmd);
+    set_pc_default_unlit(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
     vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
                                   sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
