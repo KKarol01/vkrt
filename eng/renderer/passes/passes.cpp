@@ -266,7 +266,7 @@ void VsmDebugPageCopyPass::render(VkCommandBuffer cmd) {
 DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
     : RenderPass("DefaultUnlitPass",
                  eng::rpp::PipelineSettings{
-                     .settings = RasterizationSettings{ .depth_test = true, .depth_write = false, .depth_op = VK_COMPARE_OP_LESS_OR_EQUAL },
+                     .settings = RasterizationSettings{ .depth_test = true, .depth_write = false, .depth_op = VK_COMPARE_OP_EQUAL },
                      .shaders = { "default_unlit/unlit.vert.glsl", "default_unlit/unlit.frag.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->get_frame_data().gbuffer.color_image; }, ResourceFlags::PER_FRAME_BIT),

@@ -43,6 +43,8 @@ void main() {
     float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
+    const float vcascade = ceil(length(vec3(constants.view * vec4(vsout.position, 1.0)))) / 8.0;
+    OUT_COLOR = vec4(vec3(vcascade), 1.0);
     vec2 vpi = vsm_calc_page_index(vsout.position);
     //OUT_COLOR = vec4(pow(vec2(vpi) / 64.0, vec2(8.0)) * 16.0, 0.0, 1.0);
 #if 0
