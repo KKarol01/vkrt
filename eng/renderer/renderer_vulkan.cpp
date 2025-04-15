@@ -84,10 +84,10 @@ void RendererVulkan::initialize_vulkan() {
     auto phys_ret = selector.require_present()
                         .set_surface(window_surface)
                         .set_minimum_version(1, 3)
-                        .add_required_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
-                        .add_required_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
-                        .add_required_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
-                        .add_required_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
+                        .add_desired_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+                        .add_desired_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
+                        .add_desired_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
+                        .add_desired_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
                         .add_required_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)        // for imgui
                         .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME) // for imgui
                         .prefer_gpu_device_type()
@@ -95,7 +95,10 @@ void RendererVulkan::initialize_vulkan() {
                         .select();
     if(!phys_ret) { throw std::runtime_error{ "Failed to select Vulkan Physical Device. Error: " }; }
 
-    vkb::DeviceBuilder device_builder{ phys_ret.value() };
+    supports_raytracing = phys_ret->is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
+                          phys_ret->is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+
+    auto ray_query = phys_ret->is_extension_present(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
     auto synch2_features = Vks(VkPhysicalDeviceSynchronization2Features{ .synchronization2 = true });
 
@@ -148,15 +151,12 @@ void RendererVulkan::initialize_vulkan() {
 
     rt_props = Vks(VkPhysicalDeviceRayTracingPipelinePropertiesKHR{});
     rt_acc_props = Vks(VkPhysicalDeviceAccelerationStructurePropertiesKHR{});
-
-    auto dev_ret = device_builder.add_pNext(&dev_2_features)
-                       .add_pNext(&dyn_features)
-                       .add_pNext(&synch2_features)
-                       .add_pNext(&dev_vk12_features)
-                       .add_pNext(&acc_features)
-                       .add_pNext(&rtpp_features)
-                       .add_pNext(&rayq_features)
-                       .build();
+    vkb::DeviceBuilder device_builder{ phys_ret.value() };
+    device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
+    if(supports_raytracing) {
+        device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&rayq_features);
+    }
+    auto dev_ret = device_builder.build();
     if(!dev_ret) { throw std::runtime_error{ "Failed to create Vulkan device. Error: " }; }
     vkb::Device vkb_device = dev_ret.value();
     volkLoadDevice(vkb_device.device);
