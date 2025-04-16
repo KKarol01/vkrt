@@ -20,7 +20,7 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/utils.hpp>
-#include <assets/shaders/bindless_structures.inc>
+#include <assets/shaders/bindless_structures.inc.glsl>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/descpool.hpp>
 #include <eng/renderer/submit_queue.hpp>
@@ -339,49 +339,54 @@ void RendererVulkan::initialize_resources() {
                                        Vks(VkBufferCreateInfo{ .size = sizeof(GPUVsmConstantsBuffer) + 64 * 64 * 4,
                                                                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
                                        VmaAllocationCreateInfo{});
-    GPUVsmConstantsBuffer vsm_constants{
-        .dir_light_view = glm::mat4{ 1.0f },
-        .num_pages_xy = 64,
-        .max_clipmap_index = 0,
-        .texel_resolution = 1024.0f * 8.0f,
-    };
-    // send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
+    // GPUVsmConstantsBuffer vsm_constants{
+    //     .dir_light_view = glm::mat4{ 1.0f },
+    //     .num_pages_xy = VSM_NUM_VIRTUAL_PAGES,
+    //     .max_clipmap_index = 0,
+    //     .texel_resolution = 1024.0f * 8.0f,
+    // };
+    //  send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
     vsm.free_allocs_buffer =
         make_buffer("vms alloc buffer",
                     Vks(VkBufferCreateInfo{ .size = sizeof(GPUVsmAllocConstantsBuffer), .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
                     VmaAllocationCreateInfo{});
-    GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0, .free_list = {} };
-    staging_buffer->send_to(vsm.constants_buffer, 0, vsm_constants).send_to(vsm.free_allocs_buffer, 0, &vsm_allocs).submit();
-    // send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
+    // GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0 };
+    // staging_buffer->send_to(vsm.constants_buffer, 0, vsm_constants).send_to(vsm.free_allocs_buffer, 0, vsm_allocs).submit();
+    //  send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
 
-    vsm.shadow_map_0 = make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                                                  .format = VK_FORMAT_R32_SFLOAT,
-                                                                  .extent = { 1024 * 8, 1024 * 8, 1 },
-                                                                  .mipLevels = 1,
-                                                                  .arrayLayers = 1,
-                                                                  .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                                  .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                                                           VK_IMAGE_USAGE_TRANSFER_DST_BIT });
+    vsm.shadow_map_0 =
+        make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                   .format = VK_FORMAT_R32_SFLOAT,
+                                                   .extent = { VSM_PHYSICAL_PAGE_RESOLUTION, VSM_PHYSICAL_PAGE_RESOLUTION, 1 },
+                                                   .mipLevels = 1,
+                                                   .arrayLayers = 1,
+                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT });
 
     vsm.dir_light_page_table =
         make_image("vsm dir light 0 page table",
-                   VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                      .format = VK_FORMAT_R32_SFLOAT,
-                                      .extent = { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 },
-                                      .mipLevels = 1,
-                                      .arrayLayers = 4,
-                                      .samples = VK_SAMPLE_COUNT_1_BIT,
-                                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT });
+                   VkImageCreateInfo{
+                       .imageType = VK_IMAGE_TYPE_2D,
+                       .format = VK_FORMAT_R32_UINT,
+                       .extent = { VSM_NUM_VIRTUAL_PAGES, VSM_NUM_VIRTUAL_PAGES, 1 },
+                       .mipLevels = 1,
+                       .arrayLayers = VSM_NUM_CLIPMAPS,
+                       .samples = VK_SAMPLE_COUNT_1_BIT,
+                       .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                   });
 
     vsm.dir_light_page_table_rgb8 =
         make_image("vsm dir light 0 page table rgb8",
-                   VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                      .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                      .extent = { vsm_constants.num_pages_xy, vsm_constants.num_pages_xy, 1 },
-                                      .mipLevels = 1,
-                                      .arrayLayers = 4,
-                                      .samples = VK_SAMPLE_COUNT_1_BIT,
-                                      .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
+                   VkImageCreateInfo{
+                       .imageType = VK_IMAGE_TYPE_2D,
+                       .format = VK_FORMAT_R8G8B8A8_UNORM,
+                       .extent = { VSM_NUM_VIRTUAL_PAGES, VSM_NUM_VIRTUAL_PAGES, 1 },
+                       .mipLevels = 1,
+                       .arrayLayers = VSM_NUM_CLIPMAPS,
+                       .samples = VK_SAMPLE_COUNT_1_BIT,
+                       .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+                   });
 
     create_window_sized_resources();
 
@@ -623,19 +628,27 @@ void RendererVulkan::update() {
 
         const auto dir_light_view = vsm_light_mat;
         // const auto dir_light_view = vsm_light_mat;
-        const auto dir_light_proj = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.1f, 50.0f);
+        const auto dir_light_proj = glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f,
+                                               -float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f, 0.1f, 50.0f);
         // const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
 
         GPUVsmConstantsBuffer vsmconsts{
             .dir_light_view = dir_light_view,
             .dir_light_proj = dir_light_proj,
-            .dir_light_proj_view = dir_light_proj * dir_light_view,
             .dir_light_dir = ldir,
-            .num_pages_xy = 64,
+            .num_pages_xy = VSM_NUM_VIRTUAL_PAGES,
             .max_clipmap_index = 0,
             .texel_resolution = 8.0f * 1024.0f,
             .num_frags = 0,
         };
+
+        for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+            vsmconsts.dir_light_proj_view[i] =
+                glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
+                           float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), -float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
+                           float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), 0.1f, 50.0f) *
+                dir_light_view;
+        }
 
         GPUConstantsBuffer constants{
             .view = Engine::get().camera->get_view(),
@@ -644,6 +657,7 @@ void RendererVulkan::update() {
             .inv_view = glm::inverse(Engine::get().camera->get_view()),
             .inv_proj = glm::inverse(Engine::get().camera->get_projection()),
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
+            .cam_pos = Engine::get().camera->pos,
         };
         staging_buffer->send_to(fd.constants, 0ull, constants).send_to(vsm.constants_buffer, 0ull, vsmconsts).submit();
     }
@@ -786,18 +800,19 @@ void RendererVulkan::update_transform(components::Entity entity) {
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
 
-size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) {
+size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) {
     struct ImguiTextureId {
         ImTextureID id;
         VkImage image;
         ImageFilter filter;
         ImageAddressing addressing;
+        uint32_t layer;
     };
     static std::unordered_multimap<Handle<Image>, ImguiTextureId> tex_ids;
     auto range = tex_ids.equal_range(handle);
     auto delete_it = tex_ids.end();
     for(auto it = range.first; it != range.second; ++it) {
-        if(it->second.filter == filter && it->second.addressing == addressing) {
+        if(it->second.filter == filter && it->second.addressing == addressing && it->second.layer == layer) {
             if(it->second.image != get_image(handle).image) {
                 ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(it->second.id));
                 delete_it = it;
@@ -808,11 +823,15 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter fi
     }
     if(delete_it != tex_ids.end()) { tex_ids.erase(delete_it); }
     ImguiTextureId id{
-        .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(samplers.get_sampler(filter, addressing),
-                                                                        get_image(handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
+        .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(
+            samplers.get_sampler(filter, addressing),
+            get_image(handle).get_view(Vks(VkImageViewCreateInfo{
+                .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .baseArrayLayer = layer, .layerCount = 1 } })),
+            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
         .image = get_image(handle).image,
         .filter = filter,
         .addressing = addressing,
+        .layer = layer,
     };
     tex_ids.emplace(handle, id);
     return id.id;

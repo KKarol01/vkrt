@@ -4,13 +4,12 @@
 
 layout(location = 0) out VsOut {
     vec3 wpos;
-    vec3 light_vpos;
 } vsout;
 
 void main() {
     vsout.wpos = vec3(transforms_arr[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0));
-    gl_Position = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vec4(vsout.wpos, 1.0); // todo: replace with dir_light_proj_view after initial impl is working.
-    vsout.light_vpos = vec3(vsm_calc_virtual_coords(vsout.wpos), gl_Position.z);
+    gl_Position = vsm_constants.dir_light_proj_view[0] * vec4(vsout.wpos, 1.0); 
+    // vsout.light_vpos = vec3(vsm_calc_virtual_coords(vsout.wpos), gl_Position.z);
 
 #if 0
     vsm_rclip_0_mat = proj_view * light_view;

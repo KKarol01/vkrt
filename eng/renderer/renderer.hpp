@@ -109,7 +109,7 @@ class Renderer {
     virtual void instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
     virtual void update_transform(components::Entity entity) = 0;
-    virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) = 0;
+    virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) = 0;
     virtual Handle<Image> get_color_output_texture() const = 0;
     virtual RenderMaterial get_material(Handle<RenderMaterial> handle) const = 0;
     virtual VsmData& get_vsm_data() = 0;

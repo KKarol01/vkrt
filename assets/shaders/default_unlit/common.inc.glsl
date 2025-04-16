@@ -2,7 +2,7 @@
 #define UNLIT_COMMON_H
 
 #ifndef NO_BINDLESS_STRUCTS_INCLUDE
-#include "./bindless_structures.inc"
+#include "./bindless_structures.inc.glsl"
 #endif
 
 #ifndef NO_PUSH_CONSTANTS

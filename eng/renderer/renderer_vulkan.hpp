@@ -162,7 +162,7 @@ class RendererVulkan : public Renderer {
     void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(components::Entity entity) final;
-    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing) final;
+    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
     RenderMaterial get_material(Handle<RenderMaterial> handle) const final;
     VsmData& get_vsm_data() final;

@@ -75,9 +75,17 @@ void eng_ui_update() {
         // used primarily for debug output
         ImGui::SetCursorScreenPos(render_output_next_row);
         if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {
-            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8, ImageFilter::NEAREST, ImageAddressing::CLAMP), { 128.0f, 128.0 });
+            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
+                                                        ImageFilter::NEAREST, ImageAddressing::CLAMP, 0),
+                         { 128.0f, 128.0 });
             ImGui::SameLine();
-            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().shadow_map_0, ImageFilter::NEAREST, ImageAddressing::CLAMP), { 128.0f, 128.0 });
+            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
+                                                        ImageFilter::NEAREST, ImageAddressing::CLAMP, 1),
+                         { 128.0f, 128.0 });
+            ImGui::SameLine();
+            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().shadow_map_0, ImageFilter::NEAREST,
+                                                        ImageAddressing::CLAMP, 0),
+                         { 128.0f, 128.0 });
             if(ImGui::SliderFloat3("debug dir light", g_ctx->engine->scene->debug_dir_light_dir, -1.0f, 1.0f)) {}
             if(ImGui::SliderFloat3("debug dir pos", g_ctx->engine->scene->debug_dir_light_pos, -10.0f, 10.0f)) {}
         }
@@ -92,7 +100,7 @@ UIContext* eng_ui_get_context() { return g_ctx; }
 
 ImTextureID get_imgui_render_output_descriptor() {
     return static_cast<ImTextureID>(g_ctx->engine->renderer->get_imgui_texture_id(g_ctx->engine->renderer->get_color_output_texture(),
-                                                                                  ImageFilter::LINEAR, ImageAddressing::CLAMP));
+                                                                                  ImageFilter::LINEAR, ImageAddressing::CLAMP, 0));
 }
 
 void draw_scene_instance_tree(scene::NodeInstance* i) {

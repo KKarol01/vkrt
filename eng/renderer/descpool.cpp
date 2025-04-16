@@ -1,6 +1,6 @@
 #include "./descpool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
-#include <assets/shaders/bindless_structures.inc>
+#include <assets/shaders/bindless_structures.inc.glsl>
 
 BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev) {
     if(!dev) { return; }
