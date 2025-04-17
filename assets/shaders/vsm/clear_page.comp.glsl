@@ -9,7 +9,7 @@ void main() {
     const int idx = int(gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_WorkGroupSize.x * gl_NumWorkGroups.x);
     // vsm_alloc_constants.free_list[idx] = idx;
 
-    if(gl_GlobalInvocationID.x >= VSM_NUM_VIRTUAL_PAGES || gl_GlobalInvocationID.y >= VSM_NUM_VIRTUAL_PAGES) { return; }
+    if(gl_GlobalInvocationID.x >= VSM_VIRTUAL_PAGE_RESOLUTION || gl_GlobalInvocationID.y >= VSM_VIRTUAL_PAGE_RESOLUTION) { return; }
     for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
         imageStore(vsm_page_table, ivec3(gl_GlobalInvocationID.xy, i), ivec4(0));
     }

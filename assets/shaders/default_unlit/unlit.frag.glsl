@@ -39,21 +39,28 @@ void main() {
     vec4 col_diffuse = texture(combinedImages_2d[meshes_arr[vsout.instance_index].color_texture_idx], vsout.uv);
 
     // vec2 vcoords = vsm_calc_virtual_coords(vsout.position);
-    // vec4 vlight_pos = vsm_constants.dir_light_proj * vsm_constants.dir_light_view * vec4(vsout.position, 1.0);
     // vec3 light_dir = normalize(vec3(vsm_constants.dir_light_view * vec4(0.0, 0.0, -1.0, 0.0)));
     // vlight_pos /= vlight_pos.w;
     // vlight_pos.xy = vlight_pos.xy * 0.5 + 0.5;
-    float vlight_proj_dist = vsm_calc_virtual_page_texel(vsout.position).ndc.z;
+    vec3 vndc = vsm_calc_virtual_page_texel(vsout.position).ndc;
+    ivec3 vaddr = vsm_calc_virtual_page_texel(vsout.position).addr;
+    vec3 vlight_pos = vsm_calc_rclip(vsout.position, vaddr.z);
+    //float vlight_proj_dist = vsm_calc_virtual_page_texel(vsout.position).ndc.z;
+    float vlight_proj_dist = vlight_pos.z;
     float closest_depth = calc_closest_depth(vsout.position);
-    float current_depth = vlight_proj_dist - 0.00004;// - max(0.001 * (1.0 - dot(vsout.normal, light_dir)), 0.00001);
+    float current_depth = vlight_proj_dist - 0.008;// - max(0.001 * (1.0 - dot(vsout.normal, light_dir)), 0.00001);
     float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
-    int vcascade = vsm_calc_virtual_page_texel(vsout.position).addr.z;
-    ivec2 vcascadeidx = vsm_calc_virtual_page_texel(vsout.position).addr.xy;
-    //OUT_COLOR = vec4(vec3(vcascade) / 8.0, 1.0);
-    //OUT_COLOR = vec4(vec3(vsm_calc_virtual_page_texel(vsout.position).ndc), 1.0);
-    //OUT_COLOR = vec4(vec2(vcascadeidx) / 64.0, 0.0, 1.0);
+    // int vcascade = vsm_calc_virtual_page_texel(vsout.position).addr.z;
+    // ivec2 vcascadeidx = vsm_calc_virtual_page_texel(vsout.position).addr.xy;
+    // OUT_COLOR = vec4(fract(vndc.xy * 0.5 + 0.5), 0.0, 1.0);
+    // vec2 ax = vec2(vaddr.xy) / float(VSM_VIRTUAL_PAGE_RESOLUTION);
+    // OUT_COLOR = vec4(sin(ax.x), cos(ax.y), 0.0, 1.0);
+    // OUT_COLOR = vec4(vec3(vaddr.z) / 8.0, 1.0);
+    // OUT_COLOR = vec4(vec3(vcascade) / 8.0, 1.0);
+    // OUT_COLOR = vec4(vec3(vsm_calc_virtual_page_texel(vsout.position).ndc), 1.0);
+    // OUT_COLOR = vec4(vec2(vcascadeidx) / 64.0, 0.0, 1.0);
 #if 0
     cam_pos = vec3(GetResource(GPUConstantsBuffer, constants_index).constants.inv_view * vec4(0.0, 0.0, 0.0, 1.0));
     light_view = GetResource(VsmBuffer, vsm_buffer_index).dir_light_view;

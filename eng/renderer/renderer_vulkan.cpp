@@ -341,7 +341,7 @@ void RendererVulkan::initialize_resources() {
                                        VmaAllocationCreateInfo{});
     // GPUVsmConstantsBuffer vsm_constants{
     //     .dir_light_view = glm::mat4{ 1.0f },
-    //     .num_pages_xy = VSM_NUM_VIRTUAL_PAGES,
+    //     .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
     //     .max_clipmap_index = 0,
     //     .texel_resolution = 1024.0f * 8.0f,
     // };
@@ -369,7 +369,7 @@ void RendererVulkan::initialize_resources() {
                    VkImageCreateInfo{
                        .imageType = VK_IMAGE_TYPE_2D,
                        .format = VK_FORMAT_R32_UINT,
-                       .extent = { VSM_NUM_VIRTUAL_PAGES, VSM_NUM_VIRTUAL_PAGES, 1 },
+                       .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
                        .mipLevels = 1,
                        .arrayLayers = VSM_NUM_CLIPMAPS,
                        .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -381,7 +381,7 @@ void RendererVulkan::initialize_resources() {
                    VkImageCreateInfo{
                        .imageType = VK_IMAGE_TYPE_2D,
                        .format = VK_FORMAT_R8G8B8A8_UNORM,
-                       .extent = { VSM_NUM_VIRTUAL_PAGES, VSM_NUM_VIRTUAL_PAGES, 1 },
+                       .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
                        .mipLevels = 1,
                        .arrayLayers = VSM_NUM_CLIPMAPS,
                        .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -636,7 +636,7 @@ void RendererVulkan::update() {
             .dir_light_view = dir_light_view,
             .dir_light_proj = dir_light_proj,
             .dir_light_dir = ldir,
-            .num_pages_xy = VSM_NUM_VIRTUAL_PAGES,
+            .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
             .max_clipmap_index = 0,
             .texel_resolution = 8.0f * 1024.0f,
             .num_frags = 0,
