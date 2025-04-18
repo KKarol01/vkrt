@@ -12,6 +12,7 @@ layout(scalar, push_constant) uniform PushConstants {
     uint32_t vsm_buffer_index;
     uint32_t constants_index;  // unused
     uint32_t page_table_index; // unused
+    uint32_t vsm_physical_depth_image_index; // unused
 };
 #define NO_PUSH_CONSTANTS
 #include "./vsm/common.inc.glsl"
@@ -24,6 +25,7 @@ layout(local_size_x = 8, local_size_y = 8) in;
 void main() {
     const ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
     if(any(greaterThanEqual(gid, ivec2(VSM_VIRTUAL_PAGE_RESOLUTION)))) { return; }
-    imageStore(dst_image, ivec3(gid, 0), vec4(imageLoad(src_image, ivec3(gid, 0)).r, 0.0, 0.0, 1.0));
-    imageStore(dst_image, ivec3(gid, 1), vec4(imageLoad(src_image, ivec3(gid, 1)).r, 0.0, 0.0, 1.0));
+    for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+        imageStore(dst_image, ivec3(gid, i), vec4(imageLoad(src_image, ivec3(gid, i)).r, 0.0, 0.0, 1.0));
+    }
 }

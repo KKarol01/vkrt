@@ -17,11 +17,16 @@ float lindepth(float d, float n, float f) {
 
 layout(location = 0) out vec4 OUT_COLOR;
 
-float calc_closest_depth(vec3 wpos) {
-    ivec2 ppage_texel = vsm_calc_physical_page_texel(wpos);
-    if(ppage_texel == VSM_INVALID_PAGE_TEXEL) { return 1.0; }
-    return uintBitsToFloat(imageLoad(vsm_pdepth_uint, ppage_texel).r);
-}
+//float calc_closest_depth(vec3 wpos) {
+//    //vec4 posc = vsm_constants.dir_light_proj_view[2] * vec4(world_pos, 1.0);
+//    //posc /= posc.w;
+//    //posc.xy = posc.xy * 0.5 + 0.5;
+//
+//    VsmAddresses addr = vsm_calc_addresses(wpos);
+//    ivec2 ppage_coords = vsm_calc_physical_address(addr.vsm_uv, addr.page_address);
+//    if(ppage_coords == VSM_INVALID_PAGE_TEXEL) { return 1.0; }
+//    return uintBitsToFloat(imageLoad(vsm_pdepth_uint, ppage_coords).r);
+//}
 
 const vec3 colors[] = vec3[](
     vec3(1.0, 0.0, 0.0),   // Red
@@ -34,24 +39,39 @@ const vec3 colors[] = vec3[](
     vec3(0.6, 0.2, 0.8)    // Purple
 );
 
-
 void main() {
     vec4 col_diffuse = texture(combinedImages_2d[meshes_arr[vsout.instance_index].color_texture_idx], vsout.uv);
 
-    // vec2 vcoords = vsm_calc_virtual_coords(vsout.position);
-    // vec3 light_dir = normalize(vec3(vsm_constants.dir_light_view * vec4(0.0, 0.0, -1.0, 0.0)));
-    // vlight_pos /= vlight_pos.w;
-    // vlight_pos.xy = vlight_pos.xy * 0.5 + 0.5;
-    vec3 vndc = vsm_calc_virtual_page_texel(vsout.position).ndc;
-    ivec3 vaddr = vsm_calc_virtual_page_texel(vsout.position).addr;
-    vec3 vlight_pos = vsm_calc_rclip(vsout.position, vaddr.z);
-    //float vlight_proj_dist = vsm_calc_virtual_page_texel(vsout.position).ndc.z;
-    float vlight_proj_dist = vlight_pos.z;
-    float closest_depth = calc_closest_depth(vsout.position);
-    float current_depth = vlight_proj_dist - 0.008;// - max(0.001 * (1.0 - dot(vsout.normal, light_dir)), 0.00001);
-    float shadowing = current_depth > closest_depth ? 0.3 : 1.0;
+    int clip_index = vsm_calc_clip_index(vsout.position);
+    vec3 sclip = vsm_calc_sclip(vsout.position, clip_index);
+    vec2 vsm_uv = vsm_calc_virtual_uv(vsout.position, clip_index);
+    uint vpage = vsm_read_virtual_page(vsm_uv, clip_index);
+
+    float vlight_proj_dist = sclip.z;
+    float closest_depth    = vsm_get_depth(vsm_uv, clip_index);
+
+    const float baseBias       = 0.00009;
+    const float slopeBiasConst = 0.003;
+    float cascadeBias = baseBias * exp2(float(clip_index));
+
+    float NdotL = max(0.0, dot(normalize(vsout.normal), normalize(vsm_constants.dir_light_dir)));
+    float slopeBias = slopeBiasConst * (1.0 - NdotL);
+
+    float depthBias = cascadeBias + slopeBias;
+
+    float current_depth = vlight_proj_dist - depthBias;
+    float shadowing     = current_depth > closest_depth ? 0.3 : 1.0;
+    ivec2 ppos_coords   = vsm_calc_physical_address(vsm_uv, clip_index);
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
+
+    //OUT_COLOR = vec4(vec3(closest_depth), 1.0);
+    //OUT_COLOR = vec4(vec2(ppos_coords) / vec2(VSM_PHYSICAL_PAGE_RESOLUTION), 0.0, 1.0);
+    //OUT_COLOR = vec4(vsm_uv, 0.0, 1.0);
+    //OUT_COLOR = vec4(sclip.xy * 0.5 + 0.5, 0.0, 1.0);
+    //OUT_COLOR = vec4(vec3(vsm_is_alloc_backed(vpage)), 1.0);
+    //OUT_COLOR = vec4(fract(addr.ndc.xy * 0.5 + 0.5), 0.0, 1.0);
+    //OUT_COLOR = vec4(vec2(addr.page_address.xy) / 64.0, 0.0, 1.0);
     // int vcascade = vsm_calc_virtual_page_texel(vsout.position).addr.z;
     // ivec2 vcascadeidx = vsm_calc_virtual_page_texel(vsout.position).addr.xy;
     // OUT_COLOR = vec4(fract(vndc.xy * 0.5 + 0.5), 0.0, 1.0);

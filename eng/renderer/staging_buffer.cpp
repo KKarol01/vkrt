@@ -256,7 +256,7 @@ void StagingBuffer::process_submission() {
     // }
     submission_done.wait(false);
     submission_done.store(false);
-    queue->with_cmd_buf(cmd).with_fence(fence).submit();
+    queue->with_cmd_buf(cmd).with_fence(fence).submit_wait(-1ull);
     Submission* current_submission = &get_submission();
     on_submit_complete_thread = std::jthread{ [this, fence, subm = current_submission] {
         queue->wait_fence(fence, -1ull);

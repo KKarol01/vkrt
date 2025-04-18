@@ -33,7 +33,9 @@ void main() {
     float depth;
     vec3 wpos = get_world_pos_from_depth_buffer(gid, depth);
     if(depth > 1.0 - EPS) { return; }
-    ivec3 vpi = vsm_calc_virtual_page_texel(wpos).addr;
+    int clip_index = vsm_calc_clip_index(wpos);
+    vec2 vsm_uv = vsm_calc_virtual_uv(wpos, clip_index);
+    ivec3 vpi = vsm_calc_virtual_page_address(vsm_uv, clip_index);
 
     for(;;) {
         ivec3 brd_vpi = subgroupBroadcastFirst(vpi); // match until your address gets broadcasted

@@ -1,6 +1,7 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/descpool.hpp>
+#include <assets/shaders/bindless_structures.inc.glsl>
 #include <ImGuizmo/ImGuizmo.h>
 #include "passes.hpp"
 
@@ -26,6 +27,27 @@ static void set_pc_vsm_common(VkCommandBuffer cmd) {
         r.get_bindless_index(fd.constants),
         0,
         r.get_bindless_index(shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+    };
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
+}
+
+static void set_pc_vsm_shadows(VkCommandBuffer cmd, int cascade_index) {
+    auto& r = *RendererVulkan::get_instance();
+    auto& fd = r.get_frame_data();
+    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
+                                       Vks(VkImageViewCreateInfo{
+                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
+    auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
+    uint32_t bindless_indices[]{
+        r.get_bindless_index(r.index_buffer),
+        r.get_bindless_index(r.vertex_positions_buffer),
+        r.get_bindless_index(fd.transform_buffers),
+        r.get_bindless_index(fd.constants),
+        r.get_bindless_index(r.vsm.constants_buffer),
+        r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        cascade_index,
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
@@ -232,11 +254,13 @@ void VsmShadowsPass::render(VkCommandBuffer cmd) {
                          .maxDepth = 1.0f };
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-    set_pc_vsm_common(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
-    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
-                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
-                                  0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+    for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+        set_pc_vsm_shadows(cmd, VSM_NUM_CLIPMAPS - i - 1);
+        vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
+                                      sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
+                                      0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+    }
     vkCmdEndRendering(cmd);
 }
 

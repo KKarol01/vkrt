@@ -48,41 +48,51 @@ layout(scalar, push_constant) uniform PushConstants {
 vec3 vsm_clip0_to_clip_n(vec3 o, int clip_index) { return vec3(o.xy * vec2(1.0 / float(1 << clip_index)), o.z); }
 
 vec3 vsm_calc_rclip(vec3 world_pos, int clip_index) {
-    vec4 posc = vsm_constants.dir_light_proj_view[0] * vec4(world_pos, 1.0);
+    vec4 posc = vsm_constants.dir_light_proj_view[clip_index] * vec4(world_pos, 1.0);
     posc /= posc.w;
-    return vsm_clip0_to_clip_n(posc.xyz, clip_index);
+    //return posc.xyz;
+    return vsm_clip0_to_clip_n(posc.xyz, 0);
 }
 
 vec3 vsm_calc_sclip(vec3 world_pos, int clip_index) {
-    vec3 res = vsm_calc_rclip(world_pos, clip_index);
-    vec3 posc = vsm_constants.dir_light_proj_view[0][3].xyz;
-    return res - vsm_clip0_to_clip_n(posc.xyz, clip_index);
+    vec4 posc = vsm_constants.dir_light_proj_view[clip_index] * vec4(world_pos, 1.0);
+    posc /= posc.w;
+    return posc.xyz;
 }
 
 int vsm_calc_clip_index(vec3 world_pos) {
-    //const float fcw = VSM_VIRTUAL_PAGE_RESOLUTION * VSM_VIRTUAL_PAGE_NUM_TEXELS / ()
-    float clip = distance(world_pos, constants.cam_pos);
+    float clip = exp(distance(world_pos, constants.cam_pos)) / VSM_CLIP0_LENGTH;
     clip = ceil(log2(clip));
     return int(clamp(clip, 0.0, float(VSM_NUM_CLIPMAPS - 1)));
 }
 
-//vec3 vsm_world_to_physical_coords(vec3 world_pos, int clipmap) {
-//
-//}
+vec2 vsm_calc_virtual_uv(vec3 wpos, int clip_index) {
+    vec3 ndc = vsm_calc_sclip(wpos, clip_index);
+    return fract(ndc.xy * 0.5 + 0.5);
+}
 
-//vec2 vsm_calc_virtual_coords(vec3 world_pos) { // todo: maybe rename to virtual_uvs
-//    const float clip_idx = clamp(max(0.0, ceil(log2(distance(world_pos, constants.cam_pos) / VSM_CLIP0_LENGTH))), 0.0, float(VSM_NUM_CLIPMAPS - 1));
-//    vec2 vtc = vsm_calc_sclip(world_pos, int(clip_idx)).xy;
-//    vtc = fract(vtc * 0.5 + 0.5);
-//    return vtc;
-//}
-//
-//
-//ivec2 vsm_calc_physical_texel_coords(uint vpage) {
-//    return ivec2(vsm_get_alloc_ppos_x(vpage) * VSM_VIRTUAL_PAGE_NUM_TEXELS, vsm_get_alloc_ppos_y(vpage) * VSM_VIRTUAL_PAGE_NUM_TEXELS);
-//    //const vec2 vtc = vsm_calc_virtual_coords(world_pos);
-//    //const vec2 page_start_vtc = fract(vec2(page_index) / vec2(vsm_constants.num_pages_xy));
-//    //return fract(vtc - page_start_vtc);
-//}
+ivec3 vsm_calc_virtual_page_address(vec2 uv, int clip_index) {
+    return ivec3(uv * imageSize(vsm_page_table).xy, clip_index);
+}
+
+uint vsm_read_virtual_page(vec2 uv, int clip_index) {
+    ivec3 coords = vsm_calc_virtual_page_address(uv, clip_index);
+    return imageLoad(vsm_page_table, coords).r;
+}
+
+ivec2 vsm_calc_physical_address(vec2 uv, int clip_index) {
+    uint page = vsm_read_virtual_page(uv, clip_index);
+    if(!vsm_is_alloc_backed(page)) { return VSM_INVALID_PAGE_TEXEL; }
+    vec2 page_pos_xy = vec2(vsm_get_alloc_ppos_x(page), vsm_get_alloc_ppos_y(page)) * VSM_VIRTUAL_PAGE_PHYSICAL_SIZE;
+    vec2 in_page_offset = mod(uv * vec2(VSM_PHYSICAL_PAGE_RESOLUTION), VSM_VIRTUAL_PAGE_PHYSICAL_SIZE);
+    return ivec2(page_pos_xy + in_page_offset);
+}
+
+float vsm_get_depth(vec2 uv, int clip_index) {
+    if(clip_index >= VSM_NUM_CLIPMAPS) { return 1.0; }
+    ivec2 coords = vsm_calc_physical_address(uv, clip_index);
+    if(coords == VSM_INVALID_PAGE_TEXEL) { return 1.0; }
+    return uintBitsToFloat(imageLoad(vsm_pdepth_uint, coords).r);
+}
 
 #endif

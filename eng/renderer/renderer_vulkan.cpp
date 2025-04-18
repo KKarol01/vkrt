@@ -642,12 +642,22 @@ void RendererVulkan::update() {
             .num_frags = 0,
         };
 
+        //for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+        //    vsmconsts.dir_light_proj_view[i] =
+        //        glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
+        //                   -float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
+        //                   0.1f, float(VSM_CLIP0_LENGTH) * std::exp2f(float(i))) *
+        //        dir_light_view;
+        //}
+
         for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+            float halfSize = float(VSM_CLIP0_LENGTH) * 0.5f * std::exp2f(float(i));
+            float splitNear = (i == 0) ? 0.1f : float(VSM_CLIP0_LENGTH) * std::exp2f(float(i - 1));
+            float splitFar = float(VSM_CLIP0_LENGTH) * std::exp2f(float(i));
+            splitNear = 1.0;
+            splitFar = 32.0;
             vsmconsts.dir_light_proj_view[i] =
-                glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
-                           float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), -float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
-                           float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), 0.1f, 50.0f) *
-                dir_light_view;
+                glm::ortho(-halfSize, +halfSize, -halfSize, +halfSize, splitNear, splitFar) * dir_light_view;
         }
 
         GPUConstantsBuffer constants{

@@ -75,13 +75,12 @@ void eng_ui_update() {
         // used primarily for debug output
         ImGui::SetCursorScreenPos(render_output_next_row);
         if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {
-            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
-                                                        ImageFilter::NEAREST, ImageAddressing::CLAMP, 0),
-                         { 128.0f, 128.0 });
-            ImGui::SameLine();
-            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
-                                                        ImageFilter::NEAREST, ImageAddressing::CLAMP, 1),
-                         { 128.0f, 128.0 });
+            for(int i = 0; i < 8; ++i) {
+                ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
+                                                            ImageFilter::NEAREST, ImageAddressing::CLAMP, i),
+                             { 64.0f, 64.0f });
+                ImGui::SameLine();
+            }
             ImGui::SameLine();
             ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().shadow_map_0, ImageFilter::NEAREST,
                                                         ImageAddressing::CLAMP, 0),

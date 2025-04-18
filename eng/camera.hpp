@@ -12,11 +12,11 @@ class Camera {
     glm::mat4 get_projection() const { return projection; }
     void on_mouse_move(float px, float py);
 
-    glm::vec3 pos{ 0.42441416 -0.041418266 -0.32279575 };
+    glm::vec3 pos{ -14.920987f, 14.891821f, -0.3303432f };
   private:
     glm::mat4 projection{ 1.0f };
     glm::mat4 view{ 1.0f };
-    float pitch{ 0.0f }, yaw{ 0.0f };
+    float pitch{ 0.0f }, yaw{ 3.14f };
     float lpx{ -1.0f }, lpy{ -1.0f };
     float last_press_time{ 0.0f };
     bool enabled{ false };
