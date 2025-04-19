@@ -50,20 +50,20 @@ void main() {
     float vlight_proj_dist = sclip.z;
     float closest_depth    = vsm_get_depth(vsm_uv, clip_index);
 
-    const float baseBias       = 0.00001;
-    const float slopeBiasConst = 0.0001;
-    float cascadeBias = baseBias * exp2(float(clip_index));
+    float baseBias       = 0.0001;
+    float slopeBiasConst = 0.0003;
+    float cascadeBias    = baseBias * exp2(float(clip_index));
 
-    float NdotL = max(0.0, dot(normalize(vsout.normal), normalize(vsm_constants.dir_light_dir)));
+    float NdotL     = max(0.0, dot(normalize(vsout.normal), normalize(vsm_constants.dir_light_dir)));
     float slopeBias = slopeBiasConst * (1.0 - NdotL);
 
-    float depthBias = cascadeBias + slopeBias;
+    float depthBias = mix(0.0, max(cascadeBias, slopeBias), clamp(float(clip_index), 0.0, 1.0));
 
     float current_depth = vlight_proj_dist - depthBias;
     float shadowing     = current_depth > closest_depth ? 0.3 : 1.0;
-    ivec2 ppos_coords   = vsm_calc_physical_address(vsm_uv, clip_index);
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
+
 
     //OUT_COLOR = vec4(vec3(closest_depth), 1.0);
     //OUT_COLOR = vec4(vec2(ppos_coords) / vec2(VSM_PHYSICAL_PAGE_RESOLUTION), 0.0, 1.0);

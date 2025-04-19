@@ -269,7 +269,7 @@ void RendererVulkan::initialize_resources() {
     staging_buffer = new StagingBuffer{
         submit_queue,
         make_buffer("staging_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 64 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR }),
+                    Vks(VkBufferCreateInfo{ .size = 128 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR }),
                     VmaAllocationCreateInfo{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
                                              .usage = VMA_MEMORY_USAGE_AUTO,
                                              .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT })
@@ -278,18 +278,19 @@ void RendererVulkan::initialize_resources() {
     vertex_positions_buffer =
         make_buffer("vertex_positions_buffer", buffer_resizable,
                     Vks(VkBufferCreateInfo{
-                        .size = 1024ull,
+                        .size = 1024 * 1024 * 128,
                         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                     }),
                     VmaAllocationCreateInfo{});
     vertex_attributes_buffer =
         make_buffer("vertex_attributes_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024ull, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
+                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
+                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
                     VmaAllocationCreateInfo{});
     index_buffer =
         make_buffer("index_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024ull,
+                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
                                             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
@@ -329,10 +330,11 @@ void RendererVulkan::initialize_resources() {
             make_buffer(std::format("constants_{}", i),
                         Vks(VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
                         VmaAllocationCreateInfo{});
-        fd.transform_buffers =
-            make_buffer(std::format("transform_buffer_{}", i),
-                        Vks(VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                        VmaAllocationCreateInfo{});
+        fd.transform_buffers = make_buffer(std::format("transform_buffer_{}", i), buffer_resizable,
+                                           Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
+                                                                   .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
+                                           VmaAllocationCreateInfo{});
     }
 
     vsm.constants_buffer = make_buffer("vms buffer",
@@ -616,7 +618,7 @@ void RendererVulkan::update() {
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
         const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
-        const auto eye = -ldir * 100.0f;
+        const auto eye = -ldir * 50.0f;
         auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
         const auto camdir = Engine::get().camera->pos - eye;
         const auto d = glm::dot(ldir, camdir);
@@ -643,7 +645,7 @@ void RendererVulkan::update() {
             float splitNear = (i == 0) ? 0.1f : float(VSM_CLIP0_LENGTH) * std::exp2f(float(i - 1));
             float splitFar = float(VSM_CLIP0_LENGTH) * std::exp2f(float(i));
             splitNear = 1.0;
-            splitFar = 200.0;
+            splitFar = 75.0;
             vsmconsts.dir_light_proj_view[i] =
                 glm::ortho(-halfSize, +halfSize, -halfSize, +halfSize, splitNear, splitFar) * dir_light_view;
         }
