@@ -26,10 +26,10 @@ layout(location = 0) out VsOut {
 } vsout;
 
 void main() {
-    vec4 worldPos = transforms_arr[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0);
-    vsout.wpos = worldPos.xyz;
-    vec4 lightPos = vsm_constants.dir_light_proj_view[cascade_index] * worldPos;
-    vsout.vsm_uv     = clamp(lightPos.xy / lightPos.w * 0.5 + 0.5, vec2(0.0), vec2(0.999999));
-    vsout.lightProjZ = lightPos.z / lightPos.w;
-    gl_Position      = lightPos;
+    vec4 world_pos = transforms_arr[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0);
+    vsout.wpos = world_pos.xyz;
+    vec3 lightPos = vsm_calc_rclip(vsout.wpos, int(cascade_index));
+    vsout.vsm_uv     = vsm_calc_virtual_uv(vsout.wpos, int(cascade_index));
+    vsout.lightProjZ = lightPos.z;
+    gl_Position      = vec4(lightPos, 1.0);
 }

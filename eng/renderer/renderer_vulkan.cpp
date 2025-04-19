@@ -616,20 +616,16 @@ void RendererVulkan::update() {
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
         const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
-        const auto lpos = *(glm::vec3*)Engine::get().scene->debug_dir_light_pos;
-        // const auto ldir = glm::normalize(glm::vec3{ 1.0f, 0.0f, 0.0f });
-        const auto eye = -ldir * 25.0f;
-        // auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
-        auto vsm_light_mat = glm::lookAt(lpos, glm::vec3{ 0.0f }, glm::vec3{ 0.0f, 1.0f, 0.0f });
+        const auto eye = -ldir * 100.0f;
+        auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
         const auto camdir = Engine::get().camera->pos - eye;
         const auto d = glm::dot(ldir, camdir);
         auto proj_pos = -glm::vec4{ camdir - d * ldir, 0.0f };
         proj_pos = vsm_light_mat * proj_pos;
 
-        const auto dir_light_view = vsm_light_mat;
-        // const auto dir_light_view = vsm_light_mat;
+        const auto dir_light_view = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ glm::vec2{ proj_pos }, 0.0f }) * vsm_light_mat;
         const auto dir_light_proj = glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f,
-                                               -float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f, 0.1f, 50.0f);
+                                               -float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f, 0.1f, 200.0f);
         // const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
 
         GPUVsmConstantsBuffer vsmconsts{
@@ -638,24 +634,16 @@ void RendererVulkan::update() {
             .dir_light_dir = ldir,
             .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
             .max_clipmap_index = 0,
-            .texel_resolution = 8.0f * 1024.0f,
+            .texel_resolution = float(VSM_PHYSICAL_PAGE_RESOLUTION),
             .num_frags = 0,
         };
-
-        //for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
-        //    vsmconsts.dir_light_proj_view[i] =
-        //        glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
-        //                   -float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1), float(VSM_CLIP0_LENGTH) * 0.5f * float(i + 1),
-        //                   0.1f, float(VSM_CLIP0_LENGTH) * std::exp2f(float(i))) *
-        //        dir_light_view;
-        //}
 
         for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
             float halfSize = float(VSM_CLIP0_LENGTH) * 0.5f * std::exp2f(float(i));
             float splitNear = (i == 0) ? 0.1f : float(VSM_CLIP0_LENGTH) * std::exp2f(float(i - 1));
             float splitFar = float(VSM_CLIP0_LENGTH) * std::exp2f(float(i));
             splitNear = 1.0;
-            splitFar = 32.0;
+            splitFar = 200.0;
             vsmconsts.dir_light_proj_view[i] =
                 glm::ortho(-halfSize, +halfSize, -halfSize, +halfSize, splitNear, splitFar) * dir_light_view;
         }

@@ -43,15 +43,15 @@ void main() {
     vec4 col_diffuse = texture(combinedImages_2d[meshes_arr[vsout.instance_index].color_texture_idx], vsout.uv);
 
     int clip_index = vsm_calc_clip_index(vsout.position);
-    vec3 sclip = vsm_calc_sclip(vsout.position, clip_index);
+    vec3 sclip = vsm_calc_rclip(vsout.position, clip_index);
     vec2 vsm_uv = vsm_calc_virtual_uv(vsout.position, clip_index);
     uint vpage = vsm_read_virtual_page(vsm_uv, clip_index);
 
     float vlight_proj_dist = sclip.z;
     float closest_depth    = vsm_get_depth(vsm_uv, clip_index);
 
-    const float baseBias       = 0.00009;
-    const float slopeBiasConst = 0.003;
+    const float baseBias       = 0.00001;
+    const float slopeBiasConst = 0.0001;
     float cascadeBias = baseBias * exp2(float(clip_index));
 
     float NdotL = max(0.0, dot(normalize(vsout.normal), normalize(vsm_constants.dir_light_dir)));

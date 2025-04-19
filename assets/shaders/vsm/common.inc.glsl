@@ -50,20 +50,18 @@ vec3 vsm_clip0_to_clip_n(vec3 o, int clip_index) { return vec3(o.xy * vec2(1.0 /
 vec3 vsm_calc_rclip(vec3 world_pos, int clip_index) {
     vec4 posc = vsm_constants.dir_light_proj_view[clip_index] * vec4(world_pos, 1.0);
     posc /= posc.w;
-    //return posc.xyz;
-    return vsm_clip0_to_clip_n(posc.xyz, 0);
+    return posc.xyz;
+    //return vsm_clip0_to_clip_n(posc.xyz, 0);
 }
 
 vec3 vsm_calc_sclip(vec3 world_pos, int clip_index) {
-    vec4 posc = vsm_constants.dir_light_proj_view[clip_index] * vec4(world_pos, 1.0);
-    posc /= posc.w;
-    return posc.xyz;
+    return vsm_calc_rclip(world_pos, clip_index) - vsm_calc_rclip(vsm_constants.dir_light_proj_view[clip_index][3].xyz, clip_index);
 }
 
 int vsm_calc_clip_index(vec3 world_pos) {
-    float clip = exp(distance(world_pos, constants.cam_pos)) / VSM_CLIP0_LENGTH;
-    clip = ceil(log2(clip));
-    return int(clamp(clip, 0.0, float(VSM_NUM_CLIPMAPS - 1)));
+    float clip = (distance(world_pos, constants.cam_pos)) / VSM_CLIP0_LENGTH;
+    clip = ceil(log2(clip) + 2.0);
+    return int(clamp(clip, 1.0, float(VSM_NUM_CLIPMAPS - 1)));
 }
 
 vec2 vsm_calc_virtual_uv(vec3 wpos, int clip_index) {
