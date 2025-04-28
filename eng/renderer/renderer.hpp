@@ -9,6 +9,7 @@
 #include <eng/ecs.hpp>
 
 namespace gfx {
+
 enum class BatchFlags {};
 enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };
 enum class ImageFormat {
@@ -77,12 +78,12 @@ struct BLASInstanceSettings {
     components::Entity entity;
 };
 
-//struct ScreenRect {
-//    float x;
-//    float y;
-//    float w;
-//    float h;
-//};
+// struct ScreenRect {
+//     float x;
+//     float y;
+//     float w;
+//     float h;
+// };
 
 struct VsmData {
     Handle<Buffer> constants_buffer;
@@ -101,7 +102,7 @@ class Renderer {
     virtual void init() = 0;
     virtual void update() = 0;
     virtual void on_window_resize() = 0;
-    //virtual void set_screen(ScreenRect screen) = 0;
+    // virtual void set_screen(ScreenRect screen) = 0;
     virtual Handle<Image> batch_texture(const ImageDescriptor& batch) = 0;
     virtual Handle<Material> batch_material(const MaterialDescriptor& batch) = 0;
     virtual Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) = 0;
@@ -115,4 +116,4 @@ class Renderer {
     virtual VsmData& get_vsm_data() = 0;
 };
 
-} // namespace ren
+} // namespace gfx
