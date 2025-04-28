@@ -4,8 +4,8 @@
 #include <vulkan/vulkan.h>
 #include <eng/renderer/pipeline.hpp>
 
-namespace rendergraph2 {
-using namespace eng::rpp;
+namespace gfx {
+
 class RenderGraph;
 struct Resource;
 
@@ -28,7 +28,7 @@ struct Access {
 
 class RenderPass {
   public:
-    RenderPass(const std::string& name, const eng::rpp::PipelineSettings& settings = {});
+    RenderPass(const std::string& name, const PipelineSettings& settings = {});
     virtual ~RenderPass() noexcept = default;
     virtual void render(VkCommandBuffer cmd) = 0;
 
@@ -93,4 +93,4 @@ class SwapchainPresentPass final : public RenderPass {
     void render(VkCommandBuffer cmd) final;
 };
 
-} // namespace rendergraph2
+} // namespace gfx

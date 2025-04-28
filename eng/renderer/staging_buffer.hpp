@@ -1,7 +1,7 @@
 #pragma once
 
 #include <eng/renderer/submit_queue.hpp>
-#include <eng/handle.hpp>
+#include <eng/common/handle.hpp>
 #include <vulkan/vulkan.h>
 #include <span>
 #include <vector>
@@ -10,6 +10,8 @@
 #include <atomic>
 #include <memory>
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
+
+namespace gfx {
 
 class StagingBuffer {
     struct TransferBuffer {
@@ -88,3 +90,5 @@ inline StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout 
                                              const VkBufferImageCopy2 region, const std::vector<T>& ts) {
     return send_to(image, final_layout, region, std::span{ ts.begin(), ts.end() });
 }
+
+} // namespace gfx

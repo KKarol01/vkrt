@@ -8,79 +8,13 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <eng/common/sparseset.hpp>
 
 namespace components {
 using Entity = uint32_t;
 using component_id_t = uint32_t;
-inline static constexpr Entity MAX_ENTITY = ~Entity{};
-inline static constexpr Entity MAX_COMPONENTS = 32;
-
-class SparseSet {
-  public:
-    struct Iterator {
-        const Entity* entity{};
-        size_t dense_idx{};
-    };
-
-    Iterator insert(Entity e) {
-        if(e == MAX_ENTITY) { return Iterator{}; }
-        if(has(e)) { return make_iterator(e); }
-        maybe_resize_sparse(e);
-        sparse.at(e) = free_list_head;
-        dense.insert(dense.begin() + free_list_head, e);
-        ++free_list_head;
-        return make_iterator(e);
-    }
-
-    Iterator insert() {
-        Iterator it{};
-        size_t cur = free_list_head;
-        while(cur < dense.size()) {
-            const auto val = dense.at(cur);
-            if(has(val)) {
-                ++cur;
-                continue;
-            }
-            dense.erase(dense.begin() + free_list_head, dense.begin() + cur);
-            assert(dense.at(free_list_head) == val);
-            sparse.at(val) = free_list_head;
-            ++free_list_head;
-            return make_iterator(val);
-        }
-        if(cur != free_list_head) { dense.erase(dense.begin() + free_list_head, dense.end()); }
-        return insert(free_list_head);
-    }
-
-    bool has(Entity e) const {
-        return e < MAX_ENTITY && sparse.size() > e && free_list_head > sparse.at(e) && dense.at(sparse.at(e)) == e;
-    }
-
-    void destroy(Entity e) {
-        if(!has(e)) { return; }
-        const auto idx = sparse.at(e);
-        std::swap(dense.at(idx), dense.at(--free_list_head));
-        sparse.at(dense.at(idx)) = idx;
-    }
-
-    Iterator get(Entity e) const { return make_iterator(e); }
-
-    size_t size() const { return dense.size(); }
-
-    std::span<const Entity> get_dense() const { return std::span{ dense.begin(), dense.end() }; }
-
-  private:
-    Iterator make_iterator(Entity e) const {
-        const auto* ptr = &dense.at(sparse.at(e));
-        return { ptr, static_cast<size_t>(ptr - dense.data()) };
-    }
-    void maybe_resize_sparse(Entity e) {
-        if(sparse.size() <= e) { sparse.resize(e + 1); }
-    }
-
-    std::vector<Entity> sparse;
-    std::vector<Entity> dense;
-    size_t free_list_head{};
-};
+inline static constexpr Entity s_max_entity = ~Entity{};
+inline static constexpr Entity s_max_components = 32;
 
 class ComponentArrayBase {
   public:
@@ -117,7 +51,7 @@ template <typename T> class ComponentArray : public ComponentArrayBase {
     size_t size() const { return entities.size(); }
 
   private:
-    SparseSet entities;
+    SparseSet<> entities;
     std::vector<T> components;
 };
 
@@ -131,7 +65,7 @@ struct ComponentIdGenerator {
 
 class Storage {
   public:
-    Entity create() { return *entities.insert().entity; }
+    Entity create() { return *entities.insert().key; }
 
     template <typename Component, typename... Args> Component& emplace(Entity e, Args&&... args) {
         return *try_emplace<Component>(e, std::forward<Args>(args)...);
@@ -183,7 +117,7 @@ class Storage {
         return *static_cast<ComponentArray<Component>*>(&*comp_arr);
     }
 
-    std::array<std::unique_ptr<ComponentArrayBase>, MAX_COMPONENTS> component_arrays;
-    SparseSet entities;
+    std::array<std::unique_ptr<ComponentArrayBase>, s_max_components> component_arrays;
+    SparseSet<uint32_t> entities;
 };
 } // namespace components

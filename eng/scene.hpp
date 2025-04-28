@@ -7,17 +7,17 @@
 #include "./common/types.hpp"
 #include "./common/spatial.hpp"
 #include <eng/common/components.hpp>
-#include "./handle.hpp"
-#include "./ecs.hpp"
+#include <eng/common/handle.hpp>
+#include <eng/ecs.hpp>
 #include <eng/renderer/renderer.hpp>
 
 namespace scene {
 
 struct Primitive {
-    Handle<RenderGeometry> geometry_handle{};
-    Handle<RenderMesh> mesh_handle{};
-    Handle<RenderBLAS> blas_handle{};
-    Handle<RenderMaterial> material_handle{};
+    Handle<gfx::Geometry> geometry_handle{};
+    Handle<gfx::Mesh> mesh_handle{};
+    Handle<gfx::BLAS> blas_handle{};
+    Handle<gfx::Material> material_handle{};
 };
 
 struct Node {

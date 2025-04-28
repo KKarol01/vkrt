@@ -42,6 +42,8 @@ static float halton(int i, int b) {
     return r;
 }
 
+using namespace gfx;
+
 void RendererVulkan::init() {
     initialize_vulkan();
     initialize_resources();
@@ -447,7 +449,6 @@ void RendererVulkan::create_window_sized_resources() {
 }
 
 void RendererVulkan::build_render_graph() {
-    using namespace rendergraph2;
     rendergraph.clear_passes();
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
     rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
@@ -618,7 +619,7 @@ void RendererVulkan::update() {
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
         const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
-        const auto eye = -ldir * 50.0f;
+        const auto eye = -ldir * 25.0f;
         auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
         const auto camdir = Engine::get().camera->pos - eye;
         const auto d = glm::dot(ldir, camdir);
@@ -627,7 +628,7 @@ void RendererVulkan::update() {
 
         const auto dir_light_view = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ glm::vec2{ proj_pos }, 0.0f }) * vsm_light_mat;
         const auto dir_light_proj = glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f,
-                                               -float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f, 0.1f, 200.0f);
+                                               -float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f, 0.1f, 30.0f);
         // const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
 
         GPUVsmConstantsBuffer vsmconsts{
@@ -689,20 +690,20 @@ void RendererVulkan::update() {
 
 void RendererVulkan::on_window_resize() {
     flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT);
-    set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
+    // set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
 }
 
-void RendererVulkan::set_screen(ScreenRect screen) {
-    assert(false);
-    // screen_rect = screen;
-    //  ENG_WARN("TODO: Resize resources on new set_screen()");
-}
+// void RendererVulkan::set_screen(ScreenRect screen) {
+//     assert(false);
+//     // screen_rect = screen;
+//     //  ENG_WARN("TODO: Resize resources on new set_screen()");
+// }
 
 static VkFormat deduce_image_format(ImageFormat format) {
     switch(format) {
-    case ImageFormat::UNORM:
+    case ImageFormat::R8G8B8A8_UNORM:
         return VK_FORMAT_R8G8B8A8_UNORM;
-    case ImageFormat::SRGB:
+    case ImageFormat::R8G8B8A8_SRGB:
         return VK_FORMAT_R8G8B8A8_SRGB;
     default: {
         assert(false);
@@ -713,11 +714,11 @@ static VkFormat deduce_image_format(ImageFormat format) {
 
 static VkImageType deduce_image_type(ImageType dim) {
     switch(dim) {
-    case ImageType::DIM_1D:
+    case ImageType::TYPE_1D:
         return VK_IMAGE_TYPE_1D;
-    case ImageType::DIM_2D:
+    case ImageType::TYPE_2D:
         return VK_IMAGE_TYPE_2D;
-    case ImageType::DIM_3D:
+    case ImageType::TYPE_3D:
         return VK_IMAGE_TYPE_3D;
     default: {
         assert(false);
@@ -739,24 +740,27 @@ Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
     return handle;
 }
 
-Handle<RenderMaterial> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
-    return Handle<RenderMaterial>{ *materials.insert(RenderMaterial{ .textures = desc }) };
+Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
+    return Handle<Material>{ *materials.insert(Material{ .textures = desc }) };
 }
 
-Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
+Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
     const auto total_vertices = get_total_vertices();
     const auto total_indices = get_total_indices();
 
-    RenderGeometry geometry{ .metadata = geometry_metadatas.emplace(),
-                             .vertex_offset = total_vertices,
-                             .vertex_count = (uint32_t)batch.vertices.size(),
-                             .index_offset = total_indices,
-                             .index_count = (uint32_t)batch.indices.size() };
+    Geometry geometry{ .metadata = geometry_metadatas.emplace(),
+                       .vertex_offset = total_vertices,
+                       .vertex_count = (uint32_t)batch.vertices.size(),
+                       .index_offset = total_indices,
+                       .index_count = (uint32_t)batch.indices.size() };
 
     upload_vertices.insert(upload_vertices.end(), batch.vertices.begin(), batch.vertices.end());
     upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
 
-    Handle<RenderGeometry> handle = geometries.insert(geometry);
+    this->total_vertices += geometry.vertex_count;
+    this->total_indices += geometry.index_count;
+
+    Handle<Geometry> handle = geometries.insert(geometry);
 
     flags.set(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT);
 
@@ -769,10 +773,10 @@ Handle<RenderGeometry> RendererVulkan::batch_geometry(const GeometryDescriptor& 
     return handle;
 }
 
-Handle<RenderMesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
-    RenderMesh mesh_batch{
+Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
+    Mesh mesh_batch{
         .geometry = batch.geometry,
-        .metadata = mesh_metadatas.emplace(),
+        .metadata = mesh_metadatas.insert(MeshMetadata{}),
     };
     return meshes.insert(mesh_batch);
 }
@@ -839,8 +843,8 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter fi
 
 Handle<Image> RendererVulkan::get_color_output_texture() const { return get_frame_data().gbuffer.color_image; }
 
-RenderMaterial RendererVulkan::get_material(Handle<RenderMaterial> handle) const {
-    if(!handle) { return RenderMaterial{}; }
+Material RendererVulkan::get_material(Handle<Material> handle) const {
+    if(!handle) { return Material{}; }
     return materials.at(handle);
 }
 
@@ -908,9 +912,9 @@ void RendererVulkan::bake_indirect_commands() {
 
     for(uint32_t i = 0u; i < mesh_instances.size(); ++i) {
         const components::Renderable& mi = Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i));
-        const RenderMesh& mb = meshes.at(mi.mesh_handle);
-        const RenderGeometry& geom = geometries.at(mb.geometry);
-        const RenderMaterial& mat = materials.at(mi.material_handle);
+        const Mesh& mb = meshes.at(mi.mesh_handle);
+        const Geometry& geom = geometries.at(mb.geometry);
+        const Material& mat = materials.at(mi.material_handle);
         gpu_mesh_instances.push_back(GPUMeshInstance{
             .vertex_offset = geom.vertex_offset,
             .index_offset = geom.index_offset,
@@ -992,7 +996,7 @@ void RendererVulkan::build_blas() {
         .indexData = { .deviceAddress = get_buffer(index_buffer).bda },
     });
 
-    std::vector<const RenderGeometry*> dirty_batches;
+    std::vector<const Geometry*> dirty_batches;
     std::vector<VkAccelerationStructureGeometryKHR> blas_geos;
     std::vector<VkAccelerationStructureBuildGeometryInfoKHR> blas_geo_build_infos;
     std::vector<uint32_t> scratch_sizes;
@@ -1048,7 +1052,7 @@ void RendererVulkan::build_blas() {
                                  rt_acc_props.minAccelerationStructureScratchOffsetAlignment);
 
     for(uint32_t i = 0, scratch_offset = 0; const auto& acc_geoms : blas_geos) {
-        const RenderGeometry& geom = *dirty_batches.at(i);
+        const Geometry& geom = *dirty_batches.at(i);
         const GeometryMetadata& meta = geometry_metadatas.at(geom.metadata);
         blas_geo_build_infos.at(i).scratchData.deviceAddress = get_buffer(scratch_buffer).bda + scratch_offset;
         blas_geo_build_infos.at(i).dstAccelerationStructure = meta.blas;
@@ -1099,8 +1103,8 @@ void RendererVulkan::build_tlas() {
     for(uint32_t i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
         const uint32_t mi_idx = mesh_instance_idxs.at(blas_instances.at(i));
         const auto& mr = Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(mi_idx));
-        const RenderMesh& mb = meshes.at(mr.mesh_handle);
-        const RenderGeometry& geom = geometries.at(mb.geometry);
+        const Mesh& mb = meshes.at(mr.mesh_handle);
+        const Geometry& geom = geometries.at(mb.geometry);
         const MeshMetadata& mm = mesh_metadatas.at(mb.metadata);
         /*std::distance(mesh_instances.begin(),
                       std::find_if(mesh_instances.begin(), mesh_instances.end(),
@@ -1316,21 +1320,18 @@ void RendererVulkan::update_ddgi() {
 
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
                                            const VmaAllocationCreateInfo& vma_info) {
-    const auto handle =
-        buffers.emplace(Handle<Buffer>{ generate_handle }, Buffer{ name, dev, vma, vk_info, vma_info }).first->first;
+    const auto handle = buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
     return handle;
 }
 
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, buffer_resizable_t resizable,
                                            const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) {
-    const auto handle =
-        buffers.emplace(Handle<Buffer>{ generate_handle }, Buffer{ name, dev, vma, resizable, vk_info, vma_info })
-            .first->first;
+    const auto handle = buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
     return handle;
 }
 
 Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info) {
-    const auto handle = images.emplace(Handle<Image>{ generate_handle }, Image{ name, dev, vma, vk_info }).first->first;
+    const auto handle = images.insert(Image{ name, dev, vma, vk_info });
     return handle;
 }
 

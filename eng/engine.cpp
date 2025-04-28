@@ -74,7 +74,7 @@ void Engine::init() {
     if(monitor_videomode) { _refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
     // load_dll("eng_vk_renderer.dll", true, );
-    renderer = new RendererVulkan{};
+    renderer = new gfx::RendererVulkan{};
     scene = new scene::Scene{};
     UIInitData ui_init_data{ .engine = this, .callbacks = { .alloc = malloc, .free = free }, .context = &ui_ctx };
     eng_ui_init(&ui_init_data);

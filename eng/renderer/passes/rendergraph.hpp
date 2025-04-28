@@ -3,7 +3,7 @@
 #include <eng/renderer/common.hpp>
 #include <eng/renderer/passes/passes.hpp>
 
-namespace rendergraph2 {
+namespace gfx {
 
 enum class ResourceFlags : uint32_t {
     PER_FRAME_BIT = 0x1,
@@ -52,4 +52,4 @@ class RenderGraph {
     std::vector<RenderStage> stages;
 };
 
-} // namespace rendergraph2
+} // namespace gfx

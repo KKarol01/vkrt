@@ -7,7 +7,17 @@
 template <typename T, typename Storage = uint32_t> struct Handle;
 
 template <typename T, typename Storage> struct HandleGenerator {
-    static Storage gen() { return counter++; }
+    static constexpr Storage s_max_counter = ~Storage{};
+    static Storage gen() {
+        auto ct = counter.load(std::memory_order_relaxed);
+        while(true) {
+            if(ct == s_max_counter) {
+                assert(false);
+                return ct;
+            }
+            if(counter.compare_exchange_weak(ct, ct + 1, std::memory_order_relaxed)) { return ct + 1; }
+        }
+    }
     inline static std::atomic<Storage> counter{ 0 };
 };
 

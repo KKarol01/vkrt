@@ -1,16 +1,18 @@
 #pragma once
 #include <glm/glm.hpp>
-#include "./handle.hpp"
-#include "./common/spatial.hpp"
-#include "./common/flags.hpp"
+#include <eng/common/handle.hpp>
+#include <eng/common/spatial.hpp>
+#include <eng/common/flags.hpp>
 
+namespace gfx {
 struct ModelAsset;
 struct MeshAsset;
-struct RenderMesh;
-struct RenderBLAS;
-struct RenderGeometry;
-struct RenderMaterial;
+struct Mesh;
+struct BLAS;
+struct Geometry;
+struct Material;
 enum class InstanceFlags;
+} // namespace gfx
 
 namespace components {
 
@@ -22,10 +24,10 @@ struct Transform {
 
 /* For rendering */
 struct Renderable {
-    Flags<InstanceFlags> flags;
-    Handle<RenderMesh> mesh_handle;
-    Handle<RenderMaterial> material_handle;
-    Handle<RenderBLAS> blas_handle;
+    Flags<gfx::InstanceFlags> flags;
+    Handle<gfx::Mesh> mesh_handle;
+    Handle<gfx::Material> material_handle;
+     Handle<gfx::BLAS> blas_handle;
 };
 
 } // namespace components

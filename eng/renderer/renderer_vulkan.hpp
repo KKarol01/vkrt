@@ -1,5 +1,6 @@
 #pragma once
 
+#include <eng/common/handle_map.hpp>
 #include <eng/renderer/common.hpp>
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
@@ -8,6 +9,8 @@
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/pipeline.hpp>
+
+namespace gfx {
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t {
@@ -23,7 +26,7 @@ enum class RenderFlags : uint32_t {
 };
 
 enum class GeometryFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
-enum class RenderMeshFlags : uint32_t {};
+enum class MeshFlags : uint32_t {};
 
 struct GeometryMetadata {
     VkAccelerationStructureKHR blas{};
@@ -33,7 +36,7 @@ struct GeometryMetadata {
 struct MeshMetadata {};
 
 /* position inside vertex and index buffer*/
-struct RenderGeometry {
+struct Geometry {
     Flags<GeometryFlags> flags;
     Handle<GeometryMetadata> metadata;
     uint32_t vertex_offset{ 0 };
@@ -43,19 +46,11 @@ struct RenderGeometry {
 };
 
 /* subset of geometry's vertex and index buffers */
-struct RenderMesh {
-    Flags<RenderMeshFlags> flags;
-    Handle<RenderGeometry> geometry;
+struct Mesh {
+    Flags<MeshFlags> flags;
+    Handle<Geometry> geometry;
     Handle<MeshMetadata> metadata;
 };
-
-/* render mesh with material and entity handle for ec system */
-// struct RenderInstance {
-//     Handle<RenderInstance> handle;
-//     Handle<Entity> entity;
-//     Handle<RenderMesh> mesh;
-//     Handle<RenderMaterial> material;
-// };
 
 struct DDGI {
     struct GPULayout {
@@ -136,7 +131,7 @@ class SubmitQueue;
 class StagingBuffer;
 class BindlessDescriptorPool;
 
-class RendererVulkan : public Renderer {
+class RendererVulkan : public gfx::Renderer {
   public:
     static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
 
@@ -154,17 +149,17 @@ class RendererVulkan : public Renderer {
 
     void update() final;
     void on_window_resize() final;
-    void set_screen(ScreenRect screen) final;
+    // void set_screen(ScreenRect screen) final;
     Handle<Image> batch_texture(const ImageDescriptor& desc) final;
-    Handle<RenderMaterial> batch_material(const MaterialDescriptor& desc) final;
-    Handle<RenderGeometry> batch_geometry(const GeometryDescriptor& batch) final;
-    Handle<RenderMesh> batch_mesh(const MeshDescriptor& batch) final;
+    Handle<Material> batch_material(const MaterialDescriptor& desc) final;
+    Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
+    Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
     void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(components::Entity entity) final;
     size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
-    RenderMaterial get_material(Handle<RenderMaterial> handle) const final;
+    Material get_material(Handle<Material> handle) const final;
     VsmData& get_vsm_data() final;
 
     void upload_model_textures();
@@ -192,13 +187,9 @@ class RendererVulkan : public Renderer {
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
 
-    uint32_t get_total_vertices() const {
-        return geometries.empty() ? 0u : geometries.back().vertex_offset + geometries.back().vertex_count;
-    }
-    uint32_t get_total_indices() const {
-        return geometries.empty() ? 0u : geometries.back().index_offset + geometries.back().index_count;
-    }
-    uint32_t get_total_triangles() const { return get_total_indices() / 3u; }
+    uint32_t get_total_vertices() const { return total_vertices; }
+    uint32_t get_total_indices() const { return total_indices; }
+    uint32_t get_total_triangles() const { return total_vertices / 3u; }
 
     VkInstance instance;
     VkDevice dev;
@@ -214,25 +205,26 @@ class RendererVulkan : public Renderer {
     SubmitQueue* submit_queue{};
     StagingBuffer* staging_buffer{};
     BindlessDescriptorPool* bindless_pool{};
-    rendergraph2::RenderGraph rendergraph;
-    eng::rpp::PipelineCompiler pipelines{};
+    RenderGraph rendergraph;
+    PipelineCompiler pipelines{};
 
-    HandleVector<RenderGeometry> geometries;
-    HandleVector<GeometryMetadata> geometry_metadatas;
-    HandleVector<RenderMesh> meshes;
-    HandleVector<MeshMetadata> mesh_metadatas;
-    HandleVector<RenderMaterial> materials;
+    HandleMap<Geometry> geometries;
+    HandleMap<GeometryMetadata> geometry_metadatas;
+    HandleMap<Mesh> meshes;
+    HandleMap<MeshMetadata> mesh_metadatas;
+    HandleMap<Material> materials;
 
     std::vector<components::Entity> mesh_instances;
     std::unordered_map<components::Entity, uint32_t> mesh_instance_idxs;
     std::vector<components::Entity> blas_instances;
     uint32_t max_draw_count{};
+    uint32_t total_vertices{};
+    uint32_t total_indices{};
 
     VkAccelerationStructureKHR tlas{};
     Handle<Buffer> tlas_buffer;
     Handle<Buffer> tlas_instance_buffer;
     Handle<Buffer> tlas_scratch_buffer;
-    VsmData vsm;
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
@@ -248,17 +240,20 @@ class RendererVulkan : public Renderer {
     std::array<FrameData, 2> frame_datas{};
 
     SamplerStorage samplers;
-    std::unordered_map<Handle<Image>, Image> images;
-    std::unordered_map<Handle<Buffer>, Buffer> buffers;
+    HandleMap<Image> images;
+    HandleMap<Buffer> buffers;
 
     DDGI ddgi;
+    gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
 
     struct UploadImage {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
     };
-    std::vector<Vertex> upload_vertices;
+    std::vector<gfx::Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
     std::vector<components::Entity> update_positions;
 };
+
+} // namespace gfx

@@ -1,6 +1,8 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 
+namespace gfx {
+
 CommandPool::CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev) {
     const auto vk_info = Vks(VkCommandPoolCreateInfo{ .flags = flags, .queueFamilyIndex = family_index });
     VK_CHECK(vkCreateCommandPool(dev, &vk_info, nullptr, &pool));
@@ -134,3 +136,5 @@ VkResult SubmitQueue::submit_wait(uint64_t timeout) {
 }
 
 void SubmitQueue::wait_idle() { vkQueueWaitIdle(queue); }
+
+} // namespace gfx

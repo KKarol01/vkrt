@@ -4,9 +4,7 @@
 #include <shaderc/shaderc.hpp>
 #include <stb/stb_include.h>
 
-namespace eng {
-namespace rpp {
-
+namespace gfx {
 Shader* PipelineCompiler::get_shader(const std::filesystem::path path) {
     if(auto it = compiled_shaders.find(path); it != compiled_shaders.end()) { return it->second; }
     shaders.push_front(Shader{ .path = path });
@@ -240,5 +238,4 @@ void PipelineCompiler::canonize_path(std::filesystem::path& p) {
     p.make_preferred();
 }
 
-} // namespace rpp
-} // namespace eng
+} // namespace gfx

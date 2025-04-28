@@ -162,10 +162,10 @@ ImportedModel ModelImporter::import_model(const std::filesystem::path& path) {
         auto& mesh = asset->meshes.at(node.meshIndex.value());
 
         static const std::array<std::string, 4> attribs{ "POSITION", "NORMAL", "TEXCOORD_0", "TANGENT" };
-        static const std::array<uint32_t, 4> attrib_offsets{ offsetof(Vertex, pos), offsetof(Vertex, nor),
-                                                             offsetof(Vertex, uv), offsetof(Vertex, tang) };
-        static const std::array<uint32_t, 4> attrib_sizes{ sizeof(Vertex::pos), sizeof(Vertex::nor), sizeof(Vertex::uv),
-                                                           sizeof(Vertex::tang) };
+        static const std::array<uint32_t, 4> attrib_offsets{ offsetof(gfx::Vertex, pos), offsetof(gfx::Vertex, nor),
+                                                             offsetof(gfx::Vertex, uv), offsetof(gfx::Vertex, tang) };
+        static const std::array<uint32_t, 4> attrib_sizes{ sizeof(gfx::Vertex::pos), sizeof(gfx::Vertex::nor),
+                                                           sizeof(gfx::Vertex::uv), sizeof(gfx::Vertex::tang) };
         for(auto& prim : mesh.primitives) {
             if(prim.type != fastgltf::PrimitiveType::Triangles) { continue; }
 

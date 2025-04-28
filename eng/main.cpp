@@ -13,7 +13,7 @@
 int main() {
     Engine::get().init();
     {
-        Handle<scene::Node> model = Engine::get().scene->load_from_file("boxplane_cars.glb");
+        Handle<scene::Node> model = Engine::get().scene->load_from_file("boxplane.glb");
         // Handle<Entity> model = Engine::scene()->load_from_file("bistro.glb");
         /* Engine::scene()->instance_model(sphere_handle, { .flags = {}, .transform = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.5f }) }); */
         auto cornell_instance = Engine::get().scene->instance_model(model);

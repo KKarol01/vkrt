@@ -11,6 +11,8 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/renderer.hpp>
 
+namespace gfx {
+
 class SamplerStorage {
   public:
     VkSampler get_sampler();
@@ -27,3 +29,5 @@ struct RecordingSubmitInfo {
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> waits;
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;
 };
+
+} // namespace gfx

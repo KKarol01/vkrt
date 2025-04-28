@@ -5,6 +5,8 @@
 #include <vector>
 #include <deque>
 
+namespace gfx {
+
 class CommandPool {
   public:
     CommandPool() noexcept = default;
@@ -58,3 +60,5 @@ class SubmitQueue {
     std::deque<VkFence> fences;
     Submission submission;
 };
+
+} // namespace gfx

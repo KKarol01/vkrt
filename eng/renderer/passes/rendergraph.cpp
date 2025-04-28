@@ -2,7 +2,7 @@
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 
-namespace rendergraph2 {
+namespace gfx {
 
 Handle<Resource> RenderGraph::make_resource(resource_cb_t res_cb, ResourceFlags flags) {
     if(auto it = resource_handles.find(res_cb()); it != resource_handles.end()) { return it->second; }
@@ -183,4 +183,4 @@ Image& RenderGraph::unpack_image(resource_ht handle) {
     return RendererVulkan::get_image(img);
 }
 
-} // namespace rendergraph2
+} // namespace gfx

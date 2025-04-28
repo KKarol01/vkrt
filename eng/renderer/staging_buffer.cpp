@@ -4,6 +4,8 @@
 
 static size_t align_up2(size_t val, size_t al) { return (val + al - 1) & ~(al - 1); }
 
+namespace gfx {
+
 StagingBuffer::StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept
     : queue(queue), staging_buffer(&RendererVulkan::get_buffer(staging_buffer)) {
     if(!queue) {
@@ -284,3 +286,5 @@ size_t StagingBuffer::push_data(const std::vector<std::byte>& data) {
     staging_buffer->_size = std::min(staging_buffer->capacity(), staging_buffer->size() + align_up2(data.size(), 8ull));
     return data.size();
 }
+
+} // namespace gfx

@@ -3,8 +3,7 @@
 #include <eng/renderer/common.hpp>
 #include <vulkan/vulkan.h>
 
-namespace eng {
-namespace rpp {
+namespace gfx {
 
 struct RasterizationSettings {
     bool operator==(const RasterizationSettings& o) const {
@@ -82,5 +81,4 @@ class PipelineCompiler {
     std::vector<Shader*> shaders_to_compile;
 };
 
-} // namespace rpp
-} // namespace eng
+} // namespace gfx

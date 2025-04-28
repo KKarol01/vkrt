@@ -4,6 +4,8 @@
 #include <vulkan/vulkan.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 
+namespace gfx {
+
 struct buffer_resizable_t {};
 static constexpr buffer_resizable_t buffer_resizable;
 
@@ -32,3 +34,5 @@ class Buffer {
     size_t _size{}; // size = size of currently stored data
     bool is_resizable{};
 };
+
+}

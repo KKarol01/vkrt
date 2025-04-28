@@ -12,7 +12,7 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 
-static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& img, ImageFormat format) {
+static Handle<gfx::Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& img, gfx::ImageFormat format) {
     std::byte* img_data{};
     int width{}, height{}, ch{};
     // clang-format off
@@ -31,8 +31,8 @@ static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& i
         }
     }, img.data);
     // clang-format on
-    if(!result) { return Handle<Image>{}; }
-    return Engine::get().renderer->batch_texture(ImageDescriptor{
+    if(!result) { return Handle<gfx::Image>{}; }
+    return Engine::get().renderer->batch_texture(gfx::ImageDescriptor{
         .name = img.name.c_str(),
         .width = static_cast<uint32_t>(width),
         .height = static_cast<uint32_t>(height),
@@ -44,17 +44,17 @@ static Handle<Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& i
 struct SceneLoadingState {
     struct MaterialDescriptor {
         std::string name;
-        Handle<RenderMaterial> handle{};
-        Handle<Image> base_color_image_handle{};
-        Handle<Image> normal_image_handle{};
-        Handle<Image> metallic_roughness_handle{};
+        Handle<gfx::Material> handle{};
+        Handle<gfx::Image> base_color_image_handle{};
+        Handle<gfx::Image> normal_image_handle{};
+        Handle<gfx::Image> metallic_roughness_handle{};
     };
-    std::vector<Handle<Image>> images;
+    std::vector<Handle<gfx::Image>> images;
     std::vector<MaterialDescriptor> materials;
 };
 
-static Handle<Image> scene_get_or_load_image(SceneLoadingState& state, fastgltf::Asset& asset, uint32_t texture_index,
-                                             ImageFormat format) {
+static Handle<gfx::Image> scene_get_or_load_image(SceneLoadingState& state, fastgltf::Asset& asset,
+                                                  uint32_t texture_index, gfx::ImageFormat format) {
     if(state.images.size() <= texture_index) {
         state.images.resize(texture_index + 1);
         auto& texture = asset.textures.at(texture_index);
@@ -67,12 +67,12 @@ static Handle<Image> scene_get_or_load_image(SceneLoadingState& state, fastgltf:
 static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fastgltf::Primitive& prim,
                             scene::Scene* scene, scene::Node* node) {
     static const std::array<std::string, 4> attribs{ "POSITION", "NORMAL", "TEXCOORD_0", "TANGENT" };
-    static const std::array<uint32_t, 4> attrib_offsets{ offsetof(Vertex, pos), offsetof(Vertex, nor),
-                                                         offsetof(Vertex, uv), offsetof(Vertex, tang) };
-    static const std::array<uint32_t, 4> attrib_sizes{ sizeof(Vertex::pos), sizeof(Vertex::nor), sizeof(Vertex::uv),
-                                                       sizeof(Vertex::tang) };
+    static const std::array<uint32_t, 4> attrib_offsets{ offsetof(gfx::Vertex, pos), offsetof(gfx::Vertex, nor),
+                                                         offsetof(gfx::Vertex, uv), offsetof(gfx::Vertex, tang) };
+    static const std::array<uint32_t, 4> attrib_sizes{ sizeof(gfx::Vertex::pos), sizeof(gfx::Vertex::nor),
+                                                       sizeof(gfx::Vertex::uv), sizeof(gfx::Vertex::tang) };
 
-    std::vector<Vertex> vertices;
+    std::vector<gfx::Vertex> vertices;
     std::vector<uint32_t> indices;
     for(int i = 0; i < attribs.size(); ++i) {
         const auto set_vertex_component = [&](auto val, size_t idx) {
@@ -100,7 +100,8 @@ static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fa
 
     auto& node_primitive = node->primitives.emplace_back();
     node_primitive.geometry_handle = Engine::get().renderer->batch_geometry({ .vertices = vertices, .indices = indices });
-    node_primitive.mesh_handle = Engine::get().renderer->batch_mesh(MeshDescriptor{ .geometry = node_primitive.geometry_handle });
+    node_primitive.mesh_handle =
+        Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{ .geometry = node_primitive.geometry_handle });
 
     if(prim.materialIndex) {
         if(state.materials.size() > *prim.materialIndex) {
@@ -111,17 +112,19 @@ static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fa
             auto& state_material = state.materials.at(*prim.materialIndex);
             if(material.pbrData.baseColorTexture) {
                 state_material.base_color_image_handle =
-                    scene_get_or_load_image(state, asset, material.pbrData.baseColorTexture->textureIndex, ImageFormat::SRGB);
+                    scene_get_or_load_image(state, asset, material.pbrData.baseColorTexture->textureIndex,
+                                            gfx::ImageFormat::R8G8B8A8_SRGB);
             }
             if(material.normalTexture) {
                 state_material.normal_image_handle =
-                    scene_get_or_load_image(state, asset, material.normalTexture->textureIndex, ImageFormat::UNORM);
+                    scene_get_or_load_image(state, asset, material.normalTexture->textureIndex, gfx::ImageFormat::R8G8B8A8_UNORM);
             }
             if(material.pbrData.metallicRoughnessTexture) {
                 state_material.metallic_roughness_handle =
-                    scene_get_or_load_image(state, asset, material.pbrData.metallicRoughnessTexture->textureIndex, ImageFormat::UNORM);
+                    scene_get_or_load_image(state, asset, material.pbrData.metallicRoughnessTexture->textureIndex,
+                                            gfx::ImageFormat::R8G8B8A8_UNORM);
             }
-            state_material.handle = Engine::get().renderer->batch_material(MaterialDescriptor{
+            state_material.handle = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
                 .base_color_texture = state_material.base_color_image_handle,
                 .normal_texture = state_material.normal_image_handle,
                 .metallic_roughness_texture = state_material.metallic_roughness_handle,
@@ -182,7 +185,7 @@ Handle<scene::Node> scene::Scene::load_from_file(const std::filesystem::path& pa
     if(!expected_asset) { return Handle<Node>{}; }
     auto& asset = expected_asset.get();
 
-    std::vector<Handle<Image>> images;
+    std::vector<Handle<gfx::Image>> images;
     images.reserve(asset.images.size());
 
     auto& scene = asset.scenes[0];
@@ -218,8 +221,8 @@ Handle<scene::NodeInstance> scene::Scene::instance_model(Handle<scene::Node> ent
             Engine::get().ecs_storage->emplace<components::Transform>(pi, ni->final_transform);
             Engine::get().ecs_storage->emplace<components::Renderable>(
                 pi, components::Renderable{ .mesh_handle = p.mesh_handle, .material_handle = p.material_handle });
-            Engine::get().renderer->instance_mesh(InstanceSettings{ .entity = pi });
-            Engine::get().renderer->instance_blas(BLASInstanceSettings{ .entity = pi });
+            Engine::get().renderer->instance_mesh(gfx::InstanceSettings{ .entity = pi });
+            Engine::get().renderer->instance_blas(gfx::BLASInstanceSettings{ .entity = pi });
         }
         for(auto& c : n->children) {
             ni->children.push_back(add_instance());
@@ -248,7 +251,7 @@ void scene::Scene::update_transform(Handle<scene::NodeInstance> entity, glm::mat
             if(c) { stack.push(node->final_transform); }
         }
         for(auto p : node->primitives) {
-            if(p != components::MAX_ENTITY) {
+            if(p != components::s_max_entity) {
                 Engine::get().ecs_storage->get<components::Transform>(p).transform = node->final_transform;
                 Engine::get().renderer->update_transform(p);
             }

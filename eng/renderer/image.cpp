@@ -22,6 +22,8 @@ static bool compare_view_infos(const VkImageViewCreateInfo& a, const VkImageView
     return true;
 }
 
+namespace gfx {
+
 Image::Image(const std::string& name, VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& vk_info) noexcept
     : name(name), dev(dev), vma(vma), vk_info(Vks(VkImageCreateInfo{ vk_info })), current_layout(vk_info.initialLayout) {
     if(!dev || !vma) { return; }
@@ -78,3 +80,5 @@ VkImageAspectFlags Image::deduce_aspect() const {
     }
     return VK_IMAGE_ASPECT_COLOR_BIT;
 }
+
+} // namespace gfx

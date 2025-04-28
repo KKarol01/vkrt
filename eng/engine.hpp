@@ -50,7 +50,7 @@ class Engine {
     Window* window{};
     Camera* camera{};
     components::Storage* ecs_storage{};
-    Renderer* renderer{};
+    gfx::Renderer* renderer{};
     UIContext* ui_ctx{};
     scene::Scene* scene{};
     double get_time_secs();

@@ -2,6 +2,8 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 
+namespace gfx {
+
 Buffer::Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& vk_info,
                const VmaAllocationCreateInfo& vma_info) noexcept
     : name(name), dev(dev), vma(vma), vk_info(Vks(VkBufferCreateInfo{ vk_info })), vma_info(vma_info) {
@@ -25,3 +27,5 @@ Buffer::Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, buffer_r
     : Buffer(name, dev, vma, vk_info, vma_info) {
     this->is_resizable = true;
 }
+
+} // namespace gfx

@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 
+namespace gfx {
+
 class BindlessDescriptorPool {
   public:
     BindlessDescriptorPool() noexcept = default;
@@ -41,3 +43,5 @@ class BindlessDescriptorPool {
     std::deque<VkDescriptorBufferInfo> buffer_updates;
     std::deque<VkDescriptorImageInfo> image_updates;
 };
+
+} // namespace gfx

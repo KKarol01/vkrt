@@ -10,9 +10,8 @@
 #include <deque>
 #include <memory>
 #include <functional>
-#include <eng/handle_vec.hpp>
 #include <eng/engine.hpp>
-#include <eng/handle.hpp>
+#include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/renderer/buffer.hpp>
 #include <eng/renderer/image.hpp>

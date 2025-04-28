@@ -5,6 +5,8 @@
 #include <vulkan/vulkan.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 
+namespace gfx {
+
 class Image {
   public:
     Image() noexcept = default;
@@ -27,3 +29,5 @@ class Image {
     std::vector<std::pair<VkImageViewCreateInfo, VkImageView>> views;
     VkImageLayout current_layout{};
 };
+
+}

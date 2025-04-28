@@ -2,6 +2,8 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 
+namespace gfx {
+
 BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev) {
     if(!dev) { return; }
     const VkDescriptorPoolSize sizes[] = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
@@ -118,4 +120,6 @@ void BindlessDescriptorPool::update() {
     updates.clear();
     image_updates.clear();
     buffer_updates.clear();
+}
+
 }
