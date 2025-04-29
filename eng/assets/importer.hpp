@@ -16,7 +16,12 @@
 namespace assets {
 
 using asset_index_t = uint16_t;
-static constexpr asset_index_t s_max_asset_index = ~asset_idnex_t{};
+static constexpr asset_index_t s_max_asset_index = ~asset_index_t{};
+
+enum class AssetFlags : uint32_t {
+    INDICES_16_BIT_BIT = 0x1,
+};
+ENG_ENABLE_FLAGS_OPERATORS(AssetFlags);
 
 struct Vertex {
     glm::vec3 position;
@@ -25,10 +30,10 @@ struct Vertex {
     glm::vec4 tangent;
 };
 
-enum class AssetFlags : uint32_t {
-    INDICES_16_BIT_BIT = 0x1,
+struct Range {
+    size_t offset{};
+    size_t count{};
 };
-ENG_ENABLE_FLAGS_OPERATORS(AssetFlags);
 
 struct Image {
     std::string name;
@@ -45,35 +50,71 @@ struct Texture {
 };
 
 struct Material {
-    asset_index_t _texture{ s_max_asset_index };
     asset_index_t color_texture{ s_max_asset_index };
-    asset_index_t color_texture{ s_max_asset_index };
+    asset_index_t normal_texture{ s_max_asset_index };
 };
 
-struct Mesh {};
+struct Geometry {
+    Range vertex_range{};
+    Range index_range{};
+};
+
+struct Mesh {
+    asset_index_t material{ s_max_asset_index };
+    asset_index_t geometry{ s_max_asset_index };
+};
 
 struct Node {
+    std::string name;
+    std::vector<asset_index_t> meshes;
     std::vector<asset_index_t> meshes;
     std::vector<asset_index_t> nodes;
-    asset_index_t transform;
+    asset_index_t transform{};
 };
 
 struct Asset {
-    Flags<AssetFlags> flags;
+    bool is_valid() const { return root_node != s_max_asset_index; }
+    const Material* try_get_material(const Mesh& mesh) const;
+    const Geometry* try_get_geometry(const Mesh& mesh) const;
+    const Node& get_node(asset_index_t idx) const;
+    glm::mat4x3 get_transform(const Node& node) const;
+
+    std::vector<Node> nodes;
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    std::vector<Image> images;
+    std::vector<Geometry> geometries;
     std::vector<Mesh> meshes;
-    std::vector<Material> materials;
     std::vector<glm::mat4x3> transforms;
-    Node node;
+    std::vector<Image> images;
+    std::vector<Texture> textures;
+    std::vector<Material> materials;
+    Flags<AssetFlags> flags;
+    asset_index_t root_node{ s_max_asset_index };
+    std::filesystem::path path;
 };
 
 struct ImportSettings {};
 
 class Importer {
   public:
-    static import_glb(const std::filesystem::path& path, ImportSettings settings = {});
+    static Asset import_glb(const std::filesystem::path& path, ImportSettings settings = {});
+
+    template <typename Func>
+    static inline void dfs_traverse_node_hierarchy(const Asset& asset, const Node& node, Func&& func, const Node* parent = nullptr,
+                                                   glm::mat4x3 parent_transform = glm::identity<glm::mat4x3>())
+        requires std::is_invocable_v<Func, const Node&, const Node*, glm::mat4x3>;
 };
 
 } // namespace assets
+
+template <typename Func>
+inline void assets::Importer::dfs_traverse_node_hierarchy(const assets::Asset& asset, const assets::Node& node, Func&& func,
+                                                          const assets::Node* parent, glm::mat4x3 parent_transform)
+    requires std::is_invocable_v<Func, const Node&, const Node*, glm::mat4x3>
+{
+    func(node, parent, parent_transform);
+    parent_transform = asset.get_transform(node) * parent_transform;
+    for(auto i : node.nodes) {
+        assets::Importer::dfs_traverse_node_hierarchy(asset, asset.get_node(i), &node, parent_transform);
+    }
+}

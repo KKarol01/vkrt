@@ -10,6 +10,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/ecs.hpp>
 #include <eng/renderer/renderer.hpp>
+#include <eng/assets/importer.hpp>
 
 namespace scene {
 

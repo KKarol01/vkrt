@@ -109,7 +109,9 @@ add_executable(vkrt
     "eng/renderer/submit_queue.cpp"
     "eng/renderer/passes/rendergraph.cpp" 
     "eng/renderer/passes/passes.cpp" 
-    "eng/renderer/pipeline.cpp")
+    "eng/renderer/pipeline.cpp"
+    "eng/assets/importer.cpp"
+)
 
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
