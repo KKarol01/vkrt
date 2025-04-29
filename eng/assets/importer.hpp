@@ -11,7 +11,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
-#include <glm/mat4x3.hpp>
+#include <glm/mat4x4.hpp>
 
 namespace assets {
 
@@ -59,14 +59,18 @@ struct Geometry {
     Range index_range{};
 };
 
-struct Mesh {
+struct Submesh {
     asset_index_t material{ s_max_asset_index };
     asset_index_t geometry{ s_max_asset_index };
 };
 
+struct Mesh {
+    std::string name;
+    std::vector<asset_index_t> submeshes;
+};
+
 struct Node {
     std::string name;
-    std::vector<asset_index_t> meshes;
     std::vector<asset_index_t> meshes;
     std::vector<asset_index_t> nodes;
     asset_index_t transform{};
@@ -76,20 +80,26 @@ struct Asset {
     bool is_valid() const { return root_node != s_max_asset_index; }
     const Material* try_get_material(const Mesh& mesh) const;
     const Geometry* try_get_geometry(const Mesh& mesh) const;
+    Node& get_node(asset_index_t idx);
     const Node& get_node(asset_index_t idx) const;
-    glm::mat4x3 get_transform(const Node& node) const;
+    glm::mat4 get_transform(const Node& node) const;
+    asset_index_t make_node();
+    asset_index_t make_mesh();
+    asset_index_t make_submesh();
+    glm::mat4& make_transform();
 
     std::vector<Node> nodes;
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<Geometry> geometries;
     std::vector<Mesh> meshes;
-    std::vector<glm::mat4x3> transforms;
+    std::vector<Submesh> submeshes;
+    std::vector<glm::mat4> transforms;
     std::vector<Image> images;
     std::vector<Texture> textures;
     std::vector<Material> materials;
     Flags<AssetFlags> flags;
-    asset_index_t root_node{ s_max_asset_index };
+    std::vector<asset_index_t> scene;
     std::filesystem::path path;
 };
 
@@ -101,16 +111,16 @@ class Importer {
 
     template <typename Func>
     static inline void dfs_traverse_node_hierarchy(const Asset& asset, const Node& node, Func&& func, const Node* parent = nullptr,
-                                                   glm::mat4x3 parent_transform = glm::identity<glm::mat4x3>())
-        requires std::is_invocable_v<Func, const Node&, const Node*, glm::mat4x3>;
+                                                   glm::mat4 parent_transform = glm::identity<glm::mat4>())
+        requires std::is_invocable_v<Func, const Node&, const Node*, const glm::mat4&>;
 };
 
 } // namespace assets
 
 template <typename Func>
 inline void assets::Importer::dfs_traverse_node_hierarchy(const assets::Asset& asset, const assets::Node& node, Func&& func,
-                                                          const assets::Node* parent, glm::mat4x3 parent_transform)
-    requires std::is_invocable_v<Func, const Node&, const Node*, glm::mat4x3>
+                                                          const assets::Node* parent, glm::mat4 parent_transform)
+    requires std::is_invocable_v<Func, const Node&, const Node*, const glm::mat4&>
 {
     func(node, parent, parent_transform);
     parent_transform = asset.get_transform(node) * parent_transform;

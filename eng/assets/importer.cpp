@@ -20,9 +20,28 @@ const Geometry* Asset::try_get_geometry(const Mesh& mesh) const {
     return nullptr;
 }
 
+Node& Asset::get_node(asset_index_t idx) { return nodes.at(idx); }
+
 const Node& assets::Asset::get_node(asset_index_t idx) const { return nodes.at(idx); }
 
-glm::mat4x3 assets::Asset::get_transform(const Node& node) const { return transforms.at(node.transform); }
+glm::mat4 assets::Asset::get_transform(const Node& node) const { return transforms.at(node.transform); }
+
+asset_index_t Asset::make_node() {
+    nodes.emplace_back();
+    return nodes.size();
+}
+
+asset_index_t Asset::make_mesh() {
+    meshes.emplace_back();
+    return meshes.size();
+}
+
+asset_index_t Asset::make_submesh() {
+    submeshes.emplace_back();
+    return submeshes.size();
+}
+
+glm::mat4& Asset::make_transform() { return transforms.emplace_back(); }
 
 Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings settings) {
     Asset asset;
@@ -42,25 +61,25 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
         ENG_WARN("Error during loading fastgltf::Parser::loadGltfBinary: {}", fastgltf::getErrorName(_gltfasset.error()));
         return asset;
     }
-    auto& gltfasset = _gltfasset.get();
-    auto& scene = gltfasset.scenes.at(0);
+    auto& fasset = _gltfasset.get();
+    auto& scene = fasset.scenes.at(0);
 
     asset.path = full_path;
-    asset.nodes.reserve(gltfasset.nodes.size());
-    asset.transforms.reserve(gltfasset.nodes.size());
-    asset.images.reserve(gltfasset.images.size());
-    asset.textures.reserve(gltfasset.textures.size());
-    asset.meshes.reserve(gltfasset.meshes.size());
-    asset.materials.reserve(gltfasset.materials.size());
+    asset.nodes.reserve(fasset.nodes.size());
+    asset.transforms.reserve(asset.nodes.capacity());
+    asset.images.reserve(fasset.images.size());
+    asset.textures.reserve(fasset.textures.size());
+    asset.meshes.reserve(fasset.meshes.size());
+    asset.materials.reserve(fasset.materials.size());
 
-    const auto load_image = [&gltfasset, &asset](uint32_t index, gfx::ImageFormat format) {
-        auto& img = gltfasset.images.at(index);
+    const auto load_image = [&fasset, &asset](uint32_t index, gfx::ImageFormat format) {
+        auto& img = fasset.images.at(index);
         if(!std::holds_alternative<fastgltf::sources::BufferView>(img.data)) {
             ENG_ERROR("Image {} not loaded. Invalid image data source.", img.name);
             return;
         }
-        auto& bview = gltfasset.bufferViews.at(std::get<fastgltf::sources::BufferView>(img.data).bufferViewIndex);
-        auto& buff = gltfasset.buffers.at(bview.bufferIndex);
+        auto& bview = fasset.bufferViews.at(std::get<fastgltf::sources::BufferView>(img.data).bufferViewIndex);
+        auto& buff = fasset.buffers.at(bview.bufferIndex);
         if(!std::holds_alternative<fastgltf::sources::Array>(buff.data)) {
             ENG_ERROR("Image {} not loaded. Invalid image data source.");
             asset.images.emplace_back();
@@ -85,9 +104,51 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
         });
     };
 
-    for(auto sidx : scene.nodeIndices) {
+    std::unordered_map<const fastgltf::Node*, asset_index_t> fnode_idxs;
+    const auto get_node_idx = [&fnode_idxs, &asset](const fastgltf::Node& node) {
+        if(auto it = fnode_idxs.find(&node); it != fnode_idxs.end()) { return it->second; }
+        const auto idx = static_cast<asset_index_t>(asset.nodes.size());
+        asset.make_node();
+        fnode_idxs[&node] = idx;
+        return idx;
+    };
+    const auto parseFMesh = [&fasset](Mesh& m, const fastgltf::Mesh& fm) {
+        static const std::array<std::string, 4> attribs{ "POSITION", "NORMAL", "TEXCOORD_0", "TANGENT" };
+        static const std::array<uint32_t, 4> attrib_offsets{ offsetof(gfx::Vertex, pos), offsetof(gfx::Vertex, nor),
+                                                             offsetof(gfx::Vertex, uv), offsetof(gfx::Vertex, tang) };
+        static const std::array<uint32_t, 4> attrib_sizes{ sizeof(gfx::Vertex::pos), sizeof(gfx::Vertex::nor),
+                                                           sizeof(gfx::Vertex::uv), sizeof(gfx::Vertex::tang) };
 
-        dfs_traverse_node_hierarchy(asset, )
+        for(auto& p : fm.primitives) {
+            for(auto i = 0u; i < attribs.size(); ++i) {
+                auto attr = p.findAttribute(attribs.at(i));
+                if(i == 0u && attr == p.attributes.end()) { break; }
+                fastgltf::iterateAccessor()
+            }
+        }
+    };
+    const auto iterateSceneNodes = [&asset, &fasset, &fnode_idxs, &get_node_idx,
+                                    &parseFMesh](fastgltf::Node& node, const fastgltf::math::fmat4x4& mat) {
+        const auto nidx = get_node_idx(node);
+        auto& n = asset.get_node(nidx);
+        n.name = node.name.c_str();
+        n.nodes.reserve(node.children.size());
+        for(auto nidx : node.children) {
+            n.nodes.push_back(get_node_idx(fasset.nodes.at(nidx)));
+        }
+        n.transform = asset.transforms.size();
+        auto& t = asset.make_transform();
+        memcpy(&t, &mat, sizeof(t));
+        if(node.meshIndex) {
+            n.meshes.push_back(asset.make_mesh());
+            parseFMesh(asset.meshes.back(), fasset.meshes.at(*node.meshIndex));
+        }
+    };
+
+    fastgltf::iterateSceneNodes(fasset, 0ull, fastgltf::math::fmat4x4{}, iterateSceneNodes);
+    asset.scene.reserve(scene.nodeIndices.size());
+    for(auto sidx : scene.nodeIndices) {
+        asset.scene.push_back(get_node_idx(fasset.nodes.at(sidx)));
     }
 
     return asset;
