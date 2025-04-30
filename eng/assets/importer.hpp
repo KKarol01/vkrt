@@ -45,11 +45,12 @@ struct Image {
 
 struct Texture {
     asset_index_t image{ s_max_asset_index };
-    gfx::ImageFilter filtering;
-    gfx::ImageAddressing addressing;
+    gfx::ImageFilter filtering{ gfx::ImageFilter::LINEAR };
+    gfx::ImageAddressing addressing{ gfx::ImageAddressing::REPEAT };
 };
 
 struct Material {
+    std::string name;
     asset_index_t color_texture{ s_max_asset_index };
     asset_index_t normal_texture{ s_max_asset_index };
 };
@@ -71,22 +72,29 @@ struct Mesh {
 
 struct Node {
     std::string name;
-    std::vector<asset_index_t> meshes;
+    asset_index_t mesh{ s_max_asset_index };
     std::vector<asset_index_t> nodes;
-    asset_index_t transform{};
 };
 
 struct Asset {
-    bool is_valid() const { return root_node != s_max_asset_index; }
-    const Material* try_get_material(const Mesh& mesh) const;
-    const Geometry* try_get_geometry(const Mesh& mesh) const;
+    bool is_valid() const { return !scene.empty(); }
+    Geometry& get_geometry(const Submesh& submesh);
     Node& get_node(asset_index_t idx);
     const Node& get_node(asset_index_t idx) const;
-    glm::mat4 get_transform(const Node& node) const;
+    glm::mat4& get_transform(Node& node);
+    const glm::mat4& get_transform(const Node& node) const;
+    Mesh& get_mesh(const Node& node);
+    Submesh& get_submesh(asset_index_t idx);
+    Image& get_image(asset_index_t idx);
+    Texture& get_texture(asset_index_t idx);
+    Material& get_material(asset_index_t idx);
+    asset_index_t make_geometry();
     asset_index_t make_node();
     asset_index_t make_mesh();
     asset_index_t make_submesh();
-    glm::mat4& make_transform();
+    asset_index_t make_transform();
+    asset_index_t make_texture();
+    asset_index_t make_material();
 
     std::vector<Node> nodes;
     std::vector<Vertex> vertices;

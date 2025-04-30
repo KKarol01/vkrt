@@ -11,37 +11,62 @@
 
 namespace assets {
 
-const Material* Asset::try_get_material(const Mesh& mesh) const {
-    assert(false);
-    return nullptr;
-}
-const Geometry* Asset::try_get_geometry(const Mesh& mesh) const {
-    assert(false);
-    return nullptr;
-}
+Geometry& Asset::get_geometry(const Submesh& submesh) { return geometries.at(submesh.geometry); }
 
 Node& Asset::get_node(asset_index_t idx) { return nodes.at(idx); }
 
 const Node& assets::Asset::get_node(asset_index_t idx) const { return nodes.at(idx); }
 
-glm::mat4 assets::Asset::get_transform(const Node& node) const { return transforms.at(node.transform); }
+glm::mat4& assets::Asset::get_transform(Node& node) { return transforms.at(std::distance(nodes.data(), &node)); }
+
+const glm::mat4& Asset::get_transform(const Node& node) const {
+    return transforms.at(std::distance(nodes.data(), &node));
+}
+
+Mesh& Asset::get_mesh(const Node& node) { return meshes.at(node.mesh); }
+
+Submesh& Asset::get_submesh(asset_index_t idx) { return submeshes.at(idx); }
+
+Image& Asset::get_image(asset_index_t idx) { return images.at(idx); }
+
+Texture& Asset::get_texture(asset_index_t idx) { return textures.at(idx); }
+
+Material& Asset::get_material(asset_index_t idx) { return materials.at(idx); }
+
+asset_index_t Asset::make_geometry() {
+    geometries.emplace_back();
+    return geometries.size() - 1;
+}
 
 asset_index_t Asset::make_node() {
     nodes.emplace_back();
-    return nodes.size();
+    return nodes.size() - 1;
 }
 
 asset_index_t Asset::make_mesh() {
     meshes.emplace_back();
-    return meshes.size();
+    return meshes.size() - 1;
 }
 
 asset_index_t Asset::make_submesh() {
     submeshes.emplace_back();
-    return submeshes.size();
+    return submeshes.size() - 1;
 }
 
-glm::mat4& Asset::make_transform() { return transforms.emplace_back(); }
+asset_index_t Asset::make_transform() {
+    transforms.emplace_back();
+    return transforms.size() - 1;
+}
+
+asset_index_t Asset::make_texture() {
+    textures.emplace_back();
+    return textures.size() - 1;
+}
+
+asset_index_t Asset::make_material() {
+    materials.emplace_back();
+    return materials.size() - 1;
+}
 
 Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings settings) {
     Asset asset;
@@ -65,90 +90,177 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
     auto& scene = fasset.scenes.at(0);
 
     asset.path = full_path;
-    asset.nodes.reserve(fasset.nodes.size());
-    asset.transforms.reserve(asset.nodes.capacity());
+    asset.nodes.resize(fasset.nodes.size());
+    asset.transforms.resize(fasset.nodes.size());
     asset.images.reserve(fasset.images.size());
     asset.textures.reserve(fasset.textures.size());
     asset.meshes.reserve(fasset.meshes.size());
     asset.materials.reserve(fasset.materials.size());
 
-    const auto load_image = [&fasset, &asset](uint32_t index, gfx::ImageFormat format) {
-        auto& img = fasset.images.at(index);
-        if(!std::holds_alternative<fastgltf::sources::BufferView>(img.data)) {
-            ENG_ERROR("Image {} not loaded. Invalid image data source.", img.name);
-            return;
-        }
-        auto& bview = fasset.bufferViews.at(std::get<fastgltf::sources::BufferView>(img.data).bufferViewIndex);
-        auto& buff = fasset.buffers.at(bview.bufferIndex);
-        if(!std::holds_alternative<fastgltf::sources::Array>(buff.data)) {
-            ENG_ERROR("Image {} not loaded. Invalid image data source.");
-            asset.images.emplace_back();
-            return;
-        }
-        auto& arr = std::get<fastgltf::sources::Array>(buff.data);
-        std::byte* data{};
-        int x, y, ch;
-        data = reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<stbi_uc*>(arr.bytes.data()) + bview.byteOffset,
-                                                                  bview.byteLength, &x, &y, &ch, 4));
-        if(!data) {
-            ENG_ERROR("Image {} not loaded. Stbi failed.");
-            asset.images.emplace_back();
-            return;
-        }
-        asset.images.push_back(Image{
-            .name = img.name.c_str(),
-            .width = (uint32_t)x,
-            .height = (uint32_t)y,
-            .format = format,
-            .data = { data, data + x * y * ch },
-        });
-    };
+    for(auto i = 0u; i < fasset.images.size(); ++i) {
+        using namespace fastgltf;
 
-    std::unordered_map<const fastgltf::Node*, asset_index_t> fnode_idxs;
-    const auto get_node_idx = [&fnode_idxs, &asset](const fastgltf::Node& node) {
-        if(auto it = fnode_idxs.find(&node); it != fnode_idxs.end()) { return it->second; }
-        const auto idx = static_cast<asset_index_t>(asset.nodes.size());
-        asset.make_node();
-        fnode_idxs[&node] = idx;
-        return idx;
-    };
-    const auto parseFMesh = [&fasset](Mesh& m, const fastgltf::Mesh& fm) {
-        static const std::array<std::string, 4> attribs{ "POSITION", "NORMAL", "TEXCOORD_0", "TANGENT" };
-        static const std::array<uint32_t, 4> attrib_offsets{ offsetof(gfx::Vertex, pos), offsetof(gfx::Vertex, nor),
-                                                             offsetof(gfx::Vertex, uv), offsetof(gfx::Vertex, tang) };
-        static const std::array<uint32_t, 4> attrib_sizes{ sizeof(gfx::Vertex::pos), sizeof(gfx::Vertex::nor),
-                                                           sizeof(gfx::Vertex::uv), sizeof(gfx::Vertex::tang) };
-
-        for(auto& p : fm.primitives) {
-            for(auto i = 0u; i < attribs.size(); ++i) {
-                auto attr = p.findAttribute(attribs.at(i));
-                if(i == 0u && attr == p.attributes.end()) { break; }
-                fastgltf::iterateAccessor()
+        Image img;
+        auto& fimg = fasset.images.at(i);
+        std::span<const std::byte> data;
+        if(auto fimgbview = std::get_if<sources::BufferView>(&fimg.data)) {
+            auto& bview = fasset.bufferViews.at(fimgbview->bufferViewIndex);
+            auto& buff = fasset.buffers.at(bview.bufferIndex);
+            if(auto fimgarr = std::get_if<sources::Array>(&buff.data)) {
+                data = { fimgarr->bytes.data() + bview.byteOffset, bview.byteLength };
             }
         }
-    };
-    const auto iterateSceneNodes = [&asset, &fasset, &fnode_idxs, &get_node_idx,
-                                    &parseFMesh](fastgltf::Node& node, const fastgltf::math::fmat4x4& mat) {
-        const auto nidx = get_node_idx(node);
-        auto& n = asset.get_node(nidx);
-        n.name = node.name.c_str();
-        n.nodes.reserve(node.children.size());
-        for(auto nidx : node.children) {
-            n.nodes.push_back(get_node_idx(fasset.nodes.at(nidx)));
+        if(!data.empty()) {
+            img.name = fimg.name.c_str();
+            int x, y, ch;
+            std::byte* imgdata =
+                reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()),
+                                                                   data.size(), &x, &y, &ch, 4));
+            if(!imgdata) {
+                ENG_ERROR("Stbi failed: {}", stbi_failure_reason());
+            } else {
+                img.data = { imgdata, imgdata + x * y * ch };
+                img.width = (uint32_t)x;
+                img.height = (uint32_t)y;
+                stbi_image_free(imgdata);
+            }
+        } else {
+            ENG_WARN("Could not load image {}", fimg.name.c_str());
         }
-        n.transform = asset.transforms.size();
-        auto& t = asset.make_transform();
-        memcpy(&t, &mat, sizeof(t));
-        if(node.meshIndex) {
-            n.meshes.push_back(asset.make_mesh());
-            parseFMesh(asset.meshes.back(), fasset.meshes.at(*node.meshIndex));
-        }
-    };
+        asset.images.push_back(std::move(img));
+    }
 
-    fastgltf::iterateSceneNodes(fasset, 0ull, fastgltf::math::fmat4x4{}, iterateSceneNodes);
+    for(auto i = 0u; i < fasset.textures.size(); ++i) {
+        auto& ftxt = fasset.textures.at(i);
+        if(!ftxt.imageIndex) {
+            ENG_WARN("Unsupported texture {} type.", ftxt.name.c_str());
+            asset.make_texture();
+        } else {
+            auto& txt = asset.get_texture(asset.make_texture());
+            if(ftxt.samplerIndex) {
+                auto& fsamp = fasset.samplers.at(*ftxt.samplerIndex);
+                ENG_TODO("Implement sampler settings import from fastgltf");
+            }
+            txt.image = *ftxt.imageIndex;
+        }
+    }
+
+    for(auto i = 0u; i < fasset.materials.size(); ++i) {
+        auto& fmat = fasset.materials.at(i);
+        Material mat;
+        mat.name = fmat.name.c_str();
+        if(fmat.pbrData.baseColorTexture) {
+            assert(fmat.pbrData.baseColorTexture->texCoordIndex == 0);
+            auto& img = asset.get_image(asset.get_texture(fmat.pbrData.baseColorTexture->textureIndex).image);
+            img.format = gfx::ImageFormat::R8G8B8A8_SRGB;
+            mat.color_texture = fmat.pbrData.baseColorTexture->textureIndex;
+        }
+        asset.get_material(asset.make_material()) = std::move(mat);
+    }
+
+    for(auto i = 0u; i < fasset.meshes.size(); ++i) {
+        auto& fmesh = fasset.meshes.at(i);
+        Mesh mesh;
+        mesh.name = fmesh.name.c_str();
+        mesh.submeshes.reserve(fmesh.primitives.size());
+        for(auto j = 0u; j < fmesh.primitives.size(); ++j) {
+            const auto load_primitive = [&]() {
+                Submesh submesh;
+                auto& fprim = fmesh.primitives.at(j);
+                std::vector<Vertex> vertices;
+                std::vector<uint32_t> indices;
+                if(auto it = fprim.findAttribute("POSITION"); it != fprim.attributes.end()) {
+                    auto& acc = fasset.accessors.at(it->accessorIndex);
+                    if(!acc.bufferViewIndex) {
+                        ENG_ERROR("No bufferViewIndex...");
+                        return submesh;
+                    }
+                    vertices.resize(acc.count);
+                    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fasset, acc, [&vertices](const auto& vec, auto idx) {
+                        vertices.at(idx).position = { vec.x(), vec.y(), vec.z() };
+                    });
+                } else {
+                    ENG_WARN("Mesh primitive does not contain position. Skipping...");
+                    return submesh;
+                }
+                if(auto it = fprim.findAttribute("NORMAL"); it != fprim.attributes.end()) {
+                    auto& acc = fasset.accessors.at(it->accessorIndex);
+                    if(!acc.bufferViewIndex) {
+                        ENG_ERROR("No bufferViewIndex...");
+                        return submesh;
+                    }
+                    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fasset, acc, [&vertices](const auto& vec, auto idx) {
+                        vertices.at(idx).normal = { vec.x(), vec.y(), vec.z() };
+                    });
+                }
+                if(auto it = fprim.findAttribute("TEXCOORD_0"); it != fprim.attributes.end()) {
+                    auto& acc = fasset.accessors.at(it->accessorIndex);
+                    if(!acc.bufferViewIndex) {
+                        ENG_ERROR("No bufferViewIndex...");
+                        return submesh;
+                    }
+                    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(fasset, acc, [&vertices](const auto& vec, auto idx) {
+                        vertices.at(idx).uv = { vec.x(), vec.y() };
+                    });
+                }
+                if(auto it = fprim.findAttribute("TANGENT"); it != fprim.attributes.end()) {
+                    auto& acc = fasset.accessors.at(it->accessorIndex);
+                    if(!acc.bufferViewIndex) {
+                        ENG_ERROR("No bufferViewIndex...");
+                        return submesh;
+                    }
+                    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(fasset, acc, [&vertices](const auto& vec, auto idx) {
+                        vertices.at(idx).tangent = { vec.x(), vec.y(), vec.z(), vec.w() };
+                    });
+                }
+                if(!fprim.indicesAccessor) {
+                    ENG_WARN("Mesh primitive {}:{} does not have mandatory vertex indices. Skipping...", fmesh.name.c_str(), j);
+                    return submesh;
+                } else {
+                    auto& acc = fasset.accessors.at(*fprim.indicesAccessor);
+                    if(!acc.bufferViewIndex) {
+                        ENG_ERROR("No bufferViewIndex...");
+                        return submesh;
+                    }
+                    indices.resize(acc.count);
+                    fastgltf::copyFromAccessor<uint32_t>(fasset, acc, indices.data());
+                }
+                if(fprim.materialIndex) {
+                    submesh.material = *fprim.materialIndex;
+                } else {
+                    ENG_WARN("Mesh prim {}:{} does not have a material", fmesh.name.c_str(), j);
+                }
+                submesh.geometry = asset.make_geometry();
+                auto& geom = asset.get_geometry(submesh);
+                geom.vertex_range = { .offset = asset.vertices.size(), .count = vertices.size() };
+                geom.index_range = { .offset = asset.indices.size(), .count = indices.size() };
+                asset.vertices.insert(asset.vertices.end(), vertices.begin(), vertices.end());
+                asset.indices.insert(asset.indices.end(), indices.begin(), indices.end());
+                return submesh;
+            };
+
+            const auto submeshidx = asset.make_submesh();
+            asset.get_submesh(submeshidx) = load_primitive();
+            mesh.submeshes.push_back(submeshidx);
+        }
+    }
+
+    fastgltf::iterateSceneNodes(fasset, 0ull, fastgltf::math::fmat4x4{},
+                                [&](fastgltf::Node& fnode, const fastgltf::math::fmat4x4& mat) {
+                                    const auto fidx = std::distance(fasset.nodes.data(), &fnode);
+                                    auto& node = asset.get_node(fidx);
+                                    auto& trans = asset.get_transform(node);
+                                    memcpy(&trans, &mat, sizeof(trans));
+                                    node.name = fnode.name.c_str();
+                                    if(fnode.meshIndex) { node.mesh = *fnode.meshIndex; }
+                                    node.nodes.reserve(fnode.children.size());
+                                    for(auto i : fnode.children) {
+                                        node.nodes.push_back(i);
+                                    }
+                                });
     asset.scene.reserve(scene.nodeIndices.size());
     for(auto sidx : scene.nodeIndices) {
-        asset.scene.push_back(get_node_idx(fasset.nodes.at(sidx)));
+        asset.scene.push_back(sidx);
     }
 
     return asset;
