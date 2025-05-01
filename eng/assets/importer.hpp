@@ -79,15 +79,19 @@ struct Node {
 struct Asset {
     bool is_valid() const { return !scene.empty(); }
     Geometry& get_geometry(const Submesh& submesh);
+    Geometry* try_get_geometry(const Submesh& submesh);
     Node& get_node(asset_index_t idx);
     const Node& get_node(asset_index_t idx) const;
     glm::mat4& get_transform(Node& node);
     const glm::mat4& get_transform(const Node& node) const;
     Mesh& get_mesh(const Node& node);
+    Mesh* try_get_mesh(const Node& node);
     Submesh& get_submesh(asset_index_t idx);
     Image& get_image(asset_index_t idx);
     Texture& get_texture(asset_index_t idx);
     Material& get_material(asset_index_t idx);
+    Material& get_material(const Submesh& submesh);
+    Material* try_get_material(const Submesh& submesh);
     asset_index_t make_geometry();
     asset_index_t make_node();
     asset_index_t make_mesh();

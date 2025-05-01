@@ -22,7 +22,6 @@ enum class ImageAddressing { REPEAT, CLAMP_EDGE };
 
 struct Geometry;
 struct Mesh;
-struct RenderInstance;
 struct Image;
 struct Buffer;
 

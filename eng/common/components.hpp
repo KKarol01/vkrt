@@ -22,12 +22,15 @@ struct Transform {
     glm::mat4 transform{ 1.0f };
 };
 
-/* For rendering */
-struct Renderable {
-    Flags<gfx::InstanceFlags> flags;
-    Handle<gfx::Mesh> mesh_handle;
-    Handle<gfx::Material> material_handle;
-     Handle<gfx::BLAS> blas_handle;
+struct Submesh {
+    Handle<gfx::Geometry> geometry;
+    Handle<gfx::Material> material;
+    Handle<gfx::BLAS> blas;
+};
+
+struct Mesh {
+    std::string name;
+    std::vector<Submesh> submeshes;
 };
 
 } // namespace components

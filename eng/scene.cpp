@@ -9,198 +9,64 @@
 #include <eng/model_importer.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/components.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
+// #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/set_debug_name.hpp>
+#include <eng/assets/importer.hpp>
 
-static Handle<gfx::Image> scene_load_image(fastgltf::Asset& asset, fastgltf::Image& img, gfx::ImageFormat format) {
-    std::byte* img_data{};
-    int width{}, height{}, ch{};
-    // clang-format off
-    const auto result = std::visit(fastgltf::visitor{
-        [](auto& source) { return false; },
-        [&](fastgltf::sources::BufferView& source) {
-            auto& bview = asset.bufferViews.at(source.bufferViewIndex);
-            auto& buff = asset.buffers.at(bview.bufferIndex);
-            return std::visit(fastgltf::visitor{
-                        [](auto&){ return false; },
-                        [&](fastgltf::sources::Array& vector) {
-                        auto* data = stbi_load_from_memory(reinterpret_cast<stbi_uc*>(vector.bytes.data() + bview.byteOffset), bview.byteLength, &width, &height, &ch, 4);
-                        img_data = reinterpret_cast<std::byte*>(data);
-                        return true;
-                    }}, buff.data);
-        }
-    }, img.data);
-    // clang-format on
-    if(!result) { return Handle<gfx::Image>{}; }
-    return Engine::get().renderer->batch_texture(gfx::ImageDescriptor{
-        .name = img.name.c_str(),
-        .width = static_cast<uint32_t>(width),
-        .height = static_cast<uint32_t>(height),
-        .format = format,
-        .data = { img_data, img_data + width * height * ch },
-    });
-}
+namespace scene {
 
-struct SceneLoadingState {
-    struct MaterialDescriptor {
-        std::string name;
-        Handle<gfx::Material> handle{};
-        Handle<gfx::Image> base_color_image_handle{};
-        Handle<gfx::Image> normal_image_handle{};
-        Handle<gfx::Image> metallic_roughness_handle{};
-    };
-    std::vector<Handle<gfx::Image>> images;
-    std::vector<MaterialDescriptor> materials;
-};
-
-static Handle<gfx::Image> scene_get_or_load_image(SceneLoadingState& state, fastgltf::Asset& asset,
-                                                  uint32_t texture_index, gfx::ImageFormat format) {
-    if(state.images.size() <= texture_index) {
-        state.images.resize(texture_index + 1);
-        auto& texture = asset.textures.at(texture_index);
-        auto& image = asset.images.at(*texture.imageIndex);
-        state.images.at(texture_index) = scene_load_image(asset, image, format);
+Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
+    if(path.extension() != ".glb") {
+        assert(false && "Only .glb files are supported.");
+        return {};
     }
-    return state.images.at(texture_index);
-}
-
-static void scene_load_mesh(SceneLoadingState& state, fastgltf::Asset& asset, fastgltf::Primitive& prim,
-                            scene::Scene* scene, scene::Node* node) {
-    static const std::array<std::string, 4> attribs{ "POSITION", "NORMAL", "TEXCOORD_0", "TANGENT" };
-    static const std::array<uint32_t, 4> attrib_offsets{ offsetof(gfx::Vertex, pos), offsetof(gfx::Vertex, nor),
-                                                         offsetof(gfx::Vertex, uv), offsetof(gfx::Vertex, tang) };
-    static const std::array<uint32_t, 4> attrib_sizes{ sizeof(gfx::Vertex::pos), sizeof(gfx::Vertex::nor),
-                                                       sizeof(gfx::Vertex::uv), sizeof(gfx::Vertex::tang) };
-
-    std::vector<gfx::Vertex> vertices;
-    std::vector<uint32_t> indices;
-    for(int i = 0; i < attribs.size(); ++i) {
-        const auto set_vertex_component = [&](auto val, size_t idx) {
-            memcpy((std::byte*)&vertices.at(idx) + attrib_offsets.at(i), &val, attrib_sizes.at(i));
-        };
-
-        auto attrib_it = prim.findAttribute(attribs[i]);
-        if(i == 0 && attrib_it == prim.attributes.end()) { break; }
-        if(attrib_it != prim.attributes.end()) {
-            auto& accessor = asset.accessors.at(attrib_it->accessorIndex);
-            if(i == 0) { vertices.resize(accessor.count); }
-            if(accessor.type == fastgltf::AccessorType::Vec2) {
-                fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(asset, accessor, set_vertex_component);
-            } else if(accessor.type == fastgltf::AccessorType::Vec3) {
-                fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(asset, accessor, set_vertex_component);
-            } else if(accessor.type == fastgltf::AccessorType::Vec4) {
-                fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(asset, accessor, set_vertex_component);
-            }
-        }
-    }
-
-    auto& indices_accesor = asset.accessors.at(*prim.indicesAccessor);
-    indices.resize(indices_accesor.count);
-    fastgltf::copyFromAccessor<uint32_t>(asset, indices_accesor, indices.data());
-
-    auto& node_primitive = node->primitives.emplace_back();
-    node_primitive.geometry_handle = Engine::get().renderer->batch_geometry({ .vertices = vertices, .indices = indices });
-    node_primitive.mesh_handle =
-        Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{ .geometry = node_primitive.geometry_handle });
-
-    if(prim.materialIndex) {
-        if(state.materials.size() > *prim.materialIndex) {
-            node_primitive.material_handle = state.materials.at(*prim.materialIndex).handle;
-        } else {
-            state.materials.resize(*prim.materialIndex + 1);
-            auto& material = asset.materials.at(*prim.materialIndex);
-            auto& state_material = state.materials.at(*prim.materialIndex);
-            if(material.pbrData.baseColorTexture) {
-                state_material.base_color_image_handle =
-                    scene_get_or_load_image(state, asset, material.pbrData.baseColorTexture->textureIndex,
-                                            gfx::ImageFormat::R8G8B8A8_SRGB);
-            }
-            if(material.normalTexture) {
-                state_material.normal_image_handle =
-                    scene_get_or_load_image(state, asset, material.normalTexture->textureIndex, gfx::ImageFormat::R8G8B8A8_UNORM);
-            }
-            if(material.pbrData.metallicRoughnessTexture) {
-                state_material.metallic_roughness_handle =
-                    scene_get_or_load_image(state, asset, material.pbrData.metallicRoughnessTexture->textureIndex,
-                                            gfx::ImageFormat::R8G8B8A8_UNORM);
-            }
-            state_material.handle = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
-                .base_color_texture = state_material.base_color_image_handle,
-                .normal_texture = state_material.normal_image_handle,
-                .metallic_roughness_texture = state_material.metallic_roughness_handle,
-            });
-            node_primitive.material_handle = state_material.handle;
-        }
-    }
-}
-
-static glm::mat4 scene_compose_matrix(const auto& fastgltf_transform) {
-    fastgltf::math::fmat4x4 gltf_mat;
-    if(fastgltf_transform.index() == 0) {
-        const auto T = std::get<0>(fastgltf_transform).translation;
-        const auto R = std::get<0>(fastgltf_transform).rotation;
-        const auto S = std::get<0>(fastgltf_transform).scale;
-        gltf_mat = fastgltf::math::scale(fastgltf::math::fmat4x4{ 1.0f }, S);
-        gltf_mat = fastgltf::math::rotate(fastgltf::math::fmat4x4{ 1.0f }, R) * gltf_mat;
-        gltf_mat = fastgltf::math::translate(fastgltf::math::fmat4x4{ 1.0f }, T) * gltf_mat;
-
-    } else {
-        gltf_mat = std::get<1>(fastgltf_transform);
-    }
-    glm::mat4 glm_mat;
-    memcpy(&glm_mat, &gltf_mat, sizeof(glm_mat));
-    return glm_mat;
-}
-
-static void scene_load_nodes(SceneLoadingState& state, fastgltf::Asset& asset, fastgltf::Node& node,
-                             scene::Scene* scene, scene::Node* parent_node, glm::mat4 transform) {
-    scene::Node* scene_node = scene->add_node();
-    scene_node->name = node.name;
-    scene_node->transform = scene_compose_matrix(node.transform);
-    scene_node->final_transform = scene_node->transform * transform;
-    parent_node->children.push_back(scene_node);
-
-    if(node.meshIndex) {
-        auto& mesh = asset.meshes.at(*node.meshIndex);
-        for(auto& p : mesh.primitives) {
-            if(p.type != fastgltf::PrimitiveType::Triangles) { continue; }
-            scene_load_mesh(state, asset, p, scene, scene_node);
-        }
-    }
-    for(auto child_idx : node.children) {
-        scene_load_nodes(state, asset, asset.nodes.at(child_idx), scene, scene_node, scene_node->final_transform);
-    }
-}
-
-Handle<scene::Node> scene::Scene::load_from_file(const std::filesystem::path& path) {
     const std::filesystem::path full_path = std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path;
+    auto asset = assets::Importer::import_glb(full_path);
 
-    fastgltf::Parser parser;
-    auto glbbuffer = fastgltf::GltfDataBuffer::FromPath(full_path);
-    if(!glbbuffer) { return Handle<Node>{}; }
+    const auto parse_node_components = [&](Node& snode, assets::Node& anode) {
+        if(auto* amesh = asset.try_get_mesh(anode)) {
+            auto& cmesh = Engine::get().ecs_storage->get<components::Mesh>(snode.entity);
+            cmesh.name = amesh->name;
+            cmesh.submeshes.reserve(amesh->submeshes.size());
+            for(auto& asidx : amesh->submeshes) {
+                auto& as = asset.get_submesh(asidx);
+                auto* ag = asset.try_get_geometry(as);
+                auto* am = asset.try_get_material(as);
+                assert(ag && am);
+                std::vector<gfx::Vertex> gfxvertices(ag->vertex_range.count);
+                for(auto i = 0u; i < gfxvertices.size(); ++i) {
+                    gfxvertices.at(i) = { .pos = asset.vertices.at(ag->vertex_range.offset + i).position,
+                                          .nor = asset.vertices.at(ag->vertex_range.offset + i).normal,
+                                          .uv = asset.vertices.at(ag->vertex_range.offset + i).uv,
+                                          .tang = asset.vertices.at(ag->vertex_range.offset + i).tangent };
+                }
 
-    constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
-                                 fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
-    auto expected_asset = parser.loadGltfBinary(glbbuffer.get(), full_path.parent_path(), gltfOptions);
-    if(!expected_asset) { return Handle<Node>{}; }
-    auto& asset = expected_asset.get();
+                const auto rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
+                    .vertices = std::span{ gfxvertices },
+                    .indices = std::span{ asset.indices.begin() + ag->index_range.offset, ag->index_range.count } });
+                Engine::get().renderer->batch_texture()
+            }
+        }
+    };
 
-    std::vector<Handle<gfx::Image>> images;
-    images.reserve(asset.images.size());
+    const auto parse_node = [&](assets::Node& anode, auto& recursive) -> Node* {
+        Node snode;
+        snode.name = anode.name;
+        snode.entity = Engine::get().ecs_storage->create();
+        snode.children.reserve(anode.nodes.size());
+        for(auto& c : anode.nodes) {
+            snode.children.push_back(recursive(asset.get_node(c), recursive));
+        }
+        nodes.push_back(std::move(snode));
+        return &nodes.back();
+    };
 
-    auto& scene = asset.scenes[0];
-    Node* scene_node = &nodes.emplace_back();
-    scene_node->name = scene.name.c_str();
-    scene_node->handle = Handle<Node>{ generate_handle };
-    SceneLoadingState state;
-    for(auto idx : scene.nodeIndices) {
-        scene_load_nodes(state, asset, asset.nodes.at(idx), this, scene_node, scene_compose_matrix(asset.nodes.at(idx).transform));
+    for(auto& n : asset.scene) {
+        parse_node(asset.get_node(n), parse_node);
     }
-    node_handles[scene_node->handle] = scene_node;
-    return scene_node->handle;
 }
 
-Handle<scene::NodeInstance> scene::Scene::instance_model(Handle<scene::Node> entity) {
+Handle<NodeInstance> Scene::instance_model(Handle<Node> entity) {
     Node* n = node_handles.at(entity);
     NodeInstance* i = add_instance();
     std::stack<NodeInstance*> i_stack;
@@ -235,7 +101,7 @@ Handle<scene::NodeInstance> scene::Scene::instance_model(Handle<scene::Node> ent
     return i->instance_handle;
 }
 
-void scene::Scene::update_transform(Handle<scene::NodeInstance> entity, glm::mat4 transform) {
+void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
     auto* instance = instance_handles.at(entity);
     std::stack<glm::mat4> stack;
     // stack.push(glm::mat4{1.0f});
@@ -259,27 +125,29 @@ void scene::Scene::update_transform(Handle<scene::NodeInstance> entity, glm::mat
     });
 }
 
-scene::Node* scene::Scene::add_node() {
+Node* Scene::add_node() {
     auto& n = nodes.emplace_back();
     n.handle = Handle<Node>{ generate_handle };
     node_handles[n.handle] = &n;
     return &n;
 }
 
-scene::NodeInstance* scene::Scene::add_instance() {
+NodeInstance* Scene::add_instance() {
     auto& n = node_instances.emplace_back();
     n.instance_handle = Handle<NodeInstance>{ generate_handle };
     return &n;
 }
 
-// void scene::Scene::update_transform(Handle<Entity> entity) {
+} // namespace scene
+
+// void Scene::update_transform(Handle<Entity> entity) {
 //  uint32_t idx = entity_node_idxs.at(entity);
 //  glm::mat4 tr = glm::mat4{ 1.0f };
 //  if(nodes.at(idx).parent != ~0u) { tr = final_transforms.at(nodes.at(idx).parent); }
 //_update_transform(idx, tr);
 //}
 
-// void scene::Scene::_update_transform(uint32_t idx, glm::mat4 t) {
+// void Scene::_update_transform(uint32_t idx, glm::mat4 t) {
 //  Node& node = nodes.at(idx);
 //  cmps::Transform& tr = Engine::ec()->get<cmps::Transform>(node.handle);
 //  final_transforms.at(idx) = tr.transform * t;
@@ -291,7 +159,7 @@ scene::NodeInstance* scene::Scene::add_instance() {
 //  }
 //}
 
-bool scene::NodeInstance::has_children() const {
+bool NodeInstance::has_children() const {
     for(const auto& e : children) {
         if(e) { return true; }
     }

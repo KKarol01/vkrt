@@ -14,21 +14,10 @@
 
 namespace scene {
 
-struct Primitive {
-    Handle<gfx::Geometry> geometry_handle{};
-    Handle<gfx::Mesh> mesh_handle{};
-    Handle<gfx::BLAS> blas_handle{};
-    Handle<gfx::Material> material_handle{};
-};
-
 struct Node {
     std::string name;
     std::vector<Node*> children;
-    // rendering primitives (triangles with material)
-    std::vector<Primitive> primitives;
-    glm::mat4 transform{ 1.0f };
-    glm::mat4 final_transform{ 1.0f };
-    Handle<Node> handle;
+    components::Entity entity{ components::s_max_entity };
 };
 
 struct NodeInstance {
@@ -95,12 +84,9 @@ class Scene {
     float debug_dir_light_dir[3]{ -0.45453298, -0.76604474, 0.45450562 };
     float debug_dir_light_pos[3]{ 11.323357, 12.049147, -10.638633 };
 
-    // Storage for all nodes so they can reference one another.
-    std::deque<Node> nodes;
-    // Instances of particular node
-    std::deque<NodeInstance> node_instances;
-    // Actual actors present on the scene
-    std::vector<NodeInstance*> scene;
+    std::deque<Node> nodes;                  // Storage for all nodes so they can reference one another.
+    std::deque<NodeInstance> node_instances; // Instances of particular node
+    std::vector<NodeInstance*> scene;        // Actual actors present on the scene
     std::unordered_map<Handle<Node>, Node*> node_handles;
     std::unordered_map<Handle<NodeInstance>, NodeInstance*> instance_handles;
 };

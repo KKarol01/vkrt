@@ -13,6 +13,11 @@ namespace assets {
 
 Geometry& Asset::get_geometry(const Submesh& submesh) { return geometries.at(submesh.geometry); }
 
+Geometry* Asset::try_get_geometry(const Submesh& submesh) {
+    if(submesh.geometry == s_max_asset_index) { return nullptr; }
+    return &get_geometry(submesh);
+}
+
 Node& Asset::get_node(asset_index_t idx) { return nodes.at(idx); }
 
 const Node& assets::Asset::get_node(asset_index_t idx) const { return nodes.at(idx); }
@@ -25,6 +30,11 @@ const glm::mat4& Asset::get_transform(const Node& node) const {
 
 Mesh& Asset::get_mesh(const Node& node) { return meshes.at(node.mesh); }
 
+Mesh* Asset::try_get_mesh(const Node& node) {
+    if(node.mesh == s_max_asset_index) { return nullptr; }
+    return &get_mesh(node);
+}
+
 Submesh& Asset::get_submesh(asset_index_t idx) { return submeshes.at(idx); }
 
 Image& Asset::get_image(asset_index_t idx) { return images.at(idx); }
@@ -32,6 +42,13 @@ Image& Asset::get_image(asset_index_t idx) { return images.at(idx); }
 Texture& Asset::get_texture(asset_index_t idx) { return textures.at(idx); }
 
 Material& Asset::get_material(asset_index_t idx) { return materials.at(idx); }
+
+Material& Asset::get_material(const Submesh& submesh) { return materials.at(submesh.material); }
+
+Material* Asset::try_get_material(const Submesh& submesh) {
+    if(submesh.material == s_max_asset_index) { return nullptr; }
+    return &get_material(submesh);
+}
 
 asset_index_t Asset::make_geometry() {
     geometries.emplace_back();
@@ -70,10 +87,8 @@ asset_index_t Asset::make_material() {
 
 Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings settings) {
     Asset asset;
-
-    const std::filesystem::path full_path = std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path;
     fastgltf::Parser parser;
-    auto glbbuffer = fastgltf::GltfDataBuffer::FromPath(full_path);
+    auto glbbuffer = fastgltf::GltfDataBuffer::FromPath(path);
     if(!glbbuffer) {
         ENG_WARN("Error during fastgltf::GltfDataBuffer import: {}", fastgltf::getErrorName(glbbuffer.error()));
         return asset;
@@ -81,7 +96,7 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
 
     static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
-    auto _gltfasset = parser.loadGltfBinary(glbbuffer.get(), full_path.parent_path(), gltfOptions);
+    auto _gltfasset = parser.loadGltfBinary(glbbuffer.get(), path.parent_path(), gltfOptions);
     if(!_gltfasset) {
         ENG_WARN("Error during loading fastgltf::Parser::loadGltfBinary: {}", fastgltf::getErrorName(_gltfasset.error()));
         return asset;
@@ -89,7 +104,7 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
     auto& fasset = _gltfasset.get();
     auto& scene = fasset.scenes.at(0);
 
-    asset.path = full_path;
+    asset.path = path;
     asset.nodes.resize(fasset.nodes.size());
     asset.transforms.resize(fasset.nodes.size());
     asset.images.reserve(fasset.images.size());

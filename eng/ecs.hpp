@@ -51,7 +51,7 @@ template <typename T> class ComponentArray : public ComponentArrayBase {
     size_t size() const { return entities.size(); }
 
   private:
-    SparseSet<> entities;
+    SparseSet<Entity> entities;
     std::vector<T> components;
 };
 
