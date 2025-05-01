@@ -99,38 +99,39 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
 }
 
 Handle<NodeInstance> Scene::instance_model(Handle<Node> entity) {
-    Node* n = node_handles.at(entity);
-    NodeInstance* i = add_instance();
-    std::stack<NodeInstance*> i_stack;
-    i_stack.push(i);
-    traverse_node_hierarchy_indexed(n, [&](Node* n, uint32_t idx) {
-        NodeInstance* ni = i_stack.top();
-        i_stack.pop();
-        ni->name = n->name;
-        ni->node_handle = n->handle;
-        ni->instance_handle = Handle<NodeInstance>{ generate_handle };
-        ni->transform = n->transform;
-        ni->final_transform = n->transform;
-        ni->children.reserve(n->children.size());
-        ni->primitives.reserve(n->primitives.size());
-        instance_handles[ni->instance_handle] = ni;
-        for(auto& p : n->primitives) {
-            auto pi = ni->primitives.emplace_back(Engine::get().ecs_storage->create());
-            Engine::get().ecs_storage->emplace<components::Transform>(pi, ni->final_transform);
-            Engine::get().ecs_storage->emplace<components::Renderable>(
-                pi, components::Renderable{ .mesh_handle = p.mesh_handle, .material_handle = p.material_handle });
-            Engine::get().renderer->instance_mesh(gfx::InstanceSettings{ .entity = pi });
-            Engine::get().renderer->instance_blas(gfx::BLASInstanceSettings{ .entity = pi });
-        }
-        for(auto& c : n->children) {
-            ni->children.push_back(add_instance());
-        }
-        for(auto it = ni->children.rbegin(); it != ni->children.rend(); ++it) {
-            i_stack.push(*it);
-        }
-    });
-    scene.push_back(i);
-    return i->instance_handle;
+    // Node* n = node_handles.at(entity);
+    // NodeInstance* i = add_instance();
+    // std::stack<NodeInstance*> i_stack;
+    // i_stack.push(i);
+    // traverse_node_hierarchy_indexed(n, [&](Node* n, uint32_t idx) {
+    //     NodeInstance* ni = i_stack.top();
+    //     i_stack.pop();
+    //     ni->name = n->name;
+    //     ni->node_handle = n->handle;
+    //     ni->instance_handle = Handle<NodeInstance>{ generate_handle };
+    //     ni->transform = n->transform;
+    //     ni->final_transform = n->transform;
+    //     ni->children.reserve(n->children.size());
+    //     ni->primitives.reserve(n->primitives.size());
+    //     instance_handles[ni->instance_handle] = ni;
+    //     for(auto& p : n->primitives) {
+    //         auto pi = ni->primitives.emplace_back(Engine::get().ecs_storage->create());
+    //         Engine::get().ecs_storage->emplace<components::Transform>(pi, ni->final_transform);
+    //         Engine::get().ecs_storage->emplace<components::Renderable>(
+    //             pi, components::Renderable{ .mesh_handle = p.mesh_handle, .material_handle = p.material_handle });
+    //         Engine::get().renderer->instance_mesh(gfx::InstanceSettings{ .entity = pi });
+    //         Engine::get().renderer->instance_blas(gfx::BLASInstanceSettings{ .entity = pi });
+    //     }
+    //     for(auto& c : n->children) {
+    //         ni->children.push_back(add_instance());
+    //     }
+    //     for(auto it = ni->children.rbegin(); it != ni->children.rend(); ++it) {
+    //         i_stack.push(*it);
+    //     }
+    // });
+    // scene.push_back(i);
+    // return i->instance_handle;
+    return {};
 }
 
 void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
@@ -158,16 +159,18 @@ void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
 }
 
 Node* Scene::add_node() {
-    auto& n = nodes.emplace_back();
-    n.handle = Handle<Node>{ generate_handle };
-    node_handles[n.handle] = &n;
-    return &n;
+    // auto& n = nodes.emplace_back();
+    // n.handle = Handle<Node>{ generate_handle };
+    // node_handles[n.handle] = &n;
+    // return &n;
+    return nullptr;
 }
 
 NodeInstance* Scene::add_instance() {
-    auto& n = node_instances.emplace_back();
-    n.instance_handle = Handle<NodeInstance>{ generate_handle };
-    return &n;
+    // auto& n = node_instances.emplace_back();
+    // n.instance_handle = Handle<NodeInstance>{ generate_handle };
+    // return &n;
+    return nullptr;
 }
 
 } // namespace scene
@@ -191,9 +194,10 @@ NodeInstance* Scene::add_instance() {
 //  }
 //}
 
-bool NodeInstance::has_children() const {
-    for(const auto& e : children) {
-        if(e) { return true; }
-    }
-    return false;
-}
+//bool NodeInstance::has_children() const {
+//    //for(const auto& e : children) {
+//    //    if(e) { return true; }
+//    //}
+//    //return false;
+//    return 
+//}
