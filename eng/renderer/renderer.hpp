@@ -50,7 +50,7 @@ struct ImageDescriptor {
 
 struct MaterialImageDescriptor {
     Handle<Image> handle;
-    ImageFilter filter{ ImageFilter::LINEAR };
+    ImageFilter filtering{ ImageFilter::LINEAR };
     ImageAddressing addressing{ ImageAddressing::REPEAT };
 };
 
@@ -102,7 +102,7 @@ class Renderer {
     virtual void update() = 0;
     virtual void on_window_resize() = 0;
     // virtual void set_screen(ScreenRect screen) = 0;
-    virtual Handle<Image> batch_texture(const ImageDescriptor& batch) = 0;
+    virtual Handle<Image> batch_image(const ImageDescriptor& batch) = 0;
     virtual Handle<Material> batch_material(const MaterialDescriptor& batch) = 0;
     virtual Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) = 0;
     virtual Handle<Mesh> batch_mesh(const MeshDescriptor& batch) = 0;

@@ -23,6 +23,44 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
     const std::filesystem::path full_path = std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path;
     auto asset = assets::Importer::import_glb(full_path);
 
+    std::vector<Handle<gfx::Image>> batched_images;
+    std::vector<Handle<gfx::Geometry>> batched_geometries;
+    std::vector<Handle<gfx::Material>> batched_materials;
+
+    batched_images.reserve(asset.images.size());
+    for(auto& ai : asset.images) {
+        const auto ri = Engine::get().renderer->batch_image(gfx::ImageDescriptor{
+            .name = ai.name, .width = ai.width, .height = ai.height, .format = ai.format, .data = ai.data });
+        batched_images.push_back(ri);
+    }
+
+    batched_geometries.reserve(asset.geometries.size());
+    for(auto& ag : asset.geometries) {
+        std::vector<gfx::Vertex> gfxvertices(ag.vertex_range.count);
+        for(auto i = 0u; i < gfxvertices.size(); ++i) {
+            gfxvertices.at(i) = { .pos = asset.vertices.at(ag.vertex_range.offset + i).position,
+                                  .nor = asset.vertices.at(ag.vertex_range.offset + i).normal,
+                                  .uv = asset.vertices.at(ag.vertex_range.offset + i).uv,
+                                  .tang = asset.vertices.at(ag.vertex_range.offset + i).tangent };
+        }
+
+        const auto rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
+            .vertices = std::span{ gfxvertices },
+            .indices = std::span{ asset.indices.begin() + ag.index_range.offset, ag.index_range.count } });
+        batched_geometries.push_back(rg);
+    }
+
+    batched_materials.reserve(asset.materials.size());
+    for(auto& am : asset.materials) {
+        if(am.color_texture != assets::s_max_asset_index) { // todo: should be done with try_get_texture i think.
+            const auto& act = asset.textures.at(am.color_texture);
+            const auto rm = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
+                .base_color_texture = {
+                    .handle = batched_images.at(am.color_texture), .filtering = act.filtering, .addressing = act.addressing } });
+            batched_materials.push_back(rm);
+        }
+    }
+
     const auto parse_node_components = [&](Node& snode, assets::Node& anode) {
         if(auto* amesh = asset.try_get_mesh(anode)) {
             auto& cmesh = Engine::get().ecs_storage->get<components::Mesh>(snode.entity);
@@ -33,20 +71,13 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
                 auto* ag = asset.try_get_geometry(as);
                 auto* am = asset.try_get_material(as);
                 assert(ag && am);
-                std::vector<gfx::Vertex> gfxvertices(ag->vertex_range.count);
-                for(auto i = 0u; i < gfxvertices.size(); ++i) {
-                    gfxvertices.at(i) = { .pos = asset.vertices.at(ag->vertex_range.offset + i).position,
-                                          .nor = asset.vertices.at(ag->vertex_range.offset + i).normal,
-                                          .uv = asset.vertices.at(ag->vertex_range.offset + i).uv,
-                                          .tang = asset.vertices.at(ag->vertex_range.offset + i).tangent };
-                }
-
-                const auto rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
-                    .vertices = std::span{ gfxvertices },
-                    .indices = std::span{ asset.indices.begin() + ag->index_range.offset, ag->index_range.count } });
-                Engine::get().renderer->batch_texture()
+                components::Submesh csm{ .geometry = batched_geometries.at(as.geometry),
+                                         .material = batched_materials.at(as.material) };
+                cmesh.submeshes.push_back(csm);
             }
         }
+        auto& ct = Engine::get().ecs_storage->get<components::Transform>(snode.entity);
+        ct.transform = asset.get_transform(anode);
     };
 
     const auto parse_node = [&](assets::Node& anode, auto& recursive) -> Node* {
@@ -54,6 +85,7 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
         snode.name = anode.name;
         snode.entity = Engine::get().ecs_storage->create();
         snode.children.reserve(anode.nodes.size());
+        parse_node_components(snode, anode);
         for(auto& c : anode.nodes) {
             snode.children.push_back(recursive(asset.get_node(c), recursive));
         }

@@ -727,7 +727,7 @@ static VkImageType deduce_image_type(ImageType dim) {
     }
 }
 
-Handle<Image> RendererVulkan::batch_texture(const ImageDescriptor& desc) {
+Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc) {
     const auto handle = make_image(desc.name, Vks(VkImageCreateInfo{ .imageType = deduce_image_type(desc.type),
                                                                      .format = deduce_image_format(desc.format),
                                                                      .extent = { desc.width, desc.height, 1u },
@@ -919,17 +919,17 @@ void RendererVulkan::bake_indirect_commands() {
             .vertex_offset = geom.vertex_offset,
             .index_offset = geom.index_offset,
             .color_texture_idx = get_bindless_index(get_image(mat.textures.base_color_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                    samplers.get_sampler(mat.textures.base_color_texture.filter,
+                                                    samplers.get_sampler(mat.textures.base_color_texture.filtering,
                                                                          mat.textures.base_color_texture.addressing)),
             .normal_texture_idx = mat.textures.normal_texture.handle
                                       ? get_bindless_index(get_image(mat.textures.normal_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                           samplers.get_sampler(mat.textures.normal_texture.filter,
+                                                           samplers.get_sampler(mat.textures.normal_texture.filtering,
                                                                                 mat.textures.normal_texture.addressing))
                                       : ~0ul,
             .metallic_roughness_idx =
                 mat.textures.metallic_roughness_texture.handle
                     ? get_bindless_index(get_image(mat.textures.metallic_roughness_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                         samplers.get_sampler(mat.textures.metallic_roughness_texture.filter,
+                                         samplers.get_sampler(mat.textures.metallic_roughness_texture.filtering,
                                                               mat.textures.metallic_roughness_texture.addressing))
                     : ~0ul,
         });

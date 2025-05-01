@@ -150,7 +150,7 @@ class RendererVulkan : public gfx::Renderer {
     void update() final;
     void on_window_resize() final;
     // void set_screen(ScreenRect screen) final;
-    Handle<Image> batch_texture(const ImageDescriptor& desc) final;
+    Handle<Image> batch_image(const ImageDescriptor& desc) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
     Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
     Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
