@@ -24,6 +24,7 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
     auto asset = assets::Importer::import_glb(full_path);
 
     std::vector<Handle<gfx::Image>> batched_images;
+    std::vector<Handle<gfx::Texture>> batched_textures;
     std::vector<Handle<gfx::Geometry>> batched_geometries;
     std::vector<Handle<gfx::Material>> batched_materials;
 
@@ -32,6 +33,13 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
         const auto ri = Engine::get().renderer->batch_image(gfx::ImageDescriptor{
             .name = ai.name, .width = ai.width, .height = ai.height, .format = ai.format, .data = ai.data });
         batched_images.push_back(ri);
+    }
+
+    batched_textures.reserve(asset.textures.size());
+    for(auto& at : asset.textures) {
+        const auto rt = Engine::get().renderer->batch_texture(gfx::TextureDescriptor{
+            .image = batched_images.at(at.image), .filtering = at.filtering, .addressing = at.addressing });
+        batched_textures.push_back(rt);
     }
 
     batched_geometries.reserve(asset.geometries.size());
@@ -55,8 +63,7 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
         if(am.color_texture != assets::s_max_asset_index) { // todo: should be done with try_get_texture i think.
             const auto& act = asset.textures.at(am.color_texture);
             const auto rm = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
-                .base_color_texture = {
-                    .handle = batched_images.at(am.color_texture), .filtering = act.filtering, .addressing = act.addressing } });
+                .base_color_texture = batched_textures.at(am.color_texture) });
             batched_materials.push_back(rm);
         }
     }
@@ -71,9 +78,9 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
                 auto* ag = asset.try_get_geometry(as);
                 auto* am = asset.try_get_material(as);
                 assert(ag && am);
-                components::Submesh csm{ .geometry = batched_geometries.at(as.geometry),
-                                         .material = batched_materials.at(as.material) };
-                cmesh.submeshes.push_back(csm);
+                const auto rm = Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{
+                    .geometry = batched_geometries.at(as.geometry), .material = batched_materials.at(as.material) });
+                cmesh.submeshes.push_back(rm);
             }
         }
         auto& ct = Engine::get().ecs_storage->get<components::Transform>(snode.entity);
@@ -194,10 +201,10 @@ NodeInstance* Scene::add_instance() {
 //  }
 //}
 
-//bool NodeInstance::has_children() const {
-//    //for(const auto& e : children) {
-//    //    if(e) { return true; }
-//    //}
-//    //return false;
-//    return 
-//}
+// bool NodeInstance::has_children() const {
+//     //for(const auto& e : children) {
+//     //    if(e) { return true; }
+//     //}
+//     //return false;
+//     return
+// }

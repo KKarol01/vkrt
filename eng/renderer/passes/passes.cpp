@@ -24,11 +24,11 @@ static void set_pc_vsm_common(VkCommandBuffer cmd) {
         r.get_bindless_index(fd.transform_buffers),
         r.get_bindless_index(r.vsm.constants_buffer),
         r.get_bindless_index(r.vsm.free_allocs_buffer),
-        r.get_bindless_index(depth_view, VK_IMAGE_LAYOUT_GENERAL, slr),
-        r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(r.make_texture(fd.gbuffer.depth_buffer_image, depth_view, VK_IMAGE_LAYOUT_GENERAL, slr)),
+        r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         r.get_bindless_index(fd.constants),
         0,
-        r.get_bindless_index(shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
@@ -47,8 +47,8 @@ static void set_pc_vsm_shadows(VkCommandBuffer cmd, int cascade_index) {
         r.get_bindless_index(fd.transform_buffers),
         r.get_bindless_index(fd.constants),
         r.get_bindless_index(r.vsm.constants_buffer),
-        r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-        r.get_bindless_index(shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         cascade_index,
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
@@ -67,8 +67,8 @@ static void set_pc_vsm_debug_copy(VkCommandBuffer cmd) {
                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
                               .format = RendererVulkan::get_image(r.vsm.dir_light_page_table_rgb8).vk_info.format }));
     uint32_t bindless_indices[]{
-        r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-        r.get_bindless_index(page_view_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table_rgb8, page_view_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         r.get_bindless_index(r.vsm.constants_buffer),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
@@ -92,8 +92,8 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         r.get_bindless_index(fd.constants),
         r.get_bindless_index(r.mesh_instances_buffer),
         r.get_bindless_index(r.vsm.constants_buffer),
-        r.get_bindless_index(shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr),
-        r.get_bindless_index(page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr),
+        r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }

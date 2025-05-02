@@ -23,7 +23,9 @@ enum class ImageAddressing { REPEAT, CLAMP_EDGE };
 struct Geometry;
 struct Mesh;
 struct Image;
+struct Texture;
 struct Buffer;
+struct Material;
 
 struct Vertex {
     glm::vec3 pos;
@@ -48,24 +50,21 @@ struct ImageDescriptor {
     std::span<const std::byte> data;
 };
 
-struct MaterialImageDescriptor {
-    Handle<Image> handle;
+struct TextureDescriptor {
+    Handle<Image> image;
     ImageFilter filtering{ ImageFilter::LINEAR };
     ImageAddressing addressing{ ImageAddressing::REPEAT };
 };
 
 struct MaterialDescriptor {
-    MaterialImageDescriptor base_color_texture;
-    MaterialImageDescriptor normal_texture;
-    MaterialImageDescriptor metallic_roughness_texture;
-};
-
-struct Material {
-    MaterialDescriptor textures{};
+    Handle<Texture> base_color_texture;
+    Handle<Texture> normal_texture;
+    Handle<Texture> metallic_roughness_texture;
 };
 
 struct MeshDescriptor {
-    Handle<Geometry> geometry{};
+    Handle<Geometry> geometry;
+    Handle<Material> material;
 };
 
 struct InstanceSettings {
@@ -76,13 +75,6 @@ struct InstanceSettings {
 struct BLASInstanceSettings {
     components::Entity entity;
 };
-
-// struct ScreenRect {
-//     float x;
-//     float y;
-//     float w;
-//     float h;
-// };
 
 struct VsmData {
     Handle<Buffer> constants_buffer;
@@ -103,6 +95,7 @@ class Renderer {
     virtual void on_window_resize() = 0;
     // virtual void set_screen(ScreenRect screen) = 0;
     virtual Handle<Image> batch_image(const ImageDescriptor& batch) = 0;
+    virtual Handle<Texture> batch_texture(const TextureDescriptor& batch) = 0;
     virtual Handle<Material> batch_material(const MaterialDescriptor& batch) = 0;
     virtual Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) = 0;
     virtual Handle<Mesh> batch_mesh(const MeshDescriptor& batch) = 0;

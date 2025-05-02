@@ -6,44 +6,45 @@ namespace gfx {
 
 BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev) {
     if(!dev) { return; }
-    const VkDescriptorPoolSize sizes[] = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
-                                           { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
-                                           { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 },
-                                           { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 } };
+    std::vector<VkDescriptorPoolSize> sizes{ { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
+                                             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
+                                             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 } };
+    if(RendererVulkan::get_instance()->supports_raytracing) {
+        sizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 });
+    }
     const auto pool_info = Vks(VkDescriptorPoolCreateInfo{
         .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
         .maxSets = 1,
-        .poolSizeCount = sizeof(sizes) / sizeof(sizes[0]),
-        .pPoolSizes = sizes,
+        .poolSizeCount = (uint32_t)sizes.size(),
+        .pPoolSizes = sizes.data(),
     });
     VK_CHECK(vkCreateDescriptorPool(dev, &pool_info, {}, &pool));
     assert(pool);
 
-    VkDescriptorSetLayoutBinding bindings[]{
+    std::vector<VkDescriptorSetLayoutBinding> bindings{
         { BINDLESS_STORAGE_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 65536, VK_SHADER_STAGE_ALL },
         { BINDLESS_STORAGE_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 65536, VK_SHADER_STAGE_ALL },
-        { BINDLESS_COMBINED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536, VK_SHADER_STAGE_ALL },
-        { BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536, VK_SHADER_STAGE_ALL },
+        { BINDLESS_COMBINED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536, VK_SHADER_STAGE_ALL }
     };
 
     const auto binding_flag = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                               VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-    const VkDescriptorBindingFlags binding_flags[]{
-        binding_flag,
-        binding_flag,
-        binding_flag,
-        binding_flag,
-    };
+    std::vector<VkDescriptorBindingFlags> binding_flags{ binding_flag, binding_flag, binding_flag };
+    if(RendererVulkan::get_instance()->supports_raytracing) {
+        bindings.push_back({ BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536,
+                             VK_SHADER_STAGE_ALL });
+        binding_flags.push_back(binding_flag);
+    }
     const auto binding_flags_info = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
-        .bindingCount = sizeof(binding_flags) / sizeof(binding_flags[0]),
-        .pBindingFlags = binding_flags,
+        .bindingCount = (uint32_t)binding_flags.size(),
+        .pBindingFlags = binding_flags.data(),
     });
 
     const auto layout_info = Vks(VkDescriptorSetLayoutCreateInfo{
         .pNext = &binding_flags_info,
         .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-        .bindingCount = sizeof(bindings) / sizeof(bindings[0]),
-        .pBindings = bindings,
+        .bindingCount = (uint32_t)bindings.size(),
+        .pBindings = bindings.data(),
     });
     VK_CHECK(vkCreateDescriptorSetLayout(dev, &layout_info, nullptr, &set_layout));
     assert(set_layout);
@@ -122,4 +123,4 @@ void BindlessDescriptorPool::update() {
     buffer_updates.clear();
 }
 
-}
+} // namespace gfx

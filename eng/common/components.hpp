@@ -22,15 +22,9 @@ struct Transform {
     glm::mat4 transform{ 1.0f };
 };
 
-struct Submesh {
-    Handle<gfx::Geometry> geometry;
-    Handle<gfx::Material> material;
-    Handle<gfx::BLAS> blas;
-};
-
 struct Mesh {
     std::string name;
-    std::vector<Submesh> submeshes;
+    std::vector<Handle<gfx::Mesh>> submeshes;
 };
 
 } // namespace components

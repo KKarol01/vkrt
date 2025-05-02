@@ -45,11 +45,29 @@ struct Geometry {
     uint32_t index_count{ 0 };
 };
 
+struct Material {
+    Handle<Texture> base_color_texture{ ~0u };
+};
+
+struct Texture {
+    Handle<Image> image;
+    VkImageView view{};
+    VkImageLayout layout{};
+    VkSampler sampler{};
+};
+
 /* subset of geometry's vertex and index buffers */
 struct Mesh {
-    Flags<MeshFlags> flags;
+    // Flags<MeshFlags> flags;
     Handle<Geometry> geometry;
-    Handle<MeshMetadata> metadata;
+    Handle<Material> material;
+    // Handle<MeshMetadata> metadata;
+    //  Handle<gfx::BLAS> blas;
+};
+
+struct MeshInstance {
+    components::Entity entity;
+    Handle<Mesh> mesh;
 };
 
 struct DDGI {
@@ -151,6 +169,7 @@ class RendererVulkan : public gfx::Renderer {
     void on_window_resize() final;
     // void set_screen(ScreenRect screen) final;
     Handle<Image> batch_image(const ImageDescriptor& desc) final;
+    Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
     Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
     Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
@@ -162,7 +181,7 @@ class RendererVulkan : public gfx::Renderer {
     Material get_material(Handle<Material> handle) const final;
     VsmData& get_vsm_data() final;
 
-    void upload_model_textures();
+    void upload_model_images();
     void upload_staged_models();
     void bake_indirect_commands();
     void upload_transforms();
@@ -175,14 +194,16 @@ class RendererVulkan : public gfx::Renderer {
     Handle<Buffer> make_buffer(const std::string& name, buffer_resizable_t resizable, const VkBufferCreateInfo& vk_info,
                                const VmaAllocationCreateInfo& vma_info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
+    Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     VkImageView make_image_view(Handle<Image> handle);
     VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
+
     static Buffer& get_buffer(Handle<Buffer> handle);
     static Image& get_image(Handle<Image> handle);
     void destroy_buffer(Handle<Buffer> buffer);
     void replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer);
     uint32_t get_bindless_index(Handle<Buffer> handle);
-    uint32_t get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
+    uint32_t get_bindless_index(Handle<Texture> handle);
 
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
@@ -214,8 +235,8 @@ class RendererVulkan : public gfx::Renderer {
     HandleMap<MeshMetadata> mesh_metadatas;
     HandleMap<Material> materials;
 
-    std::vector<components::Entity> mesh_instances;
-    std::unordered_map<components::Entity, uint32_t> mesh_instance_idxs;
+    std::vector<MeshInstance> mesh_instances;
+    // std::unordered_map<components::Entity, uint32_t> mesh_instance_idxs;
     std::vector<components::Entity> blas_instances;
     uint32_t max_draw_count{};
     uint32_t total_vertices{};
@@ -241,6 +262,7 @@ class RendererVulkan : public gfx::Renderer {
 
     SamplerStorage samplers;
     HandleMap<Image> images;
+    HandleMap<Texture> textures;
     HandleMap<Buffer> buffers;
 
     DDGI ddgi;

@@ -20,9 +20,9 @@ Geometry* Asset::try_get_geometry(const Submesh& submesh) {
 
 Node& Asset::get_node(asset_index_t idx) { return nodes.at(idx); }
 
-const Node& assets::Asset::get_node(asset_index_t idx) const { return nodes.at(idx); }
+const Node& Asset::get_node(asset_index_t idx) const { return nodes.at(idx); }
 
-glm::mat4& assets::Asset::get_transform(Node& node) { return transforms.at(std::distance(nodes.data(), &node)); }
+glm::mat4& Asset::get_transform(Node& node) { return transforms.at(std::distance(nodes.data(), &node)); }
 
 const glm::mat4& Asset::get_transform(const Node& node) const {
     return transforms.at(std::distance(nodes.data(), &node));
@@ -258,6 +258,7 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
             asset.get_submesh(submeshidx) = load_primitive();
             mesh.submeshes.push_back(submeshidx);
         }
+        asset.meshes.push_back(mesh);
     }
 
     fastgltf::iterateSceneNodes(fasset, 0ull, fastgltf::math::fmat4x4{},

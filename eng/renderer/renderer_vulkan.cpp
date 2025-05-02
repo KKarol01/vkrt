@@ -83,24 +83,29 @@ void RendererVulkan::initialize_vulkan() {
     vkCreateWin32SurfaceKHR(vkb_inst.instance, &surface_info, nullptr, &window_surface);
 
     vkb::PhysicalDeviceSelector selector{ vkb_inst };
-    auto phys_ret = selector.require_present()
-                        .set_surface(window_surface)
-                        .set_minimum_version(1, 3)
-                        .add_desired_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
-                        .add_desired_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
-                        .add_desired_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
-                        .add_desired_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
-                        .add_required_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)        // for imgui
-                        .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME) // for imgui
-                        .prefer_gpu_device_type()
-                        .require_present()
-                        .select();
+    auto phys_rets = selector.require_present()
+                         .set_surface(window_surface)
+                         .set_minimum_version(1, 3)
+                         .add_desired_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+                         .add_desired_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
+                         .add_desired_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
+                         .add_desired_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
+                         .add_required_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)        // for imgui
+                         .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME) // for imgui
+                         .require_present()
+                         .prefer_gpu_device_type()
+                         .allow_any_gpu_device_type(false)
+                         .select_devices();
+    auto phys_ret = [&phys_rets] {
+        for(auto& pd : *phys_rets) {
+            if(pd.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { return pd; }
+        }
+        return *phys_rets->begin();
+    }();
     if(!phys_ret) { throw std::runtime_error{ "Failed to select Vulkan Physical Device. Error: " }; }
 
-    supports_raytracing = phys_ret->is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
-                          phys_ret->is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-
-    auto ray_query = phys_ret->is_extension_present(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
+                          phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
 
     auto synch2_features = Vks(VkPhysicalDeviceSynchronization2Features{ .synchronization2 = true });
 
@@ -153,7 +158,7 @@ void RendererVulkan::initialize_vulkan() {
 
     rt_props = Vks(VkPhysicalDeviceRayTracingPipelinePropertiesKHR{});
     rt_acc_props = Vks(VkPhysicalDeviceAccelerationStructurePropertiesKHR{});
-    vkb::DeviceBuilder device_builder{ phys_ret.value() };
+    vkb::DeviceBuilder device_builder{ phys_ret };
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
     if(supports_raytracing) {
         device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&rayq_features);
@@ -169,11 +174,11 @@ void RendererVulkan::initialize_vulkan() {
         .pNext = &rt_props,
     });
     rt_props.pNext = &rt_acc_props;
-    vkGetPhysicalDeviceProperties2(phys_ret->physical_device, &pdev_props);
+    vkGetPhysicalDeviceProperties2(phys_ret.physical_device, &pdev_props);
 
     instance = vkb_inst.instance;
     dev = device;
-    pdev = phys_ret->physical_device;
+    pdev = phys_ret.physical_device;
     submit_queue = new SubmitQueue{ dev, vkb_device.get_queue(vkb::QueueType::graphics).value(),
                                     vkb_device.get_queue_index(vkb::QueueType::graphics).value() };
 
@@ -459,111 +464,6 @@ void RendererVulkan::build_render_graph() {
     rendergraph.add_pass<ImguiPass>(&rendergraph);
     rendergraph.add_pass<SwapchainPresentPass>(&rendergraph);
     rendergraph.bake();
-    int x = 0;
-#if 0
-    for(auto& fd : frame_datas) {
-        fd.render_graph.passes.clear();
-        fd.render_graph.render_list.clear();
-        auto* vsm_clear_pages = fd.render_graph.make_pass();
-        auto* z_prepass = fd.render_graph.make_pass();
-        auto* vsm_page_alloc = fd.render_graph.make_pass();
-        auto* vsm_shadow = fd.render_graph.make_pass();
-        auto* default_unlit = fd.render_graph.make_pass();
-        auto* vsm_debug_page_copy = fd.render_graph.make_pass();
-        auto* imgui = fd.render_graph.make_pass();
-        auto* swapchain_present = fd.render_graph.make_pass();
-
-        *imgui = rendergraph::RenderPass{
-            .accesses = { rendergraph::Access{ .resource = Handle<Image>{ rendergraph::swapchain_index },
-                                               .flags = rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT |
-                                                        rendergraph::ResourceFlags::FROM_UNDEFINED_LAYOUT_BIT,
-                                               .type = rendergraph::AccessType::WRITE_BIT,
-                                               .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                               .access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                                               .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL },
-                          rendergraph::Access{ .resource = fd.gbuffer.color_image,
-                                               .type = rendergraph::AccessType::READ_BIT,
-                                               .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                               .access = VK_ACCESS_2_SHADER_READ_BIT,
-                                               .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL },
-                          rendergraph::Access{ .resource = vsm.dir_light_page_table_rgb8,
-                                               .type = rendergraph::AccessType::READ_BIT,
-                                               .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                               .access = VK_ACCESS_2_SHADER_READ_BIT,
-                                               .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL },
-                          rendergraph::Access{ .resource = vsm.shadow_map_0,
-                                               .type = rendergraph::AccessType::READ_BIT,
-                                               .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                               .access = VK_ACCESS_2_SHADER_READ_BIT,
-                                               .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL }
-
-            },
-            .callback_render =
-                [](VkCommandBuffer cmd, uint32_t swapchain_index, rendergraph::RenderPass&) {
-                    auto& r = *RendererVulkan::get_instance();
-                    ImGui::SetCurrentContext(Engine::get().ui_ctx->imgui_ctx);
-                    ImGui_ImplVulkan_NewFrame();
-                    ImGui_ImplGlfw_NewFrame();
-                    ImGui::NewFrame();
-                    ImGuizmo::BeginFrame();
-                    eng_ui_update();
-                    ImGui::Render();
-                    ImDrawData* im_draw_data = ImGui::GetDrawData();
-                    if(im_draw_data) {
-                        VkRenderingAttachmentInfo r_col_atts[]{
-                            Vks(VkRenderingAttachmentInfo{
-                                .imageView = RendererVulkan::get_instance()->swapchain.images.at(swapchain_index).get_view(),
-                                .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                                .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
-                            }),
-                        };
-                        VkRect2D r_sciss_1{ .offset = {},
-                                            .extent = { (uint32_t)Engine::get().window->width,
-                                                        (uint32_t)Engine::get().window->height } };
-                        VkViewport r_view_1{ .x = 0.0f,
-                                             .y = Engine::get().window->height,
-                                             .width = Engine::get().window->width,
-                                             .height = Engine::get().window->height,
-                                             .minDepth = 0.0f,
-                                             .maxDepth = 1.0f };
-                        auto rendering_info = Vks(VkRenderingInfo{
-                            .renderArea = { .extent = { .width = (uint32_t)Engine::get().window->width,
-                                                        .height = (uint32_t)Engine::get().window->height } },
-                            .layerCount = 1,
-                            .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
-                            .pColorAttachments = r_col_atts,
-                        });
-                        vkCmdBeginRendering(cmd, &rendering_info);
-                        vkCmdSetScissor(cmd, 0, 1, &r_sciss_1);
-                        vkCmdSetViewport(cmd, 0, 1, &r_view_1);
-                        ImGui_ImplVulkan_RenderDrawData(im_draw_data, cmd);
-                        vkCmdEndRendering(cmd);
-                    }
-                },
-        };
-
-        *swapchain_present = rendergraph::RenderPass{
-            .accesses = { rendergraph::Access{ .resource = Handle<Image>{ rendergraph::swapchain_index },
-                                               .flags = rendergraph::ResourceFlags::SWAPCHAIN_IMAGE_BIT,
-                                               .type = rendergraph::AccessType::NONE_BIT,
-                                               .stage = VK_PIPELINE_STAGE_2_NONE,
-                                               .access = VK_ACCESS_2_NONE,
-                                               .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR } },
-        };
-
-        fd.render_graph.add_pass(vsm_clear_pages)
-            .add_pass(z_prepass)
-            .add_pass(vsm_page_alloc)
-            .add_pass(vsm_shadow)
-            .add_pass(default_unlit)
-            .add_pass(vsm_debug_page_copy)
-            .add_pass(imgui)
-            .add_pass(swapchain_present)
-            .bake();
-    }
-#endif
 }
 
 void RendererVulkan::update() {
@@ -740,8 +640,18 @@ Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc) {
     return handle;
 }
 
+Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch) {
+    const auto view = get_image(batch.image).get_view();
+    const auto layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+    const auto sampler = samplers.get_sampler(batch.filtering, batch.addressing);
+    return make_texture(batch.image, view, layout, sampler);
+}
+
 Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
-    return Handle<Material>{ *materials.insert(Material{ .textures = desc }) };
+    for(const auto& [h, m] : materials) {
+        if(m.base_color_texture == desc.base_color_texture) {}
+    }
+    return Handle<Material>{ *materials.insert(Material{ .base_color_texture = desc.base_color_texture }) };
 }
 
 Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
@@ -774,29 +684,34 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
 }
 
 Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
-    Mesh mesh_batch{
-        .geometry = batch.geometry,
-        .metadata = mesh_metadatas.insert(MeshMetadata{}),
-    };
-    return meshes.insert(mesh_batch);
+    for(const auto& [h, m] : meshes) {
+        if(m.geometry == batch.geometry && m.material == batch.material) { return h; }
+    }
+    Mesh mesh{ .geometry = batch.geometry, .material = batch.material };
+    return meshes.insert(mesh);
 }
 
 void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
-    mesh_instances.push_back(settings.entity);
+    const auto& mesh = Engine::get().ecs_storage->get<components::Mesh>(settings.entity);
+    mesh_instances.reserve(mesh_instances.size() + mesh.submeshes.size());
+    for(auto i = 0u; i < mesh.submeshes.size(); ++i) {
+        mesh_instances.push_back(MeshInstance{ .entity = settings.entity, .mesh = mesh.submeshes.at(i) });
+    }
     flags.set(RenderFlags::DIRTY_MESH_INSTANCES);
 }
 
 void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
-    auto& r = Engine::get().ecs_storage->get<components::Renderable>(settings.entity);
-    auto& mesh = meshes.at(r.mesh_handle);
-    auto& geometry = geometries.at(mesh.geometry);
-    auto& metadata = geometry_metadatas.at(geometry.metadata);
-    blas_instances.push_back(settings.entity);
-    flags.set(RenderFlags::DIRTY_TLAS_BIT);
-    if(!metadata.blas) {
-        geometry.flags.set(GeometryFlags::DIRTY_BLAS_BIT);
-        flags.set(RenderFlags::DIRTY_BLAS_BIT);
-    }
+    ENG_TODO("Implement blas instancing");
+    // auto& r = Engine::get().ecs_storage->get<components::Renderable>(settings.entity);
+    // auto& mesh = meshes.at(r.mesh_handle);
+    // auto& geometry = geometries.at(mesh.geometry);
+    // auto& metadata = geometry_metadatas.at(geometry.metadata);
+    // blas_instances.push_back(settings.entity);
+    // flags.set(RenderFlags::DIRTY_TLAS_BIT);
+    // if(!metadata.blas) {
+    //     geometry.flags.set(GeometryFlags::DIRTY_BLAS_BIT);
+    //     flags.set(RenderFlags::DIRTY_BLAS_BIT);
+    // }
 }
 
 void RendererVulkan::update_transform(components::Entity entity) {
@@ -850,7 +765,7 @@ Material RendererVulkan::get_material(Handle<Material> handle) const {
 
 VsmData& RendererVulkan::get_vsm_data() { return vsm; }
 
-void RendererVulkan::upload_model_textures() {
+void RendererVulkan::upload_model_images() {
     for(auto& tex : upload_images) {
         Image& img = get_image(tex.image_handle);
         // VkBufferImageCopy copy{
@@ -865,7 +780,7 @@ void RendererVulkan::upload_model_textures() {
 }
 
 void RendererVulkan::upload_staged_models() {
-    upload_model_textures();
+    upload_model_images();
     std::vector<glm::vec3> positions;
     std::vector<float> attributes;
     positions.reserve(upload_vertices.size());
@@ -891,19 +806,20 @@ void RendererVulkan::upload_staged_models() {
 }
 
 void RendererVulkan::bake_indirect_commands() {
-    std::sort(mesh_instances.begin(), mesh_instances.end(), [](auto a, auto b) {
-        const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
-        const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
-        if(ra.material_handle >= rb.material_handle) { return false; }
-        if(ra.mesh_handle >= rb.mesh_handle) { return false; }
+    std::sort(mesh_instances.begin(), mesh_instances.end(), [this](auto a, auto b) {
+        const auto& ra = meshes.at(a.mesh);
+        const auto& rb = meshes.at(b.mesh);
+        if(ra.geometry >= rb.geometry) { return false; }
+        if(ra.material >= rb.material) { return false; }
+        // blas left out
         return true;
     });
 
-    mesh_instance_idxs.clear();
-    mesh_instance_idxs.reserve(mesh_instances.size());
-    for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
-        mesh_instance_idxs[mesh_instances.at(i)] = i;
-    }
+    // mesh_instance_idxs.clear();
+    // mesh_instance_idxs.reserve(mesh_instances.size());
+    // for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
+    //     mesh_instance_idxs[mesh_instances.at(i).submesh] = i;
+    // }
 
     const auto total_triangles = get_total_triangles();
     std::vector<GPUMeshInstance> gpu_mesh_instances;
@@ -911,29 +827,18 @@ void RendererVulkan::bake_indirect_commands() {
     IndirectDrawCommandBufferHeader gpu_draw_header;
 
     for(uint32_t i = 0u; i < mesh_instances.size(); ++i) {
-        const components::Renderable& mi = Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i));
-        const Mesh& mb = meshes.at(mi.mesh_handle);
-        const Geometry& geom = geometries.at(mb.geometry);
-        const Material& mat = materials.at(mi.material_handle);
+        const MeshInstance& smi = mesh_instances.at(i);
+        const Mesh& m = meshes.at(smi.mesh);
+        const Geometry& geom = geometries.at(m.geometry);
+        const Material& mat = materials.at(m.material);
         gpu_mesh_instances.push_back(GPUMeshInstance{
             .vertex_offset = geom.vertex_offset,
             .index_offset = geom.index_offset,
-            .color_texture_idx = get_bindless_index(get_image(mat.textures.base_color_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                    samplers.get_sampler(mat.textures.base_color_texture.filtering,
-                                                                         mat.textures.base_color_texture.addressing)),
-            .normal_texture_idx = mat.textures.normal_texture.handle
-                                      ? get_bindless_index(get_image(mat.textures.normal_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                                           samplers.get_sampler(mat.textures.normal_texture.filtering,
-                                                                                mat.textures.normal_texture.addressing))
-                                      : ~0ul,
-            .metallic_roughness_idx =
-                mat.textures.metallic_roughness_texture.handle
-                    ? get_bindless_index(get_image(mat.textures.metallic_roughness_texture.handle).get_view(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                                         samplers.get_sampler(mat.textures.metallic_roughness_texture.filtering,
-                                                              mat.textures.metallic_roughness_texture.addressing))
-                    : ~0ul,
+            .color_texture_idx = get_bindless_index(mat.base_color_texture),
+            .normal_texture_idx = ~0ul,
+            .metallic_roughness_idx = ~0ul,
         });
-        if(i == 0 || Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(i - 1)).mesh_handle != mi.mesh_handle) {
+        if(i == 0 || mesh_instances.at(i - 1).mesh != smi.mesh) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
                                                                       .instanceCount = 1,
                                                                       .firstIndex = geom.index_offset,
@@ -976,7 +881,7 @@ void RendererVulkan::upload_transforms() {
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
     for(auto e : mesh_instances) {
-        transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e).transform);
+        transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e.entity).transform);
     }
     staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms)
         .send_to(get_frame_data(1).transform_buffers, 0ull, transforms)
@@ -1084,16 +989,16 @@ void RendererVulkan::build_blas() {
 
 void RendererVulkan::build_tlas() {
     return;
-    std::vector<uint32_t> tlas_mesh_offsets;
-    std::vector<uint32_t> blas_mesh_offsets;
-    std::vector<uint32_t> triangle_geo_inst_ids;
-    std::vector<VkAccelerationStructureInstanceKHR> tlas_instances;
+    // std::vector<uint32_t> tlas_mesh_offsets;
+    // std::vector<uint32_t> blas_mesh_offsets;
+    // std::vector<uint32_t> triangle_geo_inst_ids;
+    // std::vector<VkAccelerationStructureInstanceKHR> tlas_instances;
 
-    std::sort(blas_instances.begin(), blas_instances.end(), [](auto a, auto b) {
-        const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
-        const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
-        return ra.mesh_handle < rb.mesh_handle;
-    });
+    // std::sort(blas_instances.begin(), blas_instances.end(), [](auto a, auto b) {
+    //     const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
+    //     const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
+    //     return ra.mesh_handle < rb.mesh_handle;
+    // });
 
     assert(false);
 
@@ -1320,19 +1225,23 @@ void RendererVulkan::update_ddgi() {
 
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
                                            const VmaAllocationCreateInfo& vma_info) {
-    const auto handle = buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
-    return handle;
+    return buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
 }
 
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, buffer_resizable_t resizable,
                                            const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) {
-    const auto handle = buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
-    return handle;
+    return buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
 }
 
 Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info) {
-    const auto handle = images.insert(Image{ name, dev, vma, vk_info });
-    return handle;
+    return images.insert(Image{ name, dev, vma, vk_info });
+}
+
+Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler) {
+    for(const auto& [h, t] : textures) {
+        if(t.image == image && t.view == view && t.layout == layout && t.sampler == sampler) { return h; }
+    }
+    return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler });
 }
 
 VkImageView RendererVulkan::make_image_view(Handle<Image> handle) {
@@ -1361,8 +1270,10 @@ void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buff
 
 uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_bindless_index(handle); }
 
-uint32_t RendererVulkan::get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler) {
-    return bindless_pool->get_bindless_index(view, layout, sampler);
+uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) {
+    if(!handle) { return ~0u; }
+    const auto& tex = textures.at(handle);
+    return bindless_pool->get_bindless_index(tex.view, tex.layout, tex.sampler);
 }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset) {

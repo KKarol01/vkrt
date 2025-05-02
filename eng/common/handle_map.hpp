@@ -4,11 +4,14 @@
 #include <unordered_map>
 #include <cstdint>
 
-//template <typename T, typename Storage = uint32_t> using HandleMap = std::unordered_map<Handle<T, Storage>, T>;
+// template <typename T, typename Storage = uint32_t> using HandleMap = std::unordered_map<Handle<T, Storage>, T>;
 
 template <typename T, typename Storage = uint32_t> class HandleMap {
   public:
     using handle_t = Handle<T, Storage>;
+
+    auto begin() { return storage.begin(); }
+    auto end() { return storage.end(); }
 
     bool has(handle_t h) const { return storage.find(h) != storage.end(); }
 
