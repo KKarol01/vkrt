@@ -15,7 +15,7 @@ template <typename T, typename Storage> struct HandleGenerator {
                 assert(false);
                 return ct;
             }
-            if(counter.compare_exchange_weak(ct, ct + 1, std::memory_order_relaxed)) { return ct + 1; }
+            if(counter.compare_exchange_weak(ct, ct + 1, std::memory_order_relaxed)) { return ct; }
         }
     }
     inline static std::atomic<Storage> counter{ 0 };

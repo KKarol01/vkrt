@@ -1,8 +1,7 @@
 #pragma once
 
 #include <span>
-#include <glm/mat4x3.hpp>
-#include <eng/model_importer.hpp>
+#include <glm/glm.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>

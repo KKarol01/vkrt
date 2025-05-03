@@ -108,7 +108,6 @@ add_subdirectory(third_party/fmt)
 
 add_executable(vkrt 
     "eng/main.cpp"
-    "eng/model_importer.cpp" 
     "eng/engine.cpp"  
     "eng/camera.cpp"
     "eng/scene.cpp"
@@ -128,7 +127,7 @@ add_executable(vkrt
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
 target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
-target_compile_options(vkrt PRIVATE -Wall)
+#target_compile_options(vkrt PRIVATE -Wall)
 target_link_libraries(vkrt
     PRIVATE
     build_header_only

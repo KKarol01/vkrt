@@ -232,7 +232,7 @@ void RendererVulkan::initialize_imgui() {
 
     ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
 
-    VkFormat color_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
+    VkFormat color_formats[]{ swapchain.images.at(0).vk_info.format };
 
     VkDescriptorPoolSize sizes[]{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
     auto imgui_dpool_info = Vks(VkDescriptorPoolCreateInfo{
@@ -398,7 +398,6 @@ void RendererVulkan::initialize_resources() {
                    });
 
     create_window_sized_resources();
-
     build_render_graph();
 }
 
@@ -410,7 +409,7 @@ void RendererVulkan::create_window_sized_resources() {
             make_image(fmt::format("g_color_{}", i),
                        VkImageCreateInfo{
                            .imageType = VK_IMAGE_TYPE_2D,
-                           .format = VK_FORMAT_B8G8R8A8_SRGB,
+                           .format = VK_FORMAT_R8G8B8A8_SRGB,
                            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
                            .mipLevels = 1,
                            .arrayLayers = 1,
@@ -519,21 +518,18 @@ void RendererVulkan::update() {
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
         const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
-        const auto eye = -ldir * 25.0f;
-        auto vsm_light_mat = glm::lookAt(eye, ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
-        const auto camdir = Engine::get().camera->pos - eye;
-        const auto d = glm::dot(ldir, camdir);
-        auto proj_pos = -glm::vec4{ camdir - d * ldir, 0.0f };
-        proj_pos = vsm_light_mat * proj_pos;
-
-        const auto dir_light_view = glm::translate(glm::mat4{ 1.0f }, glm::vec3{ glm::vec2{ proj_pos }, 0.0f }) * vsm_light_mat;
-        const auto dir_light_proj = glm::ortho(-float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f,
-                                               -float(VSM_CLIP0_LENGTH) * 0.5f, float(VSM_CLIP0_LENGTH) * 0.5f, 0.1f, 30.0f);
+        const auto cam = Engine::get().camera->pos;
+        auto eye = -ldir * 30.0f;
+        const auto lview = glm::lookAt(eye, eye + ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
+        const auto eyelpos = lview * glm::vec4{ cam, 1.0f };
+        const auto offset = glm::translate(glm::mat4{ 1.0f }, -glm::vec3{ eyelpos.x, eyelpos.y, 0.0f });
+        const auto dir_light_view = offset * lview;
+        const auto eyelpos2 = dir_light_view * glm::vec4{ cam, 1.0f };
+        ENG_LOG("CAMERA EYE DOT {} {}", eyelpos2.x, eyelpos2.y);
         // const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
 
         GPUVsmConstantsBuffer vsmconsts{
             .dir_light_view = dir_light_view,
-            .dir_light_proj = dir_light_proj,
             .dir_light_dir = ldir,
             .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
             .max_clipmap_index = 0,
@@ -784,7 +780,7 @@ void RendererVulkan::upload_staged_models() {
     std::vector<glm::vec3> positions;
     std::vector<float> attributes;
     positions.reserve(upload_vertices.size());
-    attributes.reserve(upload_vertices.size() * 8);
+    attributes.reserve(upload_vertices.size() * ((sizeof(Vertex) - sizeof(glm::vec3)) / sizeof(float)));
     for(auto& e : upload_vertices) {
         positions.push_back(e.pos);
         attributes.push_back(e.nor.x);
@@ -1290,7 +1286,7 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
         // sinfo.pNext = &format_list_info;
         .surface = RendererVulkan::get_instance()->window_surface,
         .minImageCount = image_count,
-        .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
+        .imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent = VkExtent2D{ width, height },
         .imageArrayLayers = 1,

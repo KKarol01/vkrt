@@ -1,17 +1,15 @@
 #include <stack>
-#include <functional>
+#include <ranges>
 #include <fastgltf/core.hpp>
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <stb/stb_image.h>
 #include <eng/scene.hpp>
-#include <eng/model_importer.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/components.hpp>
-// #include <eng/renderer/renderer_vulkan.hpp>
-#include <eng/renderer/set_debug_name.hpp>
 #include <eng/assets/importer.hpp>
+#include <eng/common/logger.hpp>
 
 namespace scene {
 
@@ -20,8 +18,15 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
         assert(false && "Only .glb files are supported.");
         return {};
     }
-    const std::filesystem::path full_path = std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path;
+
+    const std::filesystem::path full_path =
+        (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path).lexically_normal();
     auto asset = assets::Importer::import_glb(full_path);
+
+    if(asset.scene.size() == 0) {
+        ENG_WARN("Imported model's scene has empty scene.");
+        return {};
+    }
 
     std::vector<Handle<gfx::Image>> batched_images;
     std::vector<Handle<gfx::Texture>> batched_textures;
@@ -70,8 +75,9 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
 
     const auto parse_node_components = [&](Node& snode, assets::Node& anode) {
         if(auto* amesh = asset.try_get_mesh(anode)) {
-            snode.name = amesh->name;
-            snode.submeshes.reserve(amesh->submeshes.size());
+            snode.mesh = Mesh{};
+            snode.mesh->name = amesh->name;
+            snode.mesh->submeshes.reserve(amesh->submeshes.size());
             for(auto& asidx : amesh->submeshes) {
                 auto& as = asset.get_submesh(asidx);
                 auto* ag = asset.try_get_geometry(as);
@@ -79,36 +85,65 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
                 assert(ag && am);
                 const auto rm = Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{
                     .geometry = batched_geometries.at(as.geometry), .material = batched_materials.at(as.material) });
-                snode.submeshes.push_back(rm);
+                snode.mesh->submeshes.push_back(rm);
             }
         }
         snode.transform = asset.get_transform(anode);
     };
 
-    const auto parse_node = [&](assets::Node& anode, auto& recursive) -> Node* {
+    const auto parse_node = [&](assets::Node& anode, auto& recursive) -> Handle<Node> {
         Node* snode;
-        add_node(&snode);
+        const auto handle = add_node(&snode);
         snode->name = anode.name;
+        snode->transform = asset.get_transform(anode);
         snode->children.reserve(anode.nodes.size());
         parse_node_components(*snode, anode);
         for(auto& c : anode.nodes) {
             snode->children.push_back(recursive(asset.get_node(c), recursive));
         }
-        return snode;
+        return handle;
     };
 
-    Node* root;
-    const auto root_handle = add_node(&root);
-    root->name = path.filename().string() + "_root";
-    for(auto& n : asset.scene) {
-        root->children.push_back(parse_node(asset.get_node(n), parse_node));
+    Node* rn;
+    const auto hrn = add_node(&rn);
+    rn->name = fmt::format("{}", full_path.filename().replace_extension().string());
+    rn->children.reserve(asset.scene.size());
+    for(auto& sn : asset.scene) {
+        rn->children.push_back(parse_node(asset.get_node(sn), parse_node));
     }
-    return root_handle;
+    return hrn;
 }
 
-Handle<NodeInstance> Scene::instance_model(Handle<Node> entity) { 
-    const auto& sn = get_node(entity); 
-    return {};
+Handle<NodeInstance> Scene::instance_model(Handle<Node> node) {
+    auto& sn = get_node(node);
+    std::stack<NodeInstance*> nis;
+    NodeInstance* rni;
+    const auto hrni = add_instance(&rni);
+    nis.push(rni);
+    traverse_dfs(node, [&](Node& n) {
+        auto* ni = nis.top();
+        nis.pop();
+        ni->name = n.name;
+        ni->entity = Engine::get().ecs_storage->create();
+        Engine::get().ecs_storage->emplace<components::Transform>(ni->entity).transform = n.transform;
+        if(n.mesh) {
+            auto& cm = Engine::get().ecs_storage->emplace<components::Mesh>(ni->entity);
+            cm.name = n.mesh->name;
+            cm.submeshes.reserve(n.mesh->submeshes.size());
+            for(const auto& sm : n.mesh->submeshes) {
+                cm.submeshes.push_back(sm);
+            }
+            Engine::get().renderer->instance_mesh(gfx::InstanceSettings{ .entity = ni->entity });
+        }
+        ni->children.reserve(n.children.size());
+        for(auto& nc : std::views::reverse(n.children)) {
+            NodeInstance* nci;
+            const auto hnci = add_instance(&nci);
+            ni->children.push_back(hnci);
+            nis.push(nci);
+        }
+    });
+    return hrni;
 }
 
 void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) { ENG_TODO(); }

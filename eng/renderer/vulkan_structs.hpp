@@ -8,7 +8,7 @@
 template <typename T> struct INIT_VK_STYPE;
 
 #ifndef NDEBUG
-#include "../logger.hpp"
+#include <eng/common/logger.hpp>
 #define VK_CHECK(func)                                                                                                 \
     if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
 #else

@@ -5,7 +5,7 @@
 #include <fastgltf/math.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <stb/stb_image.h>
-#include <eng/logger.hpp>
+#include <eng/common/logger.hpp>
 #include <stack>
 #include <variant>
 

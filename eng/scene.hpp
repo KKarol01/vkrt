@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <deque>
 #include <stack>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include "./common/types.hpp"
@@ -14,16 +15,21 @@
 
 namespace scene {
 
+struct Mesh {
+    std::string name;
+    std::vector<Handle<gfx::Mesh>> submeshes;
+};
+
 struct Node {
     std::string name;
-    std::vector<Node*> children;
+    std::vector<Handle<Node>> children;
     glm::mat4 transform{ 1.0f };
-    std::vector<Handle<gfx::Mesh>> submeshes;
+    std::optional<Mesh> mesh;
 };
 
 struct NodeInstance {
     std::string name;
-    std::vector<NodeInstance*> children;
+    std::vector<Handle<NodeInstance>> children;
     glm::mat4 transform{ 1.0f };
     components::Entity entity;
 };
@@ -31,19 +37,20 @@ struct NodeInstance {
 class Scene {
   public:
     Handle<Node> load_from_file(const std::filesystem::path& path);
-    Handle<NodeInstance> instance_model(Handle<Node> asset);
+    Handle<NodeInstance> instance_model(Handle<Node> node);
     // glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
 
     void update_transform(Handle<NodeInstance> entity, glm::mat4 transform);
     // void _update_transform(uint32_t idx, glm::mat4 t = { 1.0f });
 
+  private:
     Handle<Node> add_node(Node** out = nullptr);
     Handle<NodeInstance> add_instance(NodeInstance** out = nullptr);
     Node& get_node(Handle<Node> entity) { return *node_handles.at(entity); }
     NodeInstance& get_instance(Handle<NodeInstance> entity) { return *instance_handles.at(entity); }
 
-    void traverse_dfs(Handle<Node> node, auto& func);
-    void traverse_dfs(Node& node, auto& func)
+    void traverse_dfs(Handle<Node> node, const auto& func);
+    void traverse_dfs(Node& node, const auto& func)
         requires std::invocable<decltype(func), scene::Node&>;
 
     // TODO: maybe make this private too (used in many places -- possibly bad interface)
@@ -59,16 +66,16 @@ class Scene {
 };
 } // namespace scene
 
-void scene::Scene::traverse_dfs(Handle<scene::Node> node, auto& func) {
+void scene::Scene::traverse_dfs(Handle<scene::Node> node, const auto& func) {
     auto& n = *node_handles.at(node);
     traverse_dfs(n, func);
 }
 
-void scene::Scene::traverse_dfs(scene::Node& node, auto& func)
+void scene::Scene::traverse_dfs(scene::Node& node, const auto& func)
     requires std::invocable<decltype(func), scene::Node&>
 {
     func(node);
     for(auto& c : node.children) {
-        traverse_dfs(*c, func);
+        traverse_dfs(*node_handles.at(c), func);
     }
 }

@@ -59,7 +59,7 @@ void main() {
 
     float depthBias = mix(0.0, max(cascadeBias, slopeBias), clamp(float(clip_index), 0.0, 1.0));
 
-    float current_depth = vlight_proj_dist - depthBias;
+    float current_depth = vlight_proj_dist - 0.001 /*- depthBias*/;
     float shadowing     = current_depth > closest_depth ? 0.3 : 1.0;
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);

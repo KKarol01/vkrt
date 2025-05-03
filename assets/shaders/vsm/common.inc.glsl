@@ -60,8 +60,8 @@ vec3 vsm_calc_sclip(vec3 world_pos, int clip_index) {
 
 int vsm_calc_clip_index(vec3 world_pos) {
     float clip = (distance(world_pos, constants.cam_pos)) / VSM_CLIP0_LENGTH;
-    clip = ceil(log2(clip) + 2.0);
-    return int(clamp(clip, 0.0, float(VSM_NUM_CLIPMAPS - 1)));
+    clip = ceil(log2(clip) + 3.0);
+    return int(clamp(clip, 1.0, float(VSM_NUM_CLIPMAPS - 1)));
 }
 
 vec2 vsm_calc_virtual_uv(vec3 wpos, int clip_index) {

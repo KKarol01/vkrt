@@ -210,7 +210,7 @@ class RendererVulkan : public gfx::Renderer {
 
     uint32_t get_total_vertices() const { return total_vertices; }
     uint32_t get_total_indices() const { return total_indices; }
-    uint32_t get_total_triangles() const { return total_vertices / 3u; }
+    uint32_t get_total_triangles() const { return total_indices / 3u; }
 
     VkInstance instance;
     VkDevice dev;

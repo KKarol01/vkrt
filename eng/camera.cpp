@@ -3,7 +3,7 @@
 #include <glm/gtx/transform.hpp>
 #include <glfw/glfw3.h>
 #include <eng/engine.hpp>
-#include "./logger.hpp"
+#include <eng/common/logger.hpp>
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
     : projection{ glm::perspectiveFov(glm::radians(80.0f), static_cast<float>(1280.0f), static_cast<float>(768.0f), min_dist, max_dist) } {
@@ -38,12 +38,12 @@ void Camera::update() {
     glm::vec3 right = glm::normalize(rot * glm::vec3{ 1.0f, 0.0f, 0.0f });
     glm::vec3 up = glm::cross(right, forward);
 
-    if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { pos += forward * dt; }
-    if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { pos -= right * dt; }
-    if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) { pos -= forward * dt; }
-    if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { pos += right * dt; }
-    if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) { pos -= up * dt; }
-    if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) { pos += up * dt; }
+    if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { pos += forward * dt * 5.0f; }
+    if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { pos -= right * dt * 5.0f; }
+    if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) { pos -= forward * dt * 5.0f; }
+    if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { pos += right * dt * 5.0f; }
+    if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) { pos -= up * dt * 5.0f; }
+    if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) { pos += up * dt * 5.0f; }
 
     view = glm::lookAt(pos, pos + forward, up);
     ENG_LOG("POS: {} {} {}", pos.x, pos.y, pos.z);
