@@ -9,8 +9,8 @@
 
 static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::get().camera->on_mouse_move(px, py); }
 static void on_window_resize(GLFWwindow* window, int w, int h) {
-    Engine::get().window->width = w;
-    Engine::get().window->height = h;
+    Engine::get().window->width = (float)w;
+    Engine::get().window->height = (float)h;
     Engine::get().notify_on_window_resize();
 }
 static void on_window_focus(GLFWwindow* window, int focus) {

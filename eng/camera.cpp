@@ -11,8 +11,8 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
 
     double pos[2];
     glfwGetCursorPos(window, &pos[0], &pos[1]);
-    lpx = pos[0];
-    lpy = pos[1];
+    lpx = (float)pos[0];
+    lpy = (float)pos[1];
 }
 
 void Camera::update() {
@@ -20,7 +20,7 @@ void Camera::update() {
     const float dt = Engine::get().delta_time() * 5.0f;
 
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && glfwGetTime() - last_press_time > 0.3f) {
-        last_press_time = glfwGetTime();
+        last_press_time = (float)glfwGetTime();
         enabled = !enabled;
         if(!enabled) {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);

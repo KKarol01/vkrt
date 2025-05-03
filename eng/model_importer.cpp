@@ -23,8 +23,8 @@ static void load_image_load_buffer_view(ImportedModel& model, const fastgltf::As
                        int w, h, ch;
                        uint8_t* d = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(source.bytes.data() + view.byteOffset),
                                                           view.byteLength, &w, &h, &ch, 4);
-                       width = std::max(0, w);
-                       height = std::max(0, h);
+                       width = (uint32_t)std::max(0, w);
+                       height = (uint32_t)std::max(0, h);
                        loaded_image = reinterpret_cast<std::byte*>(d);
                    } },
                buffer.data);
@@ -186,7 +186,7 @@ ImportedModel ModelImporter::import_model(const std::filesystem::path& path) {
 
                     if(i == 0) {
                         model.vertices.resize(model.vertices.size() + accessor.count);
-                        model_mesh.vertex_count += accessor.count;
+                        model_mesh.vertex_count += (uint32_t)accessor.count;
                     }
 
                     if(accessor.type == fastgltf::AccessorType::Vec2) {
@@ -202,7 +202,7 @@ ImportedModel ModelImporter::import_model(const std::filesystem::path& path) {
             }
 
             auto& indices = asset->accessors.at(prim.indicesAccessor.value());
-            model_mesh.index_count += indices.count;
+            model_mesh.index_count += (uint32_t)indices.count;
             model.indices.resize(model.indices.size() + indices.count);
             fastgltf::copyFromAccessor<uint32_t>(asset.get(), indices, model.indices.data() + model_mesh.index_offset);
 

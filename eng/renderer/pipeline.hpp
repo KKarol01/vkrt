@@ -9,7 +9,7 @@ struct RasterizationSettings {
     bool operator==(const RasterizationSettings& o) const {
         return num_col_formats == o.num_col_formats &&
                [this, &o] {
-                   for(auto i = 0; i < num_col_formats; ++i) {
+                   for(auto i = 0u; i < num_col_formats; ++i) {
                        if(col_formats[i] != o.col_formats[i]) { return false; }
                        return true;
                    }

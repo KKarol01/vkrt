@@ -267,7 +267,7 @@ void RendererVulkan::initialize_imgui() {
     auto cmdimgui = get_frame_data().cmdpool->begin();
     ImGui_ImplVulkan_CreateFontsTexture();
     get_frame_data().cmdpool->end(cmdimgui);
-    submit_queue->with_cmd_buf(cmdimgui).submit_wait(-1ULL);
+    submit_queue->with_cmd_buf(cmdimgui).submit_wait(~0ull);
 }
 
 void RendererVulkan::initialize_resources() {
@@ -404,13 +404,13 @@ void RendererVulkan::initialize_resources() {
 
 void RendererVulkan::create_window_sized_resources() {
     swapchain.create(dev, frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
-    for(auto i = 0; i < frame_datas.size(); ++i) {
+    for(auto i = 0ull; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
         fd.gbuffer.color_image =
             make_image(fmt::format("g_color_{}", i),
                        VkImageCreateInfo{
                            .imageType = VK_IMAGE_TYPE_2D,
-                           .format = VK_FORMAT_R8G8B8A8_SRGB,
+                           .format = VK_FORMAT_B8G8R8A8_SRGB,
                            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
                            .mipLevels = 1,
                            .arrayLayers = 1,
