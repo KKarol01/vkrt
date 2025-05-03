@@ -334,10 +334,10 @@ void RendererVulkan::initialize_resources() {
         fd.sem_rendering_finished = submit_queue->make_semaphore();
         fd.fen_rendering_finished = submit_queue->make_fence(true);
         fd.constants =
-            make_buffer(std::format("constants_{}", i),
+            make_buffer(fmt::format("constants_{}", i),
                         Vks(VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
                         VmaAllocationCreateInfo{});
-        fd.transform_buffers = make_buffer(std::format("transform_buffer_{}", i), buffer_resizable,
+        fd.transform_buffers = make_buffer(fmt::format("transform_buffer_{}", i), buffer_resizable,
                                            Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
                                                                    .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
@@ -407,7 +407,7 @@ void RendererVulkan::create_window_sized_resources() {
     for(auto i = 0; i < frame_datas.size(); ++i) {
         auto& fd = frame_datas.at(i);
         fd.gbuffer.color_image =
-            make_image(std::format("g_color_{}", i),
+            make_image(fmt::format("g_color_{}", i),
                        VkImageCreateInfo{
                            .imageType = VK_IMAGE_TYPE_2D,
                            .format = VK_FORMAT_R8G8B8A8_SRGB,
@@ -418,7 +418,7 @@ void RendererVulkan::create_window_sized_resources() {
                            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         fd.gbuffer.depth_buffer_image =
-            make_image(std::format("g_depth_{}", i),
+            make_image(fmt::format("g_depth_{}", i),
                        VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
                                           .format = VK_FORMAT_D24_UNORM_S8_UINT,
                                           .extent = { (uint32_t)Engine::get().window->width,
@@ -430,24 +430,24 @@ void RendererVulkan::create_window_sized_resources() {
                                                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 
         /*make_image(&fd.gbuffer.color_image,
-                   Image{ std::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                   Image{ fmt::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
                           VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         make_image(&fd.gbuffer.view_space_positions_image,
-                   Image{ std::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                   Image{ fmt::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
                           VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                               VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
         make_image(&fd.gbuffer.view_space_normals_image,
-                   Image{ std::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                   Image{ fmt::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
                           VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         make_image(&fd.gbuffer.depth_buffer_image,
-                   Image{ std::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                   Image{ fmt::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
                           VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
                           VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         make_image(&fd.gbuffer.ambient_occlusion_image,
-                   Image{ std::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                   Image{ fmt::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
                           VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
     }
@@ -1311,7 +1311,7 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
 
     for(uint32_t i = 0; i < image_count; ++i) {
         images[i] =
-            Image{ std::format("swapchain_image_{}", i), dev, vk_images[i],
+            Image{ fmt::format("swapchain_image_{}", i), dev, vk_images[i],
                    Vks(VkImageCreateInfo{
                        .imageType = VK_IMAGE_TYPE_2D,
                        .format = sinfo.imageFormat,

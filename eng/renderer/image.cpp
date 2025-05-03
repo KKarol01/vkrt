@@ -70,7 +70,7 @@ VkImageView Image::get_view(VkImageViewCreateInfo vk_info) {
 
     VK_CHECK(vkCreateImageView(dev, &vk_info, nullptr, &view));
     if(!view) { return nullptr; }
-    set_debug_name(view, std::format("{}_view", name));
+    set_debug_name(view, fmt::format("{}_view", name));
     return views.emplace_back(vk_info, view).second;
 }
 

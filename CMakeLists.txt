@@ -102,7 +102,7 @@ set(FMT_CUDA_TEST OFF CACHE BOOL "" FORCE)
 set(FMT_OS ON CACHE BOOL "" FORCE)
 set(FMT_MODULE OFF CACHE BOOL "" FORCE)
 set(FMT_SYSTEM_HEADERS OFF CACHE BOOL "" FORCE)
-set(FMT_UNICODE ON CACHE BOOL "" FORCE)
+set(FMT_UNICODE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fmt)
 
 add_executable(vkrt 
@@ -135,7 +135,7 @@ target_link_libraries(vkrt
     imgui
     imguizmo
     glfw
-    fmt-header-only
+    fmt::fmt
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
@@ -152,20 +152,26 @@ target_compile_definitions(vkrt
 
 target_precompile_headers(vkrt
     PRIVATE
-        <vector>
-        <string>
-        <variant>
-        <utility>
-        <span>
-        <cstddef>
-        <forward_list>
-        <queue>
         <atomic>
+        <cstddef>
+        <deque>
+        <forward_list>
+        <fstream>
+        <functional>
+        <map>
         <memory>
-        <thread>
         <mutex>
         <numeric>
-        <fstream>
+        <queue>
+        <set>
+        <span>
+        <string>
+        <thread>
+        <unordered_map>
+        <unordered_set>
+        <utility>
+        <variant>
+        <vector>
         <volk/volk.h>
         <vulkan/vulkan.h>
         <glm/glm.hpp>
@@ -181,4 +187,5 @@ target_precompile_headers(vkrt
         <VulkanMemoryAllocator/include/vk_mem_alloc.h>
         <vk-bootstrap/src/VkBootstrap.h>
         <shaderc/shaderc.hpp>
+        <fmt/format.h>
 )
