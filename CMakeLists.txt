@@ -48,10 +48,11 @@ target_compile_definitions(build_header_only
         VMA_DYNAMIC_VULKAN_FUNCTIONS=0
     PUBLIC
         STB_INCLUDE_LINE_GLSL
-        VK_USE_PLATFORM_WIN32_KHR
+        $<IF:$<STREQUAL:$<PLATFORM_ID>,Windows>,VK_USE_PLATFORM_WIN32_KHR, VK_USE_PLATFORM_XCB_KHR>
         VK_VERSION_1_3
         WIN32_LEAN_AND_MEAN
 )
+
 target_include_directories(build_header_only
     PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party
