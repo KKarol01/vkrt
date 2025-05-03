@@ -12,6 +12,8 @@
 
 struct GLFWwindow;
 
+namespace eng {
+
 struct Window {
     Window(float width, float height);
     ~Window();
@@ -22,6 +24,8 @@ struct Window {
     float height;
     GLFWwindow* window{ nullptr };
 };
+
+} // namespace eng
 
 struct FrameTime {
     void update();
@@ -47,7 +51,7 @@ class Engine {
     void notify_on_window_focus();
 
     static Engine& get();
-    Window* window{};
+    eng::Window* window{};
     Camera* camera{};
     components::Storage* ecs_storage{};
     gfx::Renderer* renderer{};

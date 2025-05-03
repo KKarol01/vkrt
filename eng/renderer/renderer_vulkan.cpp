@@ -1,3 +1,11 @@
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif linux
+#define GLFW_EXPOSE_NATIVE_X11
+#include <X11/Xlib.h>
+#include <xcb/xcb.h>
+#endif
+
 #include <filesystem>
 #include <bitset>
 #include <numeric>
@@ -8,7 +16,6 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <vulkan/vulkan_core.h>
-#define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
@@ -25,6 +32,7 @@
 #include <eng/renderer/descpool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
+#include <vulkan/vulkan_xcb.h>
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
@@ -76,11 +84,19 @@ void RendererVulkan::initialize_vulkan() {
 
     const auto* window = Engine::get().window;
 
+#ifdef _WIN32
     auto surface_info = Vks(VkWin32SurfaceCreateInfoKHR{
         .hinstance = GetModuleHandle(nullptr),
         .hwnd = glfwGetWin32Window(window->window),
     });
     vkCreateWin32SurfaceKHR(vkb_inst.instance, &surface_info, nullptr, &window_surface);
+#elif linux
+    auto surface_info = Vks(VkXcbSurfaceCreateInfoKHR{
+        .connection = xcb_connect(nullptr, nullptr),
+        .window = glfwGetX11Window(window->window)
+    });
+    vkCreateXcbSurfaceKHR(vkb_inst.instance, &surface_info, nullptr, &window_surface);
+#endif
 
     vkb::PhysicalDeviceSelector selector{ vkb_inst };
     auto phys_rets = selector.require_present()
@@ -835,8 +851,8 @@ void RendererVulkan::bake_indirect_commands() {
             .vertex_offset = geom.vertex_offset,
             .index_offset = geom.index_offset,
             .color_texture_idx = get_bindless_index(mat.base_color_texture),
-            .normal_texture_idx = ~0ul,
-            .metallic_roughness_idx = ~0ul,
+            .normal_texture_idx = ~0u,
+            .metallic_roughness_idx = ~0u,
         });
         if(i == 0 || mesh_instances.at(i - 1).mesh != smi.mesh) {
             gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,

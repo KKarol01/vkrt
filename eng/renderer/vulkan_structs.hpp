@@ -2,6 +2,8 @@
 #include <type_traits>
 #include <concepts>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_xcb.h>
 
 // clang-format off
 
@@ -22,7 +24,11 @@ template <typename T> struct INIT_VK_STYPE;
 #define INIT_VK_STRUCT_NAME(ARG1, ARG2, NAME, ...) NAME
 #define INIT_VK_STRUCT(...) INIT_VK_EXPAND(INIT_VK_STRUCT_NAME(__VA_ARGS__, INIT_VK_STRUCT_2, INIT_VK_STRUCT_1)(__VA_ARGS__))
 
+#ifdef _WIN32
 INIT_VK_STRUCT(VkWin32SurfaceCreateInfoKHR, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
+#elif linux
+INIT_VK_STRUCT(VkXcbSurfaceCreateInfoKHR, VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR);
+#endif
 INIT_VK_STRUCT(VkPhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES);
 INIT_VK_STRUCT(VkPhysicalDeviceHostQueryResetFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES);
 INIT_VK_STRUCT(VkPhysicalDeviceDynamicRenderingFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES);

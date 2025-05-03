@@ -1,7 +1,7 @@
 #include <eng/camera.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
-#include <glfw/glfw3.h>
+#include <GLFW/glfw3.h>
 #include <eng/engine.hpp>
 #include "./logger.hpp"
 

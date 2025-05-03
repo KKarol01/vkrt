@@ -111,7 +111,7 @@ Handle<NodeInstance> Scene::instance_model(Handle<Node> entity) {
     return {};
 }
 
-void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) { ENG_TODO(); }
+void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) { ENG_TODO("{}", 0); }
 
 Handle<Node> Scene::add_node(Node** out) {
     auto& n = nodes.emplace_back();

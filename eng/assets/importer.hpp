@@ -12,6 +12,7 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/ext/matrix_transform.hpp>
 
 namespace assets {
 
@@ -137,6 +138,6 @@ inline void assets::Importer::dfs_traverse_node_hierarchy(const assets::Asset& a
     func(node, parent, parent_transform);
     parent_transform = asset.get_transform(node) * parent_transform;
     for(auto i : node.nodes) {
-        assets::Importer::dfs_traverse_node_hierarchy(asset, asset.get_node(i), &node, parent_transform);
+        assets::Importer::dfs_traverse_node_hierarchy(asset, asset.get_node(i), func, &node, parent_transform);
     }
 }

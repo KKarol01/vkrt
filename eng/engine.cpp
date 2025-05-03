@@ -1,4 +1,4 @@
-#include <Windows.h>
+// #include <Windows.h>
 #include <filesystem>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -18,7 +18,7 @@ static void on_window_focus(GLFWwindow* window, int focus) {
     Engine::get().notify_on_window_focus();
 }
 
-static void eng_ui_reload_dll(HMODULE hnew) {
+// static void eng_ui_reload_dll(HMODULE hnew) {
     // UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
     //         .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
     //// TODO: transition data
@@ -29,7 +29,7 @@ static void eng_ui_reload_dll(HMODULE hnew) {
     // };
     //_ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
     // Engine::get().ui = _ui;
-}
+// }
 
 // static void eng_vkrenderer_reload_dll(HMODULE hnew) {
 //     UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
@@ -48,22 +48,22 @@ static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_tra
     if(!std::filesystem::exists(path_dll)) { return; }
 }
 
-Window::Window(float width, float height) : width(width), height(height) {
+eng::Window::Window(float width, float height) : width(width), height(height) {
     window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
     if(!window) { ENG_WARN("Could not create glfw window"); }
 }
 
-Window::~Window() {
+eng::Window::~Window() {
     if(window) { glfwDestroyWindow(window); }
 }
 
-bool Window::should_close() const { return glfwWindowShouldClose(window); }
+bool eng::Window::should_close() const { return glfwWindowShouldClose(window); }
 
 void Engine::init() {
     if(!glfwInit()) { ENG_WARN("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    window = new Window{ 1280.0f, 768.0f };
+    window = new eng::Window{ 1280.0f, 768.0f };
     camera = new Camera{ glm::radians(90.0f), 0.01f, 100.0f };
     ecs_storage = new components::Storage{};
 

@@ -80,6 +80,9 @@ target_compile_definitions(imgui
     PRIVATE
         IMGUI_IMPL_VULKAN_USE_VOLK
 )
+if(UNIX)
+set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif(UNIX)
 
 add_library(imguizmo STATIC
     "third_party/ImGuizmo/ImGuizmo.cpp"
@@ -137,8 +140,10 @@ target_link_libraries(vkrt
     imguizmo
     glfw
     fmt::fmt
-    $<$<CONFIG:Debug>:shaderc_combinedd>
-    $<$<CONFIG:Release>:shaderc_combined>
+    $<$<AND:$<STREQUAL:$<PLATFORM_ID>,Windows>,$<CONFIG:Debug>>:shaderc_combinedd>
+    $<$<AND:$<STREQUAL:$<PLATFORM_ID>,Windows>,$<CONFIG:Release>>:shaderc_combined>
+    $<$<STREQUAL:$<PLATFORM_ID>,Linux>:shaderc_combined>
+    $<$<STREQUAL:$<PLATFORM_ID>,Linux>:xcb>
     fastgltf
     eng_ui
 )
