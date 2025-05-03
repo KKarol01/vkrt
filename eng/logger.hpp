@@ -4,10 +4,11 @@
 #include <print>
 #include <string>
 #include <cassert>
+#include <fmt/format.h>
 
-#define ENG_ERROR(fmt, ...)                                                                                            \
+#define ENG_ERROR(fmt1, ...)                                                                                            \
     do {                                                                                                               \
-        std::println("[ERROR][{} : {}]" fmt, __FILE__, __LINE__, __VA_ARGS__);                                         \
+        std::println("[ERROR][{} : {}]" fmt1, __FILE__, __LINE__, __VA_ARGS__);                                         \
         assert(false);                                                                                                 \
     } while(0)
 

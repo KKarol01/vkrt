@@ -94,6 +94,17 @@ target_compile_features(eng_ui PRIVATE cxx_std_23)
 target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
 
+set(FMT_DOC OFF CACHE BOOL "" FORCE)
+set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+set(FMT_TEST OFF CACHE BOOL "" FORCE)
+set(FMT_FUZZ OFF CACHE BOOL "" FORCE)
+set(FMT_CUDA_TEST OFF CACHE BOOL "" FORCE)
+set(FMT_OS ON CACHE BOOL "" FORCE)
+set(FMT_MODULE OFF CACHE BOOL "" FORCE)
+set(FMT_SYSTEM_HEADERS OFF CACHE BOOL "" FORCE)
+set(FMT_UNICODE ON CACHE BOOL "" FORCE)
+add_subdirectory(third_party/fmt)
+
 add_executable(vkrt 
     "eng/main.cpp"
     "eng/model_importer.cpp" 
@@ -113,7 +124,7 @@ add_executable(vkrt
     "eng/assets/importer.cpp"
 )
 
-target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include)
+target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
 target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_link_libraries(vkrt
@@ -124,6 +135,7 @@ target_link_libraries(vkrt
     imgui
     imguizmo
     glfw
+    fmt-header-only
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf

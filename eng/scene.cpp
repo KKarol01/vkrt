@@ -70,9 +70,8 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
 
     const auto parse_node_components = [&](Node& snode, assets::Node& anode) {
         if(auto* amesh = asset.try_get_mesh(anode)) {
-            auto& cmesh = Engine::get().ecs_storage->get<components::Mesh>(snode.entity);
-            cmesh.name = amesh->name;
-            cmesh.submeshes.reserve(amesh->submeshes.size());
+            snode.name = amesh->name;
+            snode.submeshes.reserve(amesh->submeshes.size());
             for(auto& asidx : amesh->submeshes) {
                 auto& as = asset.get_submesh(asidx);
                 auto* ag = asset.try_get_geometry(as);
@@ -80,104 +79,54 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
                 assert(ag && am);
                 const auto rm = Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{
                     .geometry = batched_geometries.at(as.geometry), .material = batched_materials.at(as.material) });
-                cmesh.submeshes.push_back(rm);
+                snode.submeshes.push_back(rm);
             }
         }
-        auto& ct = Engine::get().ecs_storage->get<components::Transform>(snode.entity);
-        ct.transform = asset.get_transform(anode);
+        snode.transform = asset.get_transform(anode);
     };
 
     const auto parse_node = [&](assets::Node& anode, auto& recursive) -> Node* {
-        Node snode;
-        snode.name = anode.name;
-        snode.entity = Engine::get().ecs_storage->create();
-        snode.children.reserve(anode.nodes.size());
-        parse_node_components(snode, anode);
+        Node* snode;
+        add_node(&snode);
+        snode->name = anode.name;
+        snode->children.reserve(anode.nodes.size());
+        parse_node_components(*snode, anode);
         for(auto& c : anode.nodes) {
-            snode.children.push_back(recursive(asset.get_node(c), recursive));
+            snode->children.push_back(recursive(asset.get_node(c), recursive));
         }
-        nodes.push_back(std::move(snode));
-        return &nodes.back();
+        return snode;
     };
 
+    Node* root;
+    const auto root_handle = add_node(&root);
+    root->name = path.filename().string() + "_root";
     for(auto& n : asset.scene) {
-        parse_node(asset.get_node(n), parse_node);
+        root->children.push_back(parse_node(asset.get_node(n), parse_node));
     }
+    return root_handle;
 }
 
-Handle<NodeInstance> Scene::instance_model(Handle<Node> entity) {
-    // Node* n = node_handles.at(entity);
-    // NodeInstance* i = add_instance();
-    // std::stack<NodeInstance*> i_stack;
-    // i_stack.push(i);
-    // traverse_node_hierarchy_indexed(n, [&](Node* n, uint32_t idx) {
-    //     NodeInstance* ni = i_stack.top();
-    //     i_stack.pop();
-    //     ni->name = n->name;
-    //     ni->node_handle = n->handle;
-    //     ni->instance_handle = Handle<NodeInstance>{ generate_handle };
-    //     ni->transform = n->transform;
-    //     ni->final_transform = n->transform;
-    //     ni->children.reserve(n->children.size());
-    //     ni->primitives.reserve(n->primitives.size());
-    //     instance_handles[ni->instance_handle] = ni;
-    //     for(auto& p : n->primitives) {
-    //         auto pi = ni->primitives.emplace_back(Engine::get().ecs_storage->create());
-    //         Engine::get().ecs_storage->emplace<components::Transform>(pi, ni->final_transform);
-    //         Engine::get().ecs_storage->emplace<components::Renderable>(
-    //             pi, components::Renderable{ .mesh_handle = p.mesh_handle, .material_handle = p.material_handle });
-    //         Engine::get().renderer->instance_mesh(gfx::InstanceSettings{ .entity = pi });
-    //         Engine::get().renderer->instance_blas(gfx::BLASInstanceSettings{ .entity = pi });
-    //     }
-    //     for(auto& c : n->children) {
-    //         ni->children.push_back(add_instance());
-    //     }
-    //     for(auto it = ni->children.rbegin(); it != ni->children.rend(); ++it) {
-    //         i_stack.push(*it);
-    //     }
-    // });
-    // scene.push_back(i);
-    // return i->instance_handle;
+Handle<NodeInstance> Scene::instance_model(Handle<Node> entity) { 
+    const auto& sn = get_node(entity); 
     return {};
 }
 
-void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
-    auto* instance = instance_handles.at(entity);
-    std::stack<glm::mat4> stack;
-    // stack.push(glm::mat4{1.0f});
-    stack.push(transform);
-    traverse_node_hierarchy_indexed(instance, [&stack](auto* node, auto idx) {
-        // remove node's transform, leave parent transform.
-        node->final_transform = glm::inverse(node->transform) * node->final_transform;
-        // update to new transform, calc new final transform, pass down.
-        node->transform = stack.top();
-        stack.pop();
-        node->final_transform = node->transform * node->final_transform;
-        for(auto* c : node->children) {
-            if(c) { stack.push(node->final_transform); }
-        }
-        for(auto p : node->primitives) {
-            if(p != components::s_max_entity) {
-                Engine::get().ecs_storage->get<components::Transform>(p).transform = node->final_transform;
-                Engine::get().renderer->update_transform(p);
-            }
-        }
-    });
+void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) { ENG_TODO(); }
+
+Handle<Node> Scene::add_node(Node** out) {
+    auto& n = nodes.emplace_back();
+    const auto handle = Handle<Node>{ generate_handle };
+    node_handles[handle] = &n;
+    if(out) { *out = &n; }
+    return handle;
 }
 
-Node* Scene::add_node() {
-    // auto& n = nodes.emplace_back();
-    // n.handle = Handle<Node>{ generate_handle };
-    // node_handles[n.handle] = &n;
-    // return &n;
-    return nullptr;
-}
-
-NodeInstance* Scene::add_instance() {
-    // auto& n = node_instances.emplace_back();
-    // n.instance_handle = Handle<NodeInstance>{ generate_handle };
-    // return &n;
-    return nullptr;
+Handle<NodeInstance> Scene::add_instance(NodeInstance** out) {
+    auto& n = node_instances.emplace_back();
+    const auto handle = Handle<NodeInstance>{ generate_handle };
+    instance_handles[handle] = &n;
+    if(out) { *out = &n; }
+    return handle;
 }
 
 } // namespace scene

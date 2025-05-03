@@ -17,54 +17,16 @@ namespace scene {
 struct Node {
     std::string name;
     std::vector<Node*> children;
-    components::Entity entity{ components::s_max_entity };
+    glm::mat4 transform{ 1.0f };
+    std::vector<Handle<gfx::Mesh>> submeshes;
 };
 
 struct NodeInstance {
-    bool has_children() const;
-
     std::string name;
-    // children are same size as node's children array, except some pointers can be nullptrs
     std::vector<NodeInstance*> children;
-    // actually rendered primitives (may not all be present as in referenced node_hadle)
-    std::vector<components::Entity> primitives;
     glm::mat4 transform{ 1.0f };
-    glm::mat4 final_transform{ 1.0f };
-    Handle<NodeInstance> instance_handle;
-    Handle<Node> node_handle;
+    components::Entity entity;
 };
-
-template <typename Func>
-    requires std::is_invocable_v<Func, Node*, uint32_t>
-void traverse_node_hierarchy_indexed(Node* node, Func f) {
-    std::stack<Node*> stack;
-    stack.push(node);
-    uint32_t index = 0;
-    while(!stack.empty()) {
-        Node* n = stack.top();
-        stack.pop();
-        f(n, index++);
-        for(auto it = n->children.rbegin(); it != n->children.rend(); ++it) {
-            stack.push(*it);
-        }
-    }
-}
-
-template <typename Func>
-    requires std::is_invocable_v<Func, NodeInstance*, uint32_t>
-void traverse_node_hierarchy_indexed(NodeInstance* node, Func f) {
-    std::stack<NodeInstance*> stack;
-    stack.push(node);
-    uint32_t index = 0;
-    while(!stack.empty()) {
-        auto* n = stack.top();
-        stack.pop();
-        f(n, index++);
-        for(auto it = n->children.rbegin(); it != n->children.rend(); ++it) {
-            if(*it) { stack.push(*it); }
-        }
-    }
-}
 
 class Scene {
   public:
@@ -72,12 +34,17 @@ class Scene {
     Handle<NodeInstance> instance_model(Handle<Node> asset);
     // glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
 
-    void update_transform(Handle<scene::NodeInstance> entity, glm::mat4 transform);
+    void update_transform(Handle<NodeInstance> entity, glm::mat4 transform);
     // void _update_transform(uint32_t idx, glm::mat4 t = { 1.0f });
 
-    Node* add_node();
-    NodeInstance* add_instance();
-    NodeInstance& get_instance(Handle<scene::NodeInstance> entity) { return *instance_handles.at(entity); }
+    Handle<Node> add_node(Node** out = nullptr);
+    Handle<NodeInstance> add_instance(NodeInstance** out = nullptr);
+    Node& get_node(Handle<Node> entity) { return *node_handles.at(entity); }
+    NodeInstance& get_instance(Handle<NodeInstance> entity) { return *instance_handles.at(entity); }
+
+    void traverse_dfs(Handle<Node> node, auto& func);
+    void traverse_dfs(Node& node, auto& func)
+        requires std::invocable<decltype(func), scene::Node&>;
 
     // TODO: maybe make this private too (used in many places -- possibly bad interface)
   public:
@@ -91,3 +58,17 @@ class Scene {
     std::unordered_map<Handle<NodeInstance>, NodeInstance*> instance_handles;
 };
 } // namespace scene
+
+void scene::Scene::traverse_dfs(Handle<scene::Node> node, auto& func) {
+    auto& n = *node_handles.at(node);
+    traverse_dfs(n, func);
+}
+
+void scene::Scene::traverse_dfs(scene::Node& node, auto& func)
+    requires std::invocable<decltype(func), scene::Node&>
+{
+    func(node);
+    for(auto& c : node.children) {
+        traverse_dfs(*c, func);
+    }
+}
