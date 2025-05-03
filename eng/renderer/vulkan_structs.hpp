@@ -2,8 +2,9 @@
 #include <type_traits>
 #include <concepts>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
+#ifdef linux
 #include <vulkan/vulkan_xcb.h>
+#endif
 
 // clang-format off
 

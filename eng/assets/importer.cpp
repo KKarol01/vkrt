@@ -211,7 +211,7 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
                 if(auto it = fprim.findAttribute("TEXCOORD_0"); it != fprim.attributes.end()) {
                     auto& acc = fasset.accessors.at(it->accessorIndex);
                     if(!acc.bufferViewIndex) {
-                        ENG_ERROR("No bufferViewIndex...", "");
+                        ENG_ERROR("No bufferViewIndex...");
                         return submesh;
                     }
                     fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(fasset, acc, [&vertices](const auto& vec, auto idx) {

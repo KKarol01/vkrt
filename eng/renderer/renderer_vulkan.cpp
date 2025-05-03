@@ -4,6 +4,7 @@
 #define GLFW_EXPOSE_NATIVE_X11
 #include <X11/Xlib.h>
 #include <xcb/xcb.h>
+#include <vulkan/vulkan_xcb.h>
 #endif
 
 #include <filesystem>
@@ -32,7 +33,6 @@
 #include <eng/renderer/descpool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
-#include <vulkan/vulkan_xcb.h>
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b) {
