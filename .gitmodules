@@ -25,3 +25,6 @@
 [submodule "third_party/ImGuizmo"]
 	path = third_party/ImGuizmo
 	url = https://github.com/CedricGuillemet/ImGuizmo
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt
