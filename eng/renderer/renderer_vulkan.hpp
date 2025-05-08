@@ -22,6 +22,7 @@ enum class RenderFlags : uint32_t {
     RESIZE_SWAPCHAIN_BIT = 0x20,
     UPDATE_BINDLESS_SET = 0x40,
     PAUSE_RENDERING = 0x80,
+    REBUILD_RENDER_GRAPH = 0x100,
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
@@ -143,6 +144,11 @@ struct FrameData {
     Handle<Buffer> constants{};
     Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
+};
+
+struct FFTOcean {
+    uint32_t num_samples = 64;
+    Handle<Image> butterfly_image;
 };
 
 class SubmitQueue;
@@ -267,6 +273,7 @@ class RendererVulkan : public gfx::Renderer {
 
     DDGI ddgi;
     gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
+    FFTOcean fftocean;
 
     struct UploadImage {
         Handle<Image> image_handle;

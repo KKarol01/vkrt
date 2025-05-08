@@ -398,7 +398,7 @@ void RendererVulkan::initialize_resources() {
                    });
 
     create_window_sized_resources();
-    build_render_graph();
+    flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
 }
 
 void RendererVulkan::create_window_sized_resources() {
@@ -481,7 +481,10 @@ void RendererVulkan::update() {
     if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
         submit_queue->wait_idle();
         create_window_sized_resources();
+    }
+    if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH)) {
         build_render_graph();
+        pipelines.threaded_compile();
     }
     if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) {
         assert(false);
@@ -489,7 +492,6 @@ void RendererVulkan::update() {
         // update_bindless_set();
     }
 
-    pipelines.threaded_compile();
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
