@@ -102,7 +102,7 @@ RenderPass::RenderPass(const std::string& name, const PipelineSettings& settings
     : name(name), pipeline(RendererVulkan::get_instance()->pipelines.get_pipeline(settings)) {}
 
 FFTOceanButterflyPass::FFTOceanButterflyPass(RenderGraph* rg)
-    : RenderPass("FFTOceanInitPass", PipelineSettings{ .shaders = { "fftocean/butterfly.comp" } }) {
+    : RenderPass("FFTOceanInitPass", PipelineSettings{ .shaders = { "fftocean/butterfly.comp.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     if(!r->fftocean.butterfly_image) {
         const auto logn = (uint32_t)(std::log2f(r->fftocean.num_samples));
