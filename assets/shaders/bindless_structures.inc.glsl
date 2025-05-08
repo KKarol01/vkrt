@@ -132,6 +132,7 @@ layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2DArra
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2D storageImages_2dr32ui[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2DArray storageImages_2dr32uiArray[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2D storageImages_2drgba8[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba16f) uniform image2D storageImages_2drgba16f[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2DArray storageImages_2drgba8Array[];
 
 #define constants		storageBuffers_GPUConstantsBuffer[constants_index]

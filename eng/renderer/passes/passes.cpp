@@ -130,6 +130,7 @@ void FFTOceanButterflyPass::render(VkCommandBuffer cmd) {
     auto& img = r.get_image(r.fftocean.butterfly_image);
     auto view = r.make_image_view(r.fftocean.butterfly_image);
     uint32_t pc[]{ r.get_bindless_index(r.make_texture(r.fftocean.butterfly_image, view, VK_IMAGE_LAYOUT_GENERAL, nullptr)) };
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), pc);
     vkCmdDispatch(cmd, img.vk_info.extent.width, img.vk_info.extent.height, 1u);
 }
