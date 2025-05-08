@@ -1,0 +1,13 @@
+#version 460 core
+
+#include "./bindless_structures.inc.glsl"
+
+layout(local_size_x = 1, local_size_y = 1) in;
+
+layout(scalar, push_constant) uniform PushConstants {
+	uint32_t butterlfy_index;
+};
+
+void main() {
+
+}

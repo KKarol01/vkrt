@@ -454,6 +454,7 @@ void RendererVulkan::create_window_sized_resources() {
 
 void RendererVulkan::build_render_graph() {
     rendergraph.clear_passes();
+    rendergraph.add_pass<FFTOceanButterflyPass>(&rendergraph);
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
     rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
     rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
@@ -491,7 +492,6 @@ void RendererVulkan::update() {
         submit_queue->wait_idle();
         // update_bindless_set();
     }
-
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();

@@ -37,6 +37,13 @@ class RenderPass {
     Pipeline* pipeline{};
 };
 
+class FFTOceanButterflyPass final : public RenderPass {
+  public:
+    FFTOceanButterflyPass(RenderGraph* rg);
+    ~FFTOceanButterflyPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
 class ZPrepassPass final : public RenderPass {
   public:
     ZPrepassPass(RenderGraph* rg);

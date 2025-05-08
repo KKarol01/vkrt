@@ -148,6 +148,7 @@ struct FrameData {
 
 struct FFTOcean {
     uint32_t num_samples = 64;
+    bool butterfly_generated{ false };
     Handle<Image> butterfly_image;
 };
 

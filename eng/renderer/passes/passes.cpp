@@ -101,6 +101,39 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
 RenderPass::RenderPass(const std::string& name, const PipelineSettings& settings)
     : name(name), pipeline(RendererVulkan::get_instance()->pipelines.get_pipeline(settings)) {}
 
+FFTOceanButterflyPass::FFTOceanButterflyPass(RenderGraph* rg)
+    : RenderPass("FFTOceanInitPass", PipelineSettings{ .shaders = { "fftocean/butterfly.comp" } }) {
+    auto r = RendererVulkan::get_instance();
+    if(!r->fftocean.butterfly_image) {
+        const auto logn = (uint32_t)(std::log2f(r->fftocean.num_samples));
+        r->fftocean.butterfly_image =
+            r->make_image("fftocean/butterfly", Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                                       .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                                                                       .extent = { logn, r->fftocean.num_samples, 1u },
+                                                                       .mipLevels = 1u,
+                                                                       .arrayLayers = 1u,
+                                                                       .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                                       .usage = VK_IMAGE_USAGE_STORAGE_BIT }));
+    }
+
+    accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.butterfly_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL } };
+}
+
+void FFTOceanButterflyPass::render(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+    if(r.fftocean.butterfly_generated) { return; }
+    r.fftocean.butterfly_generated = true;
+    auto& img = r.get_image(r.fftocean.butterfly_image);
+    auto view = r.make_image_view(r.fftocean.butterfly_image);
+    uint32_t pc[]{ r.get_bindless_index(r.make_texture(r.fftocean.butterfly_image, view, VK_IMAGE_LAYOUT_GENERAL, nullptr)) };
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), pc);
+    vkCmdDispatch(cmd, img.vk_info.extent.width, img.vk_info.extent.height, 1u);
+}
+
 ZPrepassPass::ZPrepassPass(RenderGraph* rg)
     : RenderPass("ZPrepassPass",
                  PipelineSettings{
