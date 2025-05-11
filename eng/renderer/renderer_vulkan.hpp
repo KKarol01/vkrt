@@ -147,9 +147,22 @@ struct FrameData {
 };
 
 struct FFTOcean {
-    uint32_t num_samples = 64;
-    bool butterfly_generated{ false };
+    struct FFTOceanSettings {
+        float num_samples; // N
+        float patch_size;  // L
+        glm::vec2 wind_dir;   // w
+        float phillips_const; // A
+    };
+
+    FFTOceanSettings settings;
+    uint32_t passes_run{ 0u };
+    uint32_t pingpong;
     Handle<Image> butterfly_image;
+    Handle<Image> gaussian_distribution_image;
+    Handle<Image> amplitudes_image;
+    Handle<Image> fourier_amplitudes_image;
+    Handle<Image> pingpong_image;
+    Handle<Image> displacement_image;
 };
 
 class SubmitQueue;
@@ -202,6 +215,7 @@ class RendererVulkan : public gfx::Renderer {
                                const VmaAllocationCreateInfo& vma_info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
+    Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
     VkImageView make_image_view(Handle<Image> handle);
     VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
 

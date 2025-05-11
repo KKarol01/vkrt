@@ -88,7 +88,7 @@ inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offse
 template <typename T>
 inline StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout,
                                              const VkBufferImageCopy2 region, const std::vector<T>& ts) {
-    return send_to(image, final_layout, region, std::span{ ts.begin(), ts.end() });
+    return send_to(image, final_layout, region, std::as_bytes(std::span{ ts.begin(), ts.end() }));
 }
 
 } // namespace gfx

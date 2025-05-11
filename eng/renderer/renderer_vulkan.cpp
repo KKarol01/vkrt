@@ -455,6 +455,10 @@ void RendererVulkan::create_window_sized_resources() {
 void RendererVulkan::build_render_graph() {
     rendergraph.clear_passes();
     rendergraph.add_pass<FFTOceanButterflyPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanAmplitudesPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanFourierAmplitudesPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanFourierButterflyPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDisplacementPass>(&rendergraph);
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
     rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
     rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
@@ -1240,6 +1244,11 @@ Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView vi
         if(t.image == image && t.view == view && t.layout == layout && t.sampler == sampler) { return h; }
     }
     return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler });
+}
+
+Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler) {
+    const auto view = make_image_view(image);
+    return make_texture(image, view, layout, sampler);
 }
 
 VkImageView RendererVulkan::make_image_view(Handle<Image> handle) {

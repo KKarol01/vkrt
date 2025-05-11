@@ -16,6 +16,7 @@ layout(scalar, push_constant) uniform PushConstants {
     uint32_t vsm_buffer_index;
     uint32_t vsm_physical_depth_image_index;
     uint32_t page_table_index;
+    uint32_t fft_fourier_amplitudes_index;
 };
 #endif
 

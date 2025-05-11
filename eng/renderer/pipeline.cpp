@@ -45,7 +45,7 @@ void PipelineCompiler::threaded_compile() {
     for(running_threads = 0u, items_in_flight = 0u; items_in_flight < shaders_to_compile.size();
         ++running_threads, items_in_flight += sh_per_th) {
         workers[running_threads] = std::thread{ [this, items_in_flight, sh_per_th]() {
-            for(auto i = items_in_flight; i < sh_per_th + items_in_flight; ++i) {
+            for(auto i = items_in_flight; i < sh_per_th + items_in_flight && i < shaders_to_compile.size(); ++i) {
                 compile_shader(shaders_to_compile.at(i));
             }
         } };

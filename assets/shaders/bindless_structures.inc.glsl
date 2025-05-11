@@ -125,15 +125,24 @@ ENG_DECLARE_STORAGE_BUFFERS(GPUVsmAllocConstantsBuffer) {
 	ENG_TYPE_UINT free_list_head;
 } ENG_DECLARE_BINDLESS(GPUVsmAllocConstantsBuffer);
 
+struct FFTOceanSettings {
+    ENG_TYPE_FLOAT num_samples;    // N
+    ENG_TYPE_FLOAT patch_size;     // L
+    ENG_TYPE_VEC2 wind_dir;        // w
+    ENG_TYPE_FLOAT phillips_const; // A
+};
+
 #ifndef __cplusplus
 
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2D combinedImages_2d[];
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2DArray combinedImages_2dArray[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2D storageImages_2dr32ui[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) uniform uimage2DArray storageImages_2dr32uiArray[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2D storageImages_2drgba8[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba16f) uniform image2D storageImages_2drgba16f[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) uniform image2DArray storageImages_2drgba8Array[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2D storageImages_2dr32ui[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2DArray storageImages_2dr32uiArray[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2D storageImages_2drgba8[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba32f) restrict uniform image2D storageImages_2drgba32f[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba16f) restrict uniform image2D storageImages_2drgba16f[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rg32f) restrict uniform image2D storageImages_2drg32f[];
+layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2DArray storageImages_2drgba8Array[];
 
 #define constants		storageBuffers_GPUConstantsBuffer[constants_index]
 #define vertex_pos_arr	storageBuffers_GPUVertexPositionsBuffer[vertex_positions_index].positions_us

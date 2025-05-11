@@ -44,6 +44,34 @@ class FFTOceanButterflyPass final : public RenderPass {
     void render(VkCommandBuffer cmd) final;
 };
 
+class FFTOceanAmplitudesPass final : public RenderPass {
+  public:
+    FFTOceanAmplitudesPass(RenderGraph* rg);
+    ~FFTOceanAmplitudesPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanFourierAmplitudesPass final : public RenderPass {
+  public:
+    FFTOceanFourierAmplitudesPass(RenderGraph* rg);
+    ~FFTOceanFourierAmplitudesPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanFourierButterflyPass final : public RenderPass {
+  public:
+    FFTOceanFourierButterflyPass(RenderGraph* rg);
+    ~FFTOceanFourierButterflyPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanDisplacementPass final : public RenderPass {
+  public:
+    FFTOceanDisplacementPass(RenderGraph* rg);
+    ~FFTOceanDisplacementPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
 class ZPrepassPass final : public RenderPass {
   public:
     ZPrepassPass(RenderGraph* rg);

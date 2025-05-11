@@ -63,6 +63,7 @@ void main() {
     float shadowing     = current_depth > closest_depth ? 0.3 : 1.0;
 
     OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
+    OUT_COLOR = vec4(vsout.uv.xy, 0.0, 1.0);
 
 
     //OUT_COLOR = vec4(vec3(closest_depth), 1.0);
