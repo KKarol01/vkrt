@@ -21,7 +21,7 @@ void main() {
     float dispx = textureLod(combinedImages_2d[fft_fourier_x_amplitudes_index], vsout.uv, 0.0).r;
     float dispz = textureLod(combinedImages_2d[fft_fourier_z_amplitudes_index], vsout.uv, 0.0).r;
     vec3 wn = textureLod(combinedImages_2d[fft_fourier_n_amplitudes_index], vsout.uv, 0.0).rgb;
-    vsout.position.xyz += vec3(dispx, disp, dispz) * 0.3;
+    vsout.position.xyz += vec3(dispx, disp, dispz) * 1.3;
     vsout.water_normal = wn;
     gl_Position = constants.proj_view * vec4(vsout.position, 1.0);
 }
