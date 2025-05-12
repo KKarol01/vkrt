@@ -263,7 +263,7 @@ void FFTOceanFourierAmplitudesPass::render(VkCommandBuffer cmd) {
         const auto view1 = r.get_bindless_index(r.make_texture(r.fftocean.amplitudes_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
         const auto view2 =
             r.get_bindless_index(r.make_texture(r.fftocean.fourier_amplitudes_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
-        float time = (float)glfwGetTime() * 10.0;
+        float time = (float)glfwGetTime() * 0.001;
         std::memcpy(pc.data(), &r.fftocean.settings, sizeof(r.fftocean.settings));
         std::memcpy(pc.data() + sizeof(r.fftocean.settings) + 0 * sizeof(Handle<Image>), &view1, sizeof(view1));
         std::memcpy(pc.data() + sizeof(r.fftocean.settings) + 1 * sizeof(Handle<Image>), &view2, sizeof(view2));
@@ -465,6 +465,8 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
 }
 
 void FFTOceanDebugGenH0Pass::render(VkCommandBuffer cmd) {
+    static int run = 0;
+    if(run++ > 0) { return; }
     auto& r = *RendererVulkan::get_instance();
 
     struct PushConstants {
@@ -537,7 +539,7 @@ void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd) {
         pc.h0_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_h0_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
         pc.hx_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_htx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
         pc.hz_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_htz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
-        pc.time = (float)glfwGetTime() * 12.0f;
+        pc.time = (float)glfwGetTime() * 0.01f;
     }
     r.bindless_pool->bind(cmd, pipeline->bind_point);
     uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;

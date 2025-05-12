@@ -149,8 +149,8 @@ struct FrameData {
 struct FFTOcean {
     struct FFTOceanSettings {
         float num_samples{ 128.0f };      // N
-        float patch_size{ 5000.0f };      // L
-        glm::vec2 wind_dir{ 60.0f, 3.0f }; // w
+        float patch_size{ 1000.0f };      // L
+        glm::vec2 wind_dir{ 14.0f, 3.0f }; // w
         float phillips_const{ 4.0f };     // A
     };
 
