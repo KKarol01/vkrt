@@ -30,7 +30,7 @@ void main() {
     const float nx = imageLoad(hx_image, x).r;
     const float ny = imageLoad(hy_image, x).r;
     const float nz = imageLoad(hz_image, x).r;
-    imageStore(hn_image, x, vec4(normalize(vec3(nx, ny, nz)), 1.0));
+    imageStore(hn_image, x, vec4(normalize(vec3(nx, 1.0, nz)), 1.0));
 
     const uint idx = uint(gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_WorkGroupSize.x * gl_NumWorkGroups.x);
     const float my = abs(ny);
