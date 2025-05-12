@@ -21,7 +21,7 @@ class BindlessDescriptorPool {
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout; }
 
     uint32_t get_bindless_index(Handle<Buffer> buffer);
-    uint32_t get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler);
+    uint32_t get_bindless_index(Handle<Texture> texture);
 
     void update_bindless_resource(Handle<Buffer> buffer);
     void update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler);
@@ -38,7 +38,7 @@ class BindlessDescriptorPool {
     uint32_t buffer_counter{};
     uint32_t view_counter{};
     std::unordered_map<Handle<Buffer>, uint32_t> buffers;
-    std::unordered_map<VkImageView, uint32_t> views;
+    std::unordered_map<Handle<Texture>, uint32_t> textures;
     std::vector<VkWriteDescriptorSet> updates;
     std::deque<VkDescriptorBufferInfo> buffer_updates;
     std::deque<VkDescriptorImageInfo> image_updates;

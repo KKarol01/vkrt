@@ -72,6 +72,41 @@ class FFTOceanDisplacementPass final : public RenderPass {
     void render(VkCommandBuffer cmd) final;
 };
 
+class FFTOceanDebugGenH0Pass final : public RenderPass {
+  public:
+    FFTOceanDebugGenH0Pass(RenderGraph* rg);
+    ~FFTOceanDebugGenH0Pass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanDebugGenHtPass final : public RenderPass {
+  public:
+    FFTOceanDebugGenHtPass(RenderGraph* rg);
+    ~FFTOceanDebugGenHtPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanDebugGenHxPass final : public RenderPass {
+  public:
+    FFTOceanDebugGenHxPass(RenderGraph* rg);
+    ~FFTOceanDebugGenHxPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanCalcNormalPass final : public RenderPass {
+  public:
+    FFTOceanCalcNormalPass(RenderGraph* rg);
+    ~FFTOceanCalcNormalPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanNormalizePass final : public RenderPass {
+  public:
+    FFTOceanNormalizePass(RenderGraph* rg);
+    ~FFTOceanNormalizePass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
 class ZPrepassPass final : public RenderPass {
   public:
     ZPrepassPass(RenderGraph* rg);

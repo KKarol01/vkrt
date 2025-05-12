@@ -455,10 +455,15 @@ void RendererVulkan::create_window_sized_resources() {
 void RendererVulkan::build_render_graph() {
     rendergraph.clear_passes();
     rendergraph.add_pass<FFTOceanButterflyPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanAmplitudesPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanFourierAmplitudesPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanFourierButterflyPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDisplacementPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanAmplitudesPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanFourierAmplitudesPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanFourierButterflyPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDisplacementPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDebugGenHxPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanCalcNormalPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanNormalizePass>(&rendergraph);
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
     rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
     rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
@@ -1280,7 +1285,7 @@ uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bind
 uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) {
     if(!handle) { return ~0u; }
     const auto& tex = textures.at(handle);
-    return bindless_pool->get_bindless_index(tex.view, tex.layout, tex.sampler);
+    return bindless_pool->get_bindless_index(handle);
 }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset) {

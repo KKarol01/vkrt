@@ -8,6 +8,7 @@ layout(location = 0) in VsOut {
     vec2 uv;
     vec3 tangent;
     flat uint32_t instance_index;
+    vec3 water_normal;
 }
 vsout;
 
@@ -62,8 +63,18 @@ void main() {
     float current_depth = vlight_proj_dist - 0.001 /*- depthBias*/;
     float shadowing     = current_depth > closest_depth ? 0.3 : 1.0;
 
-    OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
-    OUT_COLOR = vec4(vsout.uv.xy, 0.0, 1.0);
+    //vec3 px = dFdx(vsout.position);
+    //vec3 py = dFdy(vsout.position);
+    //vec3 pn = normalize(cross(px, py));
+    vec3 wn = vsout.water_normal;
+    float dtt = clamp(dot(wn, normalize(vec3(15.0, 80.0, 0.0))), 0.0, 1.0);
+    vec3 oceanColor = mix(vec3(0.0, 0.1, 0.3), vec3(0.0, 0.3, 0.4)*1.5, dtt);
+
+
+    //OUT_COLOR = vec4(shadowing * col_diffuse.rgb, 1.0);
+    //OUT_COLOR = vec4(vec3(wn), 1.0);
+    OUT_COLOR = vec4(vec3(oceanColor), 1.0);
+
 
 
     //OUT_COLOR = vec4(vec3(closest_depth), 1.0);

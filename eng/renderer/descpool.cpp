@@ -81,14 +81,15 @@ uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
     return buffer_counter++;
 }
 
-uint32_t BindlessDescriptorPool::get_bindless_index(VkImageView view, VkImageLayout layout, VkSampler sampler) {
-    if(!view) {
+uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Texture> texture) {
+    if(!texture) {
         ENG_WARN("view is null");
         return ~0ull;
     }
-    if(auto it = views.find(view); it != views.end()) { return it->second; }
-    views[view] = view_counter;
-    update_bindless_resource(view, layout, sampler);
+    if(auto it = textures.find(texture); it != textures.end()) { return it->second; }
+    textures[texture] = view_counter;
+    const auto& tex = RendererVulkan::get_instance()->textures.at(texture);
+    update_bindless_resource(tex.view, tex.layout, tex.sampler);
     return view_counter++;
 }
 

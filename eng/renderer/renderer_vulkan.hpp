@@ -148,10 +148,10 @@ struct FrameData {
 
 struct FFTOcean {
     struct FFTOceanSettings {
-        float num_samples; // N
-        float patch_size;  // L
-        glm::vec2 wind_dir;   // w
-        float phillips_const; // A
+        float num_samples{ 256.0f };      // N
+        float patch_size{ 1000.0f };      // L
+        glm::vec2 wind_dir{ 1.0f, 1.0f }; // w
+        float phillips_const{ 1.0f };     // A
     };
 
     FFTOceanSettings settings;
@@ -163,6 +163,14 @@ struct FFTOcean {
     Handle<Image> fourier_amplitudes_image;
     Handle<Image> pingpong_image;
     Handle<Image> displacement_image;
+    Handle<Image> debug_h0_image;
+    Handle<Image> debug_htx_image;
+    Handle<Image> debug_htz_image;
+    Handle<Image> debug_hx_image;
+    Handle<Image> debug_hxx_image;
+    Handle<Image> debug_hxz_image;
+    Handle<Image> debug_hn_image;
+    Handle<Buffer> debug_buffer;
 };
 
 class SubmitQueue;

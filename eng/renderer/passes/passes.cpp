@@ -97,7 +97,14 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         r.get_bindless_index(r.vsm.constants_buffer),
         r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
-        r.get_bindless_index(r.make_texture(r.fftocean.fourier_amplitudes_image, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        r.get_bindless_index(r.make_texture(r.fftocean.debug_hx_image, VK_IMAGE_LAYOUT_GENERAL,
+                                            r.samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        r.get_bindless_index(r.make_texture(r.fftocean.debug_hxx_image, VK_IMAGE_LAYOUT_GENERAL,
+                                            r.samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        r.get_bindless_index(r.make_texture(r.fftocean.debug_hxz_image, VK_IMAGE_LAYOUT_GENERAL,
+                                            r.samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        r.get_bindless_index(r.make_texture(r.fftocean.debug_hn_image, VK_IMAGE_LAYOUT_GENERAL,
+                                            r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
@@ -109,13 +116,6 @@ FFTOceanButterflyPass::FFTOceanButterflyPass(RenderGraph* rg)
     : RenderPass("FFTOceanInitPass", PipelineSettings{ .shaders = { "fftocean/butterfly.comp.glsl" } }) {
     auto& r = *RendererVulkan::get_instance();
     if(!r.fftocean.butterfly_image) {
-        r.fftocean.settings = FFTOcean::FFTOceanSettings{
-            .num_samples = 256.0f,
-            .patch_size = 1000.0f,
-            .wind_dir = glm::normalize(glm::vec2{ 1.0f, 1.0f }) * 40.0f,
-            .phillips_const = 4.0f,
-        };
-
         const auto ns = (uint32_t)r.fftocean.settings.num_samples;
         const auto logn = (uint32_t)(std::log2f(ns));
         r.fftocean.butterfly_image =
@@ -138,9 +138,9 @@ FFTOceanButterflyPass::FFTOceanButterflyPass(RenderGraph* rg)
         std::vector<float> gaussian_distr(r.fftocean.settings.num_samples * r.fftocean.settings.num_samples * 4u);
         std::random_device dev;
         std::mt19937 mt{ dev() };
-        std::normal_distribution nd{0.0f, 1.0f};
+        std::normal_distribution nd{ 0.0f, 1.0f };
         for(auto i = 0u; i < gaussian_distr.size(); ++i) {
-            gaussian_distr[i] = nd(mt);
+            gaussian_distr[i] = std::clamp(nd(mt), -1.0f, 1.0f);
         }
         r.staging_buffer
             ->send_to(r.fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL,
@@ -264,7 +264,6 @@ void FFTOceanFourierAmplitudesPass::render(VkCommandBuffer cmd) {
         const auto view2 =
             r.get_bindless_index(r.make_texture(r.fftocean.fourier_amplitudes_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
         float time = (float)glfwGetTime();
-        time = 0.0f;
         std::memcpy(pc.data(), &r.fftocean.settings, sizeof(r.fftocean.settings));
         std::memcpy(pc.data() + sizeof(r.fftocean.settings) + 0 * sizeof(Handle<Image>), &view1, sizeof(view1));
         std::memcpy(pc.data() + sizeof(r.fftocean.settings) + 1 * sizeof(Handle<Image>), &view2, sizeof(view2));
@@ -412,6 +411,363 @@ void FFTOceanDisplacementPass::render(VkCommandBuffer cmd) {
     }
     r.bindless_pool->bind(cmd, pipeline->bind_point);
     uint32_t dispatch_size = r.get_image(r.fftocean.displacement_image).vk_info.extent.width / 8u;
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+}
+
+FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
+    : RenderPass("FFTOceanDebugGenH0Pass", PipelineSettings{ .shaders = { "fftocean/debug_gen_h0.comp.glsl" } }) {
+    auto r = RendererVulkan::get_instance();
+
+    if(!r->fftocean.debug_h0_image) {
+        r->fftocean.debug_h0_image =
+            r->make_image("fftocean/debug_h0_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT }));
+        r->fftocean.debug_htx_image =
+            r->make_image("fftocean/debug_htx_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT }));
+        r->fftocean.debug_htz_image =
+            r->make_image("fftocean/debug_htz_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT }));
+    }
+
+    accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.gaussian_distribution_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_h0_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL } };
+}
+
+void FFTOceanDebugGenH0Pass::render(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+
+    struct PushConstants {
+        FFTOcean::FFTOceanSettings settings;
+        uint32_t h0_index;
+        uint32_t normal_dis_index;
+    };
+    PushConstants pc{};
+    static_assert(sizeof(pc) < 128);
+    {
+        pc.settings = r.fftocean.settings;
+        pc.h0_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_h0_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.normal_dis_index =
+            r.get_bindless_index(r.make_texture(r.fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+    }
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
+    uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+}
+
+FFTOceanDebugGenHtPass::FFTOceanDebugGenHtPass(RenderGraph* rg)
+    : RenderPass("FFTOceanDebugGenHtPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_ht.comp.glsl" } }) {
+    auto r = RendererVulkan::get_instance();
+
+    if(!r->fftocean.displacement_image) {
+        // r->fftocean.debug_ht_image =
+        //     r->make_image("fftocean/debug_ht_image",
+        //                   Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+        //                                          .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        //                                          .extent = { (uint32_t)r->fftocean.settings.num_samples,
+        //                                                      (uint32_t)r->fftocean.settings.num_samples, 1u },
+        //                                          .mipLevels = 1u,
+        //                                          .arrayLayers = 1u,
+        //                                          .samples = VK_SAMPLE_COUNT_1_BIT,
+        //                                          .usage = VK_IMAGE_USAGE_STORAGE_BIT }));
+    }
+
+    accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_h0_image; }),
+                         .flags = AccessFlags::READ_WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_htx_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_htz_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL } };
+}
+
+void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+
+    struct PushConstants {
+        FFTOcean::FFTOceanSettings settings;
+        uint32_t h0_index;
+        uint32_t hx_index;
+        uint32_t hz_index;
+        float time;
+    };
+    PushConstants pc{};
+    static_assert(sizeof(pc) < 128);
+    {
+        pc.settings = r.fftocean.settings;
+        pc.h0_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_h0_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hx_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_htx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hz_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_htz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.time = (float)glfwGetTime() * 0.35f;
+    }
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
+    uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+}
+
+FFTOceanDebugGenHxPass::FFTOceanDebugGenHxPass(RenderGraph* rg)
+    : RenderPass("FFTOceanDebugGenHxPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_hx.comp.glsl" } }) {
+    auto r = RendererVulkan::get_instance();
+
+    if(!r->fftocean.debug_hx_image) {
+        r->fftocean.debug_hx_image =
+            r->make_image("fftocean/debug_hx_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
+        r->fftocean.debug_hxx_image =
+            r->make_image("fftocean/debug_hxx_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
+        r->fftocean.debug_hxz_image =
+            r->make_image("fftocean/debug_hxz_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
+        r->fftocean.debug_buffer =
+            r->make_buffer("fftocean/debug_buffer",
+                           Vks(VkBufferCreateInfo{ .size = 128, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
+                           VmaAllocationCreateInfo{});
+    }
+
+    accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_h0_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_htx_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_htz_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hx_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxx_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxz_image; }),
+                         .flags = AccessFlags::FROM_UNDEFINED_LAYOUT_BIT | AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL } };
+}
+
+void FFTOceanDebugGenHxPass::render(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+
+    struct PushConstants {
+        FFTOcean::FFTOceanSettings settings;
+        uint32_t source;
+        uint32_t destination;
+        uint32_t buffer_index;
+    };
+    PushConstants pc{};
+    static_assert(sizeof(pc) < 128);
+    {
+        pc.settings = r.fftocean.settings;
+        pc.source = r.get_bindless_index(r.make_texture(r.fftocean.debug_h0_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.destination = r.get_bindless_index(r.make_texture(r.fftocean.debug_hx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.buffer_index = r.get_bindless_index(r.fftocean.debug_buffer);
+    }
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
+    uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;
+
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+
+    pc.source = r.get_bindless_index(r.make_texture(r.fftocean.debug_htx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+    pc.destination = r.get_bindless_index(r.make_texture(r.fftocean.debug_hxx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+
+    pc.source = r.get_bindless_index(r.make_texture(r.fftocean.debug_htz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+    pc.destination = r.get_bindless_index(r.make_texture(r.fftocean.debug_hxz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+}
+
+FFTOceanCalcNormalPass::FFTOceanCalcNormalPass(RenderGraph* rg)
+    : RenderPass("FFTOceanCalcNormalPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_normal.comp.glsl" } }) {
+    auto r = RendererVulkan::get_instance();
+
+    if(!r->fftocean.debug_hn_image) {
+        r->fftocean.debug_hn_image =
+            r->make_image("fftocean/debug_hn_image",
+                          Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                                 .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                 .extent = { (uint32_t)r->fftocean.settings.num_samples,
+                                                             (uint32_t)r->fftocean.settings.num_samples, 1u },
+                                                 .mipLevels = 1u,
+                                                 .arrayLayers = 1u,
+                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
+    }
+
+    accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hn_image; }),
+                         .flags = AccessFlags::WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_buffer; }),
+                         .flags = AccessFlags::READ_WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hx_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxx_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxz_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL } };
+}
+
+void FFTOceanCalcNormalPass::render(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+
+    struct PushConstants {
+        FFTOcean::FFTOceanSettings settings;
+        uint32_t hy_index;
+        uint32_t hx_index;
+        uint32_t hz_index;
+        uint32_t hn_index;
+        uint32_t debug_index;
+    };
+    PushConstants pc{};
+    static_assert(sizeof(pc) < 128);
+    {
+        pc.settings = r.fftocean.settings;
+        pc.hy_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hx_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hxx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hz_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hxz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hn_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hn_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.debug_index = r.get_bindless_index(r.fftocean.debug_buffer);
+    }
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
+    uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+}
+
+FFTOceanNormalizePass::FFTOceanNormalizePass(RenderGraph* rg)
+    : RenderPass("FFTOceanNormalizePass", PipelineSettings{ .shaders = { "fftocean/debug_gen_normalize.comp.glsl" } }) {
+    auto r = RendererVulkan::get_instance();
+
+    accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_buffer; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hx_image; }),
+                         .flags = AccessFlags::READ_WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxx_image; }),
+                         .flags = AccessFlags::READ_WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxz_image; }),
+                         .flags = AccessFlags::READ_WRITE_BIT,
+                         .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL } };
+}
+
+void FFTOceanNormalizePass::render(VkCommandBuffer cmd) {
+    auto& r = *RendererVulkan::get_instance();
+
+    struct PushConstants {
+        FFTOcean::FFTOceanSettings settings;
+        uint32_t hy_index;
+        uint32_t hx_index;
+        uint32_t hz_index;
+        uint32_t debug_index;
+    };
+    PushConstants pc{};
+    static_assert(sizeof(pc) < 128);
+    {
+        pc.settings = r.fftocean.settings;
+        pc.hy_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hx_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hxx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.hz_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_hxz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        pc.debug_index = r.get_bindless_index(r.fftocean.debug_buffer);
+    }
+    r.bindless_pool->bind(cmd, pipeline->bind_point);
+    uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(pc), &pc);
     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
 }
@@ -602,7 +958,10 @@ void VsmDebugPageCopyPass::render(VkCommandBuffer cmd) {
 
 DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
     : RenderPass("DefaultUnlitPass",
-                 PipelineSettings{ .settings = RasterizationSettings{ .depth_test = true, .depth_write = false, .depth_op = VK_COMPARE_OP_EQUAL },
+                 PipelineSettings{ .settings = RasterizationSettings{ .culling = VK_CULL_MODE_NONE,
+                                                                      .depth_test = false,
+                                                                      .depth_write = false,
+                                                                      .depth_op = VK_COMPARE_OP_EQUAL },
                                    .shaders = { "default_unlit/unlit.vert.glsl", "default_unlit/unlit.frag.glsl" } }) {
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->get_frame_data().gbuffer.color_image; }, ResourceFlags::PER_FRAME_BIT),
@@ -626,10 +985,25 @@ DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
                          .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                          .access = VK_ACCESS_2_SHADER_READ_BIT,
                          .layout = VK_IMAGE_LAYOUT_GENERAL },
-                 Access{ .resource = rg->make_resource([r] { return r->fftocean.displacement_image; }),
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hx_image; }),
                          .flags = AccessFlags::READ_BIT,
-                         .stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                         .access = VK_ACCESS_2_SHADER_READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                         .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxx_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                         .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hxz_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                         .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                         .layout = VK_IMAGE_LAYOUT_GENERAL },
+                 Access{ .resource = rg->make_resource([r] { return r->fftocean.debug_hn_image; }),
+                         .flags = AccessFlags::READ_BIT,
+                         .stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                         .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                          .layout = VK_IMAGE_LAYOUT_GENERAL } };
 }
 
