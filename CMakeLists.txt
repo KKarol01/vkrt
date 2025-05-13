@@ -89,11 +89,11 @@ target_include_directories(imguizmo
         "third_party/imgui"
 )
 
-add_library(eng_ui SHARED "eng/ui.cpp")
-target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS ENG_BUILD_AS_DLL)
-target_compile_features(eng_ui PRIVATE cxx_std_23)
-target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
-target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
+#add_library(eng_ui SHARED "eng/ui.cpp")
+#target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS ENG_BUILD_AS_DLL)
+#target_compile_features(eng_ui PRIVATE cxx_std_23)
+#target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
+#target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
 
 set(FMT_DOC OFF CACHE BOOL "" FORCE)
 set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
@@ -122,6 +122,7 @@ add_executable(vkrt
     "eng/renderer/passes/passes.cpp" 
     "eng/renderer/pipeline.cpp"
     "eng/assets/importer.cpp"
+    "eng/ui.cpp"
 )
 
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)

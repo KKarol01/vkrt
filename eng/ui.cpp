@@ -10,28 +10,20 @@
 #include <eng/ui.hpp>
 #include <eng/scene.hpp>
 
-static UIContext* g_ctx{};
-static AllocatorCallbacks alloc_callbacks{};
-ENG_OVERRIDE_STD_NEW_DELETE(alloc_callbacks);
-
 static ImTextureID get_imgui_render_output_descriptor();
-static void draw_scene_instance_tree(scene::NodeInstance* i);
-static void draw_render_mesh(scene::NodeInstance* i);
 
-void eng_ui_init(UIInitData* data) {
-    alloc_callbacks = data->callbacks;
-    if(!g_ctx) { g_ctx = new UIContext{}; }
-    g_ctx->engine = data->engine;
-    g_ctx->alloc_callbacks = &alloc_callbacks;
-    if(data->context) { *data->context = g_ctx; }
-}
+namespace eng {
 
-void eng_ui_update() {
-    auto* renderer = g_ctx->engine->renderer;
-    ImGui::SetCurrentContext(g_ctx->imgui_ctx);
-    ImGui::SetAllocatorFunctions(alloc_callbacks.imgui_alloc, alloc_callbacks.imgui_free);
+void UI::init() {}
+
+void UI::update() {
+    // ImGui::SetCurrentContext(g_ctx->imgui_ctx);
+    // ImGui::SetAllocatorFunctions(alloc_callbacks.imgui_alloc, alloc_callbacks.imgui_free);
+
+    Window* window = Engine::get().window;
+
     ImGui::SetNextWindowPos(ImVec2{});
-    ImGui::SetNextWindowSize(ImVec2{ g_ctx->engine->window->width, g_ctx->engine->window->height });
+    ImGui::SetNextWindowSize(ImVec2{ window->width, window->height });
 
     if(ImGui::Begin("main ui panel", 0,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_MenuBar)) {
@@ -75,18 +67,15 @@ void eng_ui_update() {
         // used primarily for debug output
         ImGui::SetCursorScreenPos(render_output_next_row);
         if(ImGui::BeginChild("engine panel", { render_output_size.x, 0.0f }, ImGuiChildFlags_Border)) {
-            for(int i = 0; i < 8; ++i) {
-                ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().dir_light_page_table_rgb8,
-                                                            gfx::ImageFilter::NEAREST, gfx::ImageAddressing::CLAMP_EDGE, i),
-                             { 64.0f, 64.0f });
-                ImGui::SameLine();
+            if(ImGui::BeginTabBar("asd")) {
+                for(const auto& t : tabs) {
+                    if(ImGui::BeginTabItem(t.name.c_str())) {
+                        t.cb();
+                        ImGui::EndTabItem();
+                    }
+                }
+                ImGui::EndTabBar();
             }
-            ImGui::SameLine();
-            ImGui::Image(renderer->get_imgui_texture_id(renderer->get_vsm_data().shadow_map_0,
-                                                        gfx::ImageFilter::NEAREST, gfx::ImageAddressing::CLAMP_EDGE, 0),
-                         { 128.0f, 128.0 });
-            if(ImGui::SliderFloat3("debug dir light", g_ctx->engine->scene->debug_dir_light_dir, -1.0f, 1.0f)) {}
-            if(ImGui::SliderFloat3("debug dir pos", g_ctx->engine->scene->debug_dir_light_pos, -10.0f, 10.0f)) {}
         }
         ImGui::EndChild();
     }
@@ -95,12 +84,12 @@ void eng_ui_update() {
     ImGui::Render();
 }
 
-UIContext* eng_ui_get_context() { return g_ctx; }
+} // namespace eng
 
 ImTextureID get_imgui_render_output_descriptor() {
-    return static_cast<ImTextureID>(g_ctx->engine->renderer->get_imgui_texture_id(g_ctx->engine->renderer->get_color_output_texture(),
-                                                                                  gfx::ImageFilter::LINEAR,
-                                                                                  gfx::ImageAddressing::CLAMP_EDGE, 0));
+    return static_cast<ImTextureID>(Engine::get().renderer->get_imgui_texture_id(Engine::get().renderer->get_color_output_texture(),
+                                                                                 gfx::ImageFilter::LINEAR,
+                                                                                 gfx::ImageAddressing::CLAMP_EDGE, 0));
 }
 
 void draw_scene_instance_tree(scene::NodeInstance* i) {

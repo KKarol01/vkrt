@@ -8,6 +8,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/camera.hpp>
 #include <eng/scene.hpp>
+#include <eng/ui.hpp>
 #include "./ecs.hpp"
 
 struct GLFWwindow;
@@ -51,7 +52,7 @@ class Engine {
     Camera* camera{};
     components::Storage* ecs_storage{};
     gfx::Renderer* renderer{};
-    UIContext* ui_ctx{};
+    eng::UI* ui{};
     scene::Scene* scene{};
     double get_time_secs();
     double last_frame_time() { return _last_frame_time; }

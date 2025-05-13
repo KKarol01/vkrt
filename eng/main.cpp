@@ -15,6 +15,7 @@ int main() {
     Engine::get().init();
     {
         Handle<scene::Node> model = Engine::get().scene->load_from_file("plane.glb");
+
         Engine::get().scene->instance_model(model);
         // Engine::get().set_on_update_callback([&]() {
         //     auto& ni = Engine::get().scene->get_instance(cornell_instance);

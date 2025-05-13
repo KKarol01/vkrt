@@ -130,6 +130,7 @@ struct FFTOceanSettings {
     ENG_TYPE_FLOAT patch_size;     // L
     ENG_TYPE_VEC2 wind_dir;        // w
     ENG_TYPE_FLOAT phillips_const; // A
+    ENG_TYPE_FLOAT time_speed;     // A
 };
 
 #ifndef __cplusplus

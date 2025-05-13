@@ -465,9 +465,9 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
 }
 
 void FFTOceanDebugGenH0Pass::render(VkCommandBuffer cmd) {
-    static int run = 0;
-    if(run++ > 0) { return; }
     auto& r = *RendererVulkan::get_instance();
+    if(!r.fftocean.recalc_state_0) { return; }
+    r.fftocean.recalc_state_0 = false;
 
     struct PushConstants {
         FFTOcean::FFTOceanSettings settings;
@@ -539,7 +539,7 @@ void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd) {
         pc.h0_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_h0_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
         pc.hx_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_htx_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
         pc.hz_index = r.get_bindless_index(r.make_texture(r.fftocean.debug_htz_image, VK_IMAGE_LAYOUT_GENERAL, nullptr));
-        pc.time = (float)glfwGetTime() * 0.01f;
+        pc.time = (float)glfwGetTime() * r.fftocean.settings.time_speed;
     }
     r.bindless_pool->bind(cmd, pipeline->bind_point);
     uint32_t dispatch_size = r.get_image(r.fftocean.debug_h0_image).vk_info.extent.width / 8u;
@@ -1078,12 +1078,12 @@ ImguiPass::ImguiPass(RenderGraph* rg) : RenderPass("ImguiPass", {}) {
 
 void ImguiPass::render(VkCommandBuffer cmd) {
     auto& r = *RendererVulkan::get_instance();
-    ImGui::SetCurrentContext(Engine::get().ui_ctx->imgui_ctx);
+    // ImGui::SetCurrentContext(Engine::get().ui_ctx->imgui_ctx);
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
-    eng_ui_update();
+    Engine::get().ui->update();
     ImGui::Render();
     ImDrawData* im_draw_data = ImGui::GetDrawData();
     if(im_draw_data) {

@@ -76,8 +76,10 @@ void Engine::init() {
     // load_dll("eng_vk_renderer.dll", true, );
     renderer = new gfx::RendererVulkan{};
     scene = new scene::Scene{};
-    UIInitData ui_init_data{ .engine = this, .callbacks = { .alloc = malloc, .free = free }, .context = &ui_ctx };
-    eng_ui_init(&ui_init_data);
+    ui = new eng::UI{};
+    // UIInitData ui_init_data{ .engine = this, .callbacks = { .alloc = malloc, .free = free }, .context = &ui_ctx };
+    // eng_ui_init(&ui_init_data);
+    ui->init();
     renderer->init();
 }
 

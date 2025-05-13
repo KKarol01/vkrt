@@ -225,9 +225,9 @@ void RendererVulkan::initialize_vulkan() {
 void RendererVulkan::initialize_imgui() {
     IMGUI_CHECKVERSION();
     void* user_data;
-    Engine::get().ui_ctx->imgui_ctx = ImGui::CreateContext();
-    ImGui::GetAllocatorFunctions(&Engine::get().ui_ctx->alloc_callbacks->imgui_alloc,
-                                 &Engine::get().ui_ctx->alloc_callbacks->imgui_free, &user_data);
+    ImGui::CreateContext();
+    // ImGui::GetAllocatorFunctions(&Engine::get().ui_ctx->alloc_callbacks->imgui_alloc,
+    //                              &Engine::get().ui_ctx->alloc_callbacks->imgui_free, &user_data);
     ImGui::StyleColorsDark();
 
     ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
@@ -268,6 +268,15 @@ void RendererVulkan::initialize_imgui() {
     ImGui_ImplVulkan_CreateFontsTexture();
     get_frame_data().cmdpool->end(cmdimgui);
     submit_queue->with_cmd_buf(cmdimgui).submit_wait(~0ull);
+
+    Engine::get().ui->add_tab("FFTOcean", [] {
+        auto* r = RendererVulkan::get_instance();
+        auto& fftc = r->fftocean.recalc_state_0;
+        fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 1.0f, 1000.0f);
+        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
+        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 1.0f, 100.0f);
+        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 1.0f, 100.0f);
+    });
 }
 
 void RendererVulkan::initialize_resources() {
