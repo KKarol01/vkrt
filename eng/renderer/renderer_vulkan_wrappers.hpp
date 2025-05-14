@@ -17,7 +17,7 @@ class SamplerStorage {
   public:
     VkSampler get_sampler();
     VkSampler get_sampler(VkFilter filter, VkSamplerAddressMode address);
-    VkSampler get_sampler(ImageFilter filter, ImageAddressing address);
+    VkSampler get_sampler(ImageFiltering filter, ImageAddressing address);
     VkSampler get_sampler(VkSamplerCreateInfo vk_info);
 
   private:

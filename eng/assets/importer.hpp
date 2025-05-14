@@ -45,7 +45,7 @@ struct Image {
 
 struct Texture {
     asset_index_t image{ s_max_asset_index };
-    gfx::ImageFilter filtering{ gfx::ImageFilter::LINEAR };
+    gfx::ImageFiltering filtering{ gfx::ImageFiltering::LINEAR };
     gfx::ImageAddressing addressing{ gfx::ImageAddressing::REPEAT };
 };
 
@@ -61,8 +61,8 @@ struct Geometry {
 };
 
 struct Submesh {
-    asset_index_t material{ s_max_asset_index };
     asset_index_t geometry{ s_max_asset_index };
+    asset_index_t material{ s_max_asset_index };
 };
 
 struct Mesh {

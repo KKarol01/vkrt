@@ -22,12 +22,13 @@ ENG_DECLARE_BINDLESS(GPUFFTDebugBuffer);
 #define hz_image storageImages_2drgba32f[hz_index]
 
 void main() {
-    // const ivec2 x = ivec2(gl_GlobalInvocationID.xy);
-    // const float nx = imageLoad(hx_image, x).r;
-    // const float ny = imageLoad(hy_image, x).r;
-    // const float nz = imageLoad(hz_image, x).r;
-    // const float norm = uintBitsToFloat(debug_buffer.max);
-    // imageStore(hx_image, x, vec4(vec3(nx / norm), 1.0));
-    // imageStore(hy_image, x, vec4(vec3(ny / norm), 1.0));
-    // imageStore(hz_image, x, vec4(vec3(nz / norm), 1.0));
+    return;
+    const ivec2 x = ivec2(gl_GlobalInvocationID.xy);
+    const float nx = imageLoad(hx_image, x).r;
+    const float ny = imageLoad(hy_image, x).r;
+    const float nz = imageLoad(hz_image, x).r;
+    const float norm = uintBitsToFloat(debug_buffer.max);
+    imageStore(hx_image, x, vec4(vec3(nx / norm), 1.0));
+    imageStore(hy_image, x, vec4(vec3(ny / norm), 1.0));
+    imageStore(hz_image, x, vec4(vec3(nz / norm), 1.0));
 }

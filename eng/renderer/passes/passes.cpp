@@ -87,7 +87,23 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
                                            .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
                                            .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
-    uint32_t bindless_indices[]{
+    struct PushConstants {
+        uint32_t index_buffer;
+        uint32_t vertex_pos_buffer;
+        uint32_t vertex_attrib_buffer;
+        uint32_t transform_buffer;
+        uint32_t frame_constants_buffer;
+        uint32_t instance_mesh_buffer;
+        uint32_t vsm_constants_buffer;
+        uint32_t vsm_sm0_image;
+        uint32_t vsm_dl_pt_image;
+        uint32_t fft_hxy_image;
+        uint32_t fft_hxx_image;
+        uint32_t fft_hxz_image;
+        uint32_t fft_hxn_image;
+        float fft_lambda;
+    };
+    PushConstants pc = {
         r.get_bindless_index(r.index_buffer),
         r.get_bindless_index(r.vertex_positions_buffer),
         r.get_bindless_index(r.vertex_attributes_buffer),
@@ -105,8 +121,10 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
                                             r.samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
         r.get_bindless_index(r.make_texture(r.fftocean.debug_hn_image, VK_IMAGE_LAYOUT_GENERAL,
                                             r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        r.fftocean.settings.disp_lambda,
+
     };
-    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
+    vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(pc), &pc);
 }
 
 RenderPass::RenderPass(const std::string& name, const PipelineSettings& settings)

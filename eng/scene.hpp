@@ -13,6 +13,10 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/assets/importer.hpp>
 
+namespace assets { // don't know why this is necessary
+struct Asset;
+}
+
 namespace scene {
 
 struct Mesh {
@@ -37,6 +41,7 @@ struct NodeInstance {
 class Scene {
   public:
     Handle<Node> load_from_file(const std::filesystem::path& path);
+    Handle<Node> load_from_asset(assets::Asset& asset);
     Handle<NodeInstance> instance_model(Handle<Node> node);
     // glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
 

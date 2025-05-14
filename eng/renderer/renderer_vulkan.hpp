@@ -148,11 +148,12 @@ struct FrameData {
 
 struct FFTOcean {
     struct FFTOceanSettings {
-        float num_samples{ 128.0f };       // N
-        float patch_size{ 1000.0f };       // L
-        glm::vec2 wind_dir{ 14.0f, 3.0f }; // w
-        float phillips_const{ 4.0f };      // A
-        float time_speed{ 0.01f };
+        float num_samples{ 128.0f };      // N
+        float patch_size{ 1200.0f };      // L
+        glm::vec2 wind_dir{ 2.0f, 3.0f }; // w
+        float phillips_const{ 4.0f };     // A
+        float time_speed{ 0.001f };
+        float disp_lambda{ 1.0f };
     };
     bool recalc_state_0{ true };
     FFTOceanSettings settings;
@@ -205,7 +206,7 @@ class RendererVulkan : public gfx::Renderer {
     void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(components::Entity entity) final;
-    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) final;
+    size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
     Material get_material(Handle<Material> handle) const final;
     VsmData& get_vsm_data() final;

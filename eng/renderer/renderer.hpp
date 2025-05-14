@@ -16,7 +16,7 @@ enum class ImageFormat {
     R8G8B8A8_SRGB,
 };
 enum class ImageType { TYPE_1D, TYPE_2D, TYPE_3D };
-enum class ImageFilter { LINEAR, NEAREST };
+enum class ImageFiltering { LINEAR, NEAREST };
 enum class ImageAddressing { REPEAT, CLAMP_EDGE };
 
 struct Geometry;
@@ -51,7 +51,7 @@ struct ImageDescriptor {
 
 struct TextureDescriptor {
     Handle<Image> image;
-    ImageFilter filtering{ ImageFilter::LINEAR };
+    ImageFiltering filtering{ ImageFiltering::LINEAR };
     ImageAddressing addressing{ ImageAddressing::REPEAT };
 };
 
@@ -101,7 +101,7 @@ class Renderer {
     virtual void instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
     virtual void update_transform(components::Entity entity) = 0;
-    virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) = 0;
+    virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) = 0;
     virtual Handle<Image> get_color_output_texture() const = 0;
     virtual Material get_material(Handle<Material> handle) const = 0;
     virtual VsmData& get_vsm_data() = 0;

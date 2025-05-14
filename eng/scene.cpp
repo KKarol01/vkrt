@@ -22,12 +22,15 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
     const std::filesystem::path full_path =
         (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models" / path).lexically_normal();
     auto asset = assets::Importer::import_glb(full_path);
-
     if(asset.scene.size() == 0) {
         ENG_WARN("Imported model's scene has empty scene.");
         return {};
     }
 
+    return load_from_asset(asset);
+}
+
+Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
     std::vector<Handle<gfx::Image>> batched_images;
     std::vector<Handle<gfx::Texture>> batched_textures;
     std::vector<Handle<gfx::Geometry>> batched_geometries;
@@ -106,7 +109,7 @@ Handle<Node> Scene::load_from_file(const std::filesystem::path& path) {
 
     Node* rn;
     const auto hrn = add_node(&rn);
-    rn->name = fmt::format("{}", full_path.filename().replace_extension().string());
+    rn->name = fmt::format("{}", asset.path.filename().replace_extension().string());
     rn->children.reserve(asset.scene.size());
     for(auto& sn : asset.scene) {
         rn->children.push_back(parse_node(asset.get_node(sn), parse_node));

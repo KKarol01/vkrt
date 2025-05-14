@@ -276,6 +276,7 @@ void RendererVulkan::initialize_imgui() {
         fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
         fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 1.0f, 100.0f);
         ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 1.0f, 100.0f);
+        ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, 0.1f, 20.0f);
     });
 }
 
@@ -735,11 +736,11 @@ void RendererVulkan::update_transform(components::Entity entity) {
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
 
-size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) {
+size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) {
     struct ImguiTextureId {
         ImTextureID id;
         VkImage image;
-        ImageFilter filter;
+        ImageFiltering filter;
         ImageAddressing addressing;
         uint32_t layer;
     };

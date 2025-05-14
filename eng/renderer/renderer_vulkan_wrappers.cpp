@@ -27,9 +27,9 @@ VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode addr
     return get_sampler(sampler_info);
 }
 
-VkSampler SamplerStorage::get_sampler(ImageFilter filter, ImageAddressing address) {
-    const VkFilter _filter = filter == ImageFilter::LINEAR    ? VK_FILTER_LINEAR
-                             : filter == ImageFilter::NEAREST ? VK_FILTER_NEAREST
+VkSampler SamplerStorage::get_sampler(ImageFiltering filter, ImageAddressing address) {
+    const VkFilter _filter = filter == ImageFiltering::LINEAR    ? VK_FILTER_LINEAR
+                             : filter == ImageFiltering::NEAREST ? VK_FILTER_NEAREST
                                                               : VK_FILTER_MAX_ENUM;
     const VkSamplerAddressMode _address = address == ImageAddressing::REPEAT ? VK_SAMPLER_ADDRESS_MODE_REPEAT
                                           : address == ImageAddressing::CLAMP_EDGE ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE

@@ -20,6 +20,7 @@ layout(scalar, push_constant) uniform PushConstants {
     uint32_t fft_fourier_x_amplitudes_index;
     uint32_t fft_fourier_z_amplitudes_index;
     uint32_t fft_fourier_n_amplitudes_index;
+    float lambda;
 };
 #endif
 
