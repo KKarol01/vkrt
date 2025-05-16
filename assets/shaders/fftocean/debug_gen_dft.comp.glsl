@@ -26,8 +26,8 @@ void main() {
         float cost = cos(theta);
         float sint = sin(theta);
 
-        result.x += coeff.x * cost - coeff.y * sint;
-        result.y += coeff.y * cost + coeff.x * sint;
+        result.x += coeff.x * cost + coeff.y * sint;
+        result.y += coeff.y * cost - coeff.x * sint;
     }
 
     imageStore(write_image, nm.yx, vec4(result.xy, 0.0, 1.0));

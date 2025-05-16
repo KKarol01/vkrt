@@ -17,7 +17,7 @@ int main() {
         // Handle<scene::Node> model = Engine::get().scene->load_from_file("plane.glb");
         assets::Asset plane;
         {
-            const auto max_i = 320.0f;
+            const auto max_i = 1024.0f;
             const auto max_j = max_i;
             const auto width = 64.0f;
             const auto height = width;

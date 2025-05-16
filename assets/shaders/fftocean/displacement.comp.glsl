@@ -23,5 +23,5 @@ void main() {
 
     float lambda = settings.disp_lambda;
 
-    imageStore(disp_image, coord, vec4(dx * lambda, h * lambda, dz * lambda, 1.0));
+    imageStore(disp_image, coord, vec4(dx * lambda, h, dz * lambda, 1.0));
 }
