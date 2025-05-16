@@ -37,41 +37,6 @@ class RenderPass {
     Pipeline* pipeline{};
 };
 
-class FFTOceanButterflyPass final : public RenderPass {
-  public:
-    FFTOceanButterflyPass(RenderGraph* rg);
-    ~FFTOceanButterflyPass() noexcept final = default;
-    void render(VkCommandBuffer cmd) final;
-};
-
-class FFTOceanAmplitudesPass final : public RenderPass {
-  public:
-    FFTOceanAmplitudesPass(RenderGraph* rg);
-    ~FFTOceanAmplitudesPass() noexcept final = default;
-    void render(VkCommandBuffer cmd) final;
-};
-
-class FFTOceanFourierAmplitudesPass final : public RenderPass {
-  public:
-    FFTOceanFourierAmplitudesPass(RenderGraph* rg);
-    ~FFTOceanFourierAmplitudesPass() noexcept final = default;
-    void render(VkCommandBuffer cmd) final;
-};
-
-class FFTOceanFourierButterflyPass final : public RenderPass {
-  public:
-    FFTOceanFourierButterflyPass(RenderGraph* rg);
-    ~FFTOceanFourierButterflyPass() noexcept final = default;
-    void render(VkCommandBuffer cmd) final;
-};
-
-class FFTOceanDisplacementPass final : public RenderPass {
-  public:
-    FFTOceanDisplacementPass(RenderGraph* rg);
-    ~FFTOceanDisplacementPass() noexcept final = default;
-    void render(VkCommandBuffer cmd) final;
-};
-
 class FFTOceanDebugGenH0Pass final : public RenderPass {
   public:
     FFTOceanDebugGenH0Pass(RenderGraph* rg);
@@ -86,10 +51,17 @@ class FFTOceanDebugGenHtPass final : public RenderPass {
     void render(VkCommandBuffer cmd) final;
 };
 
-class FFTOceanDebugGenHxPass final : public RenderPass {
+class FFTOceanDebugGenFourierPass final : public RenderPass {
   public:
-    FFTOceanDebugGenHxPass(RenderGraph* rg);
-    ~FFTOceanDebugGenHxPass() noexcept final = default;
+    FFTOceanDebugGenFourierPass(RenderGraph* rg);
+    ~FFTOceanDebugGenFourierPass() noexcept final = default;
+    void render(VkCommandBuffer cmd) final;
+};
+
+class FFTOceanDebugGenDisplacementPass final : public RenderPass {
+  public:
+    FFTOceanDebugGenDisplacementPass(RenderGraph* rg);
+    ~FFTOceanDebugGenDisplacementPass() noexcept final = default;
     void render(VkCommandBuffer cmd) final;
 };
 

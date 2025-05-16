@@ -13,41 +13,48 @@ layout(location = 0) in VsOut {
 fsin;
 
 layout(location = 0) out vec4 OUT_COLOR;
-const vec3 LIGHT_DIR = normalize(vec3(15.0, 80.0, 0.0));
+// Constants (tweak these values as needed)
+const vec3 LIGHT_DIR             = normalize(vec3(0.5, 1.0, 0.3));
+const vec3 WATER_COLOR           = vec3(0.0, 0.3, 0.6);
+const vec3 SKY_COLOR             = vec3(0.6, 0.8, 1.0);
+const float SHININESS            = 64.0;
+const float FRESNEL_POWER        = 5.0;
+const float SPECULAR_INTENSITY   = 1.0;
+const float TRANSMISSION_INTENSITY = 0.5;
+const float REFRACT_IOR          = 1.33; // approximate water IOR
+
 void main() {
-    vec3 N = normalize(fsin.water_normal);
-    vec3 V = normalize(constants.cam_pos - fsin.position);
-    vec3 L = LIGHT_DIR;
-    vec3 H = normalize(L + V);
+    // Compute view direction per-fragment
+    vec3 viewDir = normalize(constants.cam_pos - fsin.position);
 
-    float h = fsin.position.y;
-    float h_min = -3.0;
-    float h_max = 6.0;
+    // Reconstruct normal from world position derivatives
+    vec3 dx = dFdx(fsin.position);
+    vec3 dy = dFdy(fsin.position);
+    vec3 normal = normalize(cross(dx, dy));
+    if (dot(normal, viewDir) < 0.0) normal = -normal;
 
-    float depthFactor = smoothstep(h_min, h_max, h);
+    // Fresnel term (Schlick's approximation)
+    float cosTheta = clamp(dot(normal, viewDir), 0.0, 1.0);
+    float fresnel   = pow(1.0 - cosTheta, FRESNEL_POWER);
 
-    vec3 deepColor = vec3(0.0, 0.02, 0.15);
-    vec3 midColor = vec3(0.0, 0.05, 0.2);
-    vec3 shallowColor = vec3(0.05, 0.1, 0.25);
+    // Diffuse component (minimal)
+    float lambert = max(dot(normal, LIGHT_DIR), 0.0);
+    vec3 diffuse  = WATER_COLOR * lambert;
 
-    vec3 heightTint = mix(deepColor, midColor, depthFactor);
-    heightTint = mix(heightTint, shallowColor, pow(depthFactor, 2.0));
+    // Specular component (Blinn-Phong)
+    vec3 halfDir  = normalize(LIGHT_DIR + viewDir);
+    float spec    = SPECULAR_INTENSITY * pow(max(dot(normal, halfDir), 0.0), SHININESS);
 
-    float ambient = 0.3;
-    float diffTerm = max(dot(N, L), 0.3);
-    vec3 baseColor = heightTint * (ambient + diffTerm * (1.0 - ambient));
+    // Sky reflection via Fresnel blend
+    vec3 skyReflect = mix(diffuse + spec * vec3(1.0), SKY_COLOR, fresnel);
 
-    float shininess = 64.0;
-    float specular = pow(max(dot(N, H), 0.0), shininess);
+    // Diffuse transmission (approximate subsurface scattering)
+    vec3 refractDir = refract(-viewDir, normal, 1.0 / REFRACT_IOR);
+    float transAmt  = TRANSMISSION_INTENSITY * (1.0 - lambert);
+    vec3 transmit  = WATER_COLOR * transAmt;
 
-    specular *= mix(1.0, 0.5, 1.0 - depthFactor);
-    specular *= (diffTerm + 0.2);
+    // Combine reflection and transmission
+    vec3 color = mix(transmit, skyReflect, fresnel);
 
-    float F0 = 0.02;
-    float fresnelP = 5.0;
-    float fresnel = F0 + (1.0 - F0) * pow(1.0 - max(dot(N, V), 0.1), fresnelP);
-
-    vec3 color = baseColor * (1.0 - fresnel) + specular * fresnel;
-
-    OUT_COLOR = vec4(color * 4.0, 1.0);
+    OUT_COLOR = vec4(color, 1.0);
 }

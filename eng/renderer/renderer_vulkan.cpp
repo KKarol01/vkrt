@@ -273,9 +273,9 @@ void RendererVulkan::initialize_imgui() {
         auto* r = RendererVulkan::get_instance();
         auto& fftc = r->fftocean.recalc_state_0;
         fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 1.0f, 1000.0f);
-        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
-        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 1.0f, 100.0f);
-        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 1.0f, 100.0f);
+        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -3.0f, 3.0f);
+        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 1.0f, 10.0f);
+        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 1.0f, 10.0f);
         ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, 0.1f, 20.0f);
     });
 }
@@ -464,16 +464,18 @@ void RendererVulkan::create_window_sized_resources() {
 
 void RendererVulkan::build_render_graph() {
     rendergraph.clear_passes();
-    rendergraph.add_pass<FFTOceanButterflyPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanAmplitudesPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanFourierAmplitudesPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanFourierButterflyPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanDisplacementPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanButterflyPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanAmplitudesPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanFourierAmplitudesPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanFourierButterflyPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanDisplacementPass>(&rendergraph);
     rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
     rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenHxPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanCalcNormalPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanNormalizePass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDebugGenFourierPass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDebugGenDisplacementPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDebugGenHxPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanCalcNormalPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanNormalizePass>(&rendergraph);
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
     rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
     rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);

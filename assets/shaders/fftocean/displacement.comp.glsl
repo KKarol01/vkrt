@@ -1,33 +1,27 @@
 #version 460 core
 
-#include "./bindless_structures.inc.glsl"
-
-#define PI 3.14159265358979323846
+#include "./fftocean/common.inc.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
-layout(scalar, push_constant) uniform PushConstants {
-    FFTOceanSettings settings;
-    uint32_t pingpong0_index;
-    uint32_t pingpong1_index;
-    uint32_t displacement_index;
-    uint32_t pingpong;
-};
-
-#define pingpong0_image storageImages_2drg32f[pingpong0_index]
-#define pingpong1_image storageImages_2drg32f[pingpong1_index]
-#define displacement_image storageImages_2drgba32f[displacement_index]
-
-const float perms[] = { 1.0, -1.0 };
+#define ht_image storageImages_2drg32f[ht]
+#define dtx_image storageImages_2drg32f[dtx]
+#define dtz_image storageImages_2drg32f[dtz]
+#define disp_image storageImages_2drgba32f[disp]
 
 void main() {
-    ivec2 x = ivec2(gl_GlobalInvocationID.xy);
-    float perm = perms[int(x.x + x.y) % 2];
-    if(pingpong == 0) {
-        float h = imageLoad(pingpong0_image, x).r * perm / (settings.num_samples * settings.num_samples);
-        imageStore(displacement_image, x, vec4(vec3(h), 1.0));
-    } else {
-        float h = imageLoad(pingpong1_image, x).r * perm / (settings.num_samples * settings.num_samples);
-        imageStore(displacement_image, x, vec4(vec3(h), 1.0));
-    }
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    // checkerboard sign correction due to DFT interval
+    float sign = (((coord.x + coord.y) & 1) == 1) ? -1.0 : 1.0;
+
+    // load height and choppy displacements
+    float h  = sign * imageLoad(ht_image, coord).x;
+    float dx = sign * imageLoad(dtx_image, coord).x;
+    //float dz = sign * imageLoad(dtx_image, coord).y;
+    float dz = sign * imageLoad(dtz_image, coord).x;
+
+    float lambda = settings.disp_lambda;
+
+    imageStore(disp_image, coord, vec4(dx * lambda, h, dz * lambda, 1.0));
 }

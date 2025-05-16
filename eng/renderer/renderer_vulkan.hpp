@@ -148,31 +148,34 @@ struct FrameData {
 
 struct FFTOcean {
     struct FFTOceanSettings {
-        float num_samples{ 128.0f };      // N
-        float patch_size{ 1200.0f };      // L
-        glm::vec2 wind_dir{ 2.0f, 3.0f }; // w
-        float phillips_const{ 4.0f };     // A
-        float time_speed{ 0.001f };
+        float num_samples{ 512.0f };        // N
+        float patch_size{ 7.2f };          // L
+        glm::vec2 wind_dir{ -1.06f, 0.9f }; // w
+        float phillips_const{ 1.5f };       // A
+        float time_speed{ 0.1f };
         float disp_lambda{ 1.0f };
+    };
+    struct FFTOceanPushConstants {
+        FFTOceanSettings settings;
+        uint32_t gaussian;
+        uint32_t h0;
+        uint32_t ht;
+        uint32_t dtx;
+        uint32_t dtz;
+        uint32_t dft;
+        uint32_t disp;
+        float time;
     };
     bool recalc_state_0{ true };
     FFTOceanSettings settings;
-    uint32_t passes_run{ 0u };
-    uint32_t pingpong;
-    Handle<Image> butterfly_image;
+    FFTOceanPushConstants pc;
     Handle<Image> gaussian_distribution_image;
-    Handle<Image> amplitudes_image;
-    Handle<Image> fourier_amplitudes_image;
-    Handle<Image> pingpong_image;
-    Handle<Image> displacement_image;
-    Handle<Image> debug_h0_image;
-    Handle<Image> debug_htx_image;
-    Handle<Image> debug_htz_image;
-    Handle<Image> debug_hx_image;
-    Handle<Image> debug_hxx_image;
-    Handle<Image> debug_hxz_image;
-    Handle<Image> debug_hn_image;
-    Handle<Buffer> debug_buffer;
+    Handle<Image> h0_spectrum;
+    Handle<Image> ht_spectrum;
+    Handle<Image> dtx_spectrum;
+    Handle<Image> dtz_spectrum;
+    Handle<Image> dft_pingpong;
+    Handle<Image> displacement;
 };
 
 class SubmitQueue;
