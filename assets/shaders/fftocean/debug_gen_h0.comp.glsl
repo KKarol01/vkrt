@@ -13,10 +13,11 @@ float phillips_spectrum(vec2 k) {
 	float wind_speed = length(settings.wind_dir);
 	vec2 nw = settings.wind_dir / wind_speed;
 	float PhL = (wind_speed*wind_speed / 9.8);
+	
 	return sqrt(settings.phillips_const
 			* exp(-1.0 / pow(k_ * PhL, 2.0))
 			* (1.0 / (k_*k_*k_*k_))
-			* pow(dot(nk, nw), 2.0)) / sqrt(2.0);
+			* pow(dot(nk, nw), 2.0));
 }
 
 void main() {
