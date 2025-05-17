@@ -165,6 +165,7 @@ struct FFTOcean {
         uint32_t dtz;
         uint32_t dft;
         uint32_t disp;
+        uint32_t grad;
         float time;
     };
     bool recalc_state_0{ true };
@@ -177,6 +178,7 @@ struct FFTOcean {
     Handle<Image> dtz_spectrum;
     Handle<Image> dft_pingpong;
     Handle<Image> displacement;
+    Handle<Image> gradient;
 };
 
 class SubmitQueue;

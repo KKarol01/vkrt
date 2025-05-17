@@ -65,17 +65,10 @@ class FFTOceanDebugGenDisplacementPass final : public RenderPass {
     void render(VkCommandBuffer cmd) final;
 };
 
-class FFTOceanCalcNormalPass final : public RenderPass {
+class FFTOceanDebugGenGradientPass final : public RenderPass {
   public:
-    FFTOceanCalcNormalPass(RenderGraph* rg);
-    ~FFTOceanCalcNormalPass() noexcept final = default;
-    void render(VkCommandBuffer cmd) final;
-};
-
-class FFTOceanNormalizePass final : public RenderPass {
-  public:
-    FFTOceanNormalizePass(RenderGraph* rg);
-    ~FFTOceanNormalizePass() noexcept final = default;
+    FFTOceanDebugGenGradientPass(RenderGraph* rg);
+    ~FFTOceanDebugGenGradientPass() noexcept final = default;
     void render(VkCommandBuffer cmd) final;
 };
 

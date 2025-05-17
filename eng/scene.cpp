@@ -149,7 +149,14 @@ Handle<NodeInstance> Scene::instance_model(Handle<Node> node) {
     return hrni;
 }
 
-void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) { ENG_TODO(); }
+void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
+    ENG_TODO();
+    const auto ent = instance_handles.at(entity);
+    Engine::get().ecs_storage->get<components::Transform>(ent->entity).transform = transform;
+    for(auto& e : ent->children) {
+        Engine::get().ecs_storage->get<components::Transform>(instance_handles.at(e)->entity).transform = transform;
+    }
+}
 
 Handle<Node> Scene::add_node(Node** out) {
     auto& n = nodes.emplace_back();

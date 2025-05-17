@@ -17,9 +17,9 @@ int main() {
         // Handle<scene::Node> model = Engine::get().scene->load_from_file("plane.glb");
         assets::Asset plane;
         {
-            const auto max_i = 1024.0f;
+            const auto max_i = 128.0f;
             const auto max_j = max_i;
-            const auto width = 64.0f;
+            const auto width = 20.0f;
             const auto height = width;
             plane.vertices.reserve(max_i * max_j);
             plane.indices.reserve(((max_i - 1) * (max_j - 1)) * 2 * 3);
@@ -61,7 +61,14 @@ int main() {
             plane.transforms.push_back(glm::mat4{ 1.0f });
         }
         const auto plane_model = Engine::get().scene->load_from_asset(plane);
-        const auto plane_instance = Engine::get().scene->instance_model(plane_model);
+        // const auto plane_instance3 = Engine::get().scene->instance_model(plane_model);
+        for(int i = -5; i < 11; ++i) {
+            for(int j = -5; j < 11; ++j) {
+                const auto plane_instance = Engine::get().scene->instance_model(plane_model);
+                Engine::get().scene->update_transform(plane_instance,
+                                                      glm::translate(glm::mat4{ 1.0f }, glm::vec3{ 20.0f * i, 0.0f, 20.0f * j }));
+            }
+        }
         // Engine::get().set_on_update_callback([&]() {
         //     auto& ni = Engine::get().scene->get_instance(cornell_instance);
         //     // Engine::get().scene->update_transform(cornell_instance, ni.transform * glm::rotate(glm::radians(1.0f), glm::vec3{ 0.0f, 1.0f, 0.0f }));

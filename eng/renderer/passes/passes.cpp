@@ -97,7 +97,8 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         uint32_t vsm_buffer_index;
         uint32_t vsm_physical_depth_image_index;
         uint32_t page_table_index;
-        uint32_t fft_fourier_amplitudes_index;
+        uint32_t fft_displacement_index;
+        uint32_t fft_gradient_index;
     };
     PushConstants pc = {
         r.get_bindless_index(r.index_buffer),
@@ -110,6 +111,8 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         r.get_bindless_index(r.make_texture(r.fftocean.displacement, VK_IMAGE_LAYOUT_GENERAL,
+                                            r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        r.get_bindless_index(r.make_texture(r.fftocean.gradient, VK_IMAGE_LAYOUT_GENERAL,
                                             r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(pc), &pc);
@@ -184,6 +187,15 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
                                              .arrayLayers = 1u,
                                              .samples = VK_SAMPLE_COUNT_1_BIT,
                                              .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
+    r->fftocean.gradient =
+        r->make_image("fftocean/gradient",
+                      Vks(VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+                                             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+                                             .extent = { ns, ns, 1u },
+                                             .mipLevels = 1u,
+                                             .arrayLayers = 1u,
+                                             .samples = VK_SAMPLE_COUNT_1_BIT,
+                                             .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
 
     std::vector<float> gaussian_distr(r->fftocean.pc.settings.num_samples * r->fftocean.pc.settings.num_samples * 4u);
     std::random_device dev;
@@ -209,6 +221,7 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
         .dtz = r->get_bindless_index(r->make_texture(r->fftocean.dtz_spectrum, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         .dft = r->get_bindless_index(r->make_texture(r->fftocean.dft_pingpong, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         .disp = r->get_bindless_index(r->make_texture(r->fftocean.displacement, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        .grad = r->get_bindless_index(r->make_texture(r->fftocean.gradient, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
     };
 
     accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.gaussian_distribution_image; }),
@@ -401,6 +414,36 @@ FFTOceanDebugGenDisplacementPass::FFTOceanDebugGenDisplacementPass(RenderGraph* 
 }
 
 void FFTOceanDebugGenDisplacementPass::render(VkCommandBuffer cmd) {
+    auto r = RendererVulkan::get_instance();
+
+    static_assert(sizeof(r->fftocean.pc) <= 128);
+
+    r->bindless_pool->bind(cmd, pipeline->bind_point);
+    uint32_t dispatch_size = r->fftocean.pc.settings.num_samples / 8u;
+    vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
+                       &r->fftocean.pc);
+    vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
+}
+
+FFTOceanDebugGenGradientPass::FFTOceanDebugGenGradientPass(RenderGraph* rg)
+    : RenderPass("FFTOceanDebugGenGradientPass", PipelineSettings{ .shaders = { "fftocean/gradient.comp.glsl" } }) {
+    auto r = RendererVulkan::get_instance();
+
+    accesses = {
+        Access{ .resource = rg->make_resource([r] { return r->fftocean.displacement; }),
+                .flags = AccessFlags::READ_BIT,
+                .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                .access = VK_ACCESS_SHADER_READ_BIT,
+                .layout = VK_IMAGE_LAYOUT_GENERAL },
+        Access{ .resource = rg->make_resource([r] { return r->fftocean.gradient; }),
+                .flags = AccessFlags::WRITE_BIT | AccessFlags::FROM_UNDEFINED_LAYOUT_BIT,
+                .stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                .access = VK_ACCESS_SHADER_WRITE_BIT,
+                .layout = VK_IMAGE_LAYOUT_GENERAL },
+    };
+}
+
+void FFTOceanDebugGenGradientPass::render(VkCommandBuffer cmd) {
     auto r = RendererVulkan::get_instance();
 
     static_assert(sizeof(r->fftocean.pc) <= 128);
@@ -630,6 +673,11 @@ DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
                 .stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                 .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                 .layout = VK_IMAGE_LAYOUT_GENERAL },
+        Access{ .resource = rg->make_resource([r] { return r->fftocean.gradient; }),
+                .flags = AccessFlags::READ_BIT,
+                .stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                .layout = VK_IMAGE_LAYOUT_GENERAL },
     };
 }
 
@@ -640,7 +688,7 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd) {
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 1.0f } },
+        .clearValue = { .color = { 0.6, 0.8, 1.0, 1.0f } },
     });
 
     VkRenderingAttachmentInfo r_col_atts[]{ r_col_att_1 };

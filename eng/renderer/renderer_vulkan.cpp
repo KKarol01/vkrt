@@ -465,18 +465,11 @@ void RendererVulkan::create_window_sized_resources() {
 
 void RendererVulkan::build_render_graph() {
     rendergraph.clear_passes();
-    // rendergraph.add_pass<FFTOceanButterflyPass>(&rendergraph);
-    //  rendergraph.add_pass<FFTOceanAmplitudesPass>(&rendergraph);
-    //  rendergraph.add_pass<FFTOceanFourierAmplitudesPass>(&rendergraph);
-    //  rendergraph.add_pass<FFTOceanFourierButterflyPass>(&rendergraph);
-    //  rendergraph.add_pass<FFTOceanDisplacementPass>(&rendergraph);
     rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
     rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
     rendergraph.add_pass<FFTOceanDebugGenFourierPass>(&rendergraph);
     rendergraph.add_pass<FFTOceanDebugGenDisplacementPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanDebugGenHxPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanCalcNormalPass>(&rendergraph);
-    // rendergraph.add_pass<FFTOceanNormalizePass>(&rendergraph);
+    rendergraph.add_pass<FFTOceanDebugGenGradientPass>(&rendergraph);
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
     rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
     rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);

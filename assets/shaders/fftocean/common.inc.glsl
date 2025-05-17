@@ -18,6 +18,7 @@ layout(scalar, push_constant) uniform PushConstants {
     uint32_t dtz;
     uint32_t dft;
     uint32_t disp;
+    uint32_t grad;
     float time;
 };
 #endif

@@ -15,7 +15,7 @@ fsin;
 layout(location = 0) out vec4 OUT_COLOR;
 // Constants (tweak these values as needed)
 const vec3 LIGHT_DIR             = normalize(vec3(0.5, 1.0, 0.3));
-const vec3 WATER_COLOR           = vec3(0.0, 0.3, 0.6);
+const vec3 WATER_COLOR           = vec3(0.0, 0.3, 0.4) * 1.3;
 const vec3 SKY_COLOR             = vec3(0.6, 0.8, 1.0);
 const float SHININESS            = 64.0;
 const float FRESNEL_POWER        = 5.0;
@@ -24,6 +24,8 @@ const float TRANSMISSION_INTENSITY = 0.5;
 const float REFRACT_IOR          = 1.33; // approximate water IOR
 
 void main() {
+    vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;
+
     // Compute view direction per-fragment
     vec3 viewDir = normalize(constants.cam_pos - fsin.position);
 
@@ -31,6 +33,7 @@ void main() {
     vec3 dx = dFdx(fsin.position);
     vec3 dy = dFdy(fsin.position);
     vec3 normal = normalize(cross(dx, dy));
+    normal = normalize(vec3(grad.x, 1.0, grad.y));
     if (dot(normal, viewDir) < 0.0) normal = -normal;
 
     // Fresnel term (Schlick's approximation)
@@ -54,7 +57,17 @@ void main() {
     vec3 transmit  = WATER_COLOR * transAmt;
 
     // Combine reflection and transmission
-    vec3 color = mix(transmit, skyReflect, fresnel);
 
-    OUT_COLOR = vec4(color, 1.0);
+    vec3 color = mix(transmit, skyReflect, fresnel);
+    float J = grad.z;
+    float foamIntensity = 0.8;
+    vec3 foamColor = vec3(1.0);
+    float T_min = 0.9;
+    float T_max = 0.5;
+    float foamSeed = clamp((T_min - J) / (T_min - T_max), 0.0, 1.0);
+    foamSeed = smoothstep(0.0, 1.0, foamSeed);
+
+    //color = mix(color, foamColor, foamSeed * foamIntensity);
+
+    OUT_COLOR = vec4(color + clamp((grad.z - 1.0), 0.0, 1.0), 1.0);
 }
