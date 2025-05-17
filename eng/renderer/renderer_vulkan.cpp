@@ -272,11 +272,12 @@ void RendererVulkan::initialize_imgui() {
     Engine::get().ui->add_tab("FFTOcean", [] {
         auto* r = RendererVulkan::get_instance();
         auto& fftc = r->fftocean.recalc_state_0;
-        fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 1.0f, 1000.0f);
-        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -3.0f, 3.0f);
-        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 1.0f, 10.0f);
-        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 1.0f, 10.0f);
-        ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, 0.1f, 20.0f);
+        fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 0.1f, 50.0f);
+        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
+        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 0.01, 10.0f);
+        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 0.01f, 10.0f);
+        ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, -10.0f, 10.0f);
+        fftc |= ImGui::SliderFloat("small l", &r->fftocean.settings.small_l, 0.001, 2.0f);
     });
 }
 

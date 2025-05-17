@@ -9,29 +9,6 @@ layout(local_size_x = 8, local_size_y = 8) in;
 #define dtx_image storageImages_2drg32f[dtx]
 #define dtz_image storageImages_2drg32f[dtz]
 
-struct Complex {
-    float re;
-    float im;
-};
-
-Complex cmul(Complex a, Complex b) {
-    Complex c;
-    c.re = a.re * b.re - a.im * b.im;
-    c.im = a.re * b.im + a.im * b.re;
-    return c;
-}
-
-Complex cadd(Complex a, Complex b) {
-    Complex c;
-    c.re = a.re + b.re;
-    c.im = a.im + b.im;
-    return c;
-}
-
-Complex cexp(float v) { return Complex(cos(v), sin(v)); }
-
-Complex conj(Complex a) { return Complex(a.re, -a.im); }
-
 void main() {
     vec2 kl = vec2(gl_GlobalInvocationID.xy) - settings.num_samples * 0.5;
     vec2 k = 2.0 * PI * kl / settings.patch_size;

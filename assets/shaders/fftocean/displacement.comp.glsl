@@ -14,7 +14,6 @@ void main() {
 
     // checkerboard sign correction due to DFT interval
     float sign = (((coord.x + coord.y) & 1) == 1) ? -1.0 : 1.0;
-
     // load height and choppy displacements
     float h  = sign * imageLoad(ht_image, coord).x;
     float dx = sign * imageLoad(dtx_image, coord).x;

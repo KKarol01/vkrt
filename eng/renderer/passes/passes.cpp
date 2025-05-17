@@ -124,7 +124,7 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
 
     if(r->fftocean.gaussian_distribution_image) { return; }
 
-    uint32_t ns = (uint32_t)r->fftocean.settings.num_samples;
+    uint32_t ns = (uint32_t)r->fftocean.pc.settings.num_samples;
 
     r->fftocean.gaussian_distribution_image =
         r->make_image("fftocean/gaussian_distribution",
@@ -185,7 +185,7 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
                                              .samples = VK_SAMPLE_COUNT_1_BIT,
                                              .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT }));
 
-    std::vector<float> gaussian_distr(r->fftocean.settings.num_samples * r->fftocean.settings.num_samples * 4u);
+    std::vector<float> gaussian_distr(r->fftocean.pc.settings.num_samples * r->fftocean.pc.settings.num_samples * 4u);
     std::random_device dev;
     std::mt19937 mt{ dev() };
     std::normal_distribution nd{ 0.0f, 1.0f };
@@ -196,7 +196,7 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
         ->send_to(r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL,
                   Vks(VkBufferImageCopy2{
                       .imageSubresource = VkImageSubresourceLayers{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
-                      .imageExtent = { (uint32_t)r->fftocean.settings.num_samples, (uint32_t)r->fftocean.settings.num_samples, 1u },
+                      .imageExtent = { (uint32_t)r->fftocean.pc.settings.num_samples, (uint32_t)r->fftocean.pc.settings.num_samples, 1u },
                   }),
                   gaussian_distr)
         .submit_wait();
@@ -267,10 +267,10 @@ void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd) {
     auto r = RendererVulkan::get_instance();
 
     static_assert(sizeof(r->fftocean.pc) <= 128);
-    r->fftocean.pc.time = (float)glfwGetTime() * r->fftocean.settings.time_speed;
+    r->fftocean.pc.time = (float)glfwGetTime() * r->fftocean.pc.settings.time_speed;
 
     r->bindless_pool->bind(cmd, pipeline->bind_point);
-    uint32_t dispatch_size = r->fftocean.settings.num_samples;
+    uint32_t dispatch_size = r->fftocean.pc.settings.num_samples;
     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
                        &r->fftocean.pc);
     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
@@ -322,7 +322,7 @@ void FFTOceanDebugGenFourierPass::render(VkCommandBuffer cmd) {
     static_assert(sizeof(r->fftocean.pc) <= 128);
 
     r->bindless_pool->bind(cmd, pipeline->bind_point);
-    uint32_t dispatch_size = r->fftocean.settings.num_samples;
+    uint32_t dispatch_size = r->fftocean.pc.settings.num_samples;
 
     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
                        &r->fftocean.pc);
@@ -406,7 +406,7 @@ void FFTOceanDebugGenDisplacementPass::render(VkCommandBuffer cmd) {
     static_assert(sizeof(r->fftocean.pc) <= 128);
 
     r->bindless_pool->bind(cmd, pipeline->bind_point);
-    uint32_t dispatch_size = r->fftocean.settings.num_samples / 8u;
+    uint32_t dispatch_size = r->fftocean.pc.settings.num_samples / 8u;
     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
                        &r->fftocean.pc);
     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);

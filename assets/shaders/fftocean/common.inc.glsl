@@ -2,7 +2,7 @@
 #define FFTOCEAN_COMMON_H
 
 #define PI 3.14159265358979323846
-#define NUM_SAMPLES 512
+#define NUM_SAMPLES 256
 
 #ifndef NO_BINDLESS_STRUCTS_INCLUDE
 #include "./bindless_structures.inc.glsl"
@@ -21,5 +21,18 @@ layout(scalar, push_constant) uniform PushConstants {
     float time;
 };
 #endif
+
+struct Complex {
+    float re;
+    float im;
+};
+
+Complex cmul(Complex a, Complex b) { return Complex(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re); }
+
+Complex cadd(Complex a, Complex b) { return Complex(a.re + b.re, a.im + b.im); }
+
+Complex cexp(float v) { return Complex(cos(v), sin(v)); }
+
+Complex conj(Complex a) { return Complex(a.re, -a.im); }
 
 #endif
