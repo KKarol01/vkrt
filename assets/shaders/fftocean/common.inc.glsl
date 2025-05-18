@@ -2,7 +2,7 @@
 #define FFTOCEAN_COMMON_H
 
 #define PI 3.14159265358979323846
-#define NUM_SAMPLES 256
+#define NUM_SAMPLES 512
 
 #ifndef NO_BINDLESS_STRUCTS_INCLUDE
 #include "./bindless_structures.inc.glsl"

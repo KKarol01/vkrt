@@ -15,7 +15,7 @@ fsin;
 layout(location = 0) out vec4 OUT_COLOR;
 // Constants (tweak these values as needed)
 const vec3 LIGHT_DIR             = normalize(vec3(0.5, 1.0, 0.3));
-const vec3 WATER_COLOR           = vec3(0.0, 0.3, 0.4) * 1.3;
+const vec3 WATER_COLOR           = vec3(0.0, 0.1, 0.3) * 1.8;
 const vec3 SKY_COLOR             = vec3(0.6, 0.8, 1.0);
 const float SHININESS            = 64.0;
 const float FRESNEL_POWER        = 5.0;
@@ -58,16 +58,12 @@ void main() {
 
     // Combine reflection and transmission
 
+	float J = grad.z;
+	J = clamp(pow(J, 32.0) - 1.3, 0.0, 1.0);
+	J = smoothstep(0.5, 1.3, J);
     vec3 color = mix(transmit, skyReflect, fresnel);
-    float J = grad.z;
-    float foamIntensity = 0.8;
-    vec3 foamColor = vec3(1.0);
-    float T_min = 0.9;
-    float T_max = 0.5;
-    float foamSeed = clamp((T_min - J) / (T_min - T_max), 0.0, 1.0);
-    foamSeed = smoothstep(0.0, 1.0, foamSeed);
-
-    //color = mix(color, foamColor, foamSeed * foamIntensity);
-
-    OUT_COLOR = vec4(color + clamp((grad.z - 1.0), 0.0, 1.0), 1.0);
+	color = mix(color, vec3(1.0), J);
+    
+    OUT_COLOR = vec4(vec3(color), 1.0);
 }
+
