@@ -66,7 +66,9 @@ template <typename T> class ComponentPool : public IComponentPool {
 
   private:
     void maybe_resize(size_t idx) {
-        if(components.capacity() == idx) { components.reserve(entities.get_dense_capacity()); }
+        if(components.capacity() != entities.get_dense_capacity()) {
+            components.reserve(entities.get_dense_capacity());
+        }
         assert(components.capacity() > idx && idx == components.size());
     }
 
