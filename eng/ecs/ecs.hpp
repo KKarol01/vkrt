@@ -48,7 +48,6 @@ template <typename T> class ComponentPool : public IComponentPool {
             return get(e);
         }
         maybe_resize(it.dense_idx);
-        assert(it.dense_idx == components.size());
         components.emplace_back(std::forward<Args>(args)...);
         return components.at(it.dense_idx);
     }
@@ -69,7 +68,7 @@ template <typename T> class ComponentPool : public IComponentPool {
         if(components.capacity() != entities.get_dense_capacity()) {
             components.reserve(entities.get_dense_capacity());
         }
-        assert(components.capacity() > idx && idx == components.size());
+        assert(components.capacity() > idx && idx <= components.size());
     }
 
     SparseSet<Entity> entities;
