@@ -4,12 +4,11 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
-#include "./ui.hpp"
 #include <eng/renderer/renderer.hpp>
 #include <eng/camera.hpp>
 #include <eng/scene.hpp>
 #include <eng/ui.hpp>
-#include "./ecs.hpp"
+#include <eng/ecs/ecs.hpp>
 
 struct GLFWwindow;
 
@@ -39,7 +38,6 @@ class Engine {
     void init();
     void destroy();
     void start();
-    void update();
 
     void set_on_update_callback(const std::function<void()>& on_update_callback);
     void add_on_window_resize_callback(const std::function<bool()>& on_update_callback);
@@ -50,7 +48,7 @@ class Engine {
     static Engine& get();
     Window* window{};
     Camera* camera{};
-    components::Storage* ecs_storage{};
+    ecs::Registry* ecs_system{};
     gfx::Renderer* renderer{};
     eng::UI* ui{};
     scene::Scene* scene{};

@@ -65,7 +65,7 @@ void Engine::init() {
 
     window = new Window{ 1280.0f, 768.0f };
     camera = new Camera{ glm::radians(90.0f), 0.01f, 512.0f };
-    ecs_storage = new components::Storage{};
+    ecs_system = new ecs::Registry{};
 
     glfwSetCursorPosCallback(window->window, on_mouse_move);
     glfwSetFramebufferSizeCallback(window->window, on_window_resize);
@@ -73,12 +73,9 @@ void Engine::init() {
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { _refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
-    // load_dll("eng_vk_renderer.dll", true, );
     renderer = new gfx::RendererVulkan{};
     scene = new scene::Scene{};
     ui = new eng::UI{};
-    // UIInitData ui_init_data{ .engine = this, .callbacks = { .alloc = malloc, .free = free }, .context = &ui_ctx };
-    // eng_ui_init(&ui_init_data);
     ui->init();
     renderer->init();
 }
@@ -87,19 +84,17 @@ void Engine::destroy() { this->~Engine(); }
 
 void Engine::start() {
     while(!window->should_close()) {
-        if(get_time_secs() - last_frame_time() >= _refresh_rate) { update(); }
+        if(get_time_secs() - last_frame_time() >= _refresh_rate) {
+            const float now = get_time_secs();
+            if(_on_update_callback) { _on_update_callback(); }
+            camera->update();
+            renderer->update();
+            ++_frame_num;
+            _last_frame_time = now;
+            _delta_time = get_time_secs() - _last_frame_time;
+        }
         glfwPollEvents();
     }
-}
-
-void Engine::update() {
-    const float now = get_time_secs();
-    if(_on_update_callback) { _on_update_callback(); }
-    camera->update();
-    renderer->update();
-    ++_frame_num;
-    _last_frame_time = now;
-    _delta_time = get_time_secs() - _last_frame_time;
 }
 
 void Engine::set_on_update_callback(const std::function<void()>& on_update_callback) {

@@ -1,75 +1,95 @@
 #pragma once
 
-#include <eng/common/handle.hpp>
 #include <span>
+#include <array>
 #include <vector>
 #include <cstdint>
+#include <concepts>
+#include <cassert>
 
-template <typename T = uint32_t> class SparseSet {
+template <std::integral T = uint32_t> class SparseSet {
+    using page_t = T*;
+    inline static constexpr size_t PAGE_SIZE = 4096;
+
   public:
-    static constexpr T MAX_KEY = ~T{};
-
     struct Iterator {
-        const T* key{};
-        size_t dense_idx{};
+        explicit operator bool() const noexcept { return valid; }
+        T dense_idx{};
+        bool valid{ false };
     };
 
+    /**
+    Returns iterator with index to dense array. Iterator is always valid, however valid bool flag tells whether insertion actually took place.
+    */
     Iterator insert(T e) {
-        if(e == MAX_KEY) { return Iterator{}; }
-        if(has(e)) { return make_iterator(e); }
-        maybe_resize_sparse(e);
-        sparse.at(e) = free_list_head;
-        dense.insert(dense.begin() + free_list_head, e);
+        if(has(e)) { return make_iterator(e, false); }
+        maybe_resize(e);
+        get_sparse(e) = free_list_head;
+        if(dense.size() <= free_list_head) {
+            assert(free_list_head - dense.size() <= 1);
+            dense.push_back(e);
+        } else {
+            dense.at(free_list_head) = e;
+        }
         ++free_list_head;
-        return make_iterator(e);
+        return make_iterator(e, true);
     }
 
     Iterator insert() {
-        Iterator it{};
-        size_t cur = free_list_head;
-        while(cur < dense.size()) {
-            const auto val = dense.at(cur);
-            if(has(val)) {
-                ++cur;
-                continue;
-            }
-            dense.erase(dense.begin() + free_list_head, dense.begin() + cur);
-            assert(dense.at(free_list_head) == val);
-            sparse.at(val) = free_list_head;
-            ++free_list_head;
-            return make_iterator(val);
-        }
-        if(cur != free_list_head) { dense.erase(dense.begin() + free_list_head, dense.end()); }
+        if(free_list_head < dense.size()) { return insert(dense.at(free_list_head)); }
         return insert(free_list_head);
     }
 
     bool has(T e) const {
-        return e < MAX_KEY && sparse.size() > e && free_list_head > sparse.at(e) && dense.at(sparse.at(e)) == e;
+        return get_page_index(e) < sparse.size() && sparse.at(get_page_index(e)) && get_sparse(e) < size() && extract(e) == e;
     }
 
-    void destroy(T e) {
+    void erase(T e) {
         if(!has(e)) { return; }
-        const auto idx = sparse.at(e);
+        const auto idx = get_sparse(e);
         std::swap(dense.at(idx), dense.at(--free_list_head));
-        sparse.at(dense.at(idx)) = idx;
+        get_sparse(dense.at(idx)) = idx;
     }
 
-    Iterator get(T e) const { return make_iterator(e); }
+    /**
+    Returns iterator with index to dense array. Iterator is valid only if the set contains the key.
+    */
+    Iterator get(T e) const {
+        if(has(e)) { return make_iterator(e, true); }
+        return Iterator{ e, false };
+    }
 
-    size_t size() const { return dense.size(); }
+    size_t size() const { return free_list_head; }
 
-    std::span<const T> get_dense() const { return std::span{ dense.begin(), dense.end() }; }
+    T get_dense(size_t idx) const { return dense.at(idx); }
+    size_t get_dense_capacity() const { return dense.capacity(); }
 
   private:
-    Iterator make_iterator(T e) const {
-        const auto* ptr = &dense.at(sparse.at(e));
-        return { ptr, static_cast<size_t>(ptr - dense.data()) };
-    }
-    void maybe_resize_sparse(T e) {
-        if(sparse.size() <= e) { sparse.resize(e + 1); }
+    T& get_sparse(T e) { return sparse.at(get_page_index(e))[get_in_page_index(e)]; }
+    const T& get_sparse(T e) const { return sparse.at(get_page_index(e))[get_in_page_index(e)]; }
+
+    T& extract(T e) { return dense.at(get_sparse(e)); }
+    const T& extract(T e) const { return dense.at(get_sparse(e)); }
+
+    size_t get_page_index(T e) const { return e / PAGE_SIZE; }
+    size_t get_in_page_index(T e) const { return e % PAGE_SIZE; }
+
+    Iterator make_iterator(T e, bool is_valid) const { return Iterator{ get_sparse(e), is_valid }; }
+
+    void maybe_resize(T e) {
+        if(sparse.size() <= get_page_index(e) || !sparse.at(get_page_index(e))) {
+            const auto page = get_page_index(e);
+            if(sparse.size() <= page) { sparse.resize(page + 1); }
+            sparse.at(page) = new T[PAGE_SIZE];
+            assert(sparse.at(page));
+        }
+        if(dense.size() <= free_list_head) {
+            const size_t ns = (size_t)((double)dense.size() * 1.5);
+            dense.reserve(std::max((size_t)(free_list_head + 1), ns));
+        }
     }
 
-    std::vector<T> sparse;
+    std::vector<page_t> sparse;
     std::vector<T> dense;
     size_t free_list_head{};
 };

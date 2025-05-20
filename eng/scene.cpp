@@ -127,10 +127,10 @@ Handle<NodeInstance> Scene::instance_model(Handle<Node> node) {
         auto* ni = nis.top();
         nis.pop();
         ni->name = n.name;
-        ni->entity = Engine::get().ecs_storage->create();
-        Engine::get().ecs_storage->emplace<components::Transform>(ni->entity).transform = n.transform;
+        ni->entity = Engine::get().ecs_system->create();
+        Engine::get().ecs_system->emplace<components::Transform>(ni->entity)->transform = n.transform;
         if(n.mesh) {
-            auto& cm = Engine::get().ecs_storage->emplace<components::Mesh>(ni->entity);
+            auto& cm = *Engine::get().ecs_system->emplace<components::Mesh>(ni->entity);
             cm.name = n.mesh->name;
             cm.submeshes.reserve(n.mesh->submeshes.size());
             for(const auto& sm : n.mesh->submeshes) {
@@ -152,9 +152,9 @@ Handle<NodeInstance> Scene::instance_model(Handle<Node> node) {
 void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
     ENG_TODO();
     const auto ent = instance_handles.at(entity);
-    Engine::get().ecs_storage->get<components::Transform>(ent->entity).transform = transform;
+    Engine::get().ecs_system->get<components::Transform>(ent->entity).transform = transform;
     for(auto& e : ent->children) {
-        Engine::get().ecs_storage->get<components::Transform>(instance_handles.at(e)->entity).transform = transform;
+        Engine::get().ecs_system->get<components::Transform>(instance_handles.at(e)->entity).transform = transform;
     }
 }
 

@@ -9,7 +9,7 @@
 #include "./common/spatial.hpp"
 #include <eng/common/components.hpp>
 #include <eng/common/handle.hpp>
-#include <eng/ecs.hpp>
+#include <eng/ecs/ecs.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/assets/importer.hpp>
 
@@ -35,7 +35,7 @@ struct NodeInstance {
     std::string name;
     std::vector<Handle<NodeInstance>> children;
     glm::mat4 transform{ 1.0f };
-    components::Entity entity;
+    ecs::Entity entity;
 };
 
 class Scene {

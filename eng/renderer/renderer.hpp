@@ -5,7 +5,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
-#include <eng/ecs.hpp>
+#include <eng/ecs/ecs.hpp>
 
 namespace gfx {
 
@@ -68,11 +68,11 @@ struct MeshDescriptor {
 
 struct InstanceSettings {
     // Primitive's entity (scene::NodeInstance's primitives)
-    components::Entity entity;
+    ecs::Entity entity;
 };
 
 struct BLASInstanceSettings {
-    components::Entity entity;
+    ecs::Entity entity;
 };
 
 struct VsmData {
@@ -100,7 +100,7 @@ class Renderer {
     virtual Handle<Mesh> batch_mesh(const MeshDescriptor& batch) = 0;
     virtual void instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
-    virtual void update_transform(components::Entity entity) = 0;
+    virtual void update_transform(ecs::Entity entity) = 0;
     virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) = 0;
     virtual Handle<Image> get_color_output_texture() const = 0;
     virtual Material get_material(Handle<Material> handle) const = 0;

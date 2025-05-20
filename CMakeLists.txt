@@ -123,7 +123,7 @@ add_executable(vkrt
     "eng/renderer/pipeline.cpp"
     "eng/assets/importer.cpp"
     "eng/ui.cpp"
-)
+ )
 
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)

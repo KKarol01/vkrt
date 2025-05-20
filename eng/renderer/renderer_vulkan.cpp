@@ -705,7 +705,7 @@ Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
 }
 
 void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
-    const auto& mesh = Engine::get().ecs_storage->get<components::Mesh>(settings.entity);
+    const auto& mesh = Engine::get().ecs_system->get<components::Mesh>(settings.entity);
     mesh_instances.reserve(mesh_instances.size() + mesh.submeshes.size());
     for(auto i = 0u; i < mesh.submeshes.size(); ++i) {
         mesh_instances.push_back(MeshInstance{ .entity = settings.entity, .mesh = mesh.submeshes.at(i) });
@@ -727,7 +727,7 @@ void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
     // }
 }
 
-void RendererVulkan::update_transform(components::Entity entity) {
+void RendererVulkan::update_transform(ecs::Entity entity) {
     update_positions.push_back(entity);
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
@@ -894,7 +894,7 @@ void RendererVulkan::upload_transforms() {
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
     for(auto e : mesh_instances) {
-        transforms.push_back(Engine::get().ecs_storage->get<components::Transform>(e.entity).transform);
+        transforms.push_back(Engine::get().ecs_system->get<components::Transform>(e.entity).transform);
     }
     staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms)
         .send_to(get_frame_data(1).transform_buffers, 0ull, transforms)

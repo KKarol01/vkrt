@@ -67,7 +67,7 @@ struct Mesh {
 };
 
 struct MeshInstance {
-    components::Entity entity;
+    ecs::Entity entity;
     Handle<Mesh> mesh;
 };
 
@@ -211,7 +211,7 @@ class RendererVulkan : public gfx::Renderer {
     Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
     void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
-    void update_transform(components::Entity entity) final;
+    void update_transform(ecs::Entity entity) final;
     size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
     Material get_material(Handle<Material> handle) const final;
@@ -273,8 +273,8 @@ class RendererVulkan : public gfx::Renderer {
     HandleMap<Material> materials;
 
     std::vector<MeshInstance> mesh_instances;
-    // std::unordered_map<components::Entity, uint32_t> mesh_instance_idxs;
-    std::vector<components::Entity> blas_instances;
+    // std::unordered_map<ecs::Entity, uint32_t> mesh_instance_idxs;
+    std::vector<ecs::Entity> blas_instances;
     uint32_t max_draw_count{};
     uint32_t total_vertices{};
     uint32_t total_indices{};
@@ -313,7 +313,7 @@ class RendererVulkan : public gfx::Renderer {
     std::vector<gfx::Vertex> upload_vertices;
     std::vector<uint32_t> upload_indices;
     std::vector<UploadImage> upload_images;
-    std::vector<components::Entity> update_positions;
+    std::vector<ecs::Entity> update_positions;
 };
 
 } // namespace gfx
