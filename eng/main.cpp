@@ -14,43 +14,6 @@
 int main() {
     Engine::get().init();
 
-    ecs::Entity es[]{
-        Engine::get().ecs_system->create(),
-        Engine::get().ecs_system->create(),
-        Engine::get().ecs_system->create(),
-        Engine::get().ecs_system->create(),
-    };
-
-    struct DD {
-        int a;
-    };
-
-    Engine::get().ecs_system->emplace<DD>(es[0], 1);
-    Engine::get().ecs_system->emplace<DD>(es[1], 2);
-    Engine::get().ecs_system->emplace<DD>(es[2], 3);
-    Engine::get().ecs_system->emplace<DD>(es[3], 4);
-
-    Engine::get().ecs_system->get<DD>(es[0]).a == 1;
-    Engine::get().ecs_system->get<DD>(es[1]).a == 2;
-    Engine::get().ecs_system->get<DD>(es[2]).a == 3;
-    Engine::get().ecs_system->get<DD>(es[3]).a == 4;
-
-    Engine::get().ecs_system->erase(es[0]);
-    Engine::get().ecs_system->erase(es[1]);
-    Engine::get().ecs_system->erase(es[3]);
-
-    assert(!Engine::get().ecs_system->has_component<DD>(es[0]));
-    assert(Engine::get().ecs_system->has_component<DD>(es[2]));
-    assert(Engine::get().ecs_system->get<DD>(es[2]).a == 3);
-    assert(Engine::get().ecs_system->create() == 1);
-    assert(Engine::get().ecs_system->create() == 2);
-    assert(Engine::get().ecs_system->create() == 3);
-    assert(Engine::get().ecs_system->get<DD>(es[2]).a == 3);
-    Engine::get().ecs_system->emplace<DD>(es[3], 4);
-    assert(Engine::get().ecs_system->get<DD>(es[2]).a == 3);
-    assert(Engine::get().ecs_system->get<DD>(es[3]).a == 4);
-
-
     {
         // Handle<scene::Node> model = Engine::get().scene->load_from_file("plane.glb");
         assets::Asset plane;

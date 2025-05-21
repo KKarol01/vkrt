@@ -141,7 +141,6 @@ target_link_libraries(vkrt
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
-    eng_ui
 )
 target_compile_definitions(vkrt
     PRIVATE

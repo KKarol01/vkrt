@@ -14,7 +14,7 @@ template <std::integral T = uint32_t> class SparseSet {
   public:
     struct Iterator {
         explicit operator bool() const noexcept { return valid; }
-        T dense_idx{};
+        size_t dense_idx{};
         bool valid{ false };
     };
 
@@ -61,6 +61,7 @@ template <std::integral T = uint32_t> class SparseSet {
 
     size_t size() const { return free_list_head; }
 
+    T get_dense(Iterator it) const { return dense.at(it.dense_idx); }
     T get_dense(size_t idx) const { return dense.at(idx); }
     size_t get_dense_capacity() const { return dense.capacity(); }
 

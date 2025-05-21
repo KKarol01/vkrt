@@ -48,7 +48,12 @@ template <typename T> class ComponentPool : public IComponentPool {
             return get(e);
         }
         maybe_resize(it.dense_idx);
-        components.emplace_back(std::forward<Args>(args)...);
+        if(components.size() <= it.dense_idx) {
+            assert(components.size() == it.dense_idx);
+            components.emplace_back(std::forward<Args>(args)...);
+        } else {
+            components.emplace(components.begin() + it.dense_idx, std::forward<Args>(args)...);
+        }
         return components.at(it.dense_idx);
     }
 
@@ -85,7 +90,7 @@ struct ComponentIdGenerator {
 
 class Registry {
   public:
-    Entity create() { return entities.insert().dense_idx; }
+    Entity create() { return entities.get_dense(entities.insert()); }
 
     template <typename Component, typename... Args> Component* emplace(Entity e, Args&&... args) {
         if(!entities.has(e)) {
@@ -107,7 +112,9 @@ class Registry {
     template <typename Component> Component& get(Entity e) { return *get_or_make_comp_arr<Component>().try_get(e); }
     template <typename Component> Component* try_get(Entity e) { return get_or_make_comp_arr<Component>().try_get(e); }
 
-    template <typename Component> bool has_component(Entity e) const {
+    bool has(Entity e) const { return entities.has(e); }
+    template <typename Component> bool has(Entity e) const {
+        if(!has(e)) { return false; }
         const auto idx = ComponentIdGenerator::generate<Component>();
         if(!component_arrays.at(idx)) { return false; }
         return static_cast<ComponentPool<Component>*>(&*component_arrays.at(idx))->has(e);
