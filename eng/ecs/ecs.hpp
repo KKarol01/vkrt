@@ -26,11 +26,7 @@ class IComponentPool {
 
 template <typename T> class ComponentPool : public IComponentPool {
   public:
-    T& get(Entity e) {
-        const auto it = entities.get(e);
-        assert(it);
-        return components.at(it.dense_idx);
-    }
+    T& get(Entity e) { return *try_get(e); }
 
     T* try_get(Entity e) {
         const auto it = entities.get(e);
@@ -44,15 +40,16 @@ template <typename T> class ComponentPool : public IComponentPool {
     {
         const auto it = entities.insert(e);
         if(!it) {
-            assert(false && "No insertion took place; component already exists.");
-            return get(e);
+            ENG_WARN("Overwriting already existing component for entity {}.", e);
+            auto* c = new (&get(e)) T{ std::forward<Args>(args)... };
+            return *c;
         }
         maybe_resize(it.dense_idx);
         if(components.size() <= it.dense_idx) {
             assert(components.size() == it.dense_idx);
             components.emplace_back(std::forward<Args>(args)...);
         } else {
-            components.emplace(components.begin() + it.dense_idx, std::forward<Args>(args)...);
+            new (components.data() + it.dense_idx) T{ std::forward<Args>(args)... };
         }
         return components.at(it.dense_idx);
     }
