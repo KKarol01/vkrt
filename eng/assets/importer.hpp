@@ -122,21 +122,19 @@ class Importer {
     static Asset import_glb(const std::filesystem::path& path, ImportSettings settings = {});
 
     template <typename Func>
-    static inline void dfs_traverse_node_hierarchy(const Asset& asset, const Node& node, Func&& func, const Node* parent = nullptr,
-                                                   glm::mat4 parent_transform = glm::identity<glm::mat4>())
-        requires std::is_invocable_v<Func, const Node&, const Node*, const glm::mat4&>;
+    static inline void dfs_traverse_node_hierarchy(const Asset& asset, const Node& node, Func&& func, const Node* parent = nullptr)
+        requires std::is_invocable_v<Func, const Node&, const Node*>;
 };
 
 } // namespace assets
 
 template <typename Func>
-inline void assets::Importer::dfs_traverse_node_hierarchy(const assets::Asset& asset, const assets::Node& node, Func&& func,
-                                                          const assets::Node* parent, glm::mat4 parent_transform)
-    requires std::is_invocable_v<Func, const Node&, const Node*, const glm::mat4&>
+inline void assets::Importer::dfs_traverse_node_hierarchy(const assets::Asset& asset, const assets::Node& node,
+                                                          Func&& func, const assets::Node* parent)
+    requires std::is_invocable_v<Func, const Node&, const Node*>
 {
-    func(node, parent, parent_transform);
-    parent_transform = asset.get_transform(node) * parent_transform;
+    func(node, parent);
     for(auto i : node.nodes) {
-        assets::Importer::dfs_traverse_node_hierarchy(asset, asset.get_node(i), &node, parent_transform);
+        assets::Importer::dfs_traverse_node_hierarchy(asset, asset.get_node(i), &node);
     }
 }

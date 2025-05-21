@@ -45,7 +45,7 @@ class Scene {
     Handle<NodeInstance> instance_model(Handle<Node> node);
     // glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
 
-    void update_transform(Handle<NodeInstance> entity, glm::mat4 transform);
+    void update_transform(Handle<NodeInstance> entity, const glm::mat4& transform = glm::mat4{ 1.0f });
     // void _update_transform(uint32_t idx, glm::mat4 t = { 1.0f });
 
   private:

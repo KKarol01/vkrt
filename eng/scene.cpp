@@ -149,12 +149,12 @@ Handle<NodeInstance> Scene::instance_model(Handle<Node> node) {
     return hrni;
 }
 
-void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
-    ENG_TODO();
-    const auto ent = instance_handles.at(entity);
-    Engine::get().ecs_system->get<components::Transform>(ent->entity).transform = transform;
-    for(auto& e : ent->children) {
-        Engine::get().ecs_system->get<components::Transform>(instance_handles.at(e)->entity).transform = transform;
+void Scene::update_transform(Handle<NodeInstance> entity, const glm::mat4& transform) {
+    auto* ent = instance_handles.at(entity);
+    auto& t = Engine::get().ecs_system->get<components::Transform>(ent->entity);
+    t.transform = ent->transform * transform;
+    for(auto& ch : ent->children) {
+        update_transform(ch, t.transform);
     }
 }
 
