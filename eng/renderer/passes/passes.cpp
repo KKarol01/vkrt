@@ -107,13 +107,13 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         r.get_bindless_index(fd.transform_buffers),
         r.get_bindless_index(fd.constants),
         r.get_bindless_index(r.mesh_instances_buffer),
-        r.get_bindless_index(r.vsm.constants_buffer),
-        r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
-        r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
-        r.get_bindless_index(r.make_texture(r.fftocean.displacement, VK_IMAGE_LAYOUT_GENERAL,
-                                            r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
-        r.get_bindless_index(r.make_texture(r.fftocean.gradient, VK_IMAGE_LAYOUT_GENERAL,
-                                            r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        // r.get_bindless_index(r.vsm.constants_buffer),
+        // r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        // r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        // r.get_bindless_index(r.make_texture(r.fftocean.displacement, VK_IMAGE_LAYOUT_GENERAL,
+        //                                     r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        // r.get_bindless_index(r.make_texture(r.fftocean.gradient, VK_IMAGE_LAYOUT_GENERAL,
+        //                                     r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(pc), &pc);
 }

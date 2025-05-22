@@ -6,15 +6,15 @@
 
 namespace gfx {
 
-struct buffer_resizable_t {};
-static constexpr buffer_resizable_t buffer_resizable;
+struct resizable_t {};
+static constexpr resizable_t resizable;
 
 class Buffer {
   public:
     Buffer() noexcept = default;
     Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& vk_info,
            const VmaAllocationCreateInfo& vma_info) noexcept;
-    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, buffer_resizable_t resizable,
+    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, resizable_t resizable,
            const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) noexcept;
     // todo: make destructors and proper move semantics
 

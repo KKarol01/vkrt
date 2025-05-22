@@ -41,6 +41,11 @@ Image& Asset::get_image(asset_index_t idx) { return images.at(idx); }
 
 Texture& Asset::get_texture(asset_index_t idx) { return textures.at(idx); }
 
+Texture* Asset::try_get_texture(asset_index_t idx) {
+    if(idx == s_max_asset_index) { return nullptr; }
+    return &textures.at(idx);
+}
+
 Material& Asset::get_material(asset_index_t idx) { return materials.at(idx); }
 
 Material& Asset::get_material(const Submesh& submesh) { return materials.at(submesh.material); }
@@ -85,7 +90,17 @@ asset_index_t Asset::make_material() {
     return materials.size() - 1;
 }
 
-Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings settings) {
+Asset Importer::import_glb(std::filesystem::path path, ImportSettings settings) {
+    if(path.empty() || path.extension() != ".glb") {
+        ENG_WARN("Path {} is either empty or has incorrect extension.", path.string());
+        return Asset{ .flags = AssetFlags::ASSET_INVALID_BIT, .path = path };
+    }
+    canonize_path(path);
+    if(!std::filesystem::exists(path)) {
+        ENG_WARN("Path {} does not point to any file.", path.string());
+        return Asset{ .flags = AssetFlags::ASSET_INVALID_BIT, .path = path };
+    }
+
     Asset asset;
     fastgltf::Parser parser;
     auto glbbuffer = fastgltf::GltfDataBuffer::FromPath(path);
@@ -247,8 +262,8 @@ Asset Importer::import_glb(const std::filesystem::path& path, ImportSettings set
                 }
                 submesh.geometry = asset.make_geometry();
                 auto& geom = asset.get_geometry(submesh);
-                geom.vertex_range = { .offset = asset.vertices.size(), .count = vertices.size() };
-                geom.index_range = { .offset = asset.indices.size(), .count = indices.size() };
+                geom.vertex_range = { .offset = asset.vertices.size(), .size = vertices.size() };
+                geom.index_range = { .offset = asset.indices.size(), .size = indices.size() };
                 asset.vertices.insert(asset.vertices.end(), vertices.begin(), vertices.end());
                 asset.indices.insert(asset.indices.end(), indices.begin(), indices.end());
                 return submesh;

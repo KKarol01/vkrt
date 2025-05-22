@@ -6,7 +6,7 @@
 #include <bit>
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
-#include <eng/renderer/fwd.hpp>
+#include <eng/common/types.hpp>
 #include <eng/scene.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -19,20 +19,21 @@ using asset_index_t = uint16_t;
 static constexpr asset_index_t s_max_asset_index = ~asset_index_t{};
 
 enum class AssetFlags : uint32_t {
-    INDICES_16_BIT_BIT = 0x1,
+    ASSET_INVALID_BIT = 0x1,
+    INDICES_16_BIT_BIT = 0x2,
 };
 ENG_ENABLE_FLAGS_OPERATORS(AssetFlags);
+
+enum class ImportFlags : uint32_t {
+    MESHLETIZE_BIT = 0x1,
+};
+ENG_ENABLE_FLAGS_OPERATORS(ImportFlags);
 
 struct Vertex {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 uv;
     glm::vec4 tangent;
-};
-
-struct Range {
-    size_t offset{};
-    size_t count{};
 };
 
 struct Image {
@@ -57,7 +58,12 @@ struct Material {
 
 struct Geometry {
     Range vertex_range{};
-    Range index_range{};
+    Range index_range{}; // if an asset is meshletized, index_range is a range of meshlets.
+};
+
+struct Meshlet {
+    Range vertex_range{};   // vertex_range is a range of vertices in assets vertices array.
+    Range triangle_range{}; // index_range is a range of indices in assets indices array.
 };
 
 struct Submesh {
@@ -77,7 +83,7 @@ struct Node {
 };
 
 struct Asset {
-    bool is_valid() const { return !scene.empty(); }
+    bool is_valid() const { return !flags.test(AssetFlags::ASSET_INVALID_BIT) && !scene.empty(); }
     Geometry& get_geometry(const Submesh& submesh);
     Geometry* try_get_geometry(const Submesh& submesh);
     Node& get_node(asset_index_t idx);
@@ -89,6 +95,7 @@ struct Asset {
     Submesh& get_submesh(asset_index_t idx);
     Image& get_image(asset_index_t idx);
     Texture& get_texture(asset_index_t idx);
+    Texture* try_get_texture(asset_index_t idx);
     Material& get_material(asset_index_t idx);
     Material& get_material(const Submesh& submesh);
     Material* try_get_material(const Submesh& submesh);
@@ -104,6 +111,9 @@ struct Asset {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<Geometry> geometries;
+    std::vector<uint32_t> meshlets_vertices;
+    std::vector<uint8_t> meshlets_triangles;
+    std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
     std::vector<Submesh> submeshes;
     std::vector<glm::mat4> transforms;
@@ -115,16 +125,23 @@ struct Asset {
     std::filesystem::path path;
 };
 
-struct ImportSettings {};
+struct ImportSettings {
+    Flags<ImportFlags> flags{};
+};
 
 class Importer {
   public:
-    static Asset import_glb(const std::filesystem::path& path, ImportSettings settings = {});
+    static Asset import_glb(std::filesystem::path path, ImportSettings settings = {});
 
     template <typename Func>
     static inline void dfs_traverse_node_hierarchy(const Asset& asset, const Node& node, Func&& func, const Node* parent = nullptr,
                                                    glm::mat4 parent_transform = glm::identity<glm::mat4>())
         requires std::is_invocable_v<Func, const Node&, const Node*, const glm::mat4&>;
+    static void canonize_path(std::filesystem::path& p) {
+        static const auto prefix = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "models");
+        if(!p.string().starts_with(prefix.string())) { p = prefix / p; }
+        p.make_preferred();
+    }
 };
 
 } // namespace assets

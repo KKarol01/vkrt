@@ -52,26 +52,45 @@ Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
 
     batched_geometries.reserve(asset.geometries.size());
     for(auto& ag : asset.geometries) {
-        std::vector<gfx::Vertex> gfxvertices(ag.vertex_range.count);
+        std::vector<gfx::Vertex> gfxvertices(ag.vertex_range.size);
+        std::vector<gfx::Meshlet> gfxmeshlets(ag.index_range.size);
+        std::vector<uint32_t> meshlets_vertices;
+        std::vector<gfx::Meshlet> gfxmeshlets(ag.index_range.size);
         for(auto i = 0u; i < gfxvertices.size(); ++i) {
             gfxvertices.at(i) = { .pos = asset.vertices.at(ag.vertex_range.offset + i).position,
                                   .nor = asset.vertices.at(ag.vertex_range.offset + i).normal,
                                   .uv = asset.vertices.at(ag.vertex_range.offset + i).uv,
                                   .tang = asset.vertices.at(ag.vertex_range.offset + i).tangent };
         }
+        for(auto i = 0u; i < gfxmeshlets.size(); ++i) {
+            gfxmeshlets.at(i) = { .vertex_range = asset.meshlets.at(ag.index_range.offset + i).vertex_range,
+                                  .triangle_range = asset.meshlets.at(ag.index_range.offset + i).triangle_range };
+        }
 
-        const auto rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
-            .vertices = std::span{ gfxvertices },
-            .indices = std::span{ asset.indices.begin() + ag.index_range.offset, ag.index_range.count } });
+        Handle<gfx::Geometry> rg;
+        if(asset.meshlets.empty()) {
+            rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
+                .vertices = std::span{ gfxvertices },
+                .indices = std::span{ asset.indices.begin() + ag.index_range.offset, ag.index_range.size },
+            });
+        } else {
+            rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
+                .vertices = std::span{ gfxvertices },
+                .indices = std::span{},
+                .meshlets = std::span{ gfxmeshlets },
+                .meshlets_triangles = 
+                std::span{ asset.indices.begin() + ag.index_range.offset, ag.index_range.size },
+            });
+        }
         batched_geometries.push_back(rg);
     }
 
     batched_materials.reserve(asset.materials.size());
     for(auto& am : asset.materials) {
         if(am.color_texture != assets::s_max_asset_index) { // todo: should be done with try_get_texture i think.
-            const auto& act = asset.textures.at(am.color_texture);
             const auto rm = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
-                .base_color_texture = batched_textures.at(am.color_texture) });
+                .base_color_texture = am.color_texture == assets::s_max_asset_index ? Handle<gfx::Texture>{}
+                                                                                    : batched_textures.at(am.color_texture) });
             batched_materials.push_back(rm);
         }
     }
@@ -85,9 +104,10 @@ Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
                 auto& as = asset.get_submesh(asidx);
                 auto* ag = asset.try_get_geometry(as);
                 auto* am = asset.try_get_material(as);
-                assert(ag && am);
+                // assert(ag && am);
                 const auto rm = Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{
-                    .geometry = batched_geometries.at(as.geometry), .material = batched_materials.at(as.material) });
+                    .geometry = batched_geometries.at(as.geometry),
+                    .material = am ? batched_materials.at(as.material) : Handle<gfx::Material>{} });
                 snode.mesh->submeshes.push_back(rm);
             }
         }

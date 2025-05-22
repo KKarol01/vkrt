@@ -148,10 +148,10 @@ struct FrameData {
 
 struct FFTOcean {
     struct FFTOceanSettings {
-        float num_samples{ 512.0f };          // N
-        float patch_size{ 3.7f };            // L
-        glm::vec2 wind_dir{ 0.0f, -2.5f}; // w
-        float phillips_const{ 0.59f };        // A
+        float num_samples{ 512.0f };       // N
+        float patch_size{ 3.7f };          // L
+        glm::vec2 wind_dir{ 0.0f, -2.5f }; // w
+        float phillips_const{ 0.59f };     // A
         float time_speed{ 0.24f };
         float disp_lambda{ -1.58f };
         float small_l{ 0.0001f };
@@ -227,7 +227,7 @@ class RendererVulkan : public gfx::Renderer {
     void update_ddgi();
 
     Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
-    Handle<Buffer> make_buffer(const std::string& name, buffer_resizable_t resizable, const VkBufferCreateInfo& vk_info,
+    Handle<Buffer> make_buffer(const std::string& name, resizable_t resizable, const VkBufferCreateInfo& vk_info,
                                const VmaAllocationCreateInfo& vma_info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);

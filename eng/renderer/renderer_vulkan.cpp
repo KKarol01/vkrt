@@ -286,7 +286,7 @@ void RendererVulkan::initialize_resources() {
 
     staging_buffer = new StagingBuffer{
         submit_queue,
-        make_buffer("staging_buffer", buffer_resizable,
+        make_buffer("staging_buffer", resizable,
                     Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR }),
                     VmaAllocationCreateInfo{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
                                              .usage = VMA_MEMORY_USAGE_AUTO,
@@ -294,7 +294,7 @@ void RendererVulkan::initialize_resources() {
     };
 
     vertex_positions_buffer =
-        make_buffer("vertex_positions_buffer", buffer_resizable,
+        make_buffer("vertex_positions_buffer", resizable,
                     Vks(VkBufferCreateInfo{
                         .size = 1024 * 1024 * 128,
                         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -302,12 +302,12 @@ void RendererVulkan::initialize_resources() {
                     }),
                     VmaAllocationCreateInfo{});
     vertex_attributes_buffer =
-        make_buffer("vertex_attributes_buffer", buffer_resizable,
+        make_buffer("vertex_attributes_buffer", resizable,
                     Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
                                             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
                     VmaAllocationCreateInfo{});
     index_buffer =
-        make_buffer("index_buffer", buffer_resizable,
+        make_buffer("index_buffer", resizable,
                     Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
                                             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -348,7 +348,7 @@ void RendererVulkan::initialize_resources() {
             make_buffer(fmt::format("constants_{}", i),
                         Vks(VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
                         VmaAllocationCreateInfo{});
-        fd.transform_buffers = make_buffer(fmt::format("transform_buffer_{}", i), buffer_resizable,
+        fd.transform_buffers = make_buffer(fmt::format("transform_buffer_{}", i), resizable,
                                            Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
                                                                    .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
@@ -408,6 +408,9 @@ void RendererVulkan::initialize_resources() {
                        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                    });
 
+    // create default material
+    materials.insert(gfx::Material{});
+
     create_window_sized_resources();
     flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
 }
@@ -465,16 +468,16 @@ void RendererVulkan::create_window_sized_resources() {
 
 void RendererVulkan::build_render_graph() {
     rendergraph.clear_passes();
-    rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenFourierPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenDisplacementPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenGradientPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDebugGenFourierPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDebugGenDisplacementPass>(&rendergraph);
+    // rendergraph.add_pass<FFTOceanDebugGenGradientPass>(&rendergraph);
     rendergraph.add_pass<ZPrepassPass>(&rendergraph);
-    rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
-    rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
-    rendergraph.add_pass<VsmShadowsPass>(&rendergraph);
-    rendergraph.add_pass<VsmDebugPageCopyPass>(&rendergraph);
+    // rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
+    // rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
+    // rendergraph.add_pass<VsmShadowsPass>(&rendergraph);
+    // rendergraph.add_pass<VsmDebugPageCopyPass>(&rendergraph);
     rendergraph.add_pass<DefaultUnlitPass>(&rendergraph);
     rendergraph.add_pass<ImguiPass>(&rendergraph);
     rendergraph.add_pass<SwapchainPresentPass>(&rendergraph);
@@ -696,7 +699,10 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
     return handle;
 }
 
-Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
+Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& _batch) {
+    auto batch = _batch;
+    if(!batch.material) { batch.material = Handle<gfx::Material>{ 0 }; }
+
     for(const auto& [h, m] : meshes) {
         if(m.geometry == batch.geometry && m.material == batch.material) { return h; }
     }
@@ -1241,7 +1247,7 @@ Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBuff
     return buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
 }
 
-Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, buffer_resizable_t resizable,
+Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, resizable_t resizable,
                                            const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) {
     return buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
 }

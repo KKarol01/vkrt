@@ -33,9 +33,16 @@ struct Vertex {
     glm::vec4 tang;
 };
 
+struct Meshlet {
+    Range vertex_range;
+    Range triangle_range;
+};
+
 struct GeometryDescriptor {
     std::span<const Vertex> vertices;
     std::span<const uint32_t> indices;
+    std::span<const Meshlet> meshlets;
+    std::span<const uint8_t> meshlets_triangles; // i,i+1,i+2 into indices span.
 };
 
 struct ImageDescriptor {
