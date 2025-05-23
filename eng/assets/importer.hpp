@@ -58,7 +58,8 @@ struct Material {
 
 struct Geometry {
     Range vertex_range{};
-    Range index_range{}; // if an asset is meshletized, index_range is a range of meshlets.
+    Range index_range{};
+    Range meshlets_range{};
 };
 
 struct Meshlet {

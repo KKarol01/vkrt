@@ -106,6 +106,9 @@ set(FMT_SYSTEM_HEADERS OFF CACHE BOOL "" FORCE)
 set(FMT_UNICODE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fmt)
 
+set(MESHOPT_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/meshoptimizer)
+
 add_executable(vkrt 
     "eng/main.cpp"
     "eng/engine.cpp"  
@@ -141,6 +144,7 @@ target_link_libraries(vkrt
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
+    meshoptimizer
 )
 target_compile_definitions(vkrt
     PRIVATE

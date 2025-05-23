@@ -13,15 +13,17 @@ layout(scalar, push_constant) uniform PushConstants {
     uint32_t transforms_index;
     uint32_t constants_index;
     uint32_t meshes_index;
-    uint32_t vsm_buffer_index;
-    uint32_t vsm_physical_depth_image_index;
-    uint32_t page_table_index;
-    uint32_t fft_displacement_index;
-    uint32_t fft_gradient_index;
+    uint32_t meshlets_vertices_index;
+    uint32_t meshlets_triangles_index;
+    //uint32_t vsm_buffer_index;
+    //uint32_t vsm_physical_depth_image_index;
+    //uint32_t page_table_index;
+    //uint32_t fft_displacement_index;
+    //uint32_t fft_gradient_index;
 };
 #endif
 
 #define NO_PUSH_CONSTANTS
-#include "./vsm/common.inc.glsl"
+//#include "./vsm/common.inc.glsl"
 
 #endif

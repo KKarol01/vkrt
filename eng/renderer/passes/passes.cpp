@@ -94,11 +94,13 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         uint32_t transforms_index;
         uint32_t constants_index;
         uint32_t meshes_index;
-        uint32_t vsm_buffer_index;
-        uint32_t vsm_physical_depth_image_index;
-        uint32_t page_table_index;
-        uint32_t fft_displacement_index;
-        uint32_t fft_gradient_index;
+        uint32_t meshlets_vertices_index;
+        uint32_t meshlets_triangles_index;
+        // uint32_t vsm_buffer_index;
+        // uint32_t vsm_physical_depth_image_index;
+        // uint32_t page_table_index;
+        // uint32_t fft_displacement_index;
+        // uint32_t fft_gradient_index;
     };
     PushConstants pc = {
         r.get_bindless_index(r.index_buffer),
@@ -107,6 +109,8 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         r.get_bindless_index(fd.transform_buffers),
         r.get_bindless_index(fd.constants),
         r.get_bindless_index(r.mesh_instances_buffer),
+        r.get_bindless_index(r.meshlets_vertices_buffer),
+        r.get_bindless_index(r.meshlets_triangles_buffer),
         // r.get_bindless_index(r.vsm.constants_buffer),
         // r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         // r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
@@ -486,7 +490,7 @@ void ZPrepassPass::render(VkCommandBuffer cmd) {
         .pColorAttachments = nullptr,
         .pDepthAttachment = &r_dep_att,
     });
-    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.meshlets_triangles_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBeginRendering(cmd, &rendering_info);
     VkRect2D r_sciss_1 = rendering_info.renderArea;
     VkViewport r_view_1{ .x = 0.0f,
@@ -499,8 +503,8 @@ void ZPrepassPass::render(VkCommandBuffer cmd) {
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     set_pc_vsm_common(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
-    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
-                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
+    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
+                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
                                   0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
 }
@@ -641,7 +645,7 @@ void VsmDebugPageCopyPass::render(VkCommandBuffer cmd) {
 
 DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
     : RenderPass("DefaultUnlitPass",
-                 PipelineSettings{ .settings = RasterizationSettings{ .culling = VK_CULL_MODE_NONE,
+                 PipelineSettings{ .settings = RasterizationSettings{ .culling = VK_CULL_MODE_BACK_BIT,
                                                                       .depth_test = false,
                                                                       .depth_write = false,
                                                                       .depth_op = VK_COMPARE_OP_EQUAL },
@@ -708,7 +712,7 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd) {
         .pDepthAttachment = &r_dep_att,
     });
 
-    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.meshlets_triangles_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBeginRendering(cmd, &rendering_info);
     VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
     VkViewport r_view_1{
@@ -718,8 +722,8 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd) {
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     set_pc_default_unlit(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
-    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
-                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
+    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
+                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
                                   0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
 }

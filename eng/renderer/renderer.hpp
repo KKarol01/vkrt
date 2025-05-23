@@ -42,7 +42,8 @@ struct GeometryDescriptor {
     std::span<const Vertex> vertices;
     std::span<const uint32_t> indices;
     std::span<const Meshlet> meshlets;
-    std::span<const uint8_t> meshlets_triangles; // i,i+1,i+2 into indices span.
+    std::span<const uint32_t> meshlets_vertices;
+    std::span<const uint8_t> meshlets_triangles; // i,i+1,i+2 into meshlet_vertices span.
 };
 
 struct ImageDescriptor {

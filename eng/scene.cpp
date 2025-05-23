@@ -53,19 +53,32 @@ Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
     batched_geometries.reserve(asset.geometries.size());
     for(auto& ag : asset.geometries) {
         std::vector<gfx::Vertex> gfxvertices(ag.vertex_range.size);
-        std::vector<gfx::Meshlet> gfxmeshlets(ag.index_range.size);
+        std::vector<gfx::Meshlet> gfxmeshlets(ag.meshlets_range.size);
         std::vector<uint32_t> meshlets_vertices;
-        std::vector<gfx::Meshlet> gfxmeshlets(ag.index_range.size);
+        std::vector<uint8_t> meshlets_triangles;
+        meshlets_vertices.reserve(asset.meshlets_vertices.size());
+        meshlets_triangles.reserve(asset.meshlets_triangles.size());
         for(auto i = 0u; i < gfxvertices.size(); ++i) {
             gfxvertices.at(i) = { .pos = asset.vertices.at(ag.vertex_range.offset + i).position,
                                   .nor = asset.vertices.at(ag.vertex_range.offset + i).normal,
                                   .uv = asset.vertices.at(ag.vertex_range.offset + i).uv,
                                   .tang = asset.vertices.at(ag.vertex_range.offset + i).tangent };
         }
+
+        const auto res = std::accumulate(asset.meshlets.begin(), asset.meshlets.end(), 0ul,
+                                         [](const auto acc, const auto& mt) { return acc + mt.triangle_range.size * 3; });
+
         for(auto i = 0u; i < gfxmeshlets.size(); ++i) {
-            gfxmeshlets.at(i) = { .vertex_range = asset.meshlets.at(ag.index_range.offset + i).vertex_range,
-                                  .triangle_range = asset.meshlets.at(ag.index_range.offset + i).triangle_range };
+            const auto& am = asset.meshlets.at(ag.meshlets_range.offset + i);
+            gfxmeshlets.at(i) = { .vertex_range = am.vertex_range, .triangle_range = am.triangle_range };
+            meshlets_vertices.insert(meshlets_vertices.end(), asset.meshlets_vertices.begin() + am.vertex_range.offset,
+                                     asset.meshlets_vertices.begin() + am.vertex_range.offset + am.vertex_range.size);
+            meshlets_triangles.insert(meshlets_triangles.end(), asset.meshlets_triangles.begin() + am.triangle_range.offset,
+                                      asset.meshlets_triangles.begin() + am.triangle_range.offset + am.triangle_range.size * 3);
         }
+        meshlets_triangles = asset.meshlets_triangles;
+        meshlets_vertices.shrink_to_fit();
+        meshlets_triangles.shrink_to_fit();
 
         Handle<gfx::Geometry> rg;
         if(asset.meshlets.empty()) {
@@ -76,10 +89,9 @@ Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
         } else {
             rg = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
                 .vertices = std::span{ gfxvertices },
-                .indices = std::span{},
                 .meshlets = std::span{ gfxmeshlets },
-                .meshlets_triangles = 
-                std::span{ asset.indices.begin() + ag.index_range.offset, ag.index_range.size },
+                .meshlets_vertices = std::span{ meshlets_vertices },
+                .meshlets_triangles = std::span{ meshlets_triangles },
             });
         }
         batched_geometries.push_back(rg);

@@ -50,7 +50,7 @@ int main() {
         // downsizing from pessimistic case
         const auto& last_meshlet = meshlets.at(meshlet_count - 1);
         meshlets_verts.resize(last_meshlet.vertex_offset + last_meshlet.vertex_count);
-        meshlets_tris.resize(last_meshlet.triangle_offset + last_meshlet.triangle_count); // TODO: omitted some alignment math; if any errors, restore.
+        meshlets_tris.resize(last_meshlet.triangle_offset + last_meshlet.triangle_count * 3); // TODO: omitted some alignment math; if any errors, restore.
         meshlets.resize(meshlet_count);
 
         for(auto& m : meshlets) {
@@ -61,12 +61,12 @@ int main() {
         std::move(opt_indices.begin(), opt_indices.end(), bunny.indices.begin() + g.index_range.offset);
         std::move(opt_vertices.begin(), opt_vertices.end(), bunny.vertices.begin() + g.vertex_range.offset);
 
-        g.index_range = { .offset = bunny.meshlets.size(), .size = meshlet_count };
-        bunny.meshlets.reserve(meshlets.size());
+        g.meshlets_range = { .offset = bunny.meshlets.size(), .size = meshlet_count };
+        bunny.meshlets.reserve(bunny.meshlets.size() + meshlets.size());
         for(const auto& m : meshlets) {
             bunny.meshlets.push_back(assets::Meshlet{
-                .vertex_range = { (size_t)m.vertex_offset + bunny.meshlets_vertices.size(), m.vertex_count },
-                .triangle_range = { (size_t)m.triangle_offset + bunny.meshlets_triangles.size(), m.triangle_count } });
+                .vertex_range = { bunny.meshlets_vertices.size() + (size_t)m.vertex_offset, m.vertex_count },
+                .triangle_range = { bunny.meshlets_triangles.size() + (size_t)m.triangle_offset, m.triangle_count } });
         }
 
         bunny.meshlets_vertices.insert(bunny.meshlets_vertices.end(), meshlets_verts.begin(), meshlets_verts.end());

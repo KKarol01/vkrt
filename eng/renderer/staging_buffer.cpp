@@ -81,7 +81,7 @@ StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, std:
         return *this;
     }
     if(data.size_bytes() == 0) {
-        ENG_ERROR("Upload data size is 0. Not Sending");
+        ENG_WARN("Upload data size is 0. Not Sending");
         return *this;
     }
     const size_t real_offset = offset == ~0ull ? RendererVulkan::get_buffer(buffer).size() : offset;

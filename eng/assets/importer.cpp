@@ -258,7 +258,7 @@ Asset Importer::import_glb(std::filesystem::path path, ImportSettings settings) 
                 if(fprim.materialIndex) {
                     submesh.material = *fprim.materialIndex;
                 } else {
-                    ENG_WARN("Mesh prim {}:{} does not have a material", fmesh.name.c_str(), j);
+                    ENG_WARN("Mesh primitive {}:{} does not have a material", fmesh.name.c_str(), j);
                 }
                 submesh.geometry = asset.make_geometry();
                 auto& geom = asset.get_geometry(submesh);

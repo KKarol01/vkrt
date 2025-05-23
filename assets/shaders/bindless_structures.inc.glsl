@@ -7,12 +7,15 @@
 #define BINDLESS_ACCELERATION_STRUCT_BINDING 3
 #define ENG_TYPE_INT int32_t
 #define ENG_TYPE_UINT uint32_t
+#define ENG_TYPE_UINT8 uint8_t
 #define ENG_TYPE_FLOAT float
 
 #ifndef __cplusplus
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_buffer_reference : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
@@ -100,6 +103,13 @@ ENG_DECLARE_STORAGE_BUFFERS(GPUMeshInstancesBuffer) {
 	ENG_TYPE_UNSIZED(GPUMeshInstance, mesh_instances);
 } ENG_DECLARE_BINDLESS(GPUMeshInstancesBuffer);
 
+ENG_DECLARE_STORAGE_BUFFERS(GPUMeshletVerticesBuffer) {
+	ENG_TYPE_UNSIZED(ENG_TYPE_UINT, vertices);
+} ENG_DECLARE_BINDLESS(GPUMeshletVerticesBuffer);
+ENG_DECLARE_STORAGE_BUFFERS(GPUMeshletTrianglesBuffer) {
+	ENG_TYPE_UNSIZED(ENG_TYPE_UINT, triangles);
+} ENG_DECLARE_BINDLESS(GPUMeshletTrianglesBuffer);
+
 ENG_DECLARE_STORAGE_BUFFERS(GPUTransformsBuffer) {
 	ENG_TYPE_UNSIZED(ENG_TYPE_MAT4, transforms);
 } ENG_DECLARE_BINDLESS(GPUTransformsBuffer);
@@ -152,6 +162,9 @@ layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict unifor
 #define attrib_pos_arr	storageBuffers_GPUVertexAttributesBuffer[vertex_attributes_index].attributes_us
 #define transforms_arr	storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
 #define meshes_arr		storageBuffers_GPUMeshInstancesBuffer[meshes_index].mesh_instances_us
+#define meshlets_verts  storageBuffers_GPUMeshletVerticesBuffer[meshlets_vertices_index].vertices_us
+#define meshlets_tris   storageBuffers_GPUMeshletTrianglesBuffer[meshlets_triangles_index].triangles_us
+
 
 #endif
 

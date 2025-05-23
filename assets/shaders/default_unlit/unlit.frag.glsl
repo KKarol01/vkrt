@@ -14,16 +14,33 @@ fsin;
 
 layout(location = 0) out vec4 OUT_COLOR;
 // Constants (tweak these values as needed)
-const vec3 LIGHT_DIR             = normalize(vec3(0.5, 1.0, 0.3));
-const vec3 WATER_COLOR           = vec3(0.0, 0.1, 0.3) * 1.8;
-const vec3 SKY_COLOR             = vec3(0.6, 0.8, 1.0);
-const float SHININESS            = 64.0;
-const float FRESNEL_POWER        = 5.0;
-const float SPECULAR_INTENSITY   = 1.0;
+const vec3 LIGHT_DIR = normalize(vec3(0.5, 1.0, 0.3));
+const vec3 WATER_COLOR = vec3(0.0, 0.1, 0.3) * 1.8;
+const vec3 SKY_COLOR = vec3(0.6, 0.8, 1.0);
+const float SHININESS = 64.0;
+const float FRESNEL_POWER = 5.0;
+const float SPECULAR_INTENSITY = 1.0;
 const float TRANSMISSION_INTENSITY = 0.5;
-const float REFRACT_IOR          = 1.33; // approximate water IOR
+const float REFRACT_IOR = 1.33; // approximate water IOR
 
 void main() {
+        const vec3 colors[10] = vec3[](
+        vec3(1.0, 0.0, 0.0),  // red
+        vec3(0.0, 1.0, 0.0),  // green
+        vec3(0.0, 0.0, 1.0),  // blue
+        vec3(1.0, 1.0, 0.0),  // yellow
+        vec3(1.0, 0.0, 1.0),  // magenta
+        vec3(0.0, 1.0, 1.0),  // cyan
+        vec3(1.0, 0.5, 0.0),  // orange
+        vec3(0.5, 0.0, 1.0),  // purple
+        vec3(0.0, 0.5, 0.5),  // teal
+        vec3(0.5, 0.5, 0.5)   // gray
+    );
+
+    OUT_COLOR = vec4(
+        vec3(colors[fsin.instance_index % 10]), 1.0);
+
+#if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;
 
     // Compute view direction per-fragment
@@ -65,5 +82,5 @@ void main() {
 	color = mix(color, vec3(1.0), J);
     
     OUT_COLOR = vec4(vec3(color), 1.0);
+#endif
 }
-

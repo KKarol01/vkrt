@@ -26,7 +26,10 @@ enum class RenderFlags : uint32_t {
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class GeometryFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
+enum class GeometryFlags : uint32_t {
+    DIRTY_BLAS_BIT = 0x1,
+    MESHLETS_BIT = 0x2,
+};
 enum class MeshFlags : uint32_t {};
 
 struct GeometryMetadata {
@@ -40,10 +43,11 @@ struct MeshMetadata {};
 struct Geometry {
     Flags<GeometryFlags> flags;
     Handle<GeometryMetadata> metadata;
-    uint32_t vertex_offset{ 0 };
-    uint32_t vertex_count{ 0 };
-    uint32_t index_offset{ 0 };
-    uint32_t index_count{ 0 };
+    Range vertex_range{};
+    Range index_range{};
+    Range meshlet_range{};
+    Range meshlet_vertices_range{};
+    Range meshlet_triangles_range{};
 };
 
 struct Material {
@@ -69,6 +73,13 @@ struct Mesh {
 struct MeshInstance {
     ecs::Entity entity;
     Handle<Mesh> mesh;
+};
+
+struct MeshletInstance {
+    ecs::Entity entity;
+    Handle<Geometry> geometry;
+    Handle<Mesh> mesh;
+    uint32_t meshlet_index{ ~0u }; // index into global meshlet array.
 };
 
 struct DDGI {
@@ -245,9 +256,9 @@ class RendererVulkan : public gfx::Renderer {
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
 
-    uint32_t get_total_vertices() const { return total_vertices; }
-    uint32_t get_total_indices() const { return total_indices; }
-    uint32_t get_total_triangles() const { return total_indices / 3u; }
+    size_t get_total_vertices() const { return total_vertices; }
+    size_t get_total_indices() const { return total_indices; }
+    size_t get_total_triangles() const { return total_indices / 3; }
 
     VkInstance instance;
     VkDevice dev;
@@ -273,21 +284,34 @@ class RendererVulkan : public gfx::Renderer {
     HandleMap<Material> materials;
 
     std::vector<MeshInstance> mesh_instances;
+    std::vector<MeshletInstance> meshlet_instances;
+    std::vector<Meshlet> meshlets;
     // std::unordered_map<ecs::Entity, uint32_t> mesh_instance_idxs;
     std::vector<ecs::Entity> blas_instances;
-    uint32_t max_draw_count{};
-    uint32_t total_vertices{};
-    uint32_t total_indices{};
+    size_t max_draw_count{};
+    size_t total_vertices{};
+    size_t total_indices{};
+    size_t total_meshlets{};
+    size_t total_meshlets_vertices{};
+    size_t total_meshlets_triangles{};
 
     VkAccelerationStructureKHR tlas{};
     Handle<Buffer> tlas_buffer;
     Handle<Buffer> tlas_instance_buffer;
     Handle<Buffer> tlas_scratch_buffer;
+
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
     Handle<Buffer> indirect_draw_buffer;
+    Handle<Buffer> meshlets_indirect_draw_buffer;
+
     Handle<Buffer> mesh_instance_mesh_id_buffer;
+
+    Handle<Buffer> meshlets_meshlets_buffer;
+    Handle<Buffer> meshlets_vertices_buffer;
+    Handle<Buffer> meshlets_triangles_buffer;
+
     Handle<Buffer> tlas_mesh_offsets_buffer;
     Handle<Buffer> tlas_transform_buffer;
     Handle<Buffer> blas_mesh_offsets_buffer;
@@ -311,7 +335,10 @@ class RendererVulkan : public gfx::Renderer {
         std::vector<std::byte> rgba_data;
     };
     std::vector<gfx::Vertex> upload_vertices;
+    std::vector<gfx::Meshlet> upload_meshlets;
     std::vector<uint32_t> upload_indices;
+    std::vector<uint32_t> upload_meshlets_vertices;
+    std::vector<uint32_t> upload_meshlets_triangles;
     std::vector<UploadImage> upload_images;
     std::vector<ecs::Entity> update_positions;
 };
