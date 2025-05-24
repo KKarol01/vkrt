@@ -5,9 +5,11 @@
 #include <vulkan/vulkan.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 
-namespace gfx {
+namespace gfx
+{
 
-class Image {
+class Image
+{
   public:
     Image() noexcept = default;
     Image(const std::string& name, VkDevice dev, VmaAllocator vma, const VkImageCreateInfo& vk_info) noexcept;
@@ -30,4 +32,4 @@ class Image {
     VkImageLayout current_layout{};
 };
 
-}
+} // namespace gfx

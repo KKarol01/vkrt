@@ -4,12 +4,16 @@
 #include <vulkan/vulkan.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 
-namespace gfx {
+namespace gfx
+{
 
-struct resizable_t {};
+struct resizable_t
+{
+};
 static constexpr resizable_t resizable;
 
-class Buffer {
+class Buffer
+{
   public:
     Buffer() noexcept = default;
     Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& vk_info,
@@ -35,4 +39,4 @@ class Buffer {
     bool is_resizable{};
 };
 
-}
+} // namespace gfx

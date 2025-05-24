@@ -2,14 +2,17 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 
-namespace gfx {
+namespace gfx
+{
 
-BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev) {
+BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
+{
     if(!dev) { return; }
     std::vector<VkDescriptorPoolSize> sizes{ { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
                                              { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
                                              { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 } };
-    if(RendererVulkan::get_instance()->supports_raytracing) {
+    if(RendererVulkan::get_instance()->supports_raytracing)
+    {
         sizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 });
     }
     const auto pool_info = Vks(VkDescriptorPoolCreateInfo{
@@ -30,7 +33,8 @@ BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
     const auto binding_flag = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                               VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
     std::vector<VkDescriptorBindingFlags> binding_flags{ binding_flag, binding_flag, binding_flag };
-    if(RendererVulkan::get_instance()->supports_raytracing) {
+    if(RendererVulkan::get_instance()->supports_raytracing)
+    {
         bindings.push_back({ BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536,
                              VK_SHADER_STAGE_ALL });
         binding_flags.push_back(binding_flag);
@@ -65,13 +69,16 @@ BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
     assert(set);
 }
 
-void BindlessDescriptorPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point) {
+void BindlessDescriptorPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
+{
     update();
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
-uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
-    if(!buffer) {
+uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer)
+{
+    if(!buffer)
+    {
         ENG_WARN("buffer is null");
         return ~0ull;
     }
@@ -81,8 +88,10 @@ uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer) {
     return buffer_counter++;
 }
 
-uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Texture> texture) {
-    if(!texture) {
+uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Texture> texture)
+{
+    if(!texture)
+    {
         ENG_WARN("view is null");
         return ~0ull;
     }
@@ -93,7 +102,8 @@ uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Texture> texture) {
     return view_counter++;
 }
 
-void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer) {
+void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer)
+{
     if(!buffers.contains(buffer)) { return; }
     buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
         .buffer = RendererVulkan::get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
@@ -105,7 +115,8 @@ void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer) {
                                                 .pBufferInfo = &buffer_updates.back() }));
 }
 
-void BindlessDescriptorPool::update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler) {
+void BindlessDescriptorPool::update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler)
+{
     image_updates.push_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
     updates.push_back(Vks(VkWriteDescriptorSet{
         .dstSet = set,
@@ -116,7 +127,8 @@ void BindlessDescriptorPool::update_bindless_resource(VkImageView view, VkImageL
         .pImageInfo = &image_updates.back() }));
 }
 
-void BindlessDescriptorPool::update() {
+void BindlessDescriptorPool::update()
+{
     if(updates.empty()) { return; }
     vkUpdateDescriptorSets(dev, updates.size(), updates.data(), 0, nullptr);
     updates.clear();

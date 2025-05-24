@@ -11,21 +11,26 @@
 #include <memory>
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 
-namespace gfx {
+namespace gfx
+{
 
-class StagingBuffer {
-    struct TransferBuffer {
+class StagingBuffer
+{
+    struct TransferBuffer
+    {
         Handle<Buffer> handle{};
         size_t offset{};
         std::vector<std::byte> data;
     };
-    struct TransferImage {
+    struct TransferImage
+    {
         Handle<Image> handle{};
         VkImageLayout final_layout{};
         VkBufferImageCopy2 region{};
         std::vector<std::byte> data;
     };
-    struct TransferFromBuffer {
+    struct TransferFromBuffer
+    {
         Handle<Buffer> dst_buffer{};
         size_t dst_offset{};
         Handle<Buffer> src_buffer{};
@@ -33,7 +38,8 @@ class StagingBuffer {
         size_t size{};
     };
 
-    struct Submission {
+    struct Submission
+    {
         bool started() const { return !transfers.empty(); }
         std::vector<std::variant<TransferBuffer, TransferImage, TransferFromBuffer>> transfers;
         VkFence fence{};
@@ -76,18 +82,21 @@ class StagingBuffer {
     VkFence submission_thread_fence{};
 };
 
-template <typename T> inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const T& t) {
+template <typename T> inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const T& t)
+{
     return send_to(buffer, offset, std::as_bytes(std::span{ &t, 1 }));
 }
 
 template <typename T>
-inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts) { // todo: maybe vector to span<T>
+inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts)
+{ // todo: maybe vector to span<T>
     return send_to(buffer, offset, std::as_bytes(std::span{ ts.begin(), ts.end() }));
 }
 
 template <typename T>
 inline StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout,
-                                             const VkBufferImageCopy2 region, const std::vector<T>& ts) {
+                                             const VkBufferImageCopy2 region, const std::vector<T>& ts)
+{
     return send_to(image, final_layout, region, std::as_bytes(std::span{ ts.begin(), ts.end() }));
 }
 

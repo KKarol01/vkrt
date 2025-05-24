@@ -1,6 +1,7 @@
 #pragma once
 
-namespace gfx {
+namespace gfx
+{
 struct Geometry;
 struct Mesh;
 struct BLAS;

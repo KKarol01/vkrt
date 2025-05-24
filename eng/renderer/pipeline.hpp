@@ -3,13 +3,17 @@
 #include <eng/renderer/common.hpp>
 #include <vulkan/vulkan.h>
 
-namespace gfx {
+namespace gfx
+{
 
-struct RasterizationSettings {
-    bool operator==(const RasterizationSettings& o) const {
+struct RasterizationSettings
+{
+    bool operator==(const RasterizationSettings& o) const
+    {
         return num_col_formats == o.num_col_formats &&
                [this, &o] {
-                   for(auto i = 0u; i < num_col_formats; ++i) {
+                   for(auto i = 0u; i < num_col_formats; ++i)
+                   {
                        if(col_formats[i] != o.col_formats[i]) { return false; }
                        return true;
                    }
@@ -26,16 +30,20 @@ struct RasterizationSettings {
     VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
 };
 
-struct RaytracingSettings {
-    bool operator==(const RaytracingSettings& o) const {
+struct RaytracingSettings
+{
+    bool operator==(const RaytracingSettings& o) const
+    {
         return recursion_depth == o.recursion_depth && sbt_buffer == o.sbt_buffer && groups.size() == o.groups.size() &&
                [this, &o] {
-                   for(const auto& e : groups) {
+                   for(const auto& e : groups)
+                   {
                        if(std::find_if(o.groups.begin(), o.groups.end(), [&e](auto& g) {
                               return e.type == g.type && e.generalShader == g.generalShader &&
                                      e.closestHitShader == g.closestHitShader && e.anyHitShader == g.anyHitShader &&
                                      e.intersectionShader == g.intersectionShader;
-                          }) == o.groups.end()) {
+                          }) == o.groups.end())
+                       {
                            return false;
                        }
                    }
@@ -47,24 +55,28 @@ struct RaytracingSettings {
     Handle<Buffer> sbt_buffer;
 };
 
-struct PipelineSettings {
+struct PipelineSettings
+{
     std::variant<std::monostate, RasterizationSettings> settings; // monostate for, for example, compute pipeline
     std::vector<std::filesystem::path> shaders;
 };
 
-struct Shader {
+struct Shader
+{
     std::filesystem::path path;
     VkShaderStageFlagBits stage{};
     VkShaderModule shader{};
 };
 
-struct Pipeline {
+struct Pipeline
+{
     PipelineSettings settings{};
     VkPipelineBindPoint bind_point{};
     VkPipeline pipeline{};
 };
 
-class PipelineCompiler {
+class PipelineCompiler
+{
   public:
     Shader* get_shader(const std::filesystem::path path);
     Pipeline* get_pipeline(const PipelineSettings& settings);

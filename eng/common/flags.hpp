@@ -3,12 +3,14 @@
 #include <type_traits>
 #include <compare>
 
-#define ENG_ENABLE_FLAGS_OPERATORS(Type)                                                                                   \
-    constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept {                                           \
+#define ENG_ENABLE_FLAGS_OPERATORS(Type)                                                                               \
+    constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept                                             \
+    {                                                                                                                  \
         return Flags<Type>{ a } | Flags<Type>{ b };                                                                    \
     }
 
-template <typename T> struct Flags {
+template <typename T> struct Flags
+{
     using U = typename std::underlying_type_t<T>;
 
     constexpr Flags() = default;
@@ -19,15 +21,18 @@ template <typename T> struct Flags {
     constexpr Flags<T> operator|(Flags<T> a) const noexcept { return Flags<T>{ flags | a.flags }; }
     constexpr Flags<T> operator&(Flags<T> a) const noexcept { return Flags<T>{ a.flags & flags }; }
     constexpr Flags<T> operator~() const noexcept { return Flags<T>{ ~flags }; }
-    constexpr Flags<T>& operator|=(Flags<T> f) noexcept {
+    constexpr Flags<T>& operator|=(Flags<T> f) noexcept
+    {
         flags = flags | f.flags;
         return *this;
     }
-    constexpr Flags<T>& operator&=(Flags<T> f) noexcept {
+    constexpr Flags<T>& operator&=(Flags<T> f) noexcept
+    {
         flags = flags & f.flags;
         return *this;
     }
-    constexpr Flags<T>& operator^=(Flags<T> f) noexcept {
+    constexpr Flags<T>& operator^=(Flags<T> f) noexcept
+    {
         flags = flags ^ f.flags;
         return *this;
     }
@@ -38,7 +43,8 @@ template <typename T> struct Flags {
     constexpr bool empty() const { return flags == U{}; }
     constexpr void set(Flags<T> f) noexcept { *this |= f; }
     constexpr bool test(Flags<T> f) const noexcept { return (flags & f.flags) == f.flags; }
-    constexpr bool test_clear(Flags<T> f) {
+    constexpr bool test_clear(Flags<T> f)
+    {
         const auto result = test(f);
         clear(f);
         return result;

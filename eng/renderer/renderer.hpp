@@ -7,17 +7,37 @@
 #include <eng/common/types.hpp>
 #include <eng/ecs/ecs.hpp>
 
-namespace gfx {
+namespace gfx
+{
 
-enum class BatchFlags {};
-enum class InstanceFlags { RAY_TRACED_BIT = 0x1 };
-enum class ImageFormat {
+enum class BatchFlags
+{
+};
+enum class InstanceFlags
+{
+    RAY_TRACED_BIT = 0x1
+};
+enum class ImageFormat
+{
     R8G8B8A8_UNORM,
     R8G8B8A8_SRGB,
 };
-enum class ImageType { TYPE_1D, TYPE_2D, TYPE_3D };
-enum class ImageFiltering { LINEAR, NEAREST };
-enum class ImageAddressing { REPEAT, CLAMP_EDGE };
+enum class ImageType
+{
+    TYPE_1D,
+    TYPE_2D,
+    TYPE_3D
+};
+enum class ImageFiltering
+{
+    LINEAR,
+    NEAREST
+};
+enum class ImageAddressing
+{
+    REPEAT,
+    CLAMP_EDGE
+};
 
 struct Geometry;
 struct Mesh;
@@ -28,25 +48,29 @@ struct Material;
 
 using Index = uint32_t;
 
-struct Vertex {
+struct Vertex
+{
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 uv;
     glm::vec4 tangent;
 };
 
-struct Meshlet {
+struct Meshlet
+{
     Range vertex_range;
     Range triangle_range;
 };
 
-struct GeometryDescriptor {
+struct GeometryDescriptor
+{
     std::span<const Vertex> vertices;
     std::span<const Index> indices;
     std::span<const Meshlet> meshlets;
 };
 
-struct ImageDescriptor {
+struct ImageDescriptor
+{
     std::string name;
     uint32_t width{};
     uint32_t height{};
@@ -57,33 +81,39 @@ struct ImageDescriptor {
     std::span<const std::byte> data;
 };
 
-struct TextureDescriptor {
+struct TextureDescriptor
+{
     Handle<Image> image;
     ImageFiltering filtering{ ImageFiltering::LINEAR };
     ImageAddressing addressing{ ImageAddressing::REPEAT };
 };
 
-struct MaterialDescriptor {
+struct MaterialDescriptor
+{
     Handle<Texture> base_color_texture;
     Handle<Texture> normal_texture;
     Handle<Texture> metallic_roughness_texture;
 };
 
-struct MeshDescriptor {
+struct MeshDescriptor
+{
     Handle<Geometry> geometry;
     Handle<Material> material;
 };
 
-struct InstanceSettings {
+struct InstanceSettings
+{
     // Primitive's entity (scene::NodeInstance's primitives)
     ecs::Entity entity;
 };
 
-struct BLASInstanceSettings {
+struct BLASInstanceSettings
+{
     ecs::Entity entity;
 };
 
-struct VsmData {
+struct VsmData
+{
     Handle<Buffer> constants_buffer;
     Handle<Buffer> free_allocs_buffer;
     Handle<Image> shadow_map_0;
@@ -94,7 +124,8 @@ struct VsmData {
     // VkImageView view_dir_light_page_table_rgb8_general{};
 };
 
-class Renderer {
+class Renderer
+{
   public:
     virtual ~Renderer() = default;
     virtual void init() = 0;

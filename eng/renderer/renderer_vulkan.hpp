@@ -10,10 +10,12 @@
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/pipeline.hpp>
 
-namespace gfx {
+namespace gfx
+{
 
 /* Controls renderer's behavior */
-enum class RenderFlags : uint32_t {
+enum class RenderFlags : uint32_t
+{
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
     DIRTY_BLAS_BIT = 0x4,
@@ -26,20 +28,27 @@ enum class RenderFlags : uint32_t {
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class GeometryFlags : uint32_t {
+enum class GeometryFlags : uint32_t
+{
     DIRTY_BLAS_BIT = 0x1,
 };
-enum class MeshFlags : uint32_t {};
+enum class MeshFlags : uint32_t
+{
+};
 
-struct GeometryMetadata {
+struct GeometryMetadata
+{
     VkAccelerationStructureKHR blas{};
     Handle<Buffer> blas_buffer{};
 };
 
-struct MeshMetadata {};
+struct MeshMetadata
+{
+};
 
 /* position inside vertex and index buffer*/
-struct Geometry {
+struct Geometry
+{
     Flags<GeometryFlags> flags;
     Handle<GeometryMetadata> metadata;
     Range vertex_range{};
@@ -47,11 +56,13 @@ struct Geometry {
     Range meshlet_range{};
 };
 
-struct Material {
+struct Material
+{
     Handle<Texture> base_color_texture{ ~0u };
 };
 
-struct Texture {
+struct Texture
+{
     Handle<Image> image;
     VkImageView view{};
     VkImageLayout layout{};
@@ -59,7 +70,8 @@ struct Texture {
 };
 
 /* subset of geometry's vertex and index buffers */
-struct Mesh {
+struct Mesh
+{
     // Flags<MeshFlags> flags;
     Handle<Geometry> geometry;
     Handle<Material> material;
@@ -67,20 +79,24 @@ struct Mesh {
     //  Handle<gfx::BLAS> blas;
 };
 
-struct MeshInstance {
+struct MeshInstance
+{
     ecs::Entity entity;
     Handle<Mesh> mesh;
 };
 
-struct MeshletInstance {
+struct MeshletInstance
+{
     ecs::Entity entity;
     Handle<Geometry> geometry;
     Handle<Mesh> mesh;
     uint32_t meshlet_index{ ~0u }; // index into global meshlet array.
 };
 
-struct DDGI {
-    struct GPULayout {
+struct DDGI
+{
+    struct GPULayout
+    {
         glm::ivec2 radiance_tex_size;
         glm::ivec2 irradiance_tex_size;
         glm::ivec2 visibility_tex_size;
@@ -118,12 +134,14 @@ struct DDGI {
     Handle<Image> probe_offsets_texture;
 };
 
-struct IndirectDrawCommandBufferHeader {
+struct IndirectDrawCommandBufferHeader
+{
     uint32_t draw_count{};
     uint32_t geometry_instance_count{};
 };
 
-struct Swapchain {
+struct Swapchain
+{
     void create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height);
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     Image& get_current_image();
@@ -134,7 +152,8 @@ struct Swapchain {
     uint32_t current_index{ 0ul };
 };
 
-struct GBuffer {
+struct GBuffer
+{
     Handle<Image> color_image{};
     Handle<Image> view_space_positions_image{};
     Handle<Image> view_space_normals_image{};
@@ -144,7 +163,8 @@ struct GBuffer {
 
 class CommandPool;
 
-struct FrameData {
+struct FrameData
+{
     CommandPool* cmdpool{};
     VkSemaphore sem_swapchain{};
     VkSemaphore sem_rendering_finished{};
@@ -154,8 +174,10 @@ struct FrameData {
     GBuffer gbuffer{};
 };
 
-struct FFTOcean {
-    struct FFTOceanSettings {
+struct FFTOcean
+{
+    struct FFTOceanSettings
+    {
         float num_samples{ 512.0f };       // N
         float patch_size{ 3.7f };          // L
         glm::vec2 wind_dir{ 0.0f, -2.5f }; // w
@@ -164,7 +186,8 @@ struct FFTOcean {
         float disp_lambda{ -1.58f };
         float small_l{ 0.0001f };
     };
-    struct FFTOceanPushConstants {
+    struct FFTOceanPushConstants
+    {
         FFTOceanSettings settings;
         uint32_t gaussian;
         uint32_t h0;
@@ -193,7 +216,8 @@ class SubmitQueue;
 class StagingBuffer;
 class BindlessDescriptorPool;
 
-class RendererVulkan : public gfx::Renderer {
+class RendererVulkan : public gfx::Renderer
+{
   public:
     static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
 
@@ -327,7 +351,8 @@ class RendererVulkan : public gfx::Renderer {
     gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
     FFTOcean fftocean;
 
-    struct UploadImage {
+    struct UploadImage
+    {
         Handle<Image> image_handle;
         std::vector<std::byte> rgba_data;
     };

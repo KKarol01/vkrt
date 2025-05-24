@@ -4,7 +4,8 @@
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 
-namespace gfx {
+namespace gfx
+{
 struct ModelAsset;
 struct MeshAsset;
 struct Mesh;
@@ -14,15 +15,18 @@ struct Material;
 enum class InstanceFlags;
 } // namespace gfx
 
-namespace components {
+namespace components
+{
 
 /* Position on scene */
-struct Transform {
+struct Transform
+{
     /* World position after traversing node hierarchy */
     glm::mat4 transform{ 1.0f };
 };
 
-struct Mesh {
+struct Mesh
+{
     std::string name;
     std::vector<Handle<gfx::Mesh>> submeshes;
 };

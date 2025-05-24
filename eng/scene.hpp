@@ -14,9 +14,11 @@
 #include <eng/common/handle_map.hpp>
 #include <eng/common/types.hpp>
 
-namespace scene {
+namespace scene
+{
 
-struct Image {
+struct Image
+{
     std::string name;
     Handle<gfx::Image> gfx_handle;
     gfx::ImageFormat format;
@@ -26,38 +28,44 @@ struct Image {
     uint32_t depth{ 1 };
 };
 
-struct Texture {
+struct Texture
+{
     Handle<Image> image;
     Handle<gfx::Texture> gfx_handle;
     gfx::ImageFiltering filtering{ gfx::ImageFiltering::LINEAR };
     gfx::ImageAddressing addressing{ gfx::ImageAddressing::REPEAT };
 };
 
-struct Material {
+struct Material
+{
     std::string name;
     Handle<gfx::Material> gfx_handle;
     Handle<Texture> base_color_texture;
 };
 
-struct Geometry {
+struct Geometry
+{
     Handle<gfx::Geometry> gfx_handle;
     std::vector<gfx::Vertex> vertices;
     std::vector<gfx::Index> indices;
     std::vector<gfx::Meshlet> meshlets;
 };
 
-struct Submesh {
+struct Submesh
+{
     Handle<gfx::Mesh> gfx_handle;
     Handle<Geometry> geometry;
     Handle<Material> material;
 };
 
-struct Mesh {
+struct Mesh
+{
     std::string name;
     std::vector<Submesh> submeshes;
 };
 
-struct Node {
+struct Node
+{
     std::string name;
     std::vector<Handle<Node>> children;
     glm::mat4 transform{ 1.0f };
@@ -65,23 +73,27 @@ struct Node {
     Handle<Mesh> mesh;
 };
 
-struct Model {
+struct Model
+{
     std::filesystem::path path;
     Handle<Node> root_node;
 };
 
-struct NodeInstance {
+struct NodeInstance
+{
     std::string name;
     std::vector<Handle<NodeInstance>> children;
     glm::mat4 transform{ 1.0f };
     ecs::Entity entity;
 };
 
-struct ModelInstance {
+struct ModelInstance
+{
     Handle<NodeInstance> root_node;
 };
 
-class Scene {
+class Scene
+{
   public:
     Handle<Model> load_from_file(const std::filesystem::path& path);
     // Handle<Node> load_from_asset(assets::Asset& asset);
@@ -115,16 +127,16 @@ class Scene {
 };
 } // namespace scene
 
-//void scene::Scene::traverse_dfs(Handle<scene::Node> node, const auto& func) {
-//    auto& n = *node_handles.at(node);
-//    traverse_dfs(n, func);
-//}
+// void scene::Scene::traverse_dfs(Handle<scene::Node> node, const auto& func) {
+//     auto& n = *node_handles.at(node);
+//     traverse_dfs(n, func);
+// }
 //
-//void scene::Scene::traverse_dfs(scene::Node& node, const auto& func)
-//    requires std::invocable<decltype(func), scene::Node&>
+// void scene::Scene::traverse_dfs(scene::Node& node, const auto& func)
+//     requires std::invocable<decltype(func), scene::Node&>
 //{
-//    func(node);
-//    for(auto& c : node.children) {
-//        traverse_dfs(*node_handles.at(c), func);
-//    }
-//}
+//     func(node);
+//     for(auto& c : node.children) {
+//         traverse_dfs(*node_handles.at(c), func);
+//     }
+// }

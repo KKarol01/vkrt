@@ -3,18 +3,21 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 
-namespace gfx {
+namespace gfx
+{
 
 // clang-format off
 inline RendererVulkan& get_renderer() { return *static_cast<RendererVulkan*>(Engine::get().renderer); }
 // clang-format on
 
-VkSampler SamplerStorage::get_sampler() {
+VkSampler SamplerStorage::get_sampler()
+{
     auto sampler_info = Vks(VkSamplerCreateInfo{});
     return get_sampler(sampler_info);
 }
 
-VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode address) {
+VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode address)
+{
     auto sampler_info = Vks(VkSamplerCreateInfo{
         .magFilter = filter,
         .minFilter = filter,
@@ -27,20 +30,24 @@ VkSampler SamplerStorage::get_sampler(VkFilter filter, VkSamplerAddressMode addr
     return get_sampler(sampler_info);
 }
 
-VkSampler SamplerStorage::get_sampler(ImageFiltering filter, ImageAddressing address) {
+VkSampler SamplerStorage::get_sampler(ImageFiltering filter, ImageAddressing address)
+{
     const VkFilter _filter = filter == ImageFiltering::LINEAR    ? VK_FILTER_LINEAR
                              : filter == ImageFiltering::NEAREST ? VK_FILTER_NEAREST
-                                                              : VK_FILTER_MAX_ENUM;
+                                                                 : VK_FILTER_MAX_ENUM;
     const VkSamplerAddressMode _address = address == ImageAddressing::REPEAT ? VK_SAMPLER_ADDRESS_MODE_REPEAT
                                           : address == ImageAddressing::CLAMP_EDGE ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
                                                                                    : VK_SAMPLER_ADDRESS_MODE_MAX_ENUM;
     return get_sampler(_filter, _address);
 }
 
-VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo vk_info) {
-    for(const auto& s : samplers) {
+VkSampler SamplerStorage::get_sampler(VkSamplerCreateInfo vk_info)
+{
+    for(const auto& s : samplers)
+    {
         if(s.first.magFilter == vk_info.magFilter && s.first.minFilter == vk_info.minFilter &&
-           s.first.addressModeU == vk_info.addressModeU) {
+           s.first.addressModeU == vk_info.addressModeU)
+        {
             return s.second;
         }
     }

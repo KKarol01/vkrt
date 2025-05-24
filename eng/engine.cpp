@@ -8,17 +8,20 @@
 #include <eng/camera.hpp>
 
 static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::get().camera->on_mouse_move(px, py); }
-static void on_window_resize(GLFWwindow* window, int w, int h) {
+static void on_window_resize(GLFWwindow* window, int w, int h)
+{
     Engine::get().window->width = (float)w;
     Engine::get().window->height = (float)h;
     Engine::get().notify_on_window_resize();
 }
-static void on_window_focus(GLFWwindow* window, int focus) {
+static void on_window_focus(GLFWwindow* window, int focus)
+{
     if(!focus) { return; }
     Engine::get().notify_on_window_focus();
 }
 
-static void eng_ui_reload_dll(HMODULE hnew) {
+static void eng_ui_reload_dll(HMODULE hnew)
+{
     // UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
     //         .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
     //// TODO: transition data
@@ -44,22 +47,26 @@ static void eng_ui_reload_dll(HMODULE hnew) {
 //     Engine::get().ui = _ui;
 // }
 
-static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free) {
+static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free)
+{
     if(!std::filesystem::exists(path_dll)) { return; }
 }
 
-Window::Window(float width, float height) : width(width), height(height) {
+Window::Window(float width, float height) : width(width), height(height)
+{
     window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
     if(!window) { ENG_WARN("Could not create glfw window"); }
 }
 
-Window::~Window() {
+Window::~Window()
+{
     if(window) { glfwDestroyWindow(window); }
 }
 
 bool Window::should_close() const { return glfwWindowShouldClose(window); }
 
-void Engine::init() {
+void Engine::init()
+{
     if(!glfwInit()) { ENG_WARN("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
@@ -82,9 +89,12 @@ void Engine::init() {
 
 void Engine::destroy() { this->~Engine(); }
 
-void Engine::start() {
-    while(!window->should_close()) {
-        if(get_time_secs() - last_frame_time() >= _refresh_rate) {
+void Engine::start()
+{
+    while(!window->should_close())
+    {
+        if(get_time_secs() - last_frame_time() >= _refresh_rate)
+        {
             const float now = get_time_secs();
             if(_on_update_callback) { _on_update_callback(); }
             camera->update();
@@ -97,38 +107,47 @@ void Engine::start() {
     }
 }
 
-void Engine::set_on_update_callback(const std::function<void()>& on_update_callback) {
+void Engine::set_on_update_callback(const std::function<void()>& on_update_callback)
+{
     _on_update_callback = on_update_callback;
 }
 
-void Engine::add_on_window_resize_callback(const std::function<bool()>& on_update_callback) {
+void Engine::add_on_window_resize_callback(const std::function<bool()>& on_update_callback)
+{
     _on_window_resize_callbacks.push_back(on_update_callback);
 }
 
-void Engine::add_on_window_focus_callback(const std::function<void()>& on_focus) {
+void Engine::add_on_window_focus_callback(const std::function<void()>& on_focus)
+{
     m_on_window_focus_callbacks.push_back(on_focus);
 }
 
-void Engine::notify_on_window_resize() {
-    for(const auto& e : _on_window_resize_callbacks) {
+void Engine::notify_on_window_resize()
+{
+    for(const auto& e : _on_window_resize_callbacks)
+    {
         e();
     }
 }
 
-void Engine::notify_on_window_focus() {
-    for(auto& e : m_on_window_focus_callbacks) {
+void Engine::notify_on_window_focus()
+{
+    for(auto& e : m_on_window_focus_callbacks)
+    {
         e();
     }
 }
 
-Engine& Engine::get() {
+Engine& Engine::get()
+{
     static Engine _engine;
     return _engine;
 }
 
 double Engine::get_time_secs() { return glfwGetTime(); }
 
-void FrameTime::update() {
+void FrameTime::update()
+{
     float time = static_cast<float>(glfwGetTime());
     float dt = time - last_time;
     last_time = time;

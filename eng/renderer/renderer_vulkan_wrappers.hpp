@@ -11,9 +11,11 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/renderer.hpp>
 
-namespace gfx {
+namespace gfx
+{
 
-class SamplerStorage {
+class SamplerStorage
+{
   public:
     VkSampler get_sampler();
     VkSampler get_sampler(VkFilter filter, VkSamplerAddressMode address);
@@ -24,7 +26,8 @@ class SamplerStorage {
     std::vector<std::pair<VkSamplerCreateInfo, VkSampler>> samplers;
 };
 
-struct RecordingSubmitInfo {
+struct RecordingSubmitInfo
+{
     std::vector<VkCommandBuffer> buffers;
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> waits;
     std::vector<std::pair<VkSemaphore, VkPipelineStageFlags2>> signals;

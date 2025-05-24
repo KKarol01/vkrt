@@ -1,9 +1,11 @@
 #pragma once
-template <class... Ts> struct Visitor : Ts... {
+template <class... Ts> struct Visitor : Ts...
+{
     using Ts::operator()...;
 };
 
-struct Range {
+struct Range
+{
     size_t offset{};
     size_t size{};
 };

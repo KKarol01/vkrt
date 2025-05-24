@@ -4,8 +4,10 @@
 #include <shaderc/shaderc.hpp>
 #include <stb/stb_include.h>
 
-namespace gfx {
-Shader* PipelineCompiler::get_shader(const std::filesystem::path path) {
+namespace gfx
+{
+Shader* PipelineCompiler::get_shader(const std::filesystem::path path)
+{
     if(auto it = compiled_shaders.find(path); it != compiled_shaders.end()) { return it->second; }
     shaders.push_front(Shader{ .path = path });
     shaders_to_compile.push_back(&shaders.front());
@@ -13,18 +15,22 @@ Shader* PipelineCompiler::get_shader(const std::filesystem::path path) {
     return &shaders.front();
 }
 
-Pipeline* PipelineCompiler::get_pipeline(const PipelineSettings& settings) {
+Pipeline* PipelineCompiler::get_pipeline(const PipelineSettings& settings)
+{
     if(settings.shaders.empty()) { return nullptr; }
-    for(auto& e : pipelines) {
+    for(auto& e : pipelines)
+    {
         if(e.settings.shaders.size() == settings.shaders.size() &&
            std::equal(e.settings.shaders.begin(), e.settings.shaders.end(), settings.shaders.begin()) &&
-           e.settings.settings == settings.settings) {
+           e.settings.settings == settings.settings)
+        {
             return &e;
         }
     }
     pipelines.push_front(Pipeline{ .settings = settings });
     auto* p = &pipelines.front();
-    for(auto& e : p->settings.shaders) {
+    for(auto& e : p->settings.shaders)
+    {
         canonize_path(e);
         get_shader(e);
     }
@@ -32,7 +38,8 @@ Pipeline* PipelineCompiler::get_pipeline(const PipelineSettings& settings) {
     return p;
 }
 
-void PipelineCompiler::threaded_compile() {
+void PipelineCompiler::threaded_compile()
+{
     if(shaders_to_compile.empty()) { return; }
 
     const auto num_th = std::thread::hardware_concurrency();
@@ -43,39 +50,47 @@ void PipelineCompiler::threaded_compile() {
     uint32_t running_threads = 0u;
     uint32_t items_in_flight = 0u;
     for(running_threads = 0u, items_in_flight = 0u; items_in_flight < shaders_to_compile.size();
-        ++running_threads, items_in_flight += sh_per_th) {
+        ++running_threads, items_in_flight += sh_per_th)
+    {
         workers[running_threads] = std::thread{ [this, items_in_flight, sh_per_th]() {
-            for(auto i = items_in_flight; i < sh_per_th + items_in_flight && i < shaders_to_compile.size(); ++i) {
+            for(auto i = items_in_flight; i < sh_per_th + items_in_flight && i < shaders_to_compile.size(); ++i)
+            {
                 compile_shader(shaders_to_compile.at(i));
             }
         } };
     }
-    for(auto i = 0u; i < running_threads; ++i) {
+    for(auto i = 0u; i < running_threads; ++i)
+    {
         workers.at(i).join();
     }
     for(running_threads = 0u, items_in_flight = 0u; items_in_flight < pipelines_to_compile.size();
-        ++running_threads, items_in_flight += pp_per_th) {
+        ++running_threads, items_in_flight += pp_per_th)
+    {
         workers[running_threads] = std::thread{ [this, items_in_flight, pp_per_th]() {
-            for(auto i = items_in_flight; i < pp_per_th + items_in_flight; ++i) {
+            for(auto i = items_in_flight; i < pp_per_th + items_in_flight; ++i)
+            {
                 compile_pipeline(pipelines_to_compile.at(i));
             }
         } };
     }
-    for(auto i = 0u; i < running_threads; ++i) {
+    for(auto i = 0u; i < running_threads; ++i)
+    {
         workers.at(i).join();
     }
     shaders_to_compile.clear();
     pipelines_to_compile.clear();
 }
 
-void PipelineCompiler::compile_shader(Shader* shader) {
+void PipelineCompiler::compile_shader(Shader* shader)
+{
     const auto& path = shader->path;
     static const auto read_file = [](const std::filesystem::path& path) {
         std::string path_str = path.string();
         std::string path_to_includes = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
         char error[256] = {};
         char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
-        if(!parsed_file) {
+        if(!parsed_file)
+        {
             ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
             return std::string{};
         }
@@ -107,7 +122,8 @@ void PipelineCompiler::compile_shader(Shader* shader) {
     shaderc::Compiler c;
     std::string file_str = read_file(path);
     const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
-    if(res.GetCompilationStatus() != shaderc_compilation_status_success) {
+    if(res.GetCompilationStatus() != shaderc_compilation_status_success)
+    {
         ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
         return;
     }
@@ -119,17 +135,20 @@ void PipelineCompiler::compile_shader(Shader* shader) {
     VK_CHECK(vkCreateShaderModule(RendererVulkan::get_instance()->dev, &module_info, nullptr, &shader->shader));
 }
 
-void PipelineCompiler::compile_pipeline(Pipeline* pipeline) {
+void PipelineCompiler::compile_pipeline(Pipeline* pipeline)
+{
     if(pipeline->settings.shaders.empty()) { return; }
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
-    for(const auto& p : pipeline->settings.shaders) {
+    for(const auto& p : pipeline->settings.shaders)
+    {
         const auto stage =
             Vks(VkPipelineShaderStageCreateInfo{ .stage = get_shader(p)->stage, .module = get_shader(p)->shader, .pName = "main" });
         stages.push_back(stage);
     }
 
-    if(std::holds_alternative<RasterizationSettings>(pipeline->settings.settings)) {
+    if(std::holds_alternative<RasterizationSettings>(pipeline->settings.settings))
+    {
         auto& rasterization_settings = std::get<RasterizationSettings>(pipeline->settings.settings);
 
         auto pVertexInputState = Vks(VkPipelineVertexInputStateCreateInfo{});
@@ -165,7 +184,8 @@ void PipelineCompiler::compile_pipeline(Pipeline* pipeline) {
         });
 
         std::array<VkPipelineColorBlendAttachmentState, 4> blends;
-        for(uint32_t i = 0; i < rasterization_settings.num_col_formats; ++i) {
+        for(uint32_t i = 0; i < rasterization_settings.num_col_formats; ++i)
+        {
             blends[i] = { .colorWriteMask = 0b1111 /*RGBA*/ };
         }
         auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
@@ -206,7 +226,9 @@ void PipelineCompiler::compile_pipeline(Pipeline* pipeline) {
         });
         VK_CHECK(vkCreateGraphicsPipelines(RendererVulkan::get_instance()->dev, nullptr, 1, &vk_info, nullptr, &pipeline->pipeline));
         pipeline->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    } else if(std::holds_alternative<std::monostate>(pipeline->settings.settings)) {
+    }
+    else if(std::holds_alternative<std::monostate>(pipeline->settings.settings))
+    {
         assert(stages.size() == 1);
         auto vk_info = Vks(VkComputePipelineCreateInfo{
             .stage = stages.at(0),
@@ -214,12 +236,12 @@ void PipelineCompiler::compile_pipeline(Pipeline* pipeline) {
         });
         VK_CHECK(vkCreateComputePipelines(RendererVulkan::get_instance()->dev, nullptr, 1, &vk_info, nullptr, &pipeline->pipeline));
         pipeline->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
-    } else {
-        assert(false);
     }
+    else { assert(false); }
 }
 
-VkShaderStageFlagBits PipelineCompiler::get_shader_stage(std::filesystem::path path) const {
+VkShaderStageFlagBits PipelineCompiler::get_shader_stage(std::filesystem::path path) const
+{
     if(path.extension() == ".glsl") { path.replace_extension(); }
     const auto ext = path.extension();
     if(ext == ".vert") { return VK_SHADER_STAGE_VERTEX_BIT; }
@@ -232,7 +254,8 @@ VkShaderStageFlagBits PipelineCompiler::get_shader_stage(std::filesystem::path p
     return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
 }
 
-void PipelineCompiler::canonize_path(std::filesystem::path& p) {
+void PipelineCompiler::canonize_path(std::filesystem::path& p)
+{
     static const auto prefix = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders");
     if(!p.string().starts_with(prefix.string())) { p = prefix / p; }
     p.make_preferred();

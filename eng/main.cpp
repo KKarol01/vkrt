@@ -10,7 +10,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "./engine.hpp"
 
-int main() {
+int main()
+{
     Engine::get().init();
 
     const auto scene_bunny = Engine::get().scene->load_from_file("bunny.glb");

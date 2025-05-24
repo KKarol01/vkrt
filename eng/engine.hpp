@@ -12,7 +12,8 @@
 
 struct GLFWwindow;
 
-struct Window {
+struct Window
+{
     Window(float width, float height);
     ~Window();
 
@@ -23,7 +24,8 @@ struct Window {
     GLFWwindow* window{ nullptr };
 };
 
-struct FrameTime {
+struct FrameTime
+{
     void update();
     float get_avg_frame_time() const { return tick_sum * 0.01f; }
 
@@ -33,7 +35,8 @@ struct FrameTime {
     int index = 0;
 };
 
-class Engine {
+class Engine
+{
   public:
     void init();
     void destroy();

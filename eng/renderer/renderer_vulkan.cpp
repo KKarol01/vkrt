@@ -27,13 +27,15 @@
 #include <eng/renderer/passes/passes.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
-static float halton(int i, int b) {
+static float halton(int i, int b)
+{
     /* Creates a halton sequence of values between 0 and 1.
         https://en.wikipedia.org/wiki/Halton_sequence
         Used for jittering based on a constant set of 2D points. */
     float f = 1.0;
     float r = 0.0;
-    while(i > 0) {
+    while(i > 0)
+    {
         f = f / float(b);
         r = r + f * float(i % b);
         i = i / b;
@@ -44,7 +46,8 @@ static float halton(int i, int b) {
 
 using namespace gfx;
 
-void RendererVulkan::init() {
+void RendererVulkan::init()
+{
     initialize_vulkan();
     initialize_resources();
     initialize_imgui();
@@ -54,7 +57,8 @@ void RendererVulkan::init() {
     });
 }
 
-void RendererVulkan::initialize_vulkan() {
+void RendererVulkan::initialize_vulkan()
+{
     // TODO: remove throws
     if(volkInitialize() != VK_SUCCESS) { throw std::runtime_error{ "Volk loader not found. Stopping" }; }
 
@@ -97,7 +101,8 @@ void RendererVulkan::initialize_vulkan() {
                          .allow_any_gpu_device_type(false)
                          .select_devices();
     auto phys_ret = [&phys_rets] {
-        for(auto& pd : *phys_rets) {
+        for(auto& pd : *phys_rets)
+        {
             if(pd.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { return pd; }
         }
         return *phys_rets->begin();
@@ -160,7 +165,8 @@ void RendererVulkan::initialize_vulkan() {
     rt_acc_props = Vks(VkPhysicalDeviceAccelerationStructurePropertiesKHR{});
     vkb::DeviceBuilder device_builder{ phys_ret };
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
-    if(supports_raytracing) {
+    if(supports_raytracing)
+    {
         device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&rayq_features);
     }
     auto dev_ret = device_builder.build();
@@ -222,7 +228,8 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
 }
 
-void RendererVulkan::initialize_imgui() {
+void RendererVulkan::initialize_imgui()
+{
     IMGUI_CHECKVERSION();
     void* user_data;
     ImGui::CreateContext();
@@ -281,7 +288,8 @@ void RendererVulkan::initialize_imgui() {
     });
 }
 
-void RendererVulkan::initialize_resources() {
+void RendererVulkan::initialize_resources()
+{
     bindless_pool = new BindlessDescriptorPool{ dev };
 
     staging_buffer = new StagingBuffer{
@@ -354,7 +362,8 @@ void RendererVulkan::initialize_resources() {
     //                                         VK_IMAGE_LAYOUT_GENERAL);
     // make_image(ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
 
-    for(uint32_t i = 0; i < frame_datas.size(); ++i) {
+    for(uint32_t i = 0; i < frame_datas.size(); ++i)
+    {
         auto& fd = frame_datas[i];
         fd.cmdpool = submit_queue->make_command_pool();
         fd.sem_swapchain = submit_queue->make_semaphore();
@@ -431,9 +440,11 @@ void RendererVulkan::initialize_resources() {
     flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
 }
 
-void RendererVulkan::create_window_sized_resources() {
+void RendererVulkan::create_window_sized_resources()
+{
     swapchain.create(dev, frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
-    for(auto i = 0ull; i < frame_datas.size(); ++i) {
+    for(auto i = 0ull; i < frame_datas.size(); ++i)
+    {
         auto& fd = frame_datas.at(i);
         fd.gbuffer.color_image =
             make_image(fmt::format("g_color_{}", i),
@@ -482,7 +493,8 @@ void RendererVulkan::create_window_sized_resources() {
     }
 }
 
-void RendererVulkan::build_render_graph() {
+void RendererVulkan::build_render_graph()
+{
     rendergraph.clear_passes();
     // rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
     // rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
@@ -500,28 +512,34 @@ void RendererVulkan::build_render_graph() {
     rendergraph.bake();
 }
 
-void RendererVulkan::update() {
+void RendererVulkan::update()
+{
     if(flags.test(RenderFlags::PAUSE_RENDERING)) { return; }
     if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
-    if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES)) {
+    if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES))
+    {
         bake_indirect_commands();
         upload_transforms();
     }
     if(flags.test_clear(RenderFlags::DIRTY_BLAS_BIT)) { build_blas(); }
-    if(flags.test_clear(RenderFlags::DIRTY_TLAS_BIT)) {
+    if(flags.test_clear(RenderFlags::DIRTY_TLAS_BIT))
+    {
         build_tlas();
         update_ddgi();
         // TODO: prepare ddgi on scene update
     }
-    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
+    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT))
+    {
         submit_queue->wait_idle();
         create_window_sized_resources();
     }
-    if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH)) {
+    if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH))
+    {
         build_render_graph();
         pipelines.threaded_compile();
     }
-    if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) {
+    if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET))
+    {
         assert(false);
         submit_queue->wait_idle();
         // update_bindless_set();
@@ -537,7 +555,8 @@ void RendererVulkan::update() {
     {
         VkResult acquire_ret;
         swapchain_index = swapchain.acquire(&acquire_ret, ~0ull, fd.sem_swapchain);
-        if(acquire_ret != VK_SUCCESS) {
+        if(acquire_ret != VK_SUCCESS)
+        {
             ENG_WARN("Acquire image failed with: {}", static_cast<uint32_t>(acquire_ret));
             return;
         }
@@ -573,7 +592,8 @@ void RendererVulkan::update() {
             .num_frags = 0,
         };
 
-        for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+        for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i)
+        {
             float halfSize = float(VSM_CLIP0_LENGTH) * 0.5f * std::exp2f(float(i));
             float splitNear = (i == 0) ? 0.1f : float(VSM_CLIP0_LENGTH) * std::exp2f(float(i - 1));
             float splitFar = float(VSM_CLIP0_LENGTH) * std::exp2f(float(i));
@@ -620,7 +640,8 @@ void RendererVulkan::update() {
     return;
 }
 
-void RendererVulkan::on_window_resize() {
+void RendererVulkan::on_window_resize()
+{
     flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT);
     // set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
 }
@@ -631,35 +652,42 @@ void RendererVulkan::on_window_resize() {
 //     //  ENG_WARN("TODO: Resize resources on new set_screen()");
 // }
 
-static VkFormat deduce_image_format(ImageFormat format) {
-    switch(format) {
+static VkFormat deduce_image_format(ImageFormat format)
+{
+    switch(format)
+    {
     case ImageFormat::R8G8B8A8_UNORM:
         return VK_FORMAT_R8G8B8A8_UNORM;
     case ImageFormat::R8G8B8A8_SRGB:
         return VK_FORMAT_R8G8B8A8_SRGB;
-    default: {
+    default:
+    {
         assert(false);
         return VK_FORMAT_MAX_ENUM;
     }
     }
 }
 
-static VkImageType deduce_image_type(ImageType dim) {
-    switch(dim) {
+static VkImageType deduce_image_type(ImageType dim)
+{
+    switch(dim)
+    {
     case ImageType::TYPE_1D:
         return VK_IMAGE_TYPE_1D;
     case ImageType::TYPE_2D:
         return VK_IMAGE_TYPE_2D;
     case ImageType::TYPE_3D:
         return VK_IMAGE_TYPE_3D;
-    default: {
+    default:
+    {
         assert(false);
         return VK_IMAGE_TYPE_MAX_ENUM;
     }
     }
 }
 
-Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc) {
+Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
+{
     const auto handle = make_image(desc.name, Vks(VkImageCreateInfo{ .imageType = deduce_image_type(desc.type),
                                                                      .format = deduce_image_format(desc.format),
                                                                      .extent = { desc.width, desc.height, 1u },
@@ -672,21 +700,25 @@ Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc) {
     return handle;
 }
 
-Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch) {
+Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch)
+{
     const auto view = get_image(batch.image).get_view();
     const auto layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
     const auto sampler = samplers.get_sampler(batch.filtering, batch.addressing);
     return make_texture(batch.image, view, layout, sampler);
 }
 
-Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
-    for(const auto& [h, m] : materials) {
+Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
+{
+    for(const auto& [h, m] : materials)
+    {
         if(m.base_color_texture == desc.base_color_texture) {}
     }
     return Handle<Material>{ *materials.insert(Material{ .base_color_texture = desc.base_color_texture }) };
 }
 
-Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
+Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
+{
     Geometry geometry{ .metadata = geometry_metadatas.emplace(),
                        .vertex_range = { total_vertices, batch.vertices.size() },
                        .index_range = { total_indices, batch.indices.size() },
@@ -716,31 +748,40 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
     return handle;
 }
 
-Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& _batch) {
+Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& _batch)
+{
     auto batch = _batch;
     if(!batch.material) { batch.material = Handle<gfx::Material>{ 0 }; }
 
-    for(const auto& [h, m] : meshes) {
+    for(const auto& [h, m] : meshes)
+    {
         if(m.geometry == batch.geometry && m.material == batch.material) { return h; }
     }
     Mesh mesh{ .geometry = batch.geometry, .material = batch.material };
     return meshes.insert(mesh);
 }
 
-void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
+void RendererVulkan::instance_mesh(const InstanceSettings& settings)
+{
     const auto& ecs_mesh = Engine::get().ecs->get<components::Mesh>(settings.entity);
     const auto is_meshlets = geometries.at(meshes.at(ecs_mesh.submeshes.at(0)).geometry).meshlet_range.size > 0;
-    if(!is_meshlets) {
+    if(!is_meshlets)
+    {
         mesh_instances.reserve(mesh_instances.size() + ecs_mesh.submeshes.size());
-        for(auto i = 0u; i < ecs_mesh.submeshes.size(); ++i) {
+        for(auto i = 0u; i < ecs_mesh.submeshes.size(); ++i)
+        {
             mesh_instances.push_back(MeshInstance{ .entity = settings.entity, .mesh = ecs_mesh.submeshes.at(i) });
         }
-    } else {
+    }
+    else
+    {
         meshlet_instances.reserve(meshlet_instances.size() + ecs_mesh.submeshes.size());
-        for(auto i = 0u; i < ecs_mesh.submeshes.size(); ++i) {
+        for(auto i = 0u; i < ecs_mesh.submeshes.size(); ++i)
+        {
             const auto& rsm = meshes.at(ecs_mesh.submeshes.at(i));
             const auto& rg = geometries.at(rsm.geometry);
-            for(auto j = 0u; j < rg.meshlet_range.size; ++j) {
+            for(auto j = 0u; j < rg.meshlet_range.size; ++j)
+            {
                 meshlet_instances.push_back(MeshletInstance{
                     .entity = settings.entity, .geometry = rsm.geometry, .mesh = ecs_mesh.submeshes.at(i), .meshlet_index = j });
             }
@@ -749,7 +790,8 @@ void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
     flags.set(RenderFlags::DIRTY_MESH_INSTANCES);
 }
 
-void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
+void RendererVulkan::instance_blas(const BLASInstanceSettings& settings)
+{
     ENG_TODO("Implement blas instancing");
     // auto& r = Engine::get().ecs_storage->get<components::Renderable>(settings.entity);
     // auto& mesh = meshes.at(r.mesh_handle);
@@ -763,13 +805,16 @@ void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
     // }
 }
 
-void RendererVulkan::update_transform(ecs::Entity entity) {
+void RendererVulkan::update_transform(ecs::Entity entity)
+{
     update_positions.push_back(entity);
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
 
-size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) {
-    struct ImguiTextureId {
+size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer)
+{
+    struct ImguiTextureId
+    {
         ImTextureID id;
         VkImage image;
         ImageFiltering filter;
@@ -779,9 +824,12 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering
     static std::unordered_multimap<Handle<Image>, ImguiTextureId> tex_ids;
     auto range = tex_ids.equal_range(handle);
     auto delete_it = tex_ids.end();
-    for(auto it = range.first; it != range.second; ++it) {
-        if(it->second.filter == filter && it->second.addressing == addressing && it->second.layer == layer) {
-            if(it->second.image != get_image(handle).image) {
+    for(auto it = range.first; it != range.second; ++it)
+    {
+        if(it->second.filter == filter && it->second.addressing == addressing && it->second.layer == layer)
+        {
+            if(it->second.image != get_image(handle).image)
+            {
                 ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(it->second.id));
                 delete_it = it;
                 break;
@@ -807,15 +855,18 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering
 
 Handle<Image> RendererVulkan::get_color_output_texture() const { return get_frame_data().gbuffer.color_image; }
 
-Material RendererVulkan::get_material(Handle<Material> handle) const {
+Material RendererVulkan::get_material(Handle<Material> handle) const
+{
     if(!handle) { return Material{}; }
     return materials.at(handle);
 }
 
 VsmData& RendererVulkan::get_vsm_data() { return vsm; }
 
-void RendererVulkan::upload_model_images() {
-    for(auto& tex : upload_images) {
+void RendererVulkan::upload_model_images()
+{
+    for(auto& tex : upload_images)
+    {
         Image& img = get_image(tex.image_handle);
         // VkBufferImageCopy copy{
         //     .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
@@ -828,13 +879,15 @@ void RendererVulkan::upload_model_images() {
     upload_images.clear();
 }
 
-void RendererVulkan::upload_staged_models() {
+void RendererVulkan::upload_staged_models()
+{
     upload_model_images();
     std::vector<glm::vec3> positions;
     std::vector<float> attributes;
     positions.reserve(upload_vertices.size());
     attributes.reserve(upload_vertices.size() * ((sizeof(Vertex) - sizeof(glm::vec3)) / sizeof(float)));
-    for(auto& e : upload_vertices) {
+    for(auto& e : upload_vertices)
+    {
         positions.push_back(e.position);
         attributes.push_back(e.normal.x);
         attributes.push_back(e.normal.y);
@@ -857,7 +910,8 @@ void RendererVulkan::upload_staged_models() {
     upload_indices.clear();
 }
 
-void RendererVulkan::bake_indirect_commands() {
+void RendererVulkan::bake_indirect_commands()
+{
     // std::sort(mesh_instances.begin(), mesh_instances.end(), [this](const auto& a, const auto& b) {
     //     const auto& ra = meshes.at(a.mesh);
     //     const auto& rb = meshes.at(b.mesh);
@@ -905,14 +959,16 @@ void RendererVulkan::bake_indirect_commands() {
         if(a.meshlet_index >= b.meshlet_index) { return false; }
         return true;
     });
-    for(uint32_t i = 0u; i < meshlet_instances.size(); ++i) {
+    for(uint32_t i = 0u; i < meshlet_instances.size(); ++i)
+    {
         const MeshletInstance& rmi = meshlet_instances.at(i);
         const Mesh& m = meshes.at(rmi.mesh);
         const Geometry& geom = geometries.at(m.geometry);
         const Material& mat = materials.at(m.material);
         const Meshlet& ml = meshlets.at(geom.meshlet_range.offset + rmi.meshlet_index);
 
-        if(i == 0 || meshlet_instances.at(i - 1).meshlet_index != rmi.meshlet_index) {
+        if(i == 0 || meshlet_instances.at(i - 1).meshlet_index != rmi.meshlet_index)
+        {
             gpu_ml_draw_commands.push_back(VkDrawIndexedIndirectCommand{
                 .indexCount = (uint32_t)ml.triangle_range.size * 3,
                 .instanceCount = 1,
@@ -920,9 +976,8 @@ void RendererVulkan::bake_indirect_commands() {
                 .vertexOffset = (int32_t)(ml.vertex_range.offset),
                 .firstInstance = rmi.meshlet_index,
             });
-        } else {
-            ++gpu_ml_draw_commands.back().instanceCount;
         }
+        else { ++gpu_ml_draw_commands.back().instanceCount; }
     }
 
     gpu_ml_draw_header.draw_count = gpu_ml_draw_commands.size();
@@ -960,15 +1015,18 @@ void RendererVulkan::bake_indirect_commands() {
     // clang-format on
 }
 
-void RendererVulkan::upload_transforms() {
+void RendererVulkan::upload_transforms()
+{
     std::swap(get_frame_data().transform_buffers, get_frame_data(1).transform_buffers);
     Buffer& dst_transforms = get_buffer(get_frame_data().transform_buffers);
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
-    for(auto e : mesh_instances) {
+    for(auto e : mesh_instances)
+    {
         transforms.push_back(Engine::get().ecs->get<components::Transform>(e.entity).transform);
     }
-    for(auto e : meshlet_instances) {
+    for(auto e : meshlet_instances)
+    {
         transforms.push_back(Engine::get().ecs->get<components::Transform>(e.entity).transform);
     }
     staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms)
@@ -976,7 +1034,8 @@ void RendererVulkan::upload_transforms() {
         .submit();
 }
 
-void RendererVulkan::build_blas() {
+void RendererVulkan::build_blas()
+{
     ENG_TODO("IMPLEMENT BACK");
     return;
 #if 0
@@ -1075,7 +1134,8 @@ void RendererVulkan::build_blas() {
 #endif
 }
 
-void RendererVulkan::build_tlas() {
+void RendererVulkan::build_tlas()
+{
     return;
     // std::vector<uint32_t> tlas_mesh_offsets;
     // std::vector<uint32_t> blas_mesh_offsets;
@@ -1196,7 +1256,8 @@ void RendererVulkan::build_tlas() {
 #endif
 }
 
-void RendererVulkan::update_ddgi() {
+void RendererVulkan::update_ddgi()
+{
 #if 0
     // assert(false && "no allocating new pointers for images");
 
@@ -1312,36 +1373,44 @@ void RendererVulkan::update_ddgi() {
 }
 
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
-                                           const VmaAllocationCreateInfo& vma_info) {
+                                           const VmaAllocationCreateInfo& vma_info)
+{
     return buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
 }
 
 Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, resizable_t resizable,
-                                           const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) {
+                                           const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info)
+{
     return buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
 }
 
-Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info) {
+Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info)
+{
     return images.insert(Image{ name, dev, vma, vk_info });
 }
 
-Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler) {
-    for(const auto& [h, t] : textures) {
+Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
+{
+    for(const auto& [h, t] : textures)
+    {
         if(t.image == image && t.view == view && t.layout == layout && t.sampler == sampler) { return h; }
     }
     return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler });
 }
 
-Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler) {
+Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)
+{
     const auto view = make_image_view(image);
     return make_texture(image, view, layout, sampler);
 }
 
-VkImageView RendererVulkan::make_image_view(Handle<Image> handle) {
+VkImageView RendererVulkan::make_image_view(Handle<Image> handle)
+{
     return make_image_view(handle, Vks(VkImageViewCreateInfo{}));
 }
 
-VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info) {
+VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info)
+{
     return get_image(handle).get_view(vk_info);
 }
 
@@ -1349,13 +1418,15 @@ Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return get_instance(
 
 Image& RendererVulkan::get_image(Handle<Image> handle) { return get_instance()->images.at(handle); }
 
-void RendererVulkan::destroy_buffer(Handle<Buffer> buffer) {
+void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
+{
     auto& b = get_buffer(buffer);
     vmaDestroyBuffer(b.vma, b.buffer, b.alloc);
     b = Buffer{};
 }
 
-void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer) {
+void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer)
+{
     destroy_buffer(dst_buffer);
     buffers.at(dst_buffer) = std::move(src_buffer);
     bindless_pool->update_bindless_resource(dst_buffer);
@@ -1363,21 +1434,25 @@ void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buff
 
 uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_bindless_index(handle); }
 
-uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) {
+uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle)
+{
     if(!handle) { return ~0u; }
     const auto& tex = textures.at(handle);
     return bindless_pool->get_bindless_index(handle);
 }
 
-FrameData& RendererVulkan::get_frame_data(uint32_t offset) {
+FrameData& RendererVulkan::get_frame_data(uint32_t offset)
+{
     return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];
 }
 
-const FrameData& RendererVulkan::get_frame_data(uint32_t offset) const {
+const FrameData& RendererVulkan::get_frame_data(uint32_t offset) const
+{
     return const_cast<RendererVulkan*>(this)->get_frame_data();
 }
 
-void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height) {
+void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height)
+{
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
@@ -1402,7 +1477,8 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
 
     VK_CHECK(vkGetSwapchainImagesKHR(dev, swapchain, &image_count, vk_images.data()));
 
-    for(uint32_t i = 0; i < image_count; ++i) {
+    for(uint32_t i = 0; i < image_count; ++i)
+    {
         images[i] =
             Image{ fmt::format("swapchain_image_{}", i), dev, vk_images[i],
                    Vks(VkImageCreateInfo{
@@ -1416,7 +1492,8 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
     }
 }
 
-uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence) {
+uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence)
+{
     uint32_t idx;
     auto result = vkAcquireNextImageKHR(RendererVulkan::get_instance()->dev, swapchain, timeout, semaphore, fence, &idx);
     if(res) { *res = result; }

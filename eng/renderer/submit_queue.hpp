@@ -5,9 +5,11 @@
 #include <vector>
 #include <deque>
 
-namespace gfx {
+namespace gfx
+{
 
-class CommandPool {
+class CommandPool
+{
   public:
     CommandPool() noexcept = default;
     CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept;
@@ -25,8 +27,10 @@ class CommandPool {
     VkCommandPool pool{};
 };
 
-class SubmitQueue {
-    struct Submission {
+class SubmitQueue
+{
+    struct Submission
+    {
         VkFence fence{};
         std::vector<VkCommandBufferSubmitInfo> cmds;
         std::vector<VkSemaphoreSubmitInfo> wait_sems;

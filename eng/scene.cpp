@@ -12,24 +12,29 @@
 #include <eng/common/paths.hpp>
 #include <meshoptimizer/src/meshoptimizer.h>
 
-namespace scene {
+namespace scene
+{
 
-Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
+Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
+{
     const auto path = paths::canonize_path(_path, "models");
 
-    if(path.extension() != ".glb") {
+    if(path.extension() != ".glb")
+    {
         assert(false && "Only .glb files are supported.");
         return {};
     }
 
-    if(!std::filesystem::exists(path)) {
+    if(!std::filesystem::exists(path))
+    {
         ENG_WARN("Path {} does not point to any file.", path.string());
         return {};
     }
 
     fastgltf::Parser fastparser;
     auto fastglbbuf = fastgltf::GltfDataBuffer::FromPath(path);
-    if(!fastglbbuf) {
+    if(!fastglbbuf)
+    {
         ENG_WARN("Error during fastgltf::GltfDataBuffer import: {}", fastgltf::getErrorName(fastglbbuf.error()));
         return {};
     }
@@ -37,14 +42,16 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
     static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     auto fastgltfastassetexpected = fastparser.loadGltfBinary(fastglbbuf.get(), path.parent_path(), gltfOptions);
-    if(!fastgltfastassetexpected) {
+    if(!fastgltfastassetexpected)
+    {
         ENG_WARN("Error during loading fastgltf::Parser::loadGltfBinary: {}",
                  fastgltf::getErrorName(fastgltfastassetexpected.error()));
         return {};
     }
 
     auto& fastasset = fastgltfastassetexpected.get();
-    if(fastasset.scenes.empty()) {
+    if(fastasset.scenes.empty())
+    {
         ENG_WARN("Error during loading. Fastgltf asset does not have any scenes defined.");
         return {};
     }
@@ -63,46 +70,54 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
     batched_meshes.reserve(fastasset.meshes.size());
     batched_nodes.reserve(fastasset.nodes.size());
 
-    for(auto i = 0u; i < fastasset.images.size(); ++i) {
+    for(auto i = 0u; i < fastasset.images.size(); ++i)
+    {
         using namespace fastgltf;
         Image image;
         auto& fastimage = fastasset.images.at(i);
         std::span<const std::byte> data;
-        if(auto fastsrcbview = std::get_if<sources::BufferView>(&fastimage.data)) {
+        if(auto fastsrcbview = std::get_if<sources::BufferView>(&fastimage.data))
+        {
             auto& fastbview = fastasset.bufferViews.at(fastsrcbview->bufferViewIndex);
             auto& fastbuf = fastasset.buffers.at(fastbview.bufferIndex);
-            if(auto fastsrcarr = std::get_if<sources::Array>(&fastbuf.data)) {
+            if(auto fastsrcarr = std::get_if<sources::Array>(&fastbuf.data))
+            {
                 data = { fastsrcarr->bytes.data() + fastbview.byteOffset, fastbview.byteLength };
             }
         }
-        if(!data.empty()) {
+        if(!data.empty())
+        {
             image.name = fastimage.name.c_str();
             int x, y, ch;
             std::byte* imgdata =
                 reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()),
                                                                    data.size(), &x, &y, &ch, 4));
-            if(!imgdata) {
-                ENG_ERROR("Stbi failed: {}", stbi_failure_reason());
-            } else {
+            if(!imgdata) { ENG_ERROR("Stbi failed: {}", stbi_failure_reason()); }
+            else
+            {
                 image.data = { imgdata, imgdata + x * y * ch };
                 image.width = (uint32_t)x;
                 image.height = (uint32_t)y;
                 stbi_image_free(imgdata);
             }
-        } else {
-            ENG_WARN("Could not load image {}", fastimage.name.c_str());
         }
+        else { ENG_WARN("Could not load image {}", fastimage.name.c_str()); }
         batched_images.push_back(images.emplace(std::move(image)));
     }
 
-    for(auto i = 0u; i < fastasset.textures.size(); ++i) {
+    for(auto i = 0u; i < fastasset.textures.size(); ++i)
+    {
         auto& fasttxt = fastasset.textures.at(i);
-        if(!fasttxt.imageIndex) {
+        if(!fasttxt.imageIndex)
+        {
             ENG_WARN("Unsupported texture {} type.", fasttxt.name.c_str());
             batched_textures.push_back(textures.emplace());
-        } else {
+        }
+        else
+        {
             Texture txt;
-            if(fasttxt.samplerIndex) {
+            if(fasttxt.samplerIndex)
+            {
                 auto& fsamp = fastasset.samplers.at(*fasttxt.samplerIndex);
                 ENG_TODO("Implement sampler settings import from fastgltf");
             }
@@ -111,11 +126,13 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
         }
     }
 
-    for(auto i = 0u; i < fastasset.materials.size(); ++i) {
+    for(auto i = 0u; i < fastasset.materials.size(); ++i)
+    {
         auto& fastmat = fastasset.materials.at(i);
         Material mat;
         mat.name = fastmat.name.c_str();
-        if(fastmat.pbrData.baseColorTexture) {
+        if(fastmat.pbrData.baseColorTexture)
+        {
             assert(fastmat.pbrData.baseColorTexture->texCoordIndex == 0);
             const auto txtcolh = batched_textures.at(fastmat.pbrData.baseColorTexture->textureIndex);
             auto& txt = textures.at(txtcolh);
@@ -126,20 +143,24 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
         batched_materials.push_back(materials.emplace(std::move(mat)));
     }
 
-    for(auto i = 0u; i < fastasset.meshes.size(); ++i) {
+    for(auto i = 0u; i < fastasset.meshes.size(); ++i)
+    {
         auto& fmesh = fastasset.meshes.at(i);
         Mesh mesh;
         mesh.name = fmesh.name.c_str();
         mesh.submeshes.reserve(fmesh.primitives.size());
-        for(auto j = 0u; j < fmesh.primitives.size(); ++j) {
+        for(auto j = 0u; j < fmesh.primitives.size(); ++j)
+        {
             const auto load_primitive = [&]() {
                 Submesh submesh;
                 auto& fprim = fmesh.primitives.at(j);
                 std::vector<gfx::Vertex> vertices;
                 std::vector<gfx::Index> indices;
-                if(auto it = fprim.findAttribute("POSITION"); it != fprim.attributes.end()) {
+                if(auto it = fprim.findAttribute("POSITION"); it != fprim.attributes.end())
+                {
                     auto& acc = fastasset.accessors.at(it->accessorIndex);
-                    if(!acc.bufferViewIndex) {
+                    if(!acc.bufferViewIndex)
+                    {
                         ENG_ERROR("No bufferViewIndex...");
                         return submesh;
                     }
@@ -147,13 +168,17 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
                     fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, acc, [&vertices](const auto& vec, auto idx) {
                         vertices.at(idx).position = { vec.x(), vec.y(), vec.z() };
                     });
-                } else {
+                }
+                else
+                {
                     ENG_WARN("Mesh primitive does not contain position. Skipping...");
                     return submesh;
                 }
-                if(auto it = fprim.findAttribute("NORMAL"); it != fprim.attributes.end()) {
+                if(auto it = fprim.findAttribute("NORMAL"); it != fprim.attributes.end())
+                {
                     auto& acc = fastasset.accessors.at(it->accessorIndex);
-                    if(!acc.bufferViewIndex) {
+                    if(!acc.bufferViewIndex)
+                    {
                         ENG_ERROR("No bufferViewIndex...");
                         return submesh;
                     }
@@ -161,9 +186,11 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
                         vertices.at(idx).normal = { vec.x(), vec.y(), vec.z() };
                     });
                 }
-                if(auto it = fprim.findAttribute("TEXCOORD_0"); it != fprim.attributes.end()) {
+                if(auto it = fprim.findAttribute("TEXCOORD_0"); it != fprim.attributes.end())
+                {
                     auto& acc = fastasset.accessors.at(it->accessorIndex);
-                    if(!acc.bufferViewIndex) {
+                    if(!acc.bufferViewIndex)
+                    {
                         ENG_ERROR("No bufferViewIndex...");
                         return submesh;
                     }
@@ -171,9 +198,11 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
                         vertices.at(idx).uv = { vec.x(), vec.y() };
                     });
                 }
-                if(auto it = fprim.findAttribute("TANGENT"); it != fprim.attributes.end()) {
+                if(auto it = fprim.findAttribute("TANGENT"); it != fprim.attributes.end())
+                {
                     auto& acc = fastasset.accessors.at(it->accessorIndex);
-                    if(!acc.bufferViewIndex) {
+                    if(!acc.bufferViewIndex)
+                    {
                         ENG_ERROR("No bufferViewIndex...");
                         return submesh;
                     }
@@ -181,23 +210,24 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
                         vertices.at(idx).tangent = { vec.x(), vec.y(), vec.z(), vec.w() };
                     });
                 }
-                if(!fprim.indicesAccessor) {
+                if(!fprim.indicesAccessor)
+                {
                     ENG_WARN("Mesh primitive {}:{} does not have mandatory vertex indices. Skipping...", fmesh.name.c_str(), j);
                     return submesh;
-                } else {
+                }
+                else
+                {
                     auto& acc = fastasset.accessors.at(*fprim.indicesAccessor);
-                    if(!acc.bufferViewIndex) {
+                    if(!acc.bufferViewIndex)
+                    {
                         ENG_ERROR("No bufferViewIndex...");
                         return submesh;
                     }
                     indices.resize(acc.count);
                     fastgltf::copyFromAccessor<uint32_t>(fastasset, acc, indices.data());
                 }
-                if(fprim.materialIndex) {
-                    submesh.material = batched_materials.at(*fprim.materialIndex);
-                } else {
-                    ENG_WARN("Submesh #{} in mesh {} does not have a material", fmesh.name.c_str(), j);
-                }
+                if(fprim.materialIndex) { submesh.material = batched_materials.at(*fprim.materialIndex); }
+                else { ENG_WARN("Submesh #{} in mesh {} does not have a material", fmesh.name.c_str(), j); }
 
                 submesh.geometry = geometries.emplace(Geometry{
                     .vertices = std::move(vertices),
@@ -210,7 +240,8 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
         batched_meshes.push_back(meshes.emplace(std::move(mesh)));
     }
 
-    for(auto i = 0u; i < fastasset.nodes.size(); ++i) {
+    for(auto i = 0u; i < fastasset.nodes.size(); ++i)
+    {
         const auto& fastnode = fastasset.nodes.at(i);
         batched_nodes.push_back(nodes.emplace(Node{
             .name = fastnode.name.c_str(), .mesh = fastnode.meshIndex ? batched_meshes.at(*fastnode.meshIndex) : Handle<Mesh>{} }));
@@ -236,7 +267,8 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
     std::transform(fastscene.nodeIndices.begin(), fastscene.nodeIndices.end(), root_node.children.begin(),
                    [&batched_nodes](size_t idx) { return batched_nodes.at(idx); });
 
-    for(const auto bih : batched_images) {
+    for(const auto bih : batched_images)
+    {
         auto& i = images.at(bih);
         i.gfx_handle = Engine::get().renderer->batch_image(gfx::ImageDescriptor{ .name = i.name,
                                                                                  .width = i.width,
@@ -249,22 +281,26 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
         i.data.clear();
     }
 
-    for(const auto bth : batched_textures) {
+    for(const auto bth : batched_textures)
+    {
         auto& t = textures.at(bth);
         auto& i = images.at(t.image);
         t.gfx_handle = Engine::get().renderer->batch_texture(gfx::TextureDescriptor{
             .image = i.gfx_handle, .filtering = t.filtering, .addressing = t.addressing });
     }
 
-    for(const auto bmh : batched_materials) {
+    for(const auto bmh : batched_materials)
+    {
         auto& m = materials.at(bmh);
         m.gfx_handle = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
             .base_color_texture = textures.at(m.base_color_texture).gfx_handle });
     }
 
-    for(const auto bmh : batched_meshes) {
+    for(const auto bmh : batched_meshes)
+    {
         auto& m = meshes.at(bmh);
-        for(auto& sm : m.submeshes) {
+        for(auto& sm : m.submeshes)
+        {
             static constexpr auto max_verts = 64u;
             static constexpr auto max_tris = 124u;
             static constexpr auto cone_weight = 0.0f;
@@ -285,9 +321,15 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
             meshlets_triangles.resize(last_meshlet.triangle_offset + ((last_meshlet.triangle_count * 3 + 3) & ~3));
             meshlets.resize(meshlet_count);
 
-            for(auto& m : meshlets) {
+            for(auto& m : meshlets)
+            {
                 meshopt_optimizeMeshlet(&meshlets_verts.at(m.vertex_offset), &meshlets_triangles.at(m.triangle_offset),
                                         m.triangle_count, m.vertex_count);
+                const auto mbounds = meshopt_computeMeshletBounds(&meshlets_verts.at(m.vertex_offset),
+                                                                  &meshlets_triangles.at(m.triangle_offset),
+                                                                  m.triangle_count, &g.vertices.at(0).position.x,
+                                                                  g.vertices.size(), sizeof(g.vertices.at(0)));
+                m.
             }
 
             std::vector<gfx::Vertex> final_vertices;
@@ -297,9 +339,8 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
             g.vertices = std::move(final_vertices);
             g.indices.clear();
             g.indices.reserve(meshlets_triangles.size());
-            for(auto tri : meshlets_triangles) {
-                g.indices.push_back((uint32_t)tri);
-            }
+            std::transform(meshlets_triangles.begin(), meshlets_triangles.end(), std::back_inserter(g.indices),
+                           [](auto idx) { return gfx::Index{ idx }; });
             g.meshlets.resize(meshlet_count);
             std::transform(meshlets.begin(), meshlets.end(), g.meshlets.begin(), [](const auto& m) {
                 return gfx::Meshlet{ .vertex_range = { m.vertex_offset, m.vertex_count },
@@ -321,7 +362,8 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path) {
     return models.emplace(std::move(model));
 }
 
-Handle<ModelInstance> Scene::instance_model(Handle<Model> model) {
+Handle<ModelInstance> Scene::instance_model(Handle<Model> model)
+{
     if(!model) { return {}; }
     auto& m = models.at(model);
     if(!m.root_node) { return {}; }
@@ -335,17 +377,20 @@ Handle<ModelInstance> Scene::instance_model(Handle<Model> model) {
         ni.entity = Engine::get().ecs->create();
         Engine::get().ecs->emplace<components::Transform>(ni.entity)->transform = n.final_transform;
 
-        if(n.mesh) {
+        if(n.mesh)
+        {
             auto& nm = meshes.at(n.mesh);
             auto& nim = *Engine::get().ecs->emplace<components::Mesh>(ni.entity);
             nim.submeshes.reserve(nm.submeshes.size());
-            for(const auto& nsm : nm.submeshes) {
+            for(const auto& nsm : nm.submeshes)
+            {
                 nim.submeshes.push_back(nsm.gfx_handle);
             }
             Engine::get().renderer->instance_mesh(gfx::InstanceSettings{ .entity = ni.entity });
         }
 
-        for(const auto& nch : n.children) {
+        for(const auto& nch : n.children)
+        {
             ni.children.push_back(self(nch, self));
         }
         const auto nih = node_instances.insert(std::move(ni));
@@ -357,7 +402,8 @@ Handle<ModelInstance> Scene::instance_model(Handle<Model> model) {
     scene.push_back(mi);
 }
 
-void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform) {
+void Scene::update_transform(Handle<NodeInstance> entity, glm::mat4 transform)
+{
     // ENG_TODO();
     // const auto ent = instance_handles.at(entity);
     // Engine::get().ecs_system->get<components::Transform>(ent->entity).transform = transform;
