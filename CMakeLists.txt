@@ -124,7 +124,6 @@ add_executable(vkrt
     "eng/renderer/passes/rendergraph.cpp" 
     "eng/renderer/passes/passes.cpp" 
     "eng/renderer/pipeline.cpp"
-    "eng/assets/importer.cpp"
     "eng/ui.cpp"
  )
 

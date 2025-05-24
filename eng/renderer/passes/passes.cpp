@@ -490,7 +490,7 @@ void ZPrepassPass::render(VkCommandBuffer cmd) {
         .pColorAttachments = nullptr,
         .pDepthAttachment = &r_dep_att,
     });
-    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.meshlets_triangles_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBeginRendering(cmd, &rendering_info);
     VkRect2D r_sciss_1 = rendering_info.renderArea;
     VkViewport r_view_1{ .x = 0.0f,
@@ -712,7 +712,7 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd) {
         .pDepthAttachment = &r_dep_att,
     });
 
-    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.meshlets_triangles_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBeginRendering(cmd, &rendering_info);
     VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
     VkViewport r_view_1{

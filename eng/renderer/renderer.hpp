@@ -26,11 +26,13 @@ struct Texture;
 struct Buffer;
 struct Material;
 
+using Index = uint32_t;
+
 struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 nor;
+    glm::vec3 position;
+    glm::vec3 normal;
     glm::vec2 uv;
-    glm::vec4 tang;
+    glm::vec4 tangent;
 };
 
 struct Meshlet {
@@ -40,10 +42,8 @@ struct Meshlet {
 
 struct GeometryDescriptor {
     std::span<const Vertex> vertices;
-    std::span<const uint32_t> indices;
+    std::span<const Index> indices;
     std::span<const Meshlet> meshlets;
-    std::span<const uint32_t> meshlets_vertices;
-    std::span<const uint8_t> meshlets_triangles; // i,i+1,i+2 into meshlet_vertices span.
 };
 
 struct ImageDescriptor {

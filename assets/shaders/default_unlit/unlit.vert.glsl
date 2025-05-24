@@ -13,8 +13,8 @@ layout(location = 0) out VsOut {
 vsout;
 
 void main() {
-    uint vidx = meshlets_verts[gl_VertexIndex];
-    vec4 vpos = constants.proj_view * vec4(vertex_pos_arr[vidx], 1.0);
+    vec3 pos = vertex_pos_arr[gl_VertexIndex];
+    vec4 vpos = constants.proj_view * vec4(pos, 1.0);
     vsout.instance_index = gl_InstanceIndex;
     gl_Position = vpos;
 

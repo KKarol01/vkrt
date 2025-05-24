@@ -27,7 +27,7 @@ template <typename T, typename Storage = uint32_t> class HandleMap {
         return handle;
     }
 
-    handle_t emplace() { return insert(T{}); }
+    template <typename... Args> handle_t emplace(Args&&... args) { return insert(T{ std::forward<Args>(args)... }); }
 
     T& at(handle_t h) { return storage.at(h); }
     const T& at(handle_t h) const { return storage.at(h); }

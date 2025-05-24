@@ -687,34 +687,24 @@ Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc) 
 }
 
 Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
-    Geometry geometry{
-        .flags = GeometryFlags::MESHLETS_BIT,
-        .metadata = geometry_metadatas.emplace(),
-        .vertex_range = { total_vertices, batch.vertices.size() },
-    };
+    Geometry geometry{ .metadata = geometry_metadatas.emplace(),
+                       .vertex_range = { total_vertices, batch.vertices.size() },
+                       .index_range = { total_indices, batch.indices.size() },
+                       .meshlet_range = { total_meshlets, batch.meshlets.size() } };
     upload_vertices.insert(upload_vertices.end(), batch.vertices.begin(), batch.vertices.end());
+    upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
+    meshlets.resize(meshlets.size() + batch.meshlets.size());
+    std::transform(batch.meshlets.begin(), batch.meshlets.end(), meshlets.begin() + total_meshlets, [this](gfx::Meshlet meshlet) {
+        meshlet.vertex_range.offset += total_vertices;
+        meshlet.triangle_range.offset += total_indices;
+        return meshlet;
+    });
+
     total_vertices += geometry.vertex_range.size;
+    total_indices += geometry.index_range.size;
+    total_meshlets += batch.meshlets.size();
 
-    if(batch.meshlets.empty()) {
-        geometry.index_range = { total_indices, batch.indices.size() };
-        upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
-        total_indices += geometry.index_range.size;
-    } else {
-        geometry.meshlet_range = { total_meshlets, batch.meshlets.size() };
-        geometry.meshlet_vertices_range = { total_meshlets_vertices, batch.meshlets_vertices.size() };
-        geometry.meshlet_triangles_range = { total_meshlets_triangles, batch.meshlets_triangles.size() };
-        upload_meshlets.insert(upload_meshlets.end(), batch.meshlets.begin(), batch.meshlets.end());
-        upload_meshlets_vertices.insert(upload_meshlets_vertices.end(), batch.meshlets_vertices.begin(),
-                                        batch.meshlets_vertices.end());
-        upload_meshlets_triangles.insert(upload_meshlets_triangles.end(), batch.meshlets_triangles.begin(),
-                                         batch.meshlets_triangles.end());
-        meshlets.insert(meshlets.end(), batch.meshlets.begin(), batch.meshlets.end());
-        total_meshlets += batch.meshlets.size();
-        total_meshlets_vertices += batch.meshlets_vertices.size();
-        total_meshlets_triangles += batch.meshlets_triangles.size();
-    }
-
-    const auto handle = geometries.insert(geometry);
+    const auto handle = geometries.insert(std::move(geometry));
     flags.set(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT);
 
     // clang-format off
@@ -738,8 +728,8 @@ Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& _batch) {
 }
 
 void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
-    const auto& ecs_mesh = Engine::get().ecs_system->get<components::Mesh>(settings.entity);
-    const auto is_meshlets = geometries.at(meshes.at(ecs_mesh.submeshes.at(0)).geometry).flags.test(GeometryFlags::MESHLETS_BIT);
+    const auto& ecs_mesh = Engine::get().ecs->get<components::Mesh>(settings.entity);
+    const auto is_meshlets = geometries.at(meshes.at(ecs_mesh.submeshes.at(0)).geometry).meshlet_range.size > 0;
     if(!is_meshlets) {
         mesh_instances.reserve(mesh_instances.size() + ecs_mesh.submeshes.size());
         for(auto i = 0u; i < ecs_mesh.submeshes.size(); ++i) {
@@ -751,10 +741,8 @@ void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
             const auto& rsm = meshes.at(ecs_mesh.submeshes.at(i));
             const auto& rg = geometries.at(rsm.geometry);
             for(auto j = 0u; j < rg.meshlet_range.size; ++j) {
-                meshlet_instances.push_back(MeshletInstance{ .entity = settings.entity,
-                                                             .geometry = rsm.geometry,
-                                                             .mesh = ecs_mesh.submeshes.at(i),
-                                                             .meshlet_index = (uint32_t)rg.meshlet_range.offset + j });
+                meshlet_instances.push_back(MeshletInstance{
+                    .entity = settings.entity, .geometry = rsm.geometry, .mesh = ecs_mesh.submeshes.at(i), .meshlet_index = j });
             }
         }
     }
@@ -847,16 +835,16 @@ void RendererVulkan::upload_staged_models() {
     positions.reserve(upload_vertices.size());
     attributes.reserve(upload_vertices.size() * ((sizeof(Vertex) - sizeof(glm::vec3)) / sizeof(float)));
     for(auto& e : upload_vertices) {
-        positions.push_back(e.pos);
-        attributes.push_back(e.nor.x);
-        attributes.push_back(e.nor.y);
-        attributes.push_back(e.nor.z);
+        positions.push_back(e.position);
+        attributes.push_back(e.normal.x);
+        attributes.push_back(e.normal.y);
+        attributes.push_back(e.normal.z);
         attributes.push_back(e.uv.x);
         attributes.push_back(e.uv.y);
-        attributes.push_back(e.tang.x);
-        attributes.push_back(e.tang.y);
-        attributes.push_back(e.tang.z);
-        attributes.push_back(e.tang.w);
+        attributes.push_back(e.tangent.x);
+        attributes.push_back(e.tangent.y);
+        attributes.push_back(e.tangent.z);
+        attributes.push_back(e.tangent.w);
     }
     staging_buffer->send_to(vertex_positions_buffer, ~0ull, positions)
         .send_to(vertex_attributes_buffer, ~0ull, attributes)
@@ -870,14 +858,14 @@ void RendererVulkan::upload_staged_models() {
 }
 
 void RendererVulkan::bake_indirect_commands() {
-    std::sort(mesh_instances.begin(), mesh_instances.end(), [this](const auto& a, const auto& b) {
-        const auto& ra = meshes.at(a.mesh);
-        const auto& rb = meshes.at(b.mesh);
-        if(ra.geometry >= rb.geometry) { return false; }
-        if(ra.material >= rb.material) { return false; }
-        // blas left out
-        return true;
-    });
+    // std::sort(mesh_instances.begin(), mesh_instances.end(), [this](const auto& a, const auto& b) {
+    //     const auto& ra = meshes.at(a.mesh);
+    //     const auto& rb = meshes.at(b.mesh);
+    //     if(ra.geometry >= rb.geometry) { return false; }
+    //     if(ra.material >= rb.material) { return false; }
+    //     // blas left out
+    //     return true;
+    // });
 
     // const auto total_triangles = get_total_triangles();
     // std::vector<GPUMeshInstance> gpu_mesh_instances;
@@ -922,21 +910,14 @@ void RendererVulkan::bake_indirect_commands() {
         const Mesh& m = meshes.at(rmi.mesh);
         const Geometry& geom = geometries.at(m.geometry);
         const Material& mat = materials.at(m.material);
-        const Meshlet& rm = meshlets.at(geom.meshlet_range.offset + rmi.meshlet_index);
+        const Meshlet& ml = meshlets.at(geom.meshlet_range.offset + rmi.meshlet_index);
 
-        // gpu_mesh_instances.push_back(GPUMeshInstance{
-        //     .vertex_offset = (uint32_t)geom.vertex_range.offset,
-        //     .index_offset = (uint32_t)geom.index_range.offset,
-        //     .color_texture_idx = get_bindless_index(mat.base_color_texture),
-        //     .normal_texture_idx = ~0ul,
-        //     .metallic_roughness_idx = ~0ul,
-        // });
         if(i == 0 || meshlet_instances.at(i - 1).meshlet_index != rmi.meshlet_index) {
             gpu_ml_draw_commands.push_back(VkDrawIndexedIndirectCommand{
-                .indexCount = (uint32_t)rm.triangle_range.size * 3,
+                .indexCount = (uint32_t)ml.triangle_range.size * 3,
                 .instanceCount = 1,
-                .firstIndex = (uint32_t)(geom.meshlet_triangles_range.offset + rm.triangle_range.offset),
-                .vertexOffset = (int32_t)(geom.meshlet_vertices_range.offset + rm.vertex_range.offset),
+                .firstIndex = (uint32_t)(ml.triangle_range.offset),
+                .vertexOffset = (int32_t)(ml.vertex_range.offset),
                 .firstInstance = rmi.meshlet_index,
             });
         } else {
@@ -985,10 +966,10 @@ void RendererVulkan::upload_transforms() {
     std::vector<glm::mat4> transforms;
     transforms.reserve(mesh_instances.size());
     for(auto e : mesh_instances) {
-        transforms.push_back(Engine::get().ecs_system->get<components::Transform>(e.entity).transform);
+        transforms.push_back(Engine::get().ecs->get<components::Transform>(e.entity).transform);
     }
     for(auto e : meshlet_instances) {
-        transforms.push_back(Engine::get().ecs_system->get<components::Transform>(e.entity).transform);
+        transforms.push_back(Engine::get().ecs->get<components::Transform>(e.entity).transform);
     }
     staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms)
         .send_to(get_frame_data(1).transform_buffers, 0ull, transforms)

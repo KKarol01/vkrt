@@ -28,7 +28,6 @@ enum class RenderFlags : uint32_t {
 
 enum class GeometryFlags : uint32_t {
     DIRTY_BLAS_BIT = 0x1,
-    MESHLETS_BIT = 0x2,
 };
 enum class MeshFlags : uint32_t {};
 
@@ -46,8 +45,6 @@ struct Geometry {
     Range vertex_range{};
     Range index_range{};
     Range meshlet_range{};
-    Range meshlet_vertices_range{};
-    Range meshlet_triangles_range{};
 };
 
 struct Material {

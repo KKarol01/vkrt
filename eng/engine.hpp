@@ -48,7 +48,7 @@ class Engine {
     static Engine& get();
     Window* window{};
     Camera* camera{};
-    ecs::Registry* ecs_system{};
+    ecs::Registry* ecs{};
     gfx::Renderer* renderer{};
     eng::UI* ui{};
     scene::Scene* scene{};
