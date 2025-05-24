@@ -65,9 +65,6 @@ Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
                                   .tang = asset.vertices.at(ag.vertex_range.offset + i).tangent };
         }
 
-        const auto res = std::accumulate(asset.meshlets.begin(), asset.meshlets.end(), 0ul,
-                                         [](const auto acc, const auto& mt) { return acc + mt.triangle_range.size * 3; });
-
         for(auto i = 0u; i < gfxmeshlets.size(); ++i) {
             const auto& am = asset.meshlets.at(ag.meshlets_range.offset + i);
             gfxmeshlets.at(i) = { .vertex_range = am.vertex_range, .triangle_range = am.triangle_range };
@@ -76,7 +73,6 @@ Handle<Node> Scene::load_from_asset(assets::Asset& asset) {
             meshlets_triangles.insert(meshlets_triangles.end(), asset.meshlets_triangles.begin() + am.triangle_range.offset,
                                       asset.meshlets_triangles.begin() + am.triangle_range.offset + am.triangle_range.size * 3);
         }
-        meshlets_triangles = asset.meshlets_triangles;
         meshlets_vertices.shrink_to_fit();
         meshlets_triangles.shrink_to_fit();
 
