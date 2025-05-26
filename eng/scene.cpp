@@ -308,6 +308,7 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
 
             const auto max_meshlets = meshopt_buildMeshletsBound(g.indices.size(), max_verts, max_tris);
             std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+            std::vector<meshopt_Bounds> meshlets_bounds;
             std::vector<uint32_t> meshlets_verts(max_meshlets * max_verts);
             std::vector<uint8_t> meshlets_triangles(max_meshlets * max_tris * 3);
 
@@ -320,6 +321,7 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
             meshlets_verts.resize(last_meshlet.vertex_offset + last_meshlet.vertex_count);
             meshlets_triangles.resize(last_meshlet.triangle_offset + ((last_meshlet.triangle_count * 3 + 3) & ~3));
             meshlets.resize(meshlet_count);
+            meshlets_bounds.reserve(meshlet_count);
 
             for(auto& m : meshlets)
             {
@@ -329,7 +331,7 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
                                                                   &meshlets_triangles.at(m.triangle_offset),
                                                                   m.triangle_count, &g.vertices.at(0).position.x,
                                                                   g.vertices.size(), sizeof(g.vertices.at(0)));
-                m.
+                meshlets_bounds.push_back(mbounds);
             }
 
             std::vector<gfx::Vertex> final_vertices;
@@ -342,10 +344,15 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
             std::transform(meshlets_triangles.begin(), meshlets_triangles.end(), std::back_inserter(g.indices),
                            [](auto idx) { return gfx::Index{ idx }; });
             g.meshlets.resize(meshlet_count);
-            std::transform(meshlets.begin(), meshlets.end(), g.meshlets.begin(), [](const auto& m) {
-                return gfx::Meshlet{ .vertex_range = { m.vertex_offset, m.vertex_count },
-                                     .triangle_range = { m.triangle_offset, m.triangle_count } };
-            });
+            for(auto i = 0u; i < meshlet_count; ++i)
+            {
+                const auto& m = meshlets.at(i);
+                const auto& mb = meshlets_bounds.at(i);
+                g.meshlets.at(i) =
+                    gfx::Meshlet{ .vertex_range = { m.vertex_offset, m.vertex_count },
+                                  .triangle_range = { m.triangle_offset, m.triangle_count },
+                                  .bounding_sphere = glm::vec4{ mb.center[0], mb.center[1], mb.center[2], mb.radius } };
+            }
 
             g.gfx_handle = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{
                 .vertices = g.vertices, .indices = g.indices, .meshlets = g.meshlets });

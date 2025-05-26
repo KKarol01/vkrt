@@ -22,7 +22,7 @@
 #include <eng/utils.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 #include <eng/renderer/staging_buffer.hpp>
-#include <eng/renderer/descpool.hpp>
+#include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
 
@@ -290,7 +290,7 @@ void RendererVulkan::initialize_imgui()
 
 void RendererVulkan::initialize_resources()
 {
-    bindless_pool = new BindlessDescriptorPool{ dev };
+    bindless_pool = new BindlessPool{ dev };
 
     staging_buffer = new StagingBuffer{
         submit_queue,
@@ -369,35 +369,13 @@ void RendererVulkan::initialize_resources()
         fd.sem_swapchain = submit_queue->make_semaphore();
         fd.sem_rendering_finished = submit_queue->make_semaphore();
         fd.fen_rendering_finished = submit_queue->make_fence(true);
-        fd.constants =
-            make_buffer(fmt::format("constants_{}", i),
-                        Vks(VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                        VmaAllocationCreateInfo{});
-        fd.transform_buffers = make_buffer(fmt::format("transform_buffer_{}", i), resizable,
-                                           Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
-                                                                   .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                                           VmaAllocationCreateInfo{});
+        fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+        fd.transform_buffers =
+            make_buffer(BufferCreateInfo{ fmt::format("transform_buffer_{}", i), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
-    vsm.constants_buffer = make_buffer("vms buffer",
-                                       Vks(VkBufferCreateInfo{ .size = sizeof(GPUVsmConstantsBuffer) + 64 * 64 * 4,
-                                                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
-                                       VmaAllocationCreateInfo{});
-    // GPUVsmConstantsBuffer vsm_constants{
-    //     .dir_light_view = glm::mat4{ 1.0f },
-    //     .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
-    //     .max_clipmap_index = 0,
-    //     .texel_resolution = 1024.0f * 8.0f,
-    // };
-    //  send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
-    vsm.free_allocs_buffer =
-        make_buffer("vms alloc buffer",
-                    Vks(VkBufferCreateInfo{ .size = sizeof(GPUVsmAllocConstantsBuffer), .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
-                    VmaAllocationCreateInfo{});
-    // GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0 };
-    // staging_buffer->send_to(vsm.constants_buffer, 0, vsm_constants).send_to(vsm.free_allocs_buffer, 0, vsm_allocs).submit();
-    //  send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
+    vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    vsm.free_allocs_buffer = make_buffer(BufferCreateInfo{ "vms alloc buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
     vsm.shadow_map_0 =
         make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
@@ -1372,16 +1350,9 @@ void RendererVulkan::update_ddgi()
 #endif
 }
 
-Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
-                                           const VmaAllocationCreateInfo& vma_info)
+Handle<Buffer> gfx::RendererVulkan::make_buffer(const BufferCreateInfo& info)
 {
-    return buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
-}
-
-Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, resizable_t resizable,
-                                           const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info)
-{
-    return buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
+    return buffers.emplace(dev, vma, info);
 }
 
 Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info)
@@ -1421,25 +1392,13 @@ Image& RendererVulkan::get_image(Handle<Image> handle) { return get_instance()->
 void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
 {
     auto& b = get_buffer(buffer);
-    vmaDestroyBuffer(b.vma, b.buffer, b.alloc);
-    b = Buffer{};
+    b.deallocate();
+    bindless_pool->unregister_index(buffer);
 }
 
-void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer)
-{
-    destroy_buffer(dst_buffer);
-    buffers.at(dst_buffer) = std::move(src_buffer);
-    bindless_pool->update_bindless_resource(dst_buffer);
-}
+uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_index(handle); }
 
-uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_bindless_index(handle); }
-
-uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle)
-{
-    if(!handle) { return ~0u; }
-    const auto& tex = textures.at(handle);
-    return bindless_pool->get_bindless_index(handle);
-}
+uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) { return bindless_pool->get_index(handle); }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset)
 {

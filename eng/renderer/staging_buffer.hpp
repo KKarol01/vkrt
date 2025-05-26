@@ -9,95 +9,145 @@
 #include <thread>
 #include <atomic>
 #include <memory>
+#include <deque>
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
+#include <eng/common/types.hpp>
+
+#define IS_POW2(x) (x > 0 && !(x & (x - 1)))
 
 namespace gfx
 {
 
+struct LinearAllocator
+{
+    inline static constexpr size_t ALIGNMENT = 512;
+
+    LinearAllocator(void* buffer, size_t sz) : buffer(buffer), size(sz)
+    {
+        assert(buffer && IS_POW2(sz) && (sz % ALIGNMENT) == 0);
+    }
+
+    /* Allocates as much as it can and returns the allocation and it's size, aligned to ALIGNMENT. */
+    std::pair<void*, size_t> allocate_best_fit(size_t sz)
+    {
+        const auto padded_sz = (sz + ALIGNMENT - 1) & -ALIGNMENT;
+        size_t oldhead = head.load(std::memory_order_relaxed);
+        while(true)
+        {
+            const size_t free = size - oldhead;
+            const size_t alloc_sz = free < padded_sz ? free : padded_sz;
+            const size_t newhead = oldhead + padded_sz;
+            if(free == 0) { return { nullptr, 0 }; }
+            if(head.compare_exchange_weak(oldhead, newhead, std::memory_order_relaxed))
+            {
+                return { static_cast<void*>(static_cast<std::byte*>(buffer) + oldhead), alloc_sz };
+            }
+        }
+    }
+
+    void reset() { head.store(0); }
+    void* offset_buffer(size_t sz) const { return static_cast<void*>(static_cast<std::byte*>(buffer) + sz); }
+    size_t get_alloc_offset(const void* const palloc) const
+    {
+        return reinterpret_cast<size_t>(palloc) - reinterpret_cast<size_t>(buffer);
+    }
+
+    void* buffer{};
+    size_t size{};
+    std::atomic<size_t> head{};
+};
+
 class StagingBuffer
 {
-    struct TransferBuffer
+    enum class ResourceType : uint16_t
     {
-        Handle<Buffer> handle{};
-        size_t offset{};
-        std::vector<std::byte> data;
+        NONE,
+        BUFFER,
+        IMAGE,
+        VECTOR,
+        STAGING,
     };
-    struct TransferImage
+    struct Transfer
     {
-        Handle<Image> handle{};
-        VkImageLayout final_layout{};
-        VkBufferImageCopy2 region{};
-        std::vector<std::byte> data;
-    };
-    struct TransferFromBuffer
-    {
-        Handle<Buffer> dst_buffer{};
-        size_t dst_offset{};
-        Handle<Buffer> src_buffer{};
-        size_t src_offset{};
-        size_t size{};
-    };
-
-    struct Submission
-    {
-        bool started() const { return !transfers.empty(); }
-        std::vector<std::variant<TransferBuffer, TransferImage, TransferFromBuffer>> transfers;
-        VkFence fence{};
+        Handle<Buffer> src_buf() const { return Handle<Buffer>{ src_res }; }
+        Handle<Image> src_img() const { return Handle<Image>{ src_res }; }
+        Handle<Buffer> dst_buf() const { return Handle<Buffer>{ dst_res }; }
+        Handle<Image> dst_img() const { return Handle<Image>{ dst_res }; }
+        uint32_t src_res{ ~0u };
+        ResourceType src_type{};
+        uint32_t dst_res{ ~0u };
+        ResourceType dst_type{};
+        Range src_range;
+        Range dst_range;
+        const void* data;
+        VkImageLayout dst_final_layout;
+        VkBufferImageCopy2 dst_image_region;
     };
 
   public:
     StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept;
 
-    StagingBuffer(StagingBuffer&& o) noexcept;
-    StagingBuffer& operator=(StagingBuffer&& o) noexcept;
-
-    template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const T& t);
-    template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts);
+    template <typename T> void send_to(Handle<Buffer> buffer, size_t offset, const T& t);
+    template <typename T> void send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts);
+    void send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset);
     template <typename T>
-    StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
-                           const std::vector<T>& ts);
-    StagingBuffer& send_to(Handle<Buffer> dst_buffer, size_t dst_offset, Handle<Buffer> src_buffer, size_t src_offset, size_t size);
-    void submit(VkFence fence = nullptr);
-    void submit_wait(VkFence fence = nullptr);
+    void send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region, const std::vector<T>& ts);
 
   private:
-    Submission& get_submission() { return *submissions[0]; }
-    void swap_submissions();
-    StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::span<const std::byte> ts);
-    StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
-                           const std::span<const std::byte> ts);
+    void send_to(const Transfer& transfer);
     void resize(Handle<Buffer> buffer, size_t new_size);
     VkImageMemoryBarrier2 generate_image_barrier(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
     void transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
-    void process_submission();
-    size_t push_data(const std::vector<std::byte>& data);
+    void record_command(VkCommandBuffer cmd, const Transfer& transfer);
 
     SubmitQueue* queue{};
     CommandPool* cmdpool{};
-    VkCommandBuffer cmds[2]{};
     Buffer* staging_buffer{};
-    std::unique_ptr<Submission> submissions[2]{};
-    std::jthread on_submit_complete_thread;
-    std::atomic_bool submission_done{ true };
-    VkFence submission_thread_fence{};
+    std::unique_ptr<LinearAllocator> allocator{};
 };
 
-template <typename T> inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const T& t)
+template <typename T> void StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const T& t)
 {
-    return send_to(buffer, offset, std::as_bytes(std::span{ &t, 1 }));
+    send_to(Transfer{ .dst_res = *buffer,
+                      .src_type = ResourceType::VECTOR,
+                      .dst_type = ResourceType::BUFFER,
+                      .data = &t,
+                      .src_range = { 0, sizeof(T) },
+                      .dst_range = { offset, sizeof(T) } });
+}
+
+template <typename T> void StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts)
+{
+    send_to(Transfer{
+        .src_type = ResourceType::VECTOR,
+        .dst_res = *buffer,
+        .dst_type = ResourceType::BUFFER,
+        .dst_range = { offset, ts.size() * sizeof(T) },
+        .data = ts.data(),
+    });
 }
 
 template <typename T>
-inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts)
-{ // todo: maybe vector to span<T>
-    return send_to(buffer, offset, std::as_bytes(std::span{ ts.begin(), ts.end() }));
+void StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
+                            const std::vector<T>& ts)
+{
+    send_to(Transfer{ .src_type = ResourceType::VECTOR,
+                      .dst_res = *image,
+                      .dst_type = ResourceType::IMAGE,
+                      .src_range = { 0, ts.size() * sizeof(T) },
+                      .data = ts.data(),
+                      .dst_final_layout = final_layout,
+                      .dst_image_region = region });
 }
 
-template <typename T>
-inline StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout,
-                                             const VkBufferImageCopy2 region, const std::vector<T>& ts)
+void StagingBuffer::send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset)
 {
-    return send_to(image, final_layout, region, std::as_bytes(std::span{ ts.begin(), ts.end() }));
+    send_to(Transfer{ .src_res = *src,
+                      .src_type = ResourceType::BUFFER,
+                      .dst_res = *dst,
+                      .dst_type = ResourceType::BUFFER,
+                      .src_range = src_range,
+                      .dst_range = { dst_offset, src_range.size } });
 }
 
 } // namespace gfx

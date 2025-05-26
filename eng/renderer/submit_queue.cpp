@@ -46,7 +46,7 @@ void CommandPool::end(VkCommandBuffer cmd) { vkEndCommandBuffer(cmd); }
 
 void CommandPool::reset()
 {
-    VK_CHECK(vkResetCommandPool(dev, pool, VkCommandPoolResetFlags{}));
+    VK_CHECK(vkResetCommandPool(dev, pool, {}));
     free = std::move(used);
 }
 

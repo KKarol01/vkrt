@@ -1,11 +1,11 @@
-#include "./descpool.hpp"
+#include "./bindlesspool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 
 namespace gfx
 {
 
-BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
+BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
 {
     if(!dev) { return; }
     std::vector<VkDescriptorPoolSize> sizes{ { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
@@ -69,13 +69,13 @@ BindlessDescriptorPool::BindlessDescriptorPool(VkDevice dev) noexcept : dev(dev)
     assert(set);
 }
 
-void BindlessDescriptorPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
+void BindlessPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
 {
     update();
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
-uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer)
+uint32_t BindlessPool::get_index(Handle<Buffer> buffer)
 {
     if(!buffer)
     {
@@ -88,7 +88,7 @@ uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Buffer> buffer)
     return buffer_counter++;
 }
 
-uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Texture> texture)
+uint32_t BindlessPool::get_index(Handle<Texture> texture)
 {
     if(!texture)
     {
@@ -102,7 +102,7 @@ uint32_t BindlessDescriptorPool::get_bindless_index(Handle<Texture> texture)
     return view_counter++;
 }
 
-void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer)
+void BindlessPool::update_bindless_resource(Handle<Buffer> buffer)
 {
     if(!buffers.contains(buffer)) { return; }
     buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
@@ -115,7 +115,7 @@ void BindlessDescriptorPool::update_bindless_resource(Handle<Buffer> buffer)
                                                 .pBufferInfo = &buffer_updates.back() }));
 }
 
-void BindlessDescriptorPool::update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler)
+void BindlessPool::update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler)
 {
     image_updates.push_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
     updates.push_back(Vks(VkWriteDescriptorSet{
@@ -127,7 +127,7 @@ void BindlessDescriptorPool::update_bindless_resource(VkImageView view, VkImageL
         .pImageInfo = &image_updates.back() }));
 }
 
-void BindlessDescriptorPool::update()
+void BindlessPool::update()
 {
     if(updates.empty()) { return; }
     vkUpdateDescriptorSets(dev, updates.size(), updates.data(), 0, nullptr);

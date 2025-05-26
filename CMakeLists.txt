@@ -116,7 +116,7 @@ add_executable(vkrt
     "eng/scene.cpp"
     "eng/renderer/renderer_vulkan.cpp" 
     "eng/renderer/renderer_vulkan_wrappers.cpp"
-    "eng/renderer/descpool.cpp"
+    "eng/renderer/bindlesspool.cpp"
     "eng/renderer/buffer.cpp"
     "eng/renderer/image.cpp"
     "eng/renderer/staging_buffer.cpp" 

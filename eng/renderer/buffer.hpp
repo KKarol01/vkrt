@@ -7,36 +7,36 @@
 namespace gfx
 {
 
-struct resizable_t
+struct BufferCreateInfo
 {
+    std::string name;
+    VkBufferUsageFlags usage{};
+    size_t size{};
+    bool mapped{ false };
 };
-static constexpr resizable_t resizable;
 
 class Buffer
 {
   public:
     Buffer() noexcept = default;
-    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, const VkBufferCreateInfo& vk_info,
-           const VmaAllocationCreateInfo& vma_info) noexcept;
-    Buffer(const std::string& name, VkDevice dev, VmaAllocator vma, resizable_t resizable,
-           const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) noexcept;
-    // todo: make destructors and proper move semantics
+    Buffer(VkDevice dev, VmaAllocator vma, const BufferCreateInfo& create_info) noexcept;
 
-    size_t capacity() const { return vk_info.size; }
-    size_t size() const { return _size; }
-    size_t free_space() const { return capacity() - size(); }
+    void allocate();
+    void deallocate();
+    void resize(size_t sz);
 
-    std::string name;
+    size_t get_capacity() const { return create_info.size; }
+    size_t get_size() const { return size; }
+    size_t get_free_space() const { return get_capacity() - get_size(); }
+
     VkDevice dev{};
     VmaAllocator vma{};
-    VkBufferCreateInfo vk_info{}; // info.size = capacity
-    VmaAllocationCreateInfo vma_info{};
+    BufferCreateInfo create_info{};
     VkBuffer buffer{};
+    VmaAllocation vma_alloc{};
     VkDeviceAddress bda{};
     void* mapped{};
-    VmaAllocation alloc{};
-    size_t _size{}; // size = size of currently stored data
-    bool is_resizable{};
+    size_t size{};
 };
 
 } // namespace gfx

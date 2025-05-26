@@ -214,9 +214,9 @@ struct FFTOcean
 
 class SubmitQueue;
 class StagingBuffer;
-class BindlessDescriptorPool;
+class BindlessPool;
 
-class RendererVulkan : public gfx::Renderer
+class RendererVulkan : public Renderer
 {
   public:
     static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
@@ -258,19 +258,16 @@ class RendererVulkan : public gfx::Renderer
     void build_tlas();
     void update_ddgi();
 
-    Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
-    Handle<Buffer> make_buffer(const std::string& name, resizable_t resizable, const VkBufferCreateInfo& vk_info,
-                               const VmaAllocationCreateInfo& vma_info);
+    Handle<Buffer> make_buffer(const BufferCreateInfo& info);
     Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
     VkImageView make_image_view(Handle<Image> handle);
     VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
 
-    static Buffer& get_buffer(Handle<Buffer> handle);
-    static Image& get_image(Handle<Image> handle);
+    Buffer& get_buffer(Handle<Buffer> handle);
+    Image& get_image(Handle<Image> handle);
     void destroy_buffer(Handle<Buffer> buffer);
-    void replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer);
     uint32_t get_bindless_index(Handle<Buffer> handle);
     uint32_t get_bindless_index(Handle<Texture> handle);
 
@@ -294,7 +291,7 @@ class RendererVulkan : public gfx::Renderer
 
     SubmitQueue* submit_queue{};
     StagingBuffer* staging_buffer{};
-    BindlessDescriptorPool* bindless_pool{};
+    BindlessPool* bindless_pool{};
     RenderGraph rendergraph;
     PipelineCompiler pipelines{};
 
@@ -329,9 +326,9 @@ class RendererVulkan : public gfx::Renderer
 
     Handle<Buffer> mesh_instance_mesh_id_buffer;
 
-    Handle<Buffer> meshlets_meshlets_buffer;
-    Handle<Buffer> meshlets_vertices_buffer;
-    Handle<Buffer> meshlets_triangles_buffer;
+    // Handle<Buffer> meshlets_meshlets_buffer;
+    Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
+    Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example: ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]]
 
     Handle<Buffer> tlas_mesh_offsets_buffer;
     Handle<Buffer> tlas_transform_buffer;

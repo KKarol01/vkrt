@@ -3,6 +3,7 @@
 #include <eng/common/handle.hpp>
 #include <unordered_map>
 #include <cstdint>
+#include <concepts>
 
 // template <typename T, typename Storage = uint32_t> using HandleMap = std::unordered_map<Handle<T, Storage>, T>;
 
@@ -30,7 +31,12 @@ template <typename T, typename Storage = uint32_t> class HandleMap
         return handle;
     }
 
-    template <typename... Args> handle_t emplace(Args&&... args) { return insert(T{ std::forward<Args>(args)... }); }
+    template <typename... Args>
+    handle_t emplace(Args&&... args)
+        requires std::constructible_from<T, Args...>
+    {
+        return insert(T{ std::forward<Args>(args)... });
+    }
 
     T& at(handle_t h) { return storage.at(h); }
     const T& at(handle_t h) const { return storage.at(h); }

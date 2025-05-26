@@ -60,6 +60,7 @@ struct Meshlet
 {
     Range vertex_range;
     Range triangle_range;
+    glm::vec4 bounding_sphere{};
 };
 
 struct GeometryDescriptor
