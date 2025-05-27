@@ -38,14 +38,20 @@ struct LinearAllocator
             const size_t alloc_sz = free < padded_sz ? free : padded_sz;
             const size_t newhead = oldhead + padded_sz;
             if(free == 0) { return { nullptr, 0 }; }
+            num_allocs.fetch_add(1, std::memory_order_acq_rel);
             if(head.compare_exchange_weak(oldhead, newhead, std::memory_order_relaxed))
             {
                 return { static_cast<void*>(static_cast<std::byte*>(buffer) + oldhead), alloc_sz };
             }
+            else { num_allocs.fetch_sub(1, std::memory_order_relaxed); }
         }
     }
 
-    void reset() { head.store(0); }
+    void reset()
+    {
+        if(num_allocs.fetch_sub(1, std::memory_order_relaxed) == 1) { head.store(0, std::memory_order_relaxed); }
+    }
+
     void* offset_buffer(size_t sz) const { return static_cast<void*>(static_cast<std::byte*>(buffer) + sz); }
     size_t get_alloc_offset(const void* const palloc) const
     {
@@ -55,6 +61,7 @@ struct LinearAllocator
     void* buffer{};
     size_t size{};
     std::atomic<size_t> head{};
+    std::atomic<size_t> num_allocs{};
 };
 
 class StagingBuffer
