@@ -31,6 +31,9 @@ struct LinearAllocator
     std::pair<void*, size_t> allocate_best_fit(size_t sz)
     {
         const auto padded_sz = (sz + ALIGNMENT - 1) & -ALIGNMENT;
+        // can be reordered between previous fetch_add in previous alloc or right after
+        // head load in reset(), which should be correct, as this loop will keep on trying,
+        // or up to head.compare in this allocate.
         size_t oldhead = head.load(std::memory_order_relaxed);
         while(true)
         {
@@ -38,18 +41,49 @@ struct LinearAllocator
             const size_t alloc_sz = free < padded_sz ? free : padded_sz;
             const size_t newhead = oldhead + padded_sz;
             if(free == 0) { return { nullptr, 0 }; }
-            num_allocs.fetch_add(1, std::memory_order_acq_rel);
-            if(head.compare_exchange_weak(oldhead, newhead, std::memory_order_relaxed))
+            // no reordering past or before this point. all memory ops before should have finished.
+            // can be reordered up after fetch_add in previous alloc, or after head.load in reset()
+            // or down before another compare in alloc, or before head.compare in next reset().
+            // if it went up, and there was previous alloc, it will happen after head and num_allocs bump, so all fine.
+            // if it went up, and there was previous reset, it will happen after oldhead load, or after fetch_sub,
+            // and in both cases, it will invalidate oldhead in reset.
+            // if thread 1 is before this compare, thread 2 might dec the alloc counter, and:
+            // either we bump the head, and thread 2 does not reset it, or thread 2 bumps the head
+            // and we fail, and get new head position in next iteration.
+            if(head.compare_exchange_weak(oldhead, newhead, std::memory_order_acq_rel))
             {
+                // bump num_allocs. cannot move up, can move down up to oldhead load in reset, or
+                // before head.compare in alloc. so on successful allocation, num_allocs will be bumped
+                // before dec in subsequent resets().
+                // if thread 1 has finished compare on head in alloc, but is before this fetch_add,
+                // thread 2 might be:
+                // a) before head.compare in alloc, so it retries, and order of increments does not matter.
+                // b) after head.compare, so they both bumped head, and now will inc allocs in whatever order.
+                // c) before fetch_sub, so thread 2 will not reset, as this will have finished incrementing the counter
+                // d) after fetch_sub, so it might be wanting to reset the head, thinking it's the last alloc, so
+                // it will try to head.compare(), but oldhead will be invalid, as thread 1 bumped the head here
+                num_allocs.fetch_add(1, std::memory_order_acquire);
                 return { static_cast<void*>(static_cast<std::byte*>(buffer) + oldhead), alloc_sz };
             }
-            else { num_allocs.fetch_sub(1, std::memory_order_relaxed); }
         }
     }
 
     void reset()
     {
-        if(num_allocs.fetch_sub(1, std::memory_order_relaxed) == 1) { head.store(0, std::memory_order_relaxed); }
+        // don't want any rws move before that. if there are more resets, they can reorder under this load,
+        // which should be correct: at least one reset will fully complete before fetch_sub.
+        // if there is an alloc before that, the reset() will pile up at most after fetch_add in alloc(),
+        // so resetting will happen-after num_allocs increment, and before head reset, all rws will have completed.
+        auto oldhead = head.load(std::memory_order_acquire);
+        // fetch cannot move above load, and below compare_exchange
+        if(num_allocs.fetch_sub(1, std::memory_order_relaxed) == 1)
+        {
+            // rw to alloced memory should be finished by now
+            // sub on num_allocs should be finished
+            // if this thread finished sub, but not compare_exchange, and another
+            // thread alloced data and bumped head, don't reset head, because allocation has happened.
+            head.compare_exchange_strong(oldhead, 0, std::memory_order_release);
+        }
     }
 
     void* offset_buffer(size_t sz) const { return static_cast<void*>(static_cast<std::byte*>(buffer) + sz); }
