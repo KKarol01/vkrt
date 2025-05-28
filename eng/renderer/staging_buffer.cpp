@@ -22,48 +22,53 @@ StagingBuffer::StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) 
 
 void StagingBuffer::send_to(const Transfer& transfer)
 {
-    size_t uploaded_sz = 0;
     auto* r = RendererVulkan::get_instance();
 
     if(transfer.dst_type == ResourceType::BUFFER)
     {
-        if(transfer.src_type != ResourceType::VECTOR || transfer.src_type != ResourceType::BUFFER)
+        if(transfer.src_type != ResourceType::VECTOR && transfer.src_type != ResourceType::BUFFER)
         {
             assert(false);
             return;
         }
 
-        assert(transfer.src_type != ResourceType::IMAGE);
+        if(transfer.src_range.size == 0) { return; } // don't upload empty
+
         auto dbh = transfer.dst_buf();
         auto* db = &r->get_buffer(dbh);
+        const auto req_size = transfer.dst_range.offset + transfer.dst_range.size;
 
         // if too small, resize
-        if(db->buffer && db->get_capacity() < (transfer.dst_range.offset + transfer.dst_range.size))
+        if(db->buffer && db->get_capacity() < req_size)
         {
-            auto bci = db->create_info;
-            bci.size = transfer.dst_range.offset + transfer.dst_range.size;
-            const auto nb = r->make_buffer(bci);
-            send_to(nb, dbh, { 0, db->get_size() }, 0);
+            auto ndbci = db->create_info;
+            ndbci.size = req_size;
+            const auto ndbh = r->make_buffer(ndbci);      // this will allocate, since size is known.
+            send_to(ndbh, dbh, { 0, db->get_size() }, 0); // copy old data
             r->destroy_buffer(dbh);
-            dbh = nb;
-            db = &r->get_buffer(nb);
+            dbh = ndbh;
+            db = &r->get_buffer(ndbh);
         }
-        if(!db->buffer) { db->allocate(); }
+        // buffer is null on buffers created with size 0.
+        else if(!db->buffer)
+        {
+            db->create_info.size = std::max(db->create_info.size, req_size);
+            db->allocate();
+        }
 
         if(transfer.src_type == ResourceType::BUFFER)
         {
             const auto cmd = cmdpool->begin();
             record_command(cmd, transfer);
             queue->with_cmd_buf(cmd).submit_wait(-1ull);
-            return;
         }
-
-        if(transfer.src_type == ResourceType::VECTOR)
+        else if(transfer.src_type == ResourceType::VECTOR)
         {
+            size_t uploaded_sz = 0;
             while(uploaded_sz < transfer.src_range.size)
             {
                 auto [pGPU, alloc_sz] = allocator->allocate_best_fit(transfer.src_range.size);
-                while(!pGPU) // for future: wait for all uploads on other threads to finish so the memory frees up
+                while(!pGPU)
                 {
                     std::tie(pGPU, alloc_sz) = allocator->allocate_best_fit(transfer.src_range.size);
                 }
@@ -72,7 +77,6 @@ void StagingBuffer::send_to(const Transfer& transfer)
                 uploaded_sz += alloc_sz;
                 allocator->reset();
             }
-            return;
         }
     }
 }
@@ -106,15 +110,15 @@ VkImageMemoryBarrier2 StagingBuffer::generate_image_barrier(Handle<Image> image,
 
 void StagingBuffer::transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout)
 {
-    auto& r = *RendererVulkan::get_instance();
-    auto& i = r.get_image(image);
-    const auto barrier = generate_image_barrier(image, layout, is_final_layout);
-    const auto dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier });
-    const auto cmd = cmdpool->begin(cmds[0]);
-    vkCmdPipelineBarrier2(cmd, &dep_info);
-    cmdpool->end(cmd);
-    queue->with_cmd_buf(cmd).submit_wait(-1ull); // wait because cmd might be pending on subsequent begins
-    i.current_layout = layout;
+    // auto& r = *RendererVulkan::get_instance();
+    // auto& i = r.get_image(image);
+    // const auto barrier = generate_image_barrier(image, layout, is_final_layout);
+    // const auto dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier });
+    // const auto cmd = cmdpool->begin(cmds[0]);
+    // vkCmdPipelineBarrier2(cmd, &dep_info);
+    // cmdpool->end(cmd);
+    // queue->with_cmd_buf(cmd).submit_wait(-1ull); // wait because cmd might be pending on subsequent begins
+    // i.current_layout = layout;
 }
 
 void StagingBuffer::record_command(VkCommandBuffer cmd, const Transfer& transfer)
@@ -138,8 +142,13 @@ void StagingBuffer::record_command(VkCommandBuffer cmd, const Transfer& transfer
         assert(db.get_capacity() <= transfer.dst_range.offset + transfer.dst_range.size);
         VkBufferCopy copy{ .srcOffset = transfer.src_range.offset,
                            .dstOffset = transfer.dst_range.offset,
-                           .size = transfer.dst_range.size };
+                           .size = transfer.src_range.size };
         vkCmdCopyBuffer(cmd, sb.buffer, db.buffer, 1, &copy);
+    }
+    else
+    {
+        ENG_TODO();
+        assert(false);
     }
 }
 
