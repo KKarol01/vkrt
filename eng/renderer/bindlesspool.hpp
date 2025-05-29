@@ -25,8 +25,8 @@ class BindlessPool
 
     index_t get_index(Handle<Buffer> buffer);
     index_t get_index(Handle<Texture> texture);
-    void rem_index(Handle<Buffer> buffer);
-    void rem_index(Handle<Texture> texture);
+    void del_index(Handle<Buffer> buffer);
+    void del_index(Handle<Texture> texture);
     void update_index(index_t index, VkBuffer buffer);
     void update_index(index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler = nullptr);
 

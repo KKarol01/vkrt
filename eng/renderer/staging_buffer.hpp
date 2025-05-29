@@ -61,6 +61,11 @@ struct LinearAllocator
     size_t num_allocs{};
 };
 
+struct batched_t
+{
+};
+static inline constexpr batched_t batched = {};
+
 class StagingBuffer
 {
     enum class ResourceType : uint16_t
@@ -94,11 +99,15 @@ class StagingBuffer
     template <typename T> void send_to(Handle<Buffer> dst, size_t dst_offset, const T& src);
     template <typename T> void send_to(Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src);
     void send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset);
-    template <typename T>
-    void send_to(Handle<Image> dst, VkImageLayout final_layout, const VkBufferImageCopy2 region, const std::vector<T>& src);
+    template <typename T> void send_to(Handle<Image> dst, VkImageLayout final_layout, const VkBufferImageCopy2 region, const std::vector<T>& src);
+
+    template <typename T> void send_to(batched_t batched, Handle<Buffer> dst, size_t dst_offset, const T& src);
+    template <typename T> void send_to(batched_t batched, Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src);
+    void send_to(batched_t batched, Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset);
+    template <typename T> void send_to(batched_t batched, Handle<Image> dst, VkImageLayout final_layout, const VkBufferImageCopy2 region, const std::vector<T>& src);
 
   private:
-    void send_to(const Transfer& transfer);
+    void upload();
     VkImageMemoryBarrier2 generate_image_barrier(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
     void transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
     void record_command(VkCommandBuffer cmd, const Transfer& transfer);
@@ -106,6 +115,7 @@ class StagingBuffer
     SubmitQueue* queue{};
     CommandPool* cmdpool{};
     Buffer* staging_buffer{};
+    std::deque<Transfer> pending;
     std::unique_ptr<LinearAllocator> allocator{};
 };
 
@@ -159,6 +169,11 @@ void StagingBuffer::send_to(Handle<Image> dst, VkImageLayout final_layout, const
                       .data = ts.data(),
                       .dst_final_layout = final_layout,
                       .dst_image_region = region });
+}
+
+template <typename T>
+inline void StagingBuffer::send_to(batched_t batched, Handle<Buffer> dst, size_t dst_offset, const T& src)
+{
 }
 
 void StagingBuffer::send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset)

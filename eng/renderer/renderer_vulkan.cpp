@@ -291,52 +291,21 @@ void RendererVulkan::initialize_imgui()
 void RendererVulkan::initialize_resources()
 {
     bindless_pool = new BindlessPool{ dev };
-
-    staging_buffer = new StagingBuffer{
-        submit_queue,
-        make_buffer("staging_buffer", resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 64, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR }),
-                    VmaAllocationCreateInfo{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-                                             .usage = VMA_MEMORY_USAGE_AUTO,
-                                             .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT })
-    };
-
-    vertex_positions_buffer =
-        make_buffer("vertex_positions_buffer", resizable,
-                    Vks(VkBufferCreateInfo{
-                        .size = 1024 * 1024 * 128,
-                        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                    }),
-                    VmaAllocationCreateInfo{});
-    vertex_attributes_buffer =
-        make_buffer("vertex_attributes_buffer", resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                    VmaAllocationCreateInfo{});
+    staging_buffer =
+        new StagingBuffer{ submit_queue, make_buffer(BufferCreateInfo{ "staging_buffer", VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR,
+                                                                       1024 * 1024 * 64, true }) };
+    vertex_positions_buffer = make_buffer(BufferCreateInfo{
+        "vertex_positions_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
+    vertex_attributes_buffer = make_buffer(BufferCreateInfo{
+        "vertex_attributes_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
     index_buffer =
-        make_buffer("index_buffer", resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 64,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                    VmaAllocationCreateInfo{});
-    meshlets_meshlets_buffer =
-        make_buffer("meshlets_meshlets_buffer", resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 32,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                    VmaAllocationCreateInfo{});
-    meshlets_vertices_buffer =
-        make_buffer("meshlets_vertices_buffer", resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 32,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                    VmaAllocationCreateInfo{});
-    meshlets_triangles_buffer =
-        make_buffer("meshlets_triangles_buffer", resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 32,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT }),
-                    VmaAllocationCreateInfo{});
+        make_buffer(BufferCreateInfo{ "index_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
+    meshlets_bs_buf = make_buffer(BufferCreateInfo{ "meshlets_bounding_spheres_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    meshlets_mli_id_buf =
+        make_buffer(BufferCreateInfo{ "meshlets_meshlest_instance_to_id_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
     // auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     // auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -590,7 +559,8 @@ void RendererVulkan::update()
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
             .cam_pos = Engine::get().camera->pos,
         };
-        staging_buffer->send_to(fd.constants, 0ull, constants).send_to(vsm.constants_buffer, 0ull, vsmconsts).submit();
+        staging_buffer->send_to(fd.constants, 0ull, constants); // todo: restore batching
+        staging_buffer->send_to(vsm.constants_buffer, 0ull, vsmconsts);
     }
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { upload_transforms(); }
@@ -1393,7 +1363,7 @@ void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
 {
     auto& b = get_buffer(buffer);
     b.deallocate();
-    bindless_pool->unregister_index(buffer);
+    bindless_pool->del_index(buffer);
 }
 
 uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_index(handle); }

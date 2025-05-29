@@ -324,9 +324,7 @@ class RendererVulkan : public Renderer
     Handle<Buffer> indirect_draw_buffer;
     Handle<Buffer> meshlets_indirect_draw_buffer;
 
-    Handle<Buffer> mesh_instance_mesh_id_buffer;
-
-    // Handle<Buffer> meshlets_meshlets_buffer;
+    Handle<Buffer> mesh_instance_mid_buf;
     Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
     Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example: ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]]
 

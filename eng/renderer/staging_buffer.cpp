@@ -15,12 +15,13 @@ StagingBuffer::StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) 
         assert(false);
         return;
     }
+    assert(this->staging_buffer && this->staging_buffer->buffer);
     allocator = std::make_unique<LinearAllocator>(this->staging_buffer->mapped, this->staging_buffer->get_capacity());
     cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     assert(allocator && cmdpool);
 }
 
-void StagingBuffer::send_to(const Transfer& transfer)
+void StagingBuffer::upload()
 {
     auto* r = RendererVulkan::get_instance();
 

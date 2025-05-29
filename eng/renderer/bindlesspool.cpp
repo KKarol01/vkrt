@@ -122,7 +122,7 @@ uint32_t BindlessPool::get_index(Handle<Texture> texture)
     return idx;
 }
 
-void BindlessPool::rem_index(Handle<Buffer> buffer)
+void BindlessPool::del_index(Handle<Buffer> buffer)
 {
     if(!buffer)
     {
@@ -137,7 +137,7 @@ void BindlessPool::rem_index(Handle<Buffer> buffer)
     else { ENG_WARN("Buffer {} was not registered.", *buffer); }
 }
 
-void BindlessPool::rem_index(Handle<Texture> texture)
+void BindlessPool::del_index(Handle<Texture> texture)
 {
     if(!texture)
     {
