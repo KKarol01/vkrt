@@ -8,12 +8,17 @@ namespace gfx
 BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
 {
     if(!dev) { return; }
-    std::vector<VkDescriptorPoolSize> sizes{ { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256 },
-                                             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
-                                             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 } };
+    const auto MAX_COMBINED_IMAGES = 1024u;
+    const auto MAX_STORAGE_IMAGES = 1024u;
+    const auto MAX_STORAGE_BUFFERS = 1024u;
+    const auto MAX_AS = 16u;
+    const auto MAX_SETS = 2u;
+    std::vector<VkDescriptorPoolSize> sizes{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_SETS * MAX_COMBINED_IMAGES },
+                                             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_SETS * MAX_STORAGE_IMAGES },
+                                             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_SETS * MAX_STORAGE_BUFFERS } };
     if(RendererVulkan::get_instance()->supports_raytracing)
     {
-        sizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 });
+        sizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_AS });
     }
     const auto pool_info = Vks(VkDescriptorPoolCreateInfo{
         .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
@@ -25,9 +30,9 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
     assert(pool);
 
     std::vector<VkDescriptorSetLayoutBinding> bindings{
-        { BINDLESS_STORAGE_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 65536, VK_SHADER_STAGE_ALL },
-        { BINDLESS_STORAGE_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 65536, VK_SHADER_STAGE_ALL },
-        { BINDLESS_COMBINED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536, VK_SHADER_STAGE_ALL }
+        { BINDLESS_COMBINED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_COMBINED_IMAGES, VK_SHADER_STAGE_ALL },
+        { BINDLESS_STORAGE_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_STORAGE_IMAGES, VK_SHADER_STAGE_ALL },
+        { BINDLESS_STORAGE_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_STORAGE_BUFFERS, VK_SHADER_STAGE_ALL },
     };
 
     const auto binding_flag = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
@@ -35,8 +40,8 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
     std::vector<VkDescriptorBindingFlags> binding_flags{ binding_flag, binding_flag, binding_flag };
     if(RendererVulkan::get_instance()->supports_raytracing)
     {
-        bindings.push_back({ BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 65536,
-                             VK_SHADER_STAGE_ALL });
+        bindings.push_back({ BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+                             MAX_SETS * MAX_AS, VK_SHADER_STAGE_ALL });
         binding_flags.push_back(binding_flag);
     }
     const auto binding_flags_info = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
@@ -79,52 +84,98 @@ uint32_t BindlessPool::get_index(Handle<Buffer> buffer)
 {
     if(!buffer)
     {
-        ENG_WARN("buffer is null");
+        ENG_WARN("Buffer is null");
         return ~0ull;
     }
     if(auto it = buffers.find(buffer); it != buffers.end()) { return it->second; }
-    buffers[buffer] = buffer_counter;
-    update_bindless_resource(buffer);
-    return buffer_counter++;
+    index_t idx;
+    if(!free_buff_idxs.empty())
+    {
+        idx = free_buff_idxs.front();
+        free_buff_idxs.pop_front();
+    }
+    else { idx = buffer_counter++; }
+    buffers[buffer] = idx;
+    update_index(idx, RendererVulkan::get_instance()->get_buffer(buffer).buffer);
+    return idx;
 }
 
 uint32_t BindlessPool::get_index(Handle<Texture> texture)
 {
     if(!texture)
     {
-        ENG_WARN("view is null");
+        ENG_WARN("Texture is null");
         return ~0ull;
     }
     if(auto it = textures.find(texture); it != textures.end()) { return it->second; }
-    textures[texture] = view_counter;
+
+    uint32_t idx;
+    if(!free_img_idxs.empty())
+    {
+        idx = free_img_idxs.front();
+        free_img_idxs.pop_front();
+    }
+    else { idx = texture_counter++; }
+    textures[texture] = idx;
     const auto& tex = RendererVulkan::get_instance()->textures.at(texture);
-    update_bindless_resource(tex.view, tex.layout, tex.sampler);
-    return view_counter++;
+    update_index(idx, tex.view, tex.layout, tex.sampler);
+    return idx;
 }
 
-void BindlessPool::update_bindless_resource(Handle<Buffer> buffer)
+void BindlessPool::rem_index(Handle<Buffer> buffer)
 {
-    if(!buffers.contains(buffer)) { return; }
-    buffer_updates.push_back(Vks(VkDescriptorBufferInfo{
-        .buffer = RendererVulkan::get_buffer(buffer).buffer, .offset = 0, .range = VK_WHOLE_SIZE }));
-    updates.push_back(Vks(VkWriteDescriptorSet{ .dstSet = set,
-                                                .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
-                                                .dstArrayElement = buffers.at(buffer),
-                                                .descriptorCount = 1,
-                                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                                .pBufferInfo = &buffer_updates.back() }));
+    if(!buffer)
+    {
+        ENG_WARN("Buffer is null");
+        return;
+    }
+    if(auto it = buffers.find(buffer); it != buffers.end())
+    {
+        free_buff_idxs.push_front(it->second);
+        buffers.erase(it);
+    }
+    else { ENG_WARN("Buffer {} was not registered.", *buffer); }
 }
 
-void BindlessPool::update_bindless_resource(VkImageView view, VkImageLayout layout, VkSampler sampler)
+void BindlessPool::rem_index(Handle<Texture> texture)
 {
-    image_updates.push_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
-    updates.push_back(Vks(VkWriteDescriptorSet{
+    if(!texture)
+    {
+        ENG_WARN("Texture is null");
+        return;
+    }
+    if(auto it = textures.find(texture); it != textures.end())
+    {
+        free_img_idxs.push_front(it->second);
+        textures.erase(it);
+    }
+    else { ENG_WARN("Texture {} was not registered.", *texture); }
+}
+
+void BindlessPool::update_index(index_t index, VkBuffer buffer)
+{
+    const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = buffer, .range = VK_WHOLE_SIZE }));
+    const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
+                                                 .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
+                                                 .dstArrayElement = index,
+                                                 .descriptorCount = 1,
+                                                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                 .pBufferInfo = &update });
+    updates.push_back(write);
+}
+
+void BindlessPool::update_index(index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler)
+{
+    const auto& update =
+        texture_updates.emplace_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
+    const auto write = Vks(VkWriteDescriptorSet{
         .dstSet = set,
         .dstBinding = (uint32_t)(sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
-        .dstArrayElement = view_counter,
+        .dstArrayElement = index,
         .descriptorCount = 1,
-        .descriptorType = sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo = &image_updates.back() }));
+        .descriptorType = (sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        .pImageInfo = &update });
+    updates.push_back(write);
 }
 
 void BindlessPool::update()
@@ -132,7 +183,7 @@ void BindlessPool::update()
     if(updates.empty()) { return; }
     vkUpdateDescriptorSets(dev, updates.size(), updates.data(), 0, nullptr);
     updates.clear();
-    image_updates.clear();
+    texture_updates.clear();
     buffer_updates.clear();
 }
 
