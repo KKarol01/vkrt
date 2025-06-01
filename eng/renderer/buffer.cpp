@@ -2,6 +2,7 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/staging_buffer.hpp>
 #include <eng/common/logger.hpp>
 
 namespace gfx
@@ -11,7 +12,7 @@ Buffer::Buffer(VkDevice dev, VmaAllocator vma, const BufferCreateInfo& create_in
     : dev(dev), vma(vma), create_info(create_info)
 {
     assert(dev && vma);
-    if(create_info.size > 0) { allocate(); }
+    if(create_info.allocate) { allocate(); }
 }
 
 void Buffer::allocate()
@@ -57,8 +58,16 @@ void Buffer::allocate()
     }
 }
 
-void Buffer::deallocate() {}
-
-void Buffer::resize(size_t sz) {}
+void Buffer::deallocate()
+{
+    if(!buffer || !vma_alloc) { return; }
+    if(mapped) { vmaUnmapMemory(vma, vma_alloc); }
+    vmaDestroyBuffer(vma, buffer, vma_alloc);
+    buffer = {};
+    vma_alloc = {};
+    bda = {};
+    mapped = {};
+    size = {};
+}
 
 } // namespace gfx

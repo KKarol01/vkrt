@@ -144,7 +144,6 @@ class Renderer
     virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) = 0;
     virtual Handle<Image> get_color_output_texture() const = 0;
     virtual Material get_material(Handle<Material> handle) const = 0;
-    virtual VsmData& get_vsm_data() = 0;
 };
 
 } // namespace gfx

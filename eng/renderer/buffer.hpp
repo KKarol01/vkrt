@@ -13,6 +13,7 @@ struct BufferCreateInfo
     VkBufferUsageFlags usage{};
     size_t size{};
     bool mapped{ false };
+    bool allocate{ false };
 };
 
 class Buffer
@@ -23,7 +24,6 @@ class Buffer
 
     void allocate();
     void deallocate();
-    void resize(size_t sz);
 
     size_t get_capacity() const { return create_info.size; }
     size_t get_size() const { return size; }

@@ -25,18 +25,19 @@
     }                                                                                                                  \
     while(0)
 
-#define ENG_ASSERT(expr, str, ...)                                                                                     \
-    if(!(expr))                                                                                                        \
+#define ENG_WARN_ASSERT(str, ...)                                                                                      \
+    do                                                                                                                 \
     {                                                                                                                  \
-        fmt::println("[ASSERT][{} : {}]: " str, __FILE__, __LINE__, __VA_ARGS__);                                      \
+        ENG_WARN(str, __VA_ARGS__);                                                                                    \
         assert(false);                                                                                                 \
-    }
+    }                                                                                                                  \
+    while(0)
 
 #define ENG_TODO() fmt::println("[TODO][{} : {}]", __FILE__, __LINE__)
 #else
 #define ENG_ERROR(str, ...)
 #define ENG_WARN(str, ...)
 #define ENG_LOG(str, ...)
-#define ENG_ASSERT(expr, str, ...)
+#define ENG_WARN_ASSERT(str, ...)
 #define ENG_TODO()
 #endif

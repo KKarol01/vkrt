@@ -122,7 +122,7 @@ uint32_t BindlessPool::get_index(Handle<Texture> texture)
     return idx;
 }
 
-void BindlessPool::del_index(Handle<Buffer> buffer)
+void BindlessPool::free_index(Handle<Buffer> buffer)
 {
     if(!buffer)
     {
@@ -137,7 +137,7 @@ void BindlessPool::del_index(Handle<Buffer> buffer)
     else { ENG_WARN("Buffer {} was not registered.", *buffer); }
 }
 
-void BindlessPool::del_index(Handle<Texture> texture)
+void BindlessPool::free_index(Handle<Texture> texture)
 {
     if(!texture)
     {
@@ -154,6 +154,11 @@ void BindlessPool::del_index(Handle<Texture> texture)
 
 void BindlessPool::update_index(index_t index, VkBuffer buffer)
 {
+    if(index == ~index_t{} || !buffer)
+    {
+        ENG_WARN("Invalid index ({}) or buffer ({})", index, reinterpret_cast<uintptr_t>(buffer));
+        return;
+    }
     const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = buffer, .range = VK_WHOLE_SIZE }));
     const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
                                                  .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
@@ -166,6 +171,11 @@ void BindlessPool::update_index(index_t index, VkBuffer buffer)
 
 void BindlessPool::update_index(index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler)
 {
+    if(index == ~index_t{} || !view)
+    {
+        ENG_WARN_ASSERT("Invalid index ({}) or view ({})", index, reinterpret_cast<uintptr_t>(view));
+        return;
+    }
     const auto& update =
         texture_updates.emplace_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
     const auto write = Vks(VkWriteDescriptorSet{

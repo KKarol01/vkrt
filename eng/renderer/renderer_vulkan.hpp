@@ -235,7 +235,6 @@ class RendererVulkan : public Renderer
 
     void update() final;
     void on_window_resize() final;
-    // void set_screen(ScreenRect screen) final;
     Handle<Image> batch_image(const ImageDescriptor& desc) final;
     Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
@@ -247,7 +246,6 @@ class RendererVulkan : public Renderer
     size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
     Material get_material(Handle<Material> handle) const final;
-    VsmData& get_vsm_data() final;
 
     void upload_model_images();
     void upload_staged_models();
@@ -268,6 +266,7 @@ class RendererVulkan : public Renderer
     Buffer& get_buffer(Handle<Buffer> handle);
     Image& get_image(Handle<Image> handle);
     void destroy_buffer(Handle<Buffer> buffer);
+    void update_buffer(Handle<Buffer> buffer);
     uint32_t get_bindless_index(Handle<Buffer> handle);
     uint32_t get_bindless_index(Handle<Texture> handle);
 

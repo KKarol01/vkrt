@@ -14,7 +14,9 @@
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 #include <eng/common/types.hpp>
 
+#ifndef IS_POW2
 #define IS_POW2(x) (x > 0 && !(x & (x - 1)))
+#endif
 
 namespace gfx
 {
@@ -32,19 +34,17 @@ struct LinearAllocator
     std::pair<void*, size_t> allocate_best_fit(size_t sz)
     {
         const auto padded_sz = (sz + ALIGNMENT - 1) & -ALIGNMENT;
-        std::scoped_lock sl{ mutex };
         const size_t free = size - head;
         const size_t alloc_sz = free < padded_sz ? free : padded_sz;
         const size_t oldhead = head;
         if(free == 0) { return { nullptr, 0 }; }
-        head += padded_sz;
+        head += alloc_sz;
         ++num_allocs;
-        return { static_cast<void*>(static_cast<std::byte*>(buffer) + oldhead), alloc_sz };
+        return { static_cast<void*>(static_cast<std::byte*>(buffer) + oldhead), std::min(alloc_sz, sz) };
     }
 
     void reset()
     {
-        std::scoped_lock sl{ mutex };
         assert(num_allocs > 0);
         if(--num_allocs == 0) { head = 0; }
     }
@@ -56,15 +56,9 @@ struct LinearAllocator
 
     void* buffer{};
     size_t size{};
-    std::mutex mutex;
     size_t head{};
     size_t num_allocs{};
 };
-
-struct batched_t
-{
-};
-static inline constexpr batched_t batched = {};
 
 class StagingBuffer
 {
@@ -74,7 +68,6 @@ class StagingBuffer
         BUFFER,
         IMAGE,
         VECTOR,
-        STAGING,
     };
     struct Transfer
     {
@@ -90,7 +83,7 @@ class StagingBuffer
         Range dst_range;
         const void* data;
         VkImageLayout dst_final_layout;
-        VkBufferImageCopy2 dst_image_region;
+        VkBufferImageCopy2 dst_image_region; // this is currently unused.
     };
 
   public:
@@ -99,97 +92,54 @@ class StagingBuffer
     template <typename T> void send_to(Handle<Buffer> dst, size_t dst_offset, const T& src);
     template <typename T> void send_to(Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src);
     void send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset);
-    template <typename T> void send_to(Handle<Image> dst, VkImageLayout final_layout, const VkBufferImageCopy2 region, const std::vector<T>& src);
-
-    template <typename T> void send_to(batched_t batched, Handle<Buffer> dst, size_t dst_offset, const T& src);
-    template <typename T> void send_to(batched_t batched, Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src);
-    void send_to(batched_t batched, Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset);
-    template <typename T> void send_to(batched_t batched, Handle<Image> dst, VkImageLayout final_layout, const VkBufferImageCopy2 region, const std::vector<T>& src);
+    template <typename T> void send_to(Handle<Image> dst, VkImageLayout final_layout, const std::vector<T>& src);
+    void submit();
 
   private:
-    void upload();
-    VkImageMemoryBarrier2 generate_image_barrier(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
-    void transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
-    void record_command(VkCommandBuffer cmd, const Transfer& transfer);
+    void send_to(const Transfer& transfer);
+    void record_image_transition(VkCommandBuffer cmd, const Transfer& transfer, bool is_final_layout, VkImageLayout layout);
+    void record_buffer_copy(VkCommandBuffer cmd, VkBuffer dst, VkBuffer src, Range src_range, size_t dst_offset);
 
     SubmitQueue* queue{};
     CommandPool* cmdpool{};
     Buffer* staging_buffer{};
-    std::deque<Transfer> pending;
+    std::vector<Transfer> pending;
     std::unique_ptr<LinearAllocator> allocator{};
 };
 
 template <typename T> void StagingBuffer::send_to(Handle<Buffer> dst, size_t dst_offset, const T& src)
 {
-    if(!dst)
-    {
-        ENG_WARN("Destination resource is invalid ({}).", *dst);
-        assert(false);
-        return;
-    }
-    send_to(Transfer{ .dst_res = *dst,
-                      .src_type = ResourceType::VECTOR,
+    send_to(Transfer{ .src_type = ResourceType::VECTOR,
+                      .dst_res = *dst,
                       .dst_type = ResourceType::BUFFER,
-                      .data = &src,
                       .src_range = { 0, sizeof(T) },
-                      .dst_range = { dst_offset, sizeof(T) } });
+                      .dst_range = { dst_offset, sizeof(T) },
+                      .data = &src });
 }
 
 template <typename T> void StagingBuffer::send_to(Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src)
 {
-    if(!dst)
-    {
-        ENG_WARN("Destination resource is invalid ({}).", *dst);
-        assert(false);
-        return;
-    }
     send_to(Transfer{
         .src_type = ResourceType::VECTOR,
         .dst_res = *dst,
         .dst_type = ResourceType::BUFFER,
+        .src_range = { 0, src.size() * sizeof(T) },
         .dst_range = { dst_offset, src.size() * sizeof(T) },
         .data = src.data(),
     });
 }
 
 template <typename T>
-void StagingBuffer::send_to(Handle<Image> dst, VkImageLayout final_layout, const VkBufferImageCopy2 region,
-                            const std::vector<T>& ts)
+void StagingBuffer::send_to(Handle<Image> dst, VkImageLayout final_layout, const std::vector<T>& ts)
 {
-    if(!dst)
-    {
-        ENG_WARN("Destination resource is invalid ({}).", *dst);
-        assert(false);
-        return;
-    }
     send_to(Transfer{ .src_type = ResourceType::VECTOR,
                       .dst_res = *dst,
                       .dst_type = ResourceType::IMAGE,
                       .src_range = { 0, ts.size() * sizeof(T) },
                       .data = ts.data(),
-                      .dst_final_layout = final_layout,
-                      .dst_image_region = region });
-}
-
-template <typename T>
-inline void StagingBuffer::send_to(batched_t batched, Handle<Buffer> dst, size_t dst_offset, const T& src)
-{
-}
-
-void StagingBuffer::send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset)
-{
-    if(!dst)
-    {
-        ENG_WARN("Destination resource is invalid ({}).", *dst);
-        assert(false);
-        return;
-    }
-    send_to(Transfer{ .src_res = *src,
-                      .src_type = !src ? ResourceType::STAGING : ResourceType::BUFFER,
-                      .dst_res = *dst,
-                      .dst_type = ResourceType::BUFFER,
-                      .src_range = src_range,
-                      .dst_range = { dst_offset, src_range.size } });
+                      .dst_final_layout = final_layout });
 }
 
 } // namespace gfx
+
+#undef IS_POW2

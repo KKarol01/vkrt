@@ -21,136 +21,249 @@ StagingBuffer::StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) 
     assert(allocator && cmdpool);
 }
 
-void StagingBuffer::upload()
+void StagingBuffer::send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset)
 {
+    send_to(Transfer{ .src_res = *src,
+                      .src_type = ResourceType::BUFFER,
+                      .dst_res = *dst,
+                      .dst_type = ResourceType::BUFFER,
+                      .src_range = src_range,
+                      .dst_range = { dst_offset, src_range.size } });
+}
+
+void StagingBuffer::submit()
+{
+    if(pending.empty()) { return; }
+
     auto* r = RendererVulkan::get_instance();
+    VkCommandBuffer cmd = cmdpool->begin();
 
-    if(transfer.dst_type == ResourceType::BUFFER)
+    const auto submit = [this, &cmd](bool make_new = true) {
+        cmdpool->end(cmd);
+        queue->with_cmd_buf(cmd).submit_wait(-1ull);
+        if(make_new) { cmd = cmdpool->begin(); }
+    };
+
+    // initial barrier
     {
-        if(transfer.src_type != ResourceType::VECTOR && transfer.src_type != ResourceType::BUFFER)
-        {
-            assert(false);
-            return;
-        }
+        const auto vkmembar =
+            Vks(VkMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                  .srcAccessMask = VK_ACCESS_2_NONE,
+                                  .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                  .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT });
+        const auto vkdep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &vkmembar });
+        vkCmdPipelineBarrier2(cmd, &vkdep);
+    }
 
-        if(transfer.src_range.size == 0) { return; } // don't upload empty
-
-        auto dbh = transfer.dst_buf();
-        auto* db = &r->get_buffer(dbh);
-        const auto req_size = transfer.dst_range.offset + transfer.dst_range.size;
-
-        // if too small, resize
-        if(db->buffer && db->get_capacity() < req_size)
+    {
+        std::unordered_map<Handle<Buffer>, size_t> dst_buf_sizes;
+        std::unordered_map<Handle<Buffer>, Buffer> dst_buf_replacements;
+        for(auto& p : pending)
         {
-            auto ndbci = db->create_info;
-            ndbci.size = req_size;
-            const auto ndbh = r->make_buffer(ndbci);      // this will allocate, since size is known.
-            send_to(ndbh, dbh, { 0, db->get_size() }, 0); // copy old data
-            r->destroy_buffer(dbh);
-            dbh = ndbh;
-            db = &r->get_buffer(ndbh);
+            if(p.dst_type != ResourceType::BUFFER) { continue; }
+            const auto bh = p.dst_buf();
+            auto& b = r->get_buffer(bh);
+            if(!dst_buf_sizes.contains(bh)) { dst_buf_sizes[bh] = b.get_size(); }
+            if(p.dst_range.offset == ~0ull) { p.dst_range.offset = dst_buf_sizes.at(bh); }
+            const auto req_sz = p.dst_range.offset + p.dst_range.size;
+            dst_buf_sizes.at(bh) = std::max(dst_buf_sizes.at(bh), req_sz);
         }
-        // buffer is null on buffers created with size 0.
-        else if(!db->buffer)
+        for(auto [h, sz] : dst_buf_sizes)
         {
-            db->create_info.size = std::max(db->create_info.size, req_size);
-            db->allocate();
-        }
-
-        if(transfer.src_type == ResourceType::BUFFER)
-        {
-            const auto cmd = cmdpool->begin();
-            record_command(cmd, transfer);
-            queue->with_cmd_buf(cmd).submit_wait(-1ull);
-        }
-        else if(transfer.src_type == ResourceType::VECTOR)
-        {
-            size_t uploaded_sz = 0;
-            while(uploaded_sz < transfer.src_range.size)
+            auto& b = r->get_buffer(h);
+            if(!b.buffer)
             {
-                auto [pGPU, alloc_sz] = allocator->allocate_best_fit(transfer.src_range.size);
-                while(!pGPU)
+                b.create_info.size = sz;
+                b.allocate();
+            }
+            else if(b.get_capacity() < sz)
+            {
+                Buffer nb{ b.dev, b.vma, b.create_info };
+                nb.create_info.size = sz;
+                nb.allocate();
+                if(b.get_size() > 0)
                 {
-                    std::tie(pGPU, alloc_sz) = allocator->allocate_best_fit(transfer.src_range.size);
+                    const auto vkbufcopy = Vks(VkBufferCopy{ .srcOffset = 0, .dstOffset = 0, .size = b.get_size() });
+                    vkCmdCopyBuffer(cmd, b.buffer, nb.buffer, 1, &vkbufcopy);
                 }
-                memcpy(pGPU, static_cast<const std::byte*>(transfer.data) + uploaded_sz, alloc_sz);
-                send_to(dbh, {}, { allocator->get_alloc_offset(pGPU), alloc_sz }, transfer.dst_range.offset + uploaded_sz);
-                uploaded_sz += alloc_sz;
-                allocator->reset();
+                dst_buf_replacements[h] = std::move(nb);
             }
         }
+        if(!dst_buf_replacements.empty())
+        {
+            const auto vkmembar =
+                Vks(VkMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                      .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                      .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                      .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT });
+            const auto vkdep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &vkmembar });
+            vkCmdPipelineBarrier2(cmd, &vkdep);
+            submit();
+        }
+        for(auto& [h, nb] : dst_buf_replacements)
+        {
+            auto& b = r->get_buffer(h);
+            b.deallocate();
+            b = std::move(nb);
+            r->update_buffer(h);
+        }
     }
-}
 
-VkImageMemoryBarrier2 StagingBuffer::generate_image_barrier(Handle<Image> image, VkImageLayout layout, bool is_final_layout)
-{
-    auto& r = *RendererVulkan::get_instance();
-    auto& i = r.get_image(image);
-    return is_final_layout
-               ? Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
-                                            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                            .dstAccessMask = VK_ACCESS_2_NONE,
-                                            .oldLayout = i.current_layout,
-                                            .newLayout = layout,
-                                            .image = i.image,
-                                            .subresourceRange = { .aspectMask = i.deduce_aspect(),
-                                                                  .levelCount = VK_REMAINING_MIP_LEVELS,
-                                                                  .layerCount = VK_REMAINING_ARRAY_LAYERS } })
-               : Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                            .srcAccessMask = VK_ACCESS_2_NONE,
-                                            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
-                                            .oldLayout = i.current_layout,
-                                            .newLayout = layout,
-                                            .image = i.image,
-                                            .subresourceRange = { .aspectMask = i.deduce_aspect(),
-                                                                  .levelCount = VK_REMAINING_MIP_LEVELS,
-                                                                  .layerCount = VK_REMAINING_ARRAY_LAYERS } });
-}
-
-void StagingBuffer::transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout)
-{
-    // auto& r = *RendererVulkan::get_instance();
-    // auto& i = r.get_image(image);
-    // const auto barrier = generate_image_barrier(image, layout, is_final_layout);
-    // const auto dep_info = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier });
-    // const auto cmd = cmdpool->begin(cmds[0]);
-    // vkCmdPipelineBarrier2(cmd, &dep_info);
-    // cmdpool->end(cmd);
-    // queue->with_cmd_buf(cmd).submit_wait(-1ull); // wait because cmd might be pending on subsequent begins
-    // i.current_layout = layout;
-}
-
-void StagingBuffer::record_command(VkCommandBuffer cmd, const Transfer& transfer)
-{
-    if(transfer.src_type != ResourceType::STAGING)
+    for(auto i = 0u; i < pending.size(); ++i)
     {
-        assert(false);
-        return;
+        Transfer& t = pending.at(i);
+
+        if(t.src_type == ResourceType::VECTOR)
+        {
+            size_t uploaded = 0;
+            while(true)
+            {
+                auto [pGPU, szGPU] = allocator->allocate_best_fit(t.src_range.size);
+                if(pGPU) { memcpy(pGPU, static_cast<const std::byte*>(t.data) + t.src_range.offset + uploaded, szGPU); }
+                else
+                {
+                    submit();
+                    allocator->reset();
+                    continue;
+                }
+                if(t.dst_type == ResourceType::BUFFER)
+                {
+                    auto& buff = r->get_buffer(t.dst_buf());
+                    const auto vkbufcopy = Vks(VkBufferCopy{ .srcOffset = allocator->get_alloc_offset(pGPU),
+                                                             .dstOffset = t.dst_range.offset + uploaded,
+                                                             .size = szGPU });
+                    vkCmdCopyBuffer(cmd, staging_buffer->buffer, buff.buffer, 1, &vkbufcopy);
+                }
+                else if(t.dst_type == ResourceType::IMAGE)
+                {
+                    if(t.src_range.size != szGPU)
+                    {
+                        ENG_TODO("Implement image upload in segments, not in full, all at once.");
+                        assert(false);
+                        break;
+                    }
+                    auto& img = r->get_image(t.dst_img());
+                    const auto vkimgreg = Vks(VkBufferImageCopy2{ .bufferOffset = allocator->get_alloc_offset(pGPU),
+                                                                  .imageSubresource = { img.deduce_aspect(), 0, 0, 1 },
+                                                                  .imageExtent = img.vk_info.extent });
+
+                    const auto vkimgcpi = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = staging_buffer->buffer,
+                                                                        .dstImage = img.image,
+                                                                        .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                                        .regionCount = 1,
+                                                                        .pRegions = &vkimgreg });
+                    record_image_transition(cmd, t, false, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                    vkCmdCopyBufferToImage2(cmd, &vkimgcpi);
+                }
+                else
+                {
+                    ENG_TODO();
+                    assert(false);
+                }
+
+                uploaded += szGPU;
+                if(uploaded == t.src_range.size)
+                {
+                    if(t.dst_type == ResourceType::IMAGE) { record_image_transition(cmd, t, true, t.dst_final_layout); }
+                    break;
+                }
+            }
+        }
+        else if(t.src_type == ResourceType::BUFFER)
+        {
+            if(t.dst_type == ResourceType::BUFFER)
+            {
+                record_buffer_copy(cmd, r->get_buffer(t.dst_buf()).buffer, r->get_buffer(t.src_buf()).buffer,
+                                   t.src_range, t.dst_range.offset);
+            }
+            else { ENG_WARN_ASSERT("Unsupported dst type ({}) from src BUFFER", std::to_underlying(t.dst_type)); }
+        }
+        else
+        {
+            ENG_WARN_ASSERT("Unsupported source resource type ({})", std::to_underlying(t.src_type));
+            continue;
+        }
     }
 
-    auto* r = RendererVulkan::get_instance();
-    auto& sb = *staging_buffer;
-    assert(sb.buffer);
+    const auto vkbufbar = Vks(VkMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                                .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+                                                .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                                .dstAccessMask = VK_ACCESS_2_NONE });
+    const auto vkdep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &vkbufbar });
+    vkCmdPipelineBarrier2(cmd, &vkdep);
+    submit(false);
+    cmdpool->reset();
+    pending.clear();
+}
 
+void StagingBuffer::send_to(const Transfer& transfer)
+{
+    if(transfer.src_type == ResourceType::VECTOR)
+    {
+        if(!transfer.data || transfer.src_range.size == 0)
+        {
+            ENG_WARN_ASSERT("Invalid vector or size is 0");
+            return;
+        }
+    }
+    else if(transfer.src_type == ResourceType::BUFFER)
+    {
+        if(!transfer.src_buf())
+        {
+            ENG_WARN_ASSERT("Invalid src buffer handle.");
+            return;
+        }
+        const auto& b = RendererVulkan::get_instance()->get_buffer(transfer.src_buf());
+        if(!b.buffer || b.get_size() < transfer.src_range.offset + transfer.src_range.size)
+        {
+            ENG_WARN_ASSERT("Source buffer is not allocated or source range exceeds it's boundaries");
+            return;
+        }
+    }
     if(transfer.dst_type == ResourceType::BUFFER)
     {
-        const auto dbh = transfer.dst_buf();
-        auto& db = r->get_buffer(dbh);
-        assert(db.buffer);
-        assert(sb.get_capacity() <= transfer.src_range.offset + transfer.src_range.size);
-        assert(db.get_capacity() <= transfer.dst_range.offset + transfer.dst_range.size);
-        VkBufferCopy copy{ .srcOffset = transfer.src_range.offset,
-                           .dstOffset = transfer.dst_range.offset,
-                           .size = transfer.src_range.size };
-        vkCmdCopyBuffer(cmd, sb.buffer, db.buffer, 1, &copy);
+        if(!transfer.dst_buf())
+        {
+            ENG_WARN_ASSERT("Invalid dst buffer handle.");
+            return;
+        }
     }
-    else
-    {
-        ENG_TODO();
-        assert(false);
-    }
+
+    pending.push_back(transfer);
+}
+
+void StagingBuffer::record_image_transition(VkCommandBuffer cmd, const Transfer& transfer, bool is_final_layout, VkImageLayout layout)
+{
+    auto& r = *RendererVulkan::get_instance();
+    auto& i = r.get_image(transfer.dst_img());
+    const auto vkimgbar = [&transfer, &i, layout, is_final_layout] {
+        auto bar = Vks(VkImageMemoryBarrier2{
+            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .srcAccessMask = VK_ACCESS_2_NONE,
+            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .oldLayout = i.current_layout,
+            .newLayout = layout,
+            .image = i.image,
+            .subresourceRange = { i.deduce_aspect(), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS } });
+        if(is_final_layout)
+        {
+            bar.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            bar.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT;
+            bar.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            bar.dstAccessMask = VK_ACCESS_2_NONE;
+        }
+        return bar;
+    }();
+    i.current_layout = layout;
+    const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &vkimgbar });
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+void StagingBuffer::record_buffer_copy(VkCommandBuffer cmd, VkBuffer dst, VkBuffer src, Range src_range, size_t dst_offset)
+{
+    const auto vkbufcopy = Vks(VkBufferCopy{ .srcOffset = src_range.offset, .dstOffset = dst_offset, .size = src_range.size });
+    vkCmdCopyBuffer(cmd, src, dst, 1, &vkbufcopy);
 }
 
 } // namespace gfx

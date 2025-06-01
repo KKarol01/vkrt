@@ -38,6 +38,12 @@ template <typename T, typename Storage = uint32_t> class HandleMap
         return insert(T{ std::forward<Args>(args)... });
     }
 
+    void erase(handle_t h)
+    {
+        auto it = storage.find(h);
+        if(it != storage.end()) { storage.erase(it); }
+    }
+
     T& at(handle_t h) { return storage.at(h); }
     const T& at(handle_t h) const { return storage.at(h); }
 

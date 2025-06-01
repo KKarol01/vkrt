@@ -8,17 +8,20 @@
 #include <array>
 #include "passes.hpp"
 
-namespace gfx {
+namespace gfx
+{
 
-static void set_pc_vsm_common(VkCommandBuffer cmd) {
+static void set_pc_vsm_common(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
     auto slr = r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
     auto depth_view = r.make_image_view(fd.gbuffer.depth_buffer_image);
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
-                                       Vks(VkImageViewCreateInfo{
-                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
+    auto page_view =
+        r.make_image_view(r.vsm.dir_light_page_table,
+                          Vks(VkImageViewCreateInfo{
+                              .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                              .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
     uint32_t bindless_indices[]{
         r.get_bindless_index(r.index_buffer),
@@ -36,13 +39,15 @@ static void set_pc_vsm_common(VkCommandBuffer cmd) {
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
 
-static void set_pc_vsm_shadows(VkCommandBuffer cmd, int cascade_index) {
+static void set_pc_vsm_shadows(VkCommandBuffer cmd, int cascade_index)
+{
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
-                                       Vks(VkImageViewCreateInfo{
-                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
+    auto page_view =
+        r.make_image_view(r.vsm.dir_light_page_table,
+                          Vks(VkImageViewCreateInfo{
+                              .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                              .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
     uint32_t bindless_indices[]{
         r.get_bindless_index(r.index_buffer),
@@ -57,18 +62,20 @@ static void set_pc_vsm_shadows(VkCommandBuffer cmd, int cascade_index) {
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
 
-static void set_pc_vsm_debug_copy(VkCommandBuffer cmd) {
+static void set_pc_vsm_debug_copy(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
-                                       Vks(VkImageViewCreateInfo{
-                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
-    auto page_view_rgb8 =
-        r.make_image_view(r.vsm.dir_light_page_table_rgb8,
+    auto page_view =
+        r.make_image_view(r.vsm.dir_light_page_table,
                           Vks(VkImageViewCreateInfo{
                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                              .format = RendererVulkan::get_image(r.vsm.dir_light_page_table_rgb8).vk_info.format }));
+                              .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
+    auto page_view_rgb8 = r.make_image_view(
+        r.vsm.dir_light_page_table_rgb8,
+        Vks(VkImageViewCreateInfo{
+            .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table_rgb8).vk_info.format }));
     uint32_t bindless_indices[]{
         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table_rgb8, page_view_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
@@ -77,17 +84,20 @@ static void set_pc_vsm_debug_copy(VkCommandBuffer cmd) {
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(bindless_indices), bindless_indices);
 }
 
-static void set_pc_default_unlit(VkCommandBuffer cmd) {
+static void set_pc_default_unlit(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
     auto slr = r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
     auto depth_view = r.make_image_view(fd.gbuffer.depth_buffer_image);
-    auto page_view = r.make_image_view(r.vsm.dir_light_page_table,
-                                       Vks(VkImageViewCreateInfo{
-                                           .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                                           .format = RendererVulkan::get_image(r.vsm.dir_light_page_table).vk_info.format }));
+    auto page_view =
+        r.make_image_view(r.vsm.dir_light_page_table,
+                          Vks(VkImageViewCreateInfo{
+                              .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                              .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
-    struct PushConstants {
+    struct PushConstants
+    {
         uint32_t indices_index;
         uint32_t vertex_positions_index;
         uint32_t vertex_attributes_index;
@@ -109,24 +119,27 @@ static void set_pc_default_unlit(VkCommandBuffer cmd) {
         r.get_bindless_index(fd.transform_buffers),
         r.get_bindless_index(fd.constants),
         r.get_bindless_index(r.mesh_instances_buffer),
-        r.get_bindless_index(r.meshlets_vertices_buffer),
-        r.get_bindless_index(r.meshlets_triangles_buffer),
-        // r.get_bindless_index(r.vsm.constants_buffer),
-        // r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
-        // r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
-        // r.get_bindless_index(r.make_texture(r.fftocean.displacement, VK_IMAGE_LAYOUT_GENERAL,
-        //                                     r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
-        // r.get_bindless_index(r.make_texture(r.fftocean.gradient, VK_IMAGE_LAYOUT_GENERAL,
-        //                                     r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        // r.get_bindless_index(r.meshlets_vertices_buffer),
+        // r.get_bindless_index(r.meshlets_triangles_buffer),
+        //  r.get_bindless_index(r.vsm.constants_buffer),
+        //  r.get_bindless_index(r.make_texture(r.vsm.shadow_map_0, shadow_map, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        //  r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
+        //  r.get_bindless_index(r.make_texture(r.fftocean.displacement, VK_IMAGE_LAYOUT_GENERAL,
+        //                                      r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
+        //  r.get_bindless_index(r.make_texture(r.fftocean.gradient, VK_IMAGE_LAYOUT_GENERAL,
+        //                                      r.samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT))),
     };
     vkCmdPushConstants(cmd, r.bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0ull, sizeof(pc), &pc);
 }
 
 RenderPass::RenderPass(const std::string& name, const PipelineSettings& settings)
-    : name(name), pipeline(RendererVulkan::get_instance()->pipelines.get_pipeline(settings)) {}
+    : name(name), pipeline(RendererVulkan::get_instance()->pipelines.get_pipeline(settings))
+{
+}
 
 FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
-    : RenderPass("FFTOceanDebugGenH0Pass", PipelineSettings{ .shaders = { "fftocean/debug_gen_h0.comp.glsl" } }) {
+    : RenderPass("FFTOceanDebugGenH0Pass", PipelineSettings{ .shaders = { "fftocean/debug_gen_h0.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
 
     if(r->fftocean.gaussian_distribution_image) { return; }
@@ -205,17 +218,12 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
     std::random_device dev;
     std::mt19937 mt{ dev() };
     std::normal_distribution nd{ 0.0f, 1.0f };
-    for(auto i = 0u; i < gaussian_distr.size(); ++i) {
+    for(auto i = 0u; i < gaussian_distr.size(); ++i)
+    {
         gaussian_distr[i] = nd(mt);
     }
-    r->staging_buffer
-        ->send_to(r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL,
-                  Vks(VkBufferImageCopy2{
-                      .imageSubresource = VkImageSubresourceLayers{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
-                      .imageExtent = { (uint32_t)r->fftocean.pc.settings.num_samples, (uint32_t)r->fftocean.pc.settings.num_samples, 1u },
-                  }),
-                  gaussian_distr)
-        .submit_wait();
+    r->staging_buffer->send_to(r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL, gaussian_distr);
+    r->staging_buffer->submit();
 
     r->fftocean.pc = FFTOcean::FFTOceanPushConstants{
         .gaussian = r->get_bindless_index(r->make_texture(r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
@@ -240,7 +248,8 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
                          .layout = VK_IMAGE_LAYOUT_GENERAL } };
 }
 
-void FFTOceanDebugGenH0Pass::render(VkCommandBuffer cmd) {
+void FFTOceanDebugGenH0Pass::render(VkCommandBuffer cmd)
+{
     auto r = RendererVulkan::get_instance();
     r->fftocean.pc.settings = r->fftocean.settings;
     if(!r->fftocean.recalc_state_0) { return; }
@@ -255,7 +264,8 @@ void FFTOceanDebugGenH0Pass::render(VkCommandBuffer cmd) {
 }
 
 FFTOceanDebugGenHtPass::FFTOceanDebugGenHtPass(RenderGraph* rg)
-    : RenderPass("FFTOceanDebugGenHtPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_ht.comp.glsl" } }) {
+    : RenderPass("FFTOceanDebugGenHtPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_ht.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
 
     accesses = { Access{ .resource = rg->make_resource([r] { return r->fftocean.h0_spectrum; }),
@@ -280,7 +290,8 @@ FFTOceanDebugGenHtPass::FFTOceanDebugGenHtPass(RenderGraph* rg)
                          .layout = VK_IMAGE_LAYOUT_GENERAL } };
 }
 
-void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd) {
+void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd)
+{
     auto r = RendererVulkan::get_instance();
 
     static_assert(sizeof(r->fftocean.pc) <= 128);
@@ -294,7 +305,8 @@ void FFTOceanDebugGenHtPass::render(VkCommandBuffer cmd) {
 }
 
 FFTOceanDebugGenFourierPass::FFTOceanDebugGenFourierPass(RenderGraph* rg)
-    : RenderPass("FFTOceanDebugGenFourierPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_dft.comp.glsl" } }) {
+    : RenderPass("FFTOceanDebugGenFourierPass", PipelineSettings{ .shaders = { "fftocean/debug_gen_dft.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
 
     accesses = {
@@ -321,7 +333,8 @@ FFTOceanDebugGenFourierPass::FFTOceanDebugGenFourierPass(RenderGraph* rg)
     };
 }
 
-void FFTOceanDebugGenFourierPass::render(VkCommandBuffer cmd) {
+void FFTOceanDebugGenFourierPass::render(VkCommandBuffer cmd)
+{
     auto r = RendererVulkan::get_instance();
 
     // this shader takes from ht and outputs to dft
@@ -390,7 +403,8 @@ void FFTOceanDebugGenFourierPass::render(VkCommandBuffer cmd) {
 
 FFTOceanDebugGenDisplacementPass::FFTOceanDebugGenDisplacementPass(RenderGraph* rg)
     : RenderPass("FFTOceanDebugGenDisplacementPass",
-                 PipelineSettings{ .shaders = { "fftocean/displacement.comp.glsl" } }) {
+                 PipelineSettings{ .shaders = { "fftocean/displacement.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
 
     accesses = {
@@ -417,7 +431,8 @@ FFTOceanDebugGenDisplacementPass::FFTOceanDebugGenDisplacementPass(RenderGraph* 
     };
 }
 
-void FFTOceanDebugGenDisplacementPass::render(VkCommandBuffer cmd) {
+void FFTOceanDebugGenDisplacementPass::render(VkCommandBuffer cmd)
+{
     auto r = RendererVulkan::get_instance();
 
     static_assert(sizeof(r->fftocean.pc) <= 128);
@@ -430,7 +445,8 @@ void FFTOceanDebugGenDisplacementPass::render(VkCommandBuffer cmd) {
 }
 
 FFTOceanDebugGenGradientPass::FFTOceanDebugGenGradientPass(RenderGraph* rg)
-    : RenderPass("FFTOceanDebugGenGradientPass", PipelineSettings{ .shaders = { "fftocean/gradient.comp.glsl" } }) {
+    : RenderPass("FFTOceanDebugGenGradientPass", PipelineSettings{ .shaders = { "fftocean/gradient.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
 
     accesses = {
@@ -447,7 +463,8 @@ FFTOceanDebugGenGradientPass::FFTOceanDebugGenGradientPass(RenderGraph* rg)
     };
 }
 
-void FFTOceanDebugGenGradientPass::render(VkCommandBuffer cmd) {
+void FFTOceanDebugGenGradientPass::render(VkCommandBuffer cmd)
+{
     auto r = RendererVulkan::get_instance();
 
     static_assert(sizeof(r->fftocean.pc) <= 128);
@@ -460,10 +477,12 @@ void FFTOceanDebugGenGradientPass::render(VkCommandBuffer cmd) {
 }
 
 ZPrepassPass::ZPrepassPass(RenderGraph* rg)
-    : RenderPass("ZPrepassPass",
-                 PipelineSettings{
-                     .settings = RasterizationSettings{ .num_col_formats = 0, .depth_test = true, .depth_write = true, .depth_op = VK_COMPARE_OP_LESS },
-                     .shaders = { "vsm/zprepass.vert.glsl", "vsm/zprepass.frag.glsl" } }) {
+    : RenderPass("ZPrepassPass", PipelineSettings{ .settings = RasterizationSettings{ .num_col_formats = 0,
+                                                                                      .depth_test = true,
+                                                                                      .depth_write = true,
+                                                                                      .depth_op = VK_COMPARE_OP_LESS },
+                                                   .shaders = { "vsm/zprepass.vert.glsl", "vsm/zprepass.frag.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->get_frame_data().gbuffer.depth_buffer_image; },
                                                        ResourceFlags::PER_FRAME_BIT),
@@ -473,7 +492,8 @@ ZPrepassPass::ZPrepassPass(RenderGraph* rg)
                          .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL } };
 }
 
-void ZPrepassPass::render(VkCommandBuffer cmd) {
+void ZPrepassPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     const auto r_dep_att = Vks(VkRenderingAttachmentInfo{
         .imageView = r.get_image(r.get_frame_data().gbuffer.depth_buffer_image).get_view(),
@@ -510,7 +530,8 @@ void ZPrepassPass::render(VkCommandBuffer cmd) {
 }
 
 VsmClearPagesPass::VsmClearPagesPass(RenderGraph* rg)
-    : RenderPass("VsmClearPagesPass", PipelineSettings{ .shaders = { "vsm/clear_page.comp.glsl" } }) {
+    : RenderPass("VsmClearPagesPass", PipelineSettings{ .shaders = { "vsm/clear_page.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
     accesses = { Access{
                      .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
@@ -528,7 +549,8 @@ VsmClearPagesPass::VsmClearPagesPass(RenderGraph* rg)
                  } };
 }
 
-void VsmClearPagesPass::render(VkCommandBuffer cmd) {
+void VsmClearPagesPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     auto& fd = r.get_frame_data();
     set_pc_vsm_common(cmd);
@@ -543,7 +565,8 @@ void VsmClearPagesPass::render(VkCommandBuffer cmd) {
 }
 
 VsmPageAllocPass::VsmPageAllocPass(RenderGraph* rg)
-    : RenderPass("VsmPageAllocPass", PipelineSettings{ .shaders = { "vsm/page_alloc.comp.glsl" } }) {
+    : RenderPass("VsmPageAllocPass", PipelineSettings{ .shaders = { "vsm/page_alloc.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
                          .flags = AccessFlags::READ_WRITE_BIT,
@@ -565,7 +588,8 @@ VsmPageAllocPass::VsmPageAllocPass(RenderGraph* rg)
                          .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } };
 }
 
-void VsmPageAllocPass::render(VkCommandBuffer cmd) {
+void VsmPageAllocPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     set_pc_vsm_common(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
@@ -576,7 +600,8 @@ void VsmPageAllocPass::render(VkCommandBuffer cmd) {
 VsmShadowsPass::VsmShadowsPass(RenderGraph* rg)
     : RenderPass("VsmShadowsPass",
                  PipelineSettings{ .settings = RasterizationSettings{ .num_col_formats = 0, .depth_test = false, .depth_write = false },
-                                   .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" } }) {
+                                   .shaders = { "vsm/shadow.vert.glsl", "vsm/shadow.frag.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
                          .flags = AccessFlags::READ_BIT,
@@ -590,7 +615,8 @@ VsmShadowsPass::VsmShadowsPass(RenderGraph* rg)
                          .layout = VK_IMAGE_LAYOUT_GENERAL } };
 }
 
-void VsmShadowsPass::render(VkCommandBuffer cmd) {
+void VsmShadowsPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     const auto rendering_info = Vks(VkRenderingInfo{
         .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).vk_info.extent.width,
@@ -612,7 +638,8 @@ void VsmShadowsPass::render(VkCommandBuffer cmd) {
     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
-    for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+    for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i)
+    {
         set_pc_vsm_shadows(cmd, VSM_NUM_CLIPMAPS - i - 1);
         vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
                                       sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
@@ -622,7 +649,8 @@ void VsmShadowsPass::render(VkCommandBuffer cmd) {
 }
 
 VsmDebugPageCopyPass::VsmDebugPageCopyPass(RenderGraph* rg)
-    : RenderPass("VsmDebugPageCopyPass", PipelineSettings{ .shaders = { "vsm/debug_page_alloc_copy.comp.glsl" } }) {
+    : RenderPass("VsmDebugPageCopyPass", PipelineSettings{ .shaders = { "vsm/debug_page_alloc_copy.comp.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return r->vsm.dir_light_page_table; }),
                          .flags = AccessFlags::READ_BIT,
@@ -636,7 +664,8 @@ VsmDebugPageCopyPass::VsmDebugPageCopyPass(RenderGraph* rg)
                          .layout = VK_IMAGE_LAYOUT_GENERAL } };
 }
 
-void VsmDebugPageCopyPass::render(VkCommandBuffer cmd) {
+void VsmDebugPageCopyPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     set_pc_vsm_debug_copy(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
@@ -646,10 +675,11 @@ void VsmDebugPageCopyPass::render(VkCommandBuffer cmd) {
 DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
     : RenderPass("DefaultUnlitPass",
                  PipelineSettings{ .settings = RasterizationSettings{ .culling = VK_CULL_MODE_BACK_BIT,
-                                                                      .depth_test = false,
+                                                                      .depth_test = true,
                                                                       .depth_write = false,
                                                                       .depth_op = VK_COMPARE_OP_EQUAL },
-                                   .shaders = { "default_unlit/unlit.vert.glsl", "default_unlit/unlit.frag.glsl" } }) {
+                                   .shaders = { "default_unlit/unlit.vert.glsl", "default_unlit/unlit.frag.glsl" } })
+{
     auto r = RendererVulkan::get_instance();
     accesses = {
         Access{ .resource = rg->make_resource([r] { return r->get_frame_data().gbuffer.color_image; }, ResourceFlags::PER_FRAME_BIT),
@@ -685,7 +715,8 @@ DefaultUnlitPass::DefaultUnlitPass(RenderGraph* rg)
     };
 }
 
-void DefaultUnlitPass::render(VkCommandBuffer cmd) {
+void DefaultUnlitPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     auto r_col_att_1 = Vks(VkRenderingAttachmentInfo{
         .imageView = r.get_image(r.get_frame_data().gbuffer.color_image).get_view(),
@@ -728,7 +759,8 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd) {
     vkCmdEndRendering(cmd);
 }
 
-ImguiPass::ImguiPass(RenderGraph* rg) : RenderPass("ImguiPass", {}) {
+ImguiPass::ImguiPass(RenderGraph* rg) : RenderPass("ImguiPass", {})
+{
     auto r = RendererVulkan::get_instance();
     accesses = { Access{ .resource = rg->make_resource([r] { return swapchain_handle; }, ResourceFlags::PER_FRAME_BIT),
                          .flags = AccessFlags::WRITE_BIT | AccessFlags::FROM_UNDEFINED_LAYOUT_BIT,
@@ -752,7 +784,8 @@ ImguiPass::ImguiPass(RenderGraph* rg) : RenderPass("ImguiPass", {}) {
                          .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } };
 }
 
-void ImguiPass::render(VkCommandBuffer cmd) {
+void ImguiPass::render(VkCommandBuffer cmd)
+{
     auto& r = *RendererVulkan::get_instance();
     // ImGui::SetCurrentContext(Engine::get().ui_ctx->imgui_ctx);
     ImGui_ImplVulkan_NewFrame();
@@ -762,7 +795,8 @@ void ImguiPass::render(VkCommandBuffer cmd) {
     Engine::get().ui->update();
     ImGui::Render();
     ImDrawData* im_draw_data = ImGui::GetDrawData();
-    if(im_draw_data) {
+    if(im_draw_data)
+    {
         VkRenderingAttachmentInfo r_col_atts[]{
             Vks(VkRenderingAttachmentInfo{
                 .imageView = RendererVulkan::get_instance()->swapchain.get_current_view(),
@@ -795,7 +829,8 @@ void ImguiPass::render(VkCommandBuffer cmd) {
     }
 }
 
-SwapchainPresentPass::SwapchainPresentPass(RenderGraph* rg) : RenderPass("SwapchainPresentPass", {}) {
+SwapchainPresentPass::SwapchainPresentPass(RenderGraph* rg) : RenderPass("SwapchainPresentPass", {})
+{
     auto r = RendererVulkan::get_instance();
     accesses = {
         Access{ .resource = rg->make_resource([r] { return swapchain_handle; }, ResourceFlags::PER_FRAME_BIT),
