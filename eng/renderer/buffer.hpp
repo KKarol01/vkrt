@@ -20,6 +20,8 @@ class Buffer
   public:
     Buffer() noexcept = default;
     Buffer(VkDevice dev, VmaAllocator vma, const BufferCreateInfo& create_info) noexcept;
+    Buffer(Buffer&& o) noexcept;
+    Buffer& operator=(Buffer&& o) noexcept;
 
     void allocate();
     void deallocate();

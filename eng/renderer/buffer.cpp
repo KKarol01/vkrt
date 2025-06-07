@@ -17,6 +17,26 @@ Buffer::Buffer(VkDevice dev, VmaAllocator vma, const BufferCreateInfo& create_in
     allocate();
 }
 
+Buffer::Buffer(Buffer&& o) noexcept { *this = std::move(o); }
+
+Buffer& Buffer::operator=(Buffer&& o) noexcept
+{
+    deallocate();
+    name = std::move(o.name);
+    dev = std::exchange(o.dev, nullptr);
+    buffer = std::exchange(o.buffer, nullptr);
+    vma = std::exchange(o.vma, nullptr);
+    vmaalloc = std::exchange(o.vmaalloc, nullptr);
+    bda = std::exchange(o.bda, VkDeviceAddress{});
+    usage = o.usage;
+    capacity = std::exchange(o.capacity, 0);
+    size = std::exchange(o.size, 0);
+    memory = std::exchange(o.memory, nullptr);
+    bindless_index = o.bindless_index;
+    mapped = o.mapped;
+    return *this;
+}
+
 void Buffer::allocate()
 {
     if(capacity == 0) { return; }
