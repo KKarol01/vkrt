@@ -67,6 +67,7 @@ struct Texture
     VkImageView view{};
     VkImageLayout layout{};
     VkSampler sampler{};
+    uint32_t bindless_index{ ~0ul };
 };
 
 /* subset of geometry's vertex and index buffers */
@@ -265,8 +266,8 @@ class RendererVulkan : public Renderer
 
     Buffer& get_buffer(Handle<Buffer> handle);
     Image& get_image(Handle<Image> handle);
+    Texture& get_texture(Handle<Texture> handle);
     void destroy_buffer(Handle<Buffer> buffer);
-    void update_buffer(Handle<Buffer> buffer);
     uint32_t get_bindless_index(Handle<Buffer> handle);
     uint32_t get_bindless_index(Handle<Texture> handle);
 

@@ -222,8 +222,9 @@ FFTOceanDebugGenH0Pass::FFTOceanDebugGenH0Pass(RenderGraph* rg)
     {
         gaussian_distr[i] = nd(mt);
     }
-    r->staging_buffer->send_to(r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL, gaussian_distr);
-    r->staging_buffer->submit();
+    r->staging_buffer->create_batch()
+        .send(ImageCopy{ r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL, gaussian_distr })
+        .submit();
 
     r->fftocean.pc = FFTOcean::FFTOceanPushConstants{
         .gaussian = r->get_bindless_index(r->make_texture(r->fftocean.gaussian_distribution_image, VK_IMAGE_LAYOUT_GENERAL, nullptr)),

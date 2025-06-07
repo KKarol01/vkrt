@@ -80,83 +80,19 @@ void BindlessPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
-uint32_t BindlessPool::get_index(Handle<Buffer> buffer)
-{
-    if(!buffer)
-    {
-        ENG_WARN("Buffer is null");
-        return ~0ull;
-    }
-    if(auto it = buffers.find(buffer); it != buffers.end()) { return it->second; }
-    index_t idx;
-    if(!free_buff_idxs.empty())
-    {
-        idx = free_buff_idxs.front();
-        free_buff_idxs.pop_front();
-    }
-    else { idx = buffer_counter++; }
-    buffers[buffer] = idx;
-    update_index(idx, RendererVulkan::get_instance()->get_buffer(buffer).buffer);
-    return idx;
-}
+uint32_t BindlessPool::allocate_buffer_index() { return buffer_slots.allocate_slot(); }
 
-uint32_t BindlessPool::get_index(Handle<Texture> texture)
-{
-    if(!texture)
-    {
-        ENG_WARN("Texture is null");
-        return ~0ull;
-    }
-    if(auto it = textures.find(texture); it != textures.end()) { return it->second; }
+uint32_t BindlessPool::allocate_texture_index() { return texture_slots.allocate_slot(); }
 
-    uint32_t idx;
-    if(!free_img_idxs.empty())
-    {
-        idx = free_img_idxs.front();
-        free_img_idxs.pop_front();
-    }
-    else { idx = texture_counter++; }
-    textures[texture] = idx;
-    const auto& tex = RendererVulkan::get_instance()->textures.at(texture);
-    update_index(idx, tex.view, tex.layout, tex.sampler);
-    return idx;
-}
+void BindlessPool::free_buffer_index(bindless_index_t slot) { buffer_slots.free_slot(slot); }
 
-void BindlessPool::free_index(Handle<Buffer> buffer)
-{
-    if(!buffer)
-    {
-        ENG_WARN("Buffer is null");
-        return;
-    }
-    if(auto it = buffers.find(buffer); it != buffers.end())
-    {
-        free_buff_idxs.push_front(it->second);
-        buffers.erase(it);
-    }
-    else { ENG_WARN("Buffer {} was not registered.", *buffer); }
-}
+void BindlessPool::free_texture_index(bindless_index_t slot) { texture_slots.free_slot(slot); }
 
-void BindlessPool::free_index(Handle<Texture> texture)
+void BindlessPool::update_index(bindless_index_t index, VkBuffer buffer)
 {
-    if(!texture)
+    if(index == INVALID_INDEX)
     {
-        ENG_WARN("Texture is null");
-        return;
-    }
-    if(auto it = textures.find(texture); it != textures.end())
-    {
-        free_img_idxs.push_front(it->second);
-        textures.erase(it);
-    }
-    else { ENG_WARN("Texture {} was not registered.", *texture); }
-}
-
-void BindlessPool::update_index(index_t index, VkBuffer buffer)
-{
-    if(index == ~index_t{} || !buffer)
-    {
-        ENG_WARN("Invalid index ({}) or buffer ({})", index, reinterpret_cast<uintptr_t>(buffer));
+        ENG_WARN("Invalid bindless index.");
         return;
     }
     const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = buffer, .range = VK_WHOLE_SIZE }));
@@ -169,11 +105,11 @@ void BindlessPool::update_index(index_t index, VkBuffer buffer)
     updates.push_back(write);
 }
 
-void BindlessPool::update_index(index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler)
+void BindlessPool::update_index(bindless_index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler)
 {
-    if(index == ~index_t{} || !view)
+    if(index == INVALID_INDEX)
     {
-        ENG_WARN_ASSERT("Invalid index ({}) or view ({})", index, reinterpret_cast<uintptr_t>(view));
+        ENG_WARN("Invalid index.");
         return;
     }
     const auto& update =

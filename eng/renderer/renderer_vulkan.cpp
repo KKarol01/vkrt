@@ -295,7 +295,7 @@ void RendererVulkan::initialize_resources()
     bindless_pool = new BindlessPool{ dev };
     staging_buffer =
         new StagingBuffer{ submit_queue, make_buffer(BufferCreateInfo{ "staging_buffer", VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR,
-                                                                       1024 * 1024 * 64, true, true }) };
+                                                                       1024 * 1024 * 64, true }) };
     vertex_positions_buffer = make_buffer(BufferCreateInfo{
         "vertex_positions_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
@@ -558,9 +558,10 @@ void RendererVulkan::update()
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
             .cam_pos = Engine::get().camera->pos,
         };
-        staging_buffer->send_to(fd.constants, 0ull, constants);
-        staging_buffer->send_to(vsm.constants_buffer, 0ull, vsmconsts);
-        staging_buffer->submit();
+        staging_buffer->create_batch()
+            .send(BufferCopy{ fd.constants, 0ull, constants })
+            .send(BufferCopy{ vsm.constants_buffer, 0ull, vsmconsts })
+            .submit();
     }
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { upload_transforms(); }
@@ -813,12 +814,13 @@ Material RendererVulkan::get_material(Handle<Material> handle) const
 
 void RendererVulkan::upload_model_images()
 {
+    auto batch = staging_buffer->create_batch();
     for(auto& tex : upload_images)
     {
         Image& img = get_image(tex.image_handle);
-        staging_buffer->send_to(tex.image_handle, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, tex.rgba_data);
+        batch.send(ImageCopy{ tex.image_handle, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, tex.rgba_data });
     }
-    staging_buffer->submit();
+    batch.submit();
     upload_images.clear();
 }
 
@@ -842,13 +844,11 @@ void RendererVulkan::upload_staged_models()
         attributes.push_back(e.tangent.z);
         attributes.push_back(e.tangent.w);
     }
-    staging_buffer->send_to(vertex_positions_buffer, ~0ull, positions);
-    staging_buffer->send_to(vertex_attributes_buffer, ~0ull, attributes);
-    staging_buffer->send_to(index_buffer, ~0ull, upload_indices);
-    // staging_buffer->send_to(meshlets_meshlets_buffer, ~0ull, upload_meshlets);
-    // staging_buffer->send_to(meshlets_vertices_buffer, ~0ull, upload_meshlets_vertices);
-    // staging_buffer->send_to(meshlets_triangles_buffer, ~0ull, upload_meshlets_triangles);
-    staging_buffer->submit();
+    staging_buffer->create_batch()
+        .send(BufferCopy{ vertex_positions_buffer, ~0ull, positions })
+        .send(BufferCopy{ vertex_attributes_buffer, ~0ull, attributes })
+        .send(BufferCopy{ index_buffer, ~0ull, upload_indices })
+        .submit();
     upload_vertices.clear();
     upload_indices.clear();
 }
@@ -952,10 +952,11 @@ void RendererVulkan::bake_indirect_commands()
             BufferCreateInfo{
             "meshlets_indirect_draw_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT});
     }
-    staging_buffer->send_to(meshlets_indirect_draw_buffer, 0ull, gpu_ml_draw_header);
-    staging_buffer->send_to(meshlets_indirect_draw_buffer, sizeof(gpu_ml_draw_header), gpu_ml_draw_commands);
-    staging_buffer->submit();
     // clang-format on
+    staging_buffer->create_batch()
+        .send(BufferCopy{ meshlets_indirect_draw_buffer, 0ull, gpu_ml_draw_header })
+        .send(BufferCopy{ meshlets_indirect_draw_buffer, sizeof(gpu_ml_draw_header), gpu_ml_draw_commands })
+        .submit();
 }
 
 void RendererVulkan::upload_transforms()
@@ -972,9 +973,10 @@ void RendererVulkan::upload_transforms()
     {
         transforms.push_back(Engine::get().ecs->get<components::Transform>(e.entity).transform);
     }
-    staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms);
-    staging_buffer->send_to(get_frame_data(1).transform_buffers, 0ull, transforms);
-    staging_buffer->submit();
+    staging_buffer->create_batch()
+        .send(BufferCopy{ get_frame_data().transform_buffers, 0ull, transforms })
+        .send(BufferCopy{ get_frame_data(1).transform_buffers, 0ull, transforms })
+        .submit();
 }
 
 void RendererVulkan::build_blas()
@@ -1331,7 +1333,8 @@ Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView vi
     {
         if(t.image == image && t.view == view && t.layout == layout && t.sampler == sampler) { return h; }
     }
-    return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler });
+    return textures.insert(Texture{
+        .image = image, .view = view, .layout = layout, .sampler = sampler, .bindless_index = bindless_pool->allocate_texture_index() });
 }
 
 Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)
@@ -1354,24 +1357,26 @@ Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(ha
 
 Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(handle); }
 
+Texture& gfx::RendererVulkan::get_texture(Handle<Texture> handle) { return textures.at(handle); }
+
 void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
 {
     auto& b = get_buffer(buffer);
     b.deallocate();
-    bindless_pool->free_index(buffer);
     buffers.erase(buffer);
 }
 
-void RendererVulkan::update_buffer(Handle<Buffer> buffer)
+uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle)
 {
-    const auto& b = get_buffer(buffer);
-    const auto idx = bindless_pool->get_index(buffer);
-    bindless_pool->update_index(idx, b.buffer);
+    if(!handle)
+    {
+        ENG_WARN("Invalid handle");
+        return BindlessPool::INVALID_INDEX;
+    }
+    return get_buffer(handle).bindless_index;
 }
 
-uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_index(handle); }
-
-uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) { return bindless_pool->get_index(handle); }
+uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) { return get_texture(handle).bindless_index; }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset)
 {

@@ -20,6 +20,7 @@
 
 namespace gfx
 {
+struct Buffer;
 
 struct LinearAllocator
 {
@@ -60,85 +61,80 @@ struct LinearAllocator
     size_t num_allocs{};
 };
 
+struct BufferCopy
+{
+    BufferCopy(Handle<Buffer> dst, size_t dst_offset, Handle<Buffer> src, Range src_range) noexcept
+        : src(src), dst(dst), src_range(src_range), dst_offset(dst_offset)
+    {
+    }
+    template <typename T>
+    BufferCopy(Handle<Buffer> dst, size_t dst_offset, const T& src) noexcept
+        : dst(dst), src_range(0, sizeof(T)), dst_offset(dst_offset), data(std::as_bytes(std::span{ &src, 1 }))
+    {
+    }
+    template <typename T>
+    BufferCopy(Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src) noexcept
+        : dst(dst), src_range(0, src.size() * sizeof(T)), dst_offset(dst_offset), data(std::as_bytes(std::span{ src }))
+    {
+    }
+    Handle<Buffer> src;
+    Handle<Buffer> dst;
+    Range src_range;
+    size_t dst_offset;
+    std::span<const std::byte> data;
+};
+
+struct ImageCopy
+{
+    template <typename T>
+    ImageCopy(Handle<Image> dst, VkImageLayout final_layout, std::span<const T> src) noexcept
+        : dst(dst), final_layout(final_layout), data(std::as_bytes(src))
+    {
+    }
+    template <typename T>
+    ImageCopy(Handle<Image> dst, VkImageLayout final_layout, const std::vector<T>& src) noexcept
+        : dst(dst), final_layout(final_layout), data(std::as_bytes(std::span{ src }))
+    {
+    }
+    Handle<Image> dst;
+    VkImageLayout final_layout;
+    std::span<const std::byte> data;
+};
+
+static constexpr auto STAGING_APPEND = std::numeric_limits<std::uint64_t>::max();
+
 class StagingBuffer
 {
-    enum class ResourceType : uint16_t
+  public:
+    struct Batch
     {
-        NONE,
-        BUFFER,
-        IMAGE,
-        VECTOR,
-    };
-    struct Transfer
-    {
-        Handle<Buffer> src_buf() const { return Handle<Buffer>{ src_res }; }
-        Handle<Image> src_img() const { return Handle<Image>{ src_res }; }
-        Handle<Buffer> dst_buf() const { return Handle<Buffer>{ dst_res }; }
-        Handle<Image> dst_img() const { return Handle<Image>{ dst_res }; }
-        uint32_t src_res{ ~0u };
-        ResourceType src_type{};
-        uint32_t dst_res{ ~0u };
-        ResourceType dst_type{};
-        Range src_range;
-        Range dst_range;
-        const void* data;
-        VkImageLayout dst_final_layout;
-        VkBufferImageCopy2 dst_image_region; // this is currently unused.
+        friend class StagingBuffer;
+
+        Batch& send(const BufferCopy& copy);
+        Batch& send(const ImageCopy& copy);
+        void submit();
+
+      private:
+        explicit Batch(StagingBuffer* sb) noexcept : sb(sb) { assert(sb); }
+
+        void maybe_resize(Handle<Buffer> bh, Buffer& b, size_t nsz);
+
+        StagingBuffer* sb;
+        std::vector<BufferCopy> bcps;
+        std::vector<ImageCopy> icps;
     };
 
-  public:
     StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept;
 
-    template <typename T> void send_to(Handle<Buffer> dst, size_t dst_offset, const T& src);
-    template <typename T> void send_to(Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src);
-    void send_to(Handle<Buffer> dst, Handle<Buffer> src, Range src_range, size_t dst_offset);
-    template <typename T> void send_to(Handle<Image> dst, VkImageLayout final_layout, const std::vector<T>& src);
-    void submit();
+    Batch create_batch() { return Batch{ this }; }
+    void submit(Batch&& batch);
 
   private:
-    void send_to(const Transfer& transfer);
-    void record_image_transition(VkCommandBuffer cmd, const Transfer& transfer, bool is_final_layout, VkImageLayout layout);
-    void record_buffer_copy(VkCommandBuffer cmd, VkBuffer dst, VkBuffer src, Range src_range, size_t dst_offset);
-
     SubmitQueue* queue{};
     CommandPool* cmdpool{};
     Buffer* staging_buffer{};
-    std::vector<Transfer> pending;
     std::unique_ptr<LinearAllocator> allocator{};
 };
-
-template <typename T> void StagingBuffer::send_to(Handle<Buffer> dst, size_t dst_offset, const T& src)
-{
-    send_to(Transfer{ .src_type = ResourceType::VECTOR,
-                      .dst_res = *dst,
-                      .dst_type = ResourceType::BUFFER,
-                      .src_range = { 0, sizeof(T) },
-                      .dst_range = { dst_offset, sizeof(T) },
-                      .data = &src });
-}
-
-template <typename T> void StagingBuffer::send_to(Handle<Buffer> dst, size_t dst_offset, const std::vector<T>& src)
-{
-    send_to(Transfer{
-        .src_type = ResourceType::VECTOR,
-        .dst_res = *dst,
-        .dst_type = ResourceType::BUFFER,
-        .src_range = { 0, src.size() * sizeof(T) },
-        .dst_range = { dst_offset, src.size() * sizeof(T) },
-        .data = src.data(),
-    });
-}
-
-template <typename T>
-void StagingBuffer::send_to(Handle<Image> dst, VkImageLayout final_layout, const std::vector<T>& ts)
-{
-    send_to(Transfer{ .src_type = ResourceType::VECTOR,
-                      .dst_res = *dst,
-                      .dst_type = ResourceType::IMAGE,
-                      .src_range = { 0, ts.size() * sizeof(T) },
-                      .data = ts.data(),
-                      .dst_final_layout = final_layout });
-}
 
 } // namespace gfx
 

@@ -13,7 +13,6 @@ struct BufferCreateInfo
     VkBufferUsageFlags usage{};
     size_t size{};
     bool mapped{ false };
-    bool allocate{ false };
 };
 
 class Buffer
@@ -25,18 +24,20 @@ class Buffer
     void allocate();
     void deallocate();
 
-    size_t get_capacity() const { return create_info.size; }
-    size_t get_size() const { return size; }
-    size_t get_free_space() const { return get_capacity() - get_size(); }
+    size_t get_free_space() const { return capacity - size; }
 
+    std::string name;
     VkDevice dev{};
-    VmaAllocator vma{};
-    BufferCreateInfo create_info{};
     VkBuffer buffer{};
-    VmaAllocation vma_alloc{};
+    VmaAllocator vma{};
+    VmaAllocation vmaalloc{};
     VkDeviceAddress bda{};
-    void* mapped{};
+    VkBufferUsageFlags usage{};
+    size_t capacity{};
     size_t size{};
+    void* memory{};
+    uint32_t bindless_index{ ~0ul };
+    bool mapped{};
 };
 
 } // namespace gfx
