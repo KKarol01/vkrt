@@ -1,5 +1,6 @@
 #include "./bindlesspool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/resources/resources.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 
 namespace gfx
@@ -80,22 +81,33 @@ void BindlessPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
-uint32_t BindlessPool::allocate_buffer_index() { return buffer_slots.allocate_slot(); }
+void BindlessPool::get_index(Handle<Buffer> handle) { buffer_indices.emplace(handle, buffer_slots.allocate_slot()); }
 
-uint32_t BindlessPool::allocate_texture_index() { return texture_slots.allocate_slot(); }
+void BindlessPool::get_index(Handle<Texture> handle) { texture_indices.emplace(handle, texture_slots.allocate_slot()); }
 
-void BindlessPool::free_buffer_index(bindless_index_t slot) { buffer_slots.free_slot(slot); }
-
-void BindlessPool::free_texture_index(bindless_index_t slot) { texture_slots.free_slot(slot); }
-
-void BindlessPool::update_index(bindless_index_t index, VkBuffer buffer)
+void BindlessPool::free_index(Handle<Buffer> handle)
 {
-    if(index == INVALID_INDEX)
+    if(auto it = buffer_indices.find(handle); it != buffer_indices.end())
     {
-        ENG_WARN("Invalid bindless index.");
-        return;
+        buffer_slots.free_slot(it->second);
+        buffer_indices.erase(it);
     }
-    const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = buffer, .range = VK_WHOLE_SIZE }));
+}
+
+void BindlessPool::free_index(Handle<Texture> handle)
+{
+    if(auto it = texture_indices.find(handle); it != texture_indices.end())
+    {
+        texture_slots.free_slot(it->second);
+        texture_indices.erase(it);
+    }
+}
+
+void BindlessPool::update_index(Handle<Buffer> handle)
+{
+    const auto index = buffer_indices.at(handle);
+    const auto& update =
+        buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = handle->buffer, .range = VK_WHOLE_SIZE }));
     const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
                                                  .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
                                                  .dstArrayElement = index,
@@ -105,21 +117,18 @@ void BindlessPool::update_index(bindless_index_t index, VkBuffer buffer)
     updates.push_back(write);
 }
 
-void BindlessPool::update_index(bindless_index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler)
+void BindlessPool::update_index(Handle<Texture> handle)
 {
-    if(index == INVALID_INDEX)
-    {
-        ENG_WARN("Invalid index.");
-        return;
-    }
-    const auto& update =
-        texture_updates.emplace_back(Vks(VkDescriptorImageInfo{ .sampler = sampler, .imageView = view, .imageLayout = layout }));
+    const auto index = texture_indices.at(handle);
+    const auto& txt = handle.get();
+    const auto& update = texture_updates.emplace_back(Vks(VkDescriptorImageInfo{
+        .sampler = txt.sampler, .imageView = txt.view, .imageLayout = txt.layout }));
     const auto write = Vks(VkWriteDescriptorSet{
         .dstSet = set,
-        .dstBinding = (uint32_t)(sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
+        .dstBinding = (uint32_t)(txt.sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
         .dstArrayElement = index,
         .descriptorCount = 1,
-        .descriptorType = (sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        .descriptorType = (txt.sampler ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
         .pImageInfo = &update });
     updates.push_back(write);
 }

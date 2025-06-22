@@ -668,22 +668,15 @@ Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
 
 Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
 {
-    Geometry geometry{ .metadata = geometry_metadatas.emplace(),
-                       .vertex_range = { total_vertices, batch.vertices.size() },
-                       .index_range = { total_indices, batch.indices.size() },
-                       .meshlet_range = { total_meshlets, batch.meshlets.size() } };
+    Geometry geometry{ .vertex_range = { total_vertices, batch.vertices.size() },
+                       .index_range = { total_indices, batch.indices.size() } };
+
     upload_vertices.insert(upload_vertices.end(), batch.vertices.begin(), batch.vertices.end());
     upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
-    meshlets.resize(meshlets.size() + batch.meshlets.size());
-    std::transform(batch.meshlets.begin(), batch.meshlets.end(), meshlets.begin() + total_meshlets, [this](gfx::Meshlet meshlet) {
-        meshlet.vertex_range.offset += total_vertices;
-        meshlet.triangle_range.offset += total_indices;
-        return meshlet;
-    });
 
     total_vertices += geometry.vertex_range.size;
     total_indices += geometry.index_range.size;
-    total_meshlets += batch.meshlets.size();
+    total_meshlets += geometry.meshlet_range.size;
 
     const auto handle = geometries.insert(std::move(geometry));
     flags.set(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT);
@@ -724,15 +717,16 @@ void RendererVulkan::instance_mesh(const InstanceSettings& settings)
     }
     else
     {
-        meshlet_instances.reserve(meshlet_instances.size() + ecs_mesh.submeshes.size());
+        // todo: maybe resize the vec
         for(auto i = 0u; i < ecs_mesh.submeshes.size(); ++i)
         {
             const auto& rsm = meshes.at(ecs_mesh.submeshes.at(i));
             const auto& rg = geometries.at(rsm.geometry);
             for(auto j = 0u; j < rg.meshlet_range.size; ++j)
             {
+                const auto ml_idx = (uint32_t)(rg.meshlet_range.offset + j);
                 meshlet_instances.push_back(MeshletInstance{
-                    .entity = settings.entity, .geometry = rsm.geometry, .mesh = ecs_mesh.submeshes.at(i), .meshlet_index = j });
+                    .entity = settings.entity, .geometry = rsm.geometry, .mesh = ecs_mesh.submeshes.at(i), .meshlet_index = ml_idx });
             }
         }
     }
@@ -895,9 +889,13 @@ void RendererVulkan::bake_indirect_commands()
     // }
 
     std::vector<VkDrawIndexedIndirectCommand> gpu_ml_draw_commands;
+    std::vector<uint32_t> gpu_mli_ids;
     IndirectDrawCommandBufferHeader gpu_ml_draw_header;
+
+    gpu_ml_draw_commands.reserve(meshlet_instances.size());
+    gpu_mli_ids.reserve(meshlet_instances.size());
+
     std::sort(meshlet_instances.begin(), meshlet_instances.end(), [this](const auto& a, const auto& b) {
-        if(a.geometry >= b.geometry) { return false; }
         if(a.mesh >= b.mesh) { return false; }
         if(a.meshlet_index >= b.meshlet_index) { return false; }
         return true;
@@ -908,9 +906,11 @@ void RendererVulkan::bake_indirect_commands()
         const Mesh& m = meshes.at(rmi.mesh);
         const Geometry& geom = geometries.at(m.geometry);
         const Material& mat = materials.at(m.material);
-        const Meshlet& ml = meshlets.at(geom.meshlet_range.offset + rmi.meshlet_index);
+        const Meshlet& ml = meshlets.at(rmi.meshlet_index);
 
-        if(i == 0 || meshlet_instances.at(i - 1).meshlet_index != rmi.meshlet_index)
+        gpu_mli_ids.push_back()
+
+            if(i == 0 || meshlet_instances.at(i - 1).meshlet_index != rmi.meshlet_index)
         {
             gpu_ml_draw_commands.push_back(VkDrawIndexedIndirectCommand{
                 .indexCount = (uint32_t)ml.triangle_range.size * 3,
@@ -927,35 +927,15 @@ void RendererVulkan::bake_indirect_commands()
     gpu_ml_draw_header.geometry_instance_count = meshlet_instances.size();
     max_draw_count = gpu_ml_draw_commands.size();
 
-    // clang-format off
-    //if(!indirect_draw_buffer){
-    //    indirect_draw_buffer = make_buffer("indirect draw", 
-    //        Vks(VkBufferCreateInfo{
-    //                .size = sizeof(IndirectDrawCommandBufferHeader) + gpu_draw_commands.size() * sizeof(gpu_draw_commands[0]),
-    //                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
-    //            }), VmaAllocationCreateInfo{});
-    //}
-    //staging_buffer->send_to(indirect_draw_buffer, 0ull, gpu_draw_header).submit();
-    //staging_buffer->send_to(indirect_draw_buffer, ~0ull, gpu_draw_commands).submit();
-
-    //if(!mesh_instances_buffer) {
-    //    mesh_instances_buffer = make_buffer("mesh instances", 
-    //        Vks(VkBufferCreateInfo{
-    //                .size = gpu_mesh_instances.size() * sizeof(gpu_mesh_instances[0]),
-    //                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-    //            }), VmaAllocationCreateInfo{});
-    //}
-    //staging_buffer->send_to(mesh_instances_buffer, 0ull, gpu_mesh_instances).submit(); 
-    
-    if(!meshlets_indirect_draw_buffer){
-        meshlets_indirect_draw_buffer = make_buffer(
-            BufferCreateInfo{
-            "meshlets_indirect_draw_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT});
+    if(!meshlets_ind_draw_buf)
+    {
+        meshlets_ind_draw_buf = make_buffer(BufferCreateInfo{
+            "meshlets_indirect_draw_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT });
     }
     // clang-format on
     staging_buffer->create_batch()
-        .send(BufferCopy{ meshlets_indirect_draw_buffer, 0ull, gpu_ml_draw_header })
-        .send(BufferCopy{ meshlets_indirect_draw_buffer, sizeof(gpu_ml_draw_header), gpu_ml_draw_commands })
+        .send(BufferCopy{ meshlets_ind_draw_buf, 0ull, gpu_ml_draw_header })
+        .send(BufferCopy{ meshlets_ind_draw_buf, sizeof(gpu_ml_draw_header), gpu_ml_draw_commands })
         .submit();
 }
 
@@ -1317,14 +1297,22 @@ void RendererVulkan::update_ddgi()
 #endif
 }
 
-Handle<Buffer> gfx::RendererVulkan::make_buffer(const BufferCreateInfo& info)
+Handle<Buffer> RendererVulkan::make_buffer(const BufferCreateInfo& info)
 {
-    return buffers.emplace(dev, vma, info);
+    const auto handle = buffers.emplace(info);
+    handle->init();
+    return handle;
 }
 
-Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info)
+Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
 {
-    return images.insert(Image{ name, dev, vma, vk_info });
+    const auto handle = images.emplace(info);
+    handle->init();
+    return handle;
+}
+
+void RendererVulkan::update_resource(Handle<Buffer> dst) {
+    bindless_pool->update_index()
 }
 
 Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
@@ -1334,7 +1322,7 @@ Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView vi
         if(t.image == image && t.view == view && t.layout == layout && t.sampler == sampler) { return h; }
     }
     return textures.insert(Texture{
-        .image = image, .view = view, .layout = layout, .sampler = sampler, .bindless_index = bindless_pool->allocate_texture_index() });
+        .image = image, .view = view, .layout = layout, .sampler = sampler, .bindless_index = bindless_pool->get_index() });
 }
 
 Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)
@@ -1352,12 +1340,6 @@ VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageV
 {
     return get_image(handle).get_view(vk_info);
 }
-
-Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return buffers.at(handle); }
-
-Image& RendererVulkan::get_image(Handle<Image> handle) { return images.at(handle); }
-
-Texture& gfx::RendererVulkan::get_texture(Handle<Texture> handle) { return textures.at(handle); }
 
 void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
 {
@@ -1441,3 +1423,12 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semapho
 Image& Swapchain::get_current_image() { return images.at(current_index); }
 
 VkImageView& Swapchain::get_current_view() { return views.at(current_index); }
+
+void gfx::BufferResource_T::update_bindless_index()
+{
+    auto* r = RendererVulkan::get_instance();
+    if(bindless_index < INVALID_VALUE) { r->bindless_pool->free_index(bindless_index); }
+    const auto idx = r->bindless_pool->get_index();
+    assert(idx < INVALID_VALUE);
+    bindless_index = idx;
+}

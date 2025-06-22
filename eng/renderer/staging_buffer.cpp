@@ -1,3 +1,4 @@
+#include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <deque>
@@ -7,215 +8,278 @@ static size_t align_up2(size_t val, size_t al) { return (val + al - 1) & ~(al - 
 namespace gfx
 {
 
-StagingBuffer::Batch& StagingBuffer::Batch::send(const BufferCopy& copy)
-{
-    bcps.push_back(copy);
-    return *this;
-}
-
-StagingBuffer::Batch& StagingBuffer::Batch::send(const ImageCopy& copy)
-{
-    icps.push_back(copy);
-    return *this;
-}
-
-void StagingBuffer::Batch::submit() { sb->submit(std::move(*this)); }
-
-StagingBuffer::StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept
-    : queue(queue), staging_buffer(&RendererVulkan::get_instance()->get_buffer(staging_buffer))
+StagingBuffer::StagingBuffer(SubmitQueue* queue) noexcept : queue(queue)
 {
     if(!queue)
     {
         assert(false);
         return;
     }
-    assert(this->staging_buffer && this->staging_buffer->buffer);
-    allocator = std::make_unique<LinearAllocator>(this->staging_buffer->memory, this->staging_buffer->capacity);
+    auto* r = RendererVulkan::get_instance();
+    buffer = r->make_buffer(BufferCreateInfo{
+        .name = "staging buffer",
+        .size = CAPACITY,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR,
+        .mapped = true,
+    });
     cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
-    assert(allocator && cmdpool);
+    assert(buffer && cmdpool);
+    data = buffer->memory;
+    fence = queue->make_fence(false);
+    assert(data && fence);
+    begin_cmd_buffer();
 }
 
-void StagingBuffer::submit(Batch&& batch)
+void StagingBuffer::stage(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range src_range)
 {
-    if(batch.bcps.empty() && batch.icps.empty()) { return; }
-    auto* r = RendererVulkan::get_instance();
-    Batch b = std::move(batch); // so the client code doesn't have to sustain the lifetime of a batch.
+    dst_offset = resize_buffer(dst, dst_offset, src_range.size);
+    transactions.push_back(Transaction{ *dst, *src, dst_offset, src_range, true, true });
+    dst->size = std::max(dst->size, dst_offset + src_range.size);
+}
 
-    const auto calculate_required_dst_buf_sizes = [&b, r] {
-        std::unordered_map<Handle<Buffer>, size_t> dst_szs;
-        dst_szs.reserve(b.bcps.size());
-        for(auto& bcp : b.bcps)
-        {
-            auto [it, inserted] = dst_szs.emplace(bcp.dst, 0);
-            const auto& buf = r->get_buffer(bcp.dst);
-            size_t prev_sz = it->second;
-            if(bcp.dst_offset == STAGING_APPEND) { bcp.dst_offset = inserted ? buf.size : prev_sz; }
-            it->second = std::max(prev_sz, bcp.dst_offset + bcp.src_range.size);
-        }
-        return dst_szs;
-    };
-
-    const auto create_resized_buffers = [r](const auto& dst_szs) {
-        std::vector<std::pair<Buffer*, Buffer>> resized_bufs;
-        resized_bufs.reserve(dst_szs.size());
-        for(const auto& [bh, req_sz] : dst_szs)
-        {
-            auto& buf = r->get_buffer(bh);
-            if(buf.capacity < req_sz)
-            {
-                resized_bufs.emplace_back(&buf, Buffer{ buf.dev, buf.vma,
-                                                        BufferCreateInfo{ buf.name, buf.usage, req_sz, buf.mapped } });
-            }
-        }
-        return resized_bufs;
-    };
-
-    const auto record_buffer_resize_copies = [](auto cmd, const auto& res_bufs) -> bool {
-        bool recorded = false;
-        for(const auto& [ob, nb] : res_bufs)
-        {
-            if(ob->size > 0)
-            {
-                const auto vkcp = Vks(VkBufferCopy2{ .srcOffset = 0, .dstOffset = 0, .size = ob->size });
-                const auto vkcpi =
-                    Vks(VkCopyBufferInfo2{ .srcBuffer = ob->buffer, .dstBuffer = nb.buffer, .regionCount = 1, .pRegions = &vkcp });
-                vkCmdCopyBuffer2(cmd, &vkcpi);
-                recorded = true;
-            }
-        }
-        return recorded;
-    };
-
-    const auto submit = [this](VkCommandBuffer& cmd, bool new_cmd = true) {
-        cmdpool->end(cmd);
-        queue->with_cmd_buf(cmd).submit_wait(-1ull);
-        allocator->reset(); // needs fixing for multithreading; cannot reset while other threads are pending.
-        cmdpool->reset();
-        if(new_cmd) { cmd = cmdpool->begin(); }
-    };
-
-    const auto resize_buffers = [&calculate_required_dst_buf_sizes, &create_resized_buffers,
-                                 &record_buffer_resize_copies, &submit](auto& cmd) -> bool {
-        const auto dst_szs = calculate_required_dst_buf_sizes();
-        auto res_bufs = create_resized_buffers(dst_szs);
-        const auto recorded_copies = record_buffer_resize_copies(cmd, res_bufs);
-        if(recorded_copies) { submit(cmd); }
-        for(auto& [buf, res_buf] : res_bufs)
-        {
-            *buf = std::move(res_buf);
-        }
-        return recorded_copies;
-    };
-
-    const auto record_img_bar = [](auto cmd, auto srcstage, auto srcaccess, auto dststage, auto dstaccess,
-                                   auto oldlayout, auto newlayout, auto& image) {
-        const auto ibar = Vks(VkImageMemoryBarrier2{
-            .srcStageMask = srcstage,
-            .srcAccessMask = srcaccess,
-            .dstStageMask = dststage,
-            .dstAccessMask = dstaccess,
-            .oldLayout = oldlayout,
-            .newLayout = newlayout,
-            .image = image.image,
-            .subresourceRange = { image.deduce_aspect(), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS } });
-        const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &ibar });
-        vkCmdPipelineBarrier2(cmd, &dep);
-        image.current_layout = newlayout;
-    };
-
-    const auto record_global_barrier = [](auto cmd, auto srcstage, auto srcaccess, auto dststage, auto dstaccess) {
-        const auto bar = Vks(VkMemoryBarrier2{
-            .srcStageMask = srcstage, .srcAccessMask = srcaccess, .dstStageMask = dststage, .dstAccessMask = dstaccess });
-        const auto dep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
-        vkCmdPipelineBarrier2(cmd, &dep);
-    };
-
-    auto cmd = cmdpool->begin();
-    record_global_barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                          VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
-    resize_buffers(cmd);
-    for(const auto& bcp : b.bcps)
+void StagingBuffer::stage(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size)
+{
+    const auto num_splits = (src_size + CAPACITY - 1) / CAPACITY;
+    dst_offset = resize_buffer(dst, dst_offset, src_size);
+    for(auto i = 0ull; i < num_splits; ++i)
     {
-        if(bcp.src)
+        const auto size = std::min(src_size - CAPACITY * i, CAPACITY);
+        auto [pGPU, pOffset] = allocate(size);
+        memcpy(pGPU, src, size);
+        transactions.push_back(Transaction{ *dst, ~0u, dst_offset + i * CAPACITY, { pOffset, src_size }, true, false, pGPU });
+    }
+    dst->size = std::max(dst->size, dst_offset + src_size);
+}
+
+void StagingBuffer::stage(Handle<Buffer> dst, std::span<const std::byte> src, size_t dst_offset)
+{
+    stage(dst, src.data(), dst_offset, src.size_bytes());
+}
+
+void StagingBuffer::stage(Handle<Image> dst, std::span<const std::byte> src, VkImageLayout final_layout)
+{
+    auto [pGPU, pOffset] = allocate(src.size_bytes());
+    memcpy(pGPU, src.data(), src.size_bytes());
+    transactions.push_back(Transaction{ *dst, ~0u, 0ull, { pOffset, src.size_bytes() }, false, false, pGPU, final_layout });
+}
+
+void StagingBuffer::flush()
+{
+    if(transactions.empty()) { return; }
+
+    record_replacement_buffers();
+
+    std::vector<VkImageMemoryBarrier2> img_barriers;
+    std::vector<VkImageLayout> img_final_layouts;
+    img_barriers.reserve(transactions.size());
+    img_final_layouts.reserve(transactions.size());
+    for(const auto& t : transactions)
+    {
+        if(!t.dst_is_buffer)
         {
-            const auto vkcp =
-                Vks(VkBufferCopy2{ .srcOffset = bcp.src_range.offset, .dstOffset = bcp.dst_offset, .size = bcp.src_range.size });
-            const auto vkcpi = Vks(VkCopyBufferInfo2{ .srcBuffer = r->get_buffer(bcp.src).buffer,
-                                                      .dstBuffer = r->get_buffer(bcp.dst).buffer,
-                                                      .regionCount = 1,
-                                                      .pRegions = &vkcp });
-            vkCmdCopyBuffer2(cmd, &vkcpi);
+            img_barriers.push_back(create_layout_transition(t.dst_image().get(), VK_IMAGE_LAYOUT_UNDEFINED,
+                                                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE,
+                                                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT));
+            img_final_layouts.push_back(t.final_layout);
+            t.dst_image()->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        }
+    }
+    record_mem_barrier(img_barriers);
+
+    for(const auto& t : transactions)
+    {
+        if(t.dst_is_buffer)
+        {
+            if(t.src_is_buffer || t.alloc)
+            {
+                record_copy(t.dst_buffer().get(), t.src_buffer().get(), t.dst_offset, t.src_range);
+            }
+            else { ENG_ERROR("Unsupported source type."); }
+        }
+        else /*dst is image*/
+        {
+            if(t.alloc) { record_copy(t.dst_image().get(), t.src_range.offset); }
+            else { ENG_ERROR("Unsupported source type"); }
+            t.dst_image()->current_layout = t.final_layout;
+        }
+    }
+
+    for(auto i = 0ull; i < img_barriers.size(); ++i)
+    {
+        auto& b = img_barriers.at(i);
+        auto l = img_final_layouts.at(i);
+        b.srcStageMask = b.dstStageMask;
+        b.srcAccessMask = b.dstAccessMask;
+        b.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT; // can this be stage none if last barrier is global?
+        b.dstAccessMask = VK_ACCESS_NONE;
+        b.oldLayout = b.newLayout;
+        b.newLayout = l;
+    }
+    record_mem_barrier(img_barriers);
+    record_mem_barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE);
+    cmdpool->end(cmd);
+    queue->with_cmd_buf(cmd).with_fence(fence).submit();
+
+    for(auto& [h, nb] : replacement_buffers)
+    {
+        if(!h) { continue; }
+        RendererVulkan::get_instance()->update_resource(h);
+        nb.destroy();
+    }
+
+    queue->wait_fence(fence, ~0ull);
+    head = 0;
+    cmdpool->reset();
+    transactions.clear();
+    replacement_buffers.clear();
+    begin_cmd_buffer();
+}
+
+void* StagingBuffer::try_allocate(size_t size)
+{
+    const auto aligned_size = align(size);
+    if(CAPACITY < aligned_size)
+    {
+        ENG_ERROR("Cannot allocate more than the buffer");
+        return nullptr;
+    }
+    if(get_free_space() < aligned_size) { return nullptr; }
+    auto* ptr = head_to_ptr();
+    head += aligned_size;
+    return ptr;
+}
+
+std::pair<void*, size_t> StagingBuffer::allocate(size_t size)
+{
+    auto* ptr = try_allocate(size);
+    if(!ptr)
+    {
+        flush();
+        ptr = try_allocate(size);
+    }
+    if(!ptr) { ENG_ERROR("Allocation failed"); }
+    return { ptr, calc_alloc_head(ptr) };
+}
+
+size_t StagingBuffer::resize_buffer(Handle<Buffer> hbuf, size_t dst_offset, size_t src_size)
+{
+    Buffer& buf = hbuf.get();
+    if(dst_offset == STAGING_APPEND) { dst_offset = buf.size; }
+    const auto capacity = dst_offset + src_size;
+    if(buf.capacity < capacity)
+    {
+        if(auto it = std::find_if(replacement_buffers.begin(), replacement_buffers.end(),
+                                  [hbuf](const auto& pair) { return pair.first == hbuf; });
+           it != replacement_buffers.end())
+        {
+            it->second.capacity = capacity;
         }
         else
         {
-            if(bcp.data.empty())
-            {
-                ENG_WARN("Src range is empty");
-                continue;
-            }
-            if(!bcp.data.data())
-            {
-                ENG_WARN_ASSERT("Src range is null");
-                continue;
-            }
-            size_t uploaded_bytes = 0;
-            while(true)
-            {
-                const auto dst_offset = bcp.dst_offset + uploaded_bytes;
-                const auto left_sz = bcp.data.size_bytes() - uploaded_bytes;
-                auto [pGPU, alloc_sz] = allocator->allocate_best_fit(left_sz);
-                if(!pGPU)
-                {
-                    submit(cmd);
-                    continue;
-                }
-                memcpy(pGPU, bcp.data.data() + uploaded_bytes, alloc_sz);
-                const auto src_offset = allocator->get_alloc_offset(pGPU);
-                const auto vkcp = Vks(VkBufferCopy2{ .srcOffset = src_offset, .dstOffset = dst_offset, .size = alloc_sz });
-                const auto vkcpi = Vks(VkCopyBufferInfo2{
-                    .srcBuffer = staging_buffer->buffer, .dstBuffer = r->get_buffer(bcp.dst).buffer, .regionCount = 1, .pRegions = &vkcp });
-                vkCmdCopyBuffer2(cmd, &vkcpi);
-                uploaded_bytes += alloc_sz;
-                if(uploaded_bytes == bcp.data.size_bytes()) { break; }
-            }
+            Buffer b{ BufferCreateInfo{ buf.name, capacity, buf.usage, buf.mapped } };
+            replacement_buffers.emplace_back(hbuf, b);
         }
     }
+    return dst_offset;
+}
 
-    for(const auto& icp : b.icps)
+void StagingBuffer::begin_cmd_buffer()
+{
+    cmd = cmdpool->begin();
+    // wait for all the previous accesses
+    record_mem_barrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+}
+
+void StagingBuffer::record_mem_barrier(VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                                       VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access)
+{
+    const auto bar = Vks(VkMemoryBarrier2{
+        .srcStageMask = src_stage, .srcAccessMask = src_access, .dstStageMask = dst_stage, .dstAccessMask = dst_access });
+    const auto dep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+void StagingBuffer::record_mem_barrier(std::span<const VkImageMemoryBarrier2> barriers)
+{
+    const auto dep =
+        Vks(VkDependencyInfo{ .imageMemoryBarrierCount = (uint32_t)barriers.size(), .pImageMemoryBarriers = barriers.data() });
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+void StagingBuffer::record_replacement_buffers()
+{
+    bool issue_barrier = false;
+    std::vector<VkBufferCopy2> buf_copies;
+    buf_copies.reserve(replacement_buffers.size());
+    for(auto& [h, nb] : replacement_buffers)
     {
-        auto [pGPU, alloc_sz] = allocator->allocate_best_fit(icp.data.size_bytes());
-        if(!pGPU)
+        if(h->size == 0)
         {
-            submit(cmd);
-            std::tie(pGPU, alloc_sz) = allocator->allocate_best_fit(icp.data.size_bytes());
-            assert(pGPU);
-        }
-        if(alloc_sz != icp.data.size_bytes())
-        {
-            ENG_WARN_ASSERT("Partial upload to images is not yet supported.");
+            h = Handle<Buffer>{}; // invalidate the handle to skip replacing
             continue;
         }
-        memcpy(pGPU, icp.data.data(), alloc_sz);
-        auto& img = r->get_image(icp.dst);
-        const auto vkicp = Vks(VkBufferImageCopy2{ .bufferOffset = allocator->get_alloc_offset(pGPU),
-                                                   .imageSubresource = { img.deduce_aspect(), 0, 0, VK_REMAINING_ARRAY_LAYERS },
-                                                   .imageExtent = img.vk_info.extent });
-        const auto vkicpi = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = staging_buffer->buffer,
-                                                          .dstImage = img.image,
-                                                          .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                                          .regionCount = 1,
-                                                          .pRegions = &vkicp });
-        record_img_bar(cmd, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                       VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, img);
-        vkCmdCopyBufferToImage2(cmd, &vkicpi);
-        record_img_bar(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                       VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, icp.final_layout, img);
+        nb.init();
+        record_copy(nb, h.get(), 0ull, { 0ull, h->size });
+        std::swap(h.get(), nb); // for later replacing in renderer
+        issue_barrier = true;
     }
-
-    record_global_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE);
-    submit(cmd, false);
+    if(issue_barrier)
+    {
+        // src stage none because of global barrier issued at the begin of the cmd buffer
+        record_mem_barrier(VK_PIPELINE_STAGE_NONE, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+    }
 }
+
+void StagingBuffer::record_copy(Buffer& dst, Buffer& src, size_t dst_offset, Range src_range)
+{
+    const auto copy = create_copy(dst_offset, src_range);
+    const auto info =
+        Vks(VkCopyBufferInfo2{ .srcBuffer = src.buffer, .dstBuffer = dst.buffer, .regionCount = 1, .pRegions = &copy });
+    vkCmdCopyBuffer2(cmd, &info);
+}
+
+void StagingBuffer::record_copy(Image& dst, size_t src_offset)
+{
+    const auto copy = Vks(VkBufferImageCopy2{ .bufferOffset = src_offset,
+                                              .imageSubresource = { dst.deduce_aspect(), 0, 0, VK_REMAINING_ARRAY_LAYERS },
+                                              .imageExtent = dst.extent });
+    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = buffer->buffer,
+                                                    .dstImage = dst.image,
+                                                    .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                    .regionCount = 1,
+                                                    .pRegions = &copy });
+    vkCmdCopyBufferToImage2(cmd, &info);
+}
+
+VkBufferCopy2 StagingBuffer::create_copy(size_t dst_offset, Range src_range) const
+{
+    return Vks(VkBufferCopy2{ .srcOffset = src_range.offset, .dstOffset = dst_offset, .size = src_range.size });
+}
+
+VkImageMemoryBarrier2 StagingBuffer::create_layout_transition(const Image& img, VkImageLayout src_layout, VkImageLayout dst_layout,
+                                                              VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                                                              VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) const
+{
+    return Vks(VkImageMemoryBarrier2{
+        .srcStageMask = src_stage,
+        .srcAccessMask = src_access,
+        .dstStageMask = dst_stage,
+        .dstAccessMask = dst_access,
+        .oldLayout = src_layout,
+        .newLayout = dst_layout,
+        .image = img.image,
+        .subresourceRange = { img.deduce_aspect(), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS } });
+}
+
+Handle<Buffer> StagingBuffer::Transaction::dst_buffer() const { return Handle<Buffer>{ dst_resource }; }
+
+Handle<Image> StagingBuffer::Transaction::dst_image() const { return Handle<Image>{ dst_resource }; }
+
+Handle<Buffer> StagingBuffer::Transaction::src_buffer() const { return Handle<Buffer>{ src_resource }; }
+
+Handle<Image> StagingBuffer::Transaction::src_image() const { return Handle<Image>{ src_resource }; }
 
 } // namespace gfx

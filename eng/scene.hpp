@@ -11,7 +11,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/renderer/renderer.hpp>
-#include <eng/common/handle_map.hpp>
+#include <eng/common/slotmap.hpp>
 #include <eng/common/types.hpp>
 
 namespace scene
@@ -126,17 +126,3 @@ class Scene
     std::vector<ModelInstance> scene;
 };
 } // namespace scene
-
-// void scene::Scene::traverse_dfs(Handle<scene::Node> node, const auto& func) {
-//     auto& n = *node_handles.at(node);
-//     traverse_dfs(n, func);
-// }
-//
-// void scene::Scene::traverse_dfs(scene::Node& node, const auto& func)
-//     requires std::invocable<decltype(func), scene::Node&>
-//{
-//     func(node);
-//     for(auto& c : node.children) {
-//         traverse_dfs(*node_handles.at(c), func);
-//     }
-// }

@@ -16,8 +16,8 @@ namespace ecs
 {
 using Entity = uint32_t;
 using component_id_t = uint32_t;
-inline static constexpr Entity s_max_entity = ~Entity{};
-inline static constexpr Entity s_max_components = 32;
+inline static constexpr Entity MAX_ENTITY = ~Entity{};
+inline static constexpr Entity MAX_COMPONENTS = 32;
 
 class IComponentPool
 {
@@ -81,7 +81,7 @@ template <typename T> class ComponentPool : public IComponentPool
         assert(components.capacity() > idx && idx <= components.size());
     }
 
-    SparseSet<Entity> entities;
+    SparseSet entities;
     std::vector<T> components;
 };
 
@@ -141,7 +141,7 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*comp_arr);
     }
 
-    std::array<std::unique_ptr<IComponentPool>, s_max_components> component_arrays;
-    SparseSet<Entity> entities;
+    std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
+    SparseSet entities;
 };
 } // namespace ecs

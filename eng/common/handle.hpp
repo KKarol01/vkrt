@@ -8,20 +8,7 @@ template <typename T, typename Storage = uint32_t> struct Handle;
 
 template <typename T, typename Storage> struct HandleGenerator
 {
-    static constexpr Storage s_max_counter = ~Storage{};
-    static Storage gen()
-    {
-        auto ct = counter.load(std::memory_order_relaxed);
-        while(true)
-        {
-            if(ct == s_max_counter)
-            {
-                assert(false);
-                return ct;
-            }
-            if(counter.compare_exchange_weak(ct, ct + 1, std::memory_order_relaxed)) { return ct; }
-        }
-    }
+    static Storage gen() { return ++counter; }
     inline static std::atomic<Storage> counter{ 0 };
 };
 
@@ -29,6 +16,11 @@ struct HandleGenerate_T
 {
 };
 inline constexpr HandleGenerate_T generate_handle{};
+
+template <typename Handle> struct HandleDispatcher
+{
+    constexpr static T* get(Handle handle) = delete;
+};
 
 template <typename T, typename Storage> struct Handle
 {
@@ -39,6 +31,8 @@ template <typename T, typename Storage> struct Handle
     constexpr Storage operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;
     constexpr explicit operator bool() const { return handle != ~Storage{}; }
+    constexpr T* operator->() const { return HandleDispatcher<Handle<T, Storage>>::get(*this); }
+    constexpr T& get() const { return *HandleDispatcher<Handle<T, Storage>>::get(*this); }
     Storage handle{ ~Storage{} };
 };
 

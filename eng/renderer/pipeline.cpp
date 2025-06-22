@@ -3,6 +3,7 @@
 #include <eng/renderer/bindlesspool.hpp>
 #include <shaderc/shaderc.hpp>
 #include <stb/stb_include.h>
+#include <filesystem>
 
 namespace gfx
 {

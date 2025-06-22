@@ -1,7 +1,8 @@
 #pragma once
 
-#include <eng/renderer/common.hpp>
+#include <array>
 #include <vulkan/vulkan.h>
+#include <eng/common/hash.hpp>
 
 namespace gfx
 {
@@ -10,16 +11,7 @@ struct RasterizationSettings
 {
     bool operator==(const RasterizationSettings& o) const
     {
-        return num_col_formats == o.num_col_formats &&
-               [this, &o] {
-                   for(auto i = 0u; i < num_col_formats; ++i)
-                   {
-                       if(col_formats[i] != o.col_formats[i]) { return false; }
-                       return true;
-                   }
-               }() &&
-               dep_format == o.dep_format && culling == o.culling && depth_test == o.depth_test &&
-               depth_write == o.depth_write && depth_op == o.depth_op;
+        return std::hash<RasterizationSettings>{}(*this) == std::hash<RasterizationSettings>{}(o);
     }
     uint32_t num_col_formats{ 1 };
     std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
@@ -94,3 +86,15 @@ class PipelineCompiler
 };
 
 } // namespace gfx
+
+namespace std
+{
+template <> struct hash<gfx::RasterizationSettings>
+{
+    size_t operator()(const gfx::RasterizationSettings& a) const
+    {
+        return HashCombine::hash(a.num_col_formats, a.col_formats[0], a.col_formats[1], a.col_formats[2],
+                                 a.col_formats[3], a.dep_format, a.culling, a.depth_test, a.depth_write, a.depth_op);
+    }
+};
+} // namespace std

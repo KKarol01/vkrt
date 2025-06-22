@@ -10,8 +10,9 @@
 namespace gfx
 {
 
-enum class BatchFlags
+enum class GeometryFlags
 {
+    MESHLETS_BIT = 0x1,
 };
 enum class InstanceFlags
 {
@@ -65,9 +66,9 @@ struct Meshlet
 
 struct GeometryDescriptor
 {
+    Flags<GeometryFlags> flags;
     std::span<const Vertex> vertices;
     std::span<const Index> indices;
-    std::span<const Meshlet> meshlets;
 };
 
 struct ImageDescriptor

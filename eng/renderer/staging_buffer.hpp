@@ -2,64 +2,21 @@
 
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/common/handle.hpp>
+#include <eng/renderer/resources/resources.hpp>
 #include <vulkan/vulkan.h>
 #include <span>
 #include <vector>
-#include <variant>
 #include <thread>
 #include <atomic>
 #include <memory>
 #include <deque>
 #include <mutex>
-#include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
+#include <numeric>
 #include <eng/common/types.hpp>
-
-#ifndef IS_POW2
-#define IS_POW2(x) (x > 0 && !(x & (x - 1)))
-#endif
 
 namespace gfx
 {
 struct Buffer;
-
-struct LinearAllocator
-{
-    inline static constexpr size_t ALIGNMENT = 512;
-
-    LinearAllocator(void* buffer, size_t sz) : buffer(buffer), size(sz)
-    {
-        assert(buffer && IS_POW2(sz) && (sz % ALIGNMENT) == 0);
-    }
-
-    /* Allocates as much as it can and returns the allocation and it's size, aligned to ALIGNMENT. */
-    std::pair<void*, size_t> allocate_best_fit(size_t sz)
-    {
-        const auto padded_sz = (sz + ALIGNMENT - 1) & -ALIGNMENT;
-        const size_t free = size - head;
-        const size_t alloc_sz = free < padded_sz ? free : padded_sz;
-        const size_t oldhead = head;
-        if(free == 0) { return { nullptr, 0 }; }
-        head += alloc_sz;
-        ++num_allocs;
-        return { static_cast<void*>(static_cast<std::byte*>(buffer) + oldhead), std::min(alloc_sz, sz) };
-    }
-
-    void reset()
-    {
-        assert(num_allocs > 0);
-        if(--num_allocs == 0) { head = 0; }
-    }
-
-    size_t get_alloc_offset(const void* const palloc) const
-    {
-        return reinterpret_cast<size_t>(palloc) - reinterpret_cast<size_t>(buffer);
-    }
-
-    void* buffer{};
-    size_t size{};
-    size_t head{};
-    size_t num_allocs{};
-};
 
 struct BufferCopy
 {
@@ -101,41 +58,83 @@ struct ImageCopy
     std::span<const std::byte> data;
 };
 
-static constexpr auto STAGING_APPEND = std::numeric_limits<std::uint64_t>::max();
+static constexpr auto STAGING_APPEND = std::numeric_limits<std::size_t>::max();
 
 class StagingBuffer
 {
-  public:
-    struct Batch
+    static constexpr auto CAPACITY = 64ull * 1024 * 1024;
+    static constexpr auto ALIGNMENT = 512u;
+
+    struct Transaction
     {
-        friend class StagingBuffer;
-
-        Batch& send(const BufferCopy& copy);
-        Batch& send(const ImageCopy& copy);
-        void submit();
-
-      private:
-        explicit Batch(StagingBuffer* sb) noexcept : sb(sb) { assert(sb); }
-
-        void maybe_resize(Handle<Buffer> bh, Buffer& b, size_t nsz);
-
-        StagingBuffer* sb;
-        std::vector<BufferCopy> bcps;
-        std::vector<ImageCopy> icps;
+        Handle<Buffer> dst_buffer() const;
+        Handle<Image> dst_image() const;
+        Handle<Buffer> src_buffer() const;
+        Handle<Image> src_image() const;
+        uint32_t dst_resource;
+        uint32_t src_resource;
+        size_t dst_offset;
+        Range src_range;
+        bool dst_is_buffer;
+        bool src_is_buffer;
+        const void* alloc{};
+        VkImageLayout final_layout{};
     };
 
-    StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept;
-
-    Batch create_batch() { return Batch{ this }; }
-    void submit(Batch&& batch);
+  public:
+    StagingBuffer(SubmitQueue* queue) noexcept;
+    void stage(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range src_range);
+    void stage(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size);
+    void stage(Handle<Buffer> dst, std::span<const std::byte> src, size_t dst_offset);
+    template <typename T> void stage(Handle<Buffer> dst, const T& src, size_t dst_offset)
+    {
+        stage(dst, &src, dst_offset, sizeof(T));
+    }
+    template <typename... Ts> void stage_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts)
+    {
+        const auto total_size = (sizeof(Ts) + ...);
+        const auto offset = resize_buffer(dst, dst_offset, total_size);
+        const auto prefix_sum = [] {
+            auto arr = std::array<size_t, sizeof...(Ts)>{ sizeof(Ts)... };
+            std::exclusive_scan(arr.begin(), arr.end(), arr.begin(), size_t{});
+            return arr;
+        }();
+        size_t idx = 0;
+        (..., stage(dst, &ts, offset + prefix_sum[idx++], sizeof(Ts)));
+    }
+    void stage(Handle<Image> dst, std::span<const std::byte> src, VkImageLayout final_layout);
+    void flush();
 
   private:
+    void* try_allocate(size_t size);
+    std::pair<void*, size_t> allocate(size_t size);
+    void* head_to_ptr() const { return static_cast<std::byte*>(data) + head; }
+    size_t get_free_space() const { return CAPACITY - head; }
+    size_t align(size_t sz) const { return (sz + ALIGNMENT - 1) & -ALIGNMENT; }
+    size_t resize_buffer(Handle<Buffer> hbuf, size_t dst_offset, size_t src_size);
+    size_t calc_alloc_head(void* ptr) const { return (std::uintptr_t)ptr - (std::uintptr_t)data; }
+    void begin_cmd_buffer();
+    void record_mem_barrier(VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
+                            VkAccessFlags2 dst_access);
+    void record_mem_barrier(std::span<const VkImageMemoryBarrier2> barriers);
+    void record_replacement_buffers();
+    void record_copy(Buffer& dst, Buffer& src, size_t dst_offset, Range src_range);
+    void record_copy(Image& dst, size_t src_offset);
+    VkBufferCopy2 create_copy(size_t dst_offset, Range src_range) const;
+    VkImageMemoryBarrier2 create_layout_transition(const Image& img, VkImageLayout src_layout, VkImageLayout dst_layout,
+                                                   VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                                                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) const;
+
+    std::vector<Transaction> transactions;
+    std::vector<std::pair<Handle<Buffer>, Buffer>> replacement_buffers;
+
     SubmitQueue* queue{};
+    VkFence fence{};
     CommandPool* cmdpool{};
-    Buffer* staging_buffer{};
-    std::unique_ptr<LinearAllocator> allocator{};
+    VkCommandBuffer cmd{};
+    Handle<Buffer> buffer{};
+    void* data{};
+    size_t head{};
 };
 
 } // namespace gfx
-
-#undef IS_POW2

@@ -1,7 +1,6 @@
 #pragma once
 
-#include <eng/common/handle_map.hpp>
-#include <eng/renderer/common.hpp>
+#include <eng/common/slotmap.hpp>
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
@@ -9,6 +8,7 @@
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/pipeline.hpp>
+#include <eng/renderer/resources/resources.hpp>
 
 namespace gfx
 {
@@ -31,7 +31,9 @@ enum class RenderFlags : uint32_t
 enum class GeometryFlags : uint32_t
 {
     DIRTY_BLAS_BIT = 0x1,
+    IS_MESHLET_BIT = 0x2,
 };
+
 enum class MeshFlags : uint32_t
 {
 };
@@ -49,11 +51,8 @@ struct MeshMetadata
 /* position inside vertex and index buffer*/
 struct Geometry
 {
-    Flags<GeometryFlags> flags;
-    Handle<GeometryMetadata> metadata;
     Range vertex_range{};
     Range index_range{};
-    Range meshlet_range{};
 };
 
 struct Material
@@ -89,9 +88,8 @@ struct MeshInstance
 struct MeshletInstance
 {
     ecs::Entity entity;
-    Handle<Geometry> geometry;
     Handle<Mesh> mesh;
-    uint32_t meshlet_index{ ~0u }; // index into global meshlet array.
+    uint32_t meshlet_index{ ~0u }; // global meshlet idx
 };
 
 struct DDGI
@@ -258,18 +256,20 @@ class RendererVulkan : public Renderer
     void update_ddgi();
 
     Handle<Buffer> make_buffer(const BufferCreateInfo& info);
-    Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
+    Handle<Image> make_image(const ImageCreateInfo& info);
+    void update_resource(Handle<Buffer> dst);
+
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
     VkImageView make_image_view(Handle<Image> handle);
     VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
 
-    Buffer& get_buffer(Handle<Buffer> handle);
-    Image& get_image(Handle<Image> handle);
-    Texture& get_texture(Handle<Texture> handle);
-    void destroy_buffer(Handle<Buffer> buffer);
-    uint32_t get_bindless_index(Handle<Buffer> handle);
-    uint32_t get_bindless_index(Handle<Texture> handle);
+    // Buffer& get_buffer(Handle<Buffer> handle);
+    // Image& get_image(Handle<Image> handle);
+    // Texture& get_texture(Handle<Texture> handle);
+    // void destroy_buffer(Handle<Buffer> buffer);
+    // uint32_t get_bindless_index(Handle<Buffer> handle);
+    // uint32_t get_bindless_index(Handle<Texture> handle);
 
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
@@ -304,7 +304,6 @@ class RendererVulkan : public Renderer
     std::vector<MeshInstance> mesh_instances;
     std::vector<MeshletInstance> meshlet_instances;
     std::vector<Meshlet> meshlets;
-    // std::unordered_map<ecs::Entity, uint32_t> mesh_instance_idxs;
     std::vector<ecs::Entity> blas_instances;
     size_t max_draw_count{};
     size_t total_vertices{};
@@ -321,12 +320,11 @@ class RendererVulkan : public Renderer
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
-    Handle<Buffer> indirect_draw_buffer;
-    Handle<Buffer> meshlets_indirect_draw_buffer;
 
-    Handle<Buffer> mesh_instance_mid_buf;
     Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
     Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example: ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]]
+    Handle<Buffer> meshlets_index_buf;
+    Handle<Buffer> meshlets_ind_draw_buf;
 
     Handle<Buffer> tlas_mesh_offsets_buffer;
     Handle<Buffer> tlas_transform_buffer;
@@ -338,26 +336,28 @@ class RendererVulkan : public Renderer
     std::array<FrameData, 2> frame_datas{};
 
     SamplerStorage samplers;
-    HandleMap<Image> images;
     HandleMap<Texture> textures;
     HandleMap<Buffer> buffers;
+    HandleMap<Image> images;
 
     DDGI ddgi;
     gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
     FFTOcean fftocean;
-
-    struct UploadImage
-    {
-        Handle<Image> image_handle;
-        std::vector<std::byte> rgba_data;
-    };
-    std::vector<gfx::Vertex> upload_vertices;
-    std::vector<gfx::Meshlet> upload_meshlets;
-    std::vector<uint32_t> upload_indices;
-    std::vector<uint32_t> upload_meshlets_vertices;
-    std::vector<uint32_t> upload_meshlets_triangles;
-    std::vector<UploadImage> upload_images;
-    std::vector<ecs::Entity> update_positions;
 };
 
 } // namespace gfx
+
+template <> struct HandleDispatcher<Handle<gfx::Buffer>>
+{
+    constexpr static auto* get(Handle<gfx::Buffer> handle)
+    {
+        return &gfx::RendererVulkan::get_instance()->buffers.at(handle);
+    }
+};
+template <> struct HandleDispatcher<Handle<gfx::Image>>
+{
+    constexpr static auto* get(Handle<gfx::Image> handle)
+    {
+        return &gfx::RendererVulkan::get_instance()->images.at(handle);
+    }
+};

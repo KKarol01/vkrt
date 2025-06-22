@@ -524,8 +524,8 @@ void ZPrepassPass::render(VkCommandBuffer cmd)
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     set_pc_vsm_common(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
-    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
-                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
+    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.meshlets_ind_draw_buf).buffer,
+                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.meshlets_ind_draw_buf).buffer,
                                   0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
 }
@@ -618,35 +618,35 @@ VsmShadowsPass::VsmShadowsPass(RenderGraph* rg)
 
 void VsmShadowsPass::render(VkCommandBuffer cmd)
 {
-    auto& r = *RendererVulkan::get_instance();
-    const auto rendering_info = Vks(VkRenderingInfo{
-        .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).vk_info.extent.width,
-                                    .height = r.get_image(r.vsm.shadow_map_0).vk_info.extent.height } },
-        .layerCount = 1,
-        .colorAttachmentCount = 0,
-        .pColorAttachments = nullptr,
-        .pDepthAttachment = nullptr,
-    });
-    vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdBeginRendering(cmd, &rendering_info);
-    VkRect2D r_sciss_1 = rendering_info.renderArea;
-    VkViewport r_view_1{ .x = 0.0f,
-                         .y = 0.0f,
-                         .width = (float)rendering_info.renderArea.extent.width,
-                         .height = (float)rendering_info.renderArea.extent.height,
-                         .minDepth = 0.0f,
-                         .maxDepth = 1.0f };
-    vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
-    vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
-    r.bindless_pool->bind(cmd, pipeline->bind_point);
-    for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i)
-    {
-        set_pc_vsm_shadows(cmd, VSM_NUM_CLIPMAPS - i - 1);
-        vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
-                                      sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
-                                      0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
-    }
-    vkCmdEndRendering(cmd);
+    // auto& r = *RendererVulkan::get_instance();
+    // const auto rendering_info = Vks(VkRenderingInfo{
+    //     .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).vk_info.extent.width,
+    //                                 .height = r.get_image(r.vsm.shadow_map_0).vk_info.extent.height } },
+    //     .layerCount = 1,
+    //     .colorAttachmentCount = 0,
+    //     .pColorAttachments = nullptr,
+    //     .pDepthAttachment = nullptr,
+    // });
+    // vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
+    // vkCmdBeginRendering(cmd, &rendering_info);
+    // VkRect2D r_sciss_1 = rendering_info.renderArea;
+    // VkViewport r_view_1{ .x = 0.0f,
+    //                      .y = 0.0f,
+    //                      .width = (float)rendering_info.renderArea.extent.width,
+    //                      .height = (float)rendering_info.renderArea.extent.height,
+    //                      .minDepth = 0.0f,
+    //                      .maxDepth = 1.0f };
+    // vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
+    // vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
+    // r.bindless_pool->bind(cmd, pipeline->bind_point);
+    // for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i)
+    //{
+    //     set_pc_vsm_shadows(cmd, VSM_NUM_CLIPMAPS - i - 1);
+    //     vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.indirect_draw_buffer).buffer,
+    //                                   sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.indirect_draw_buffer).buffer,
+    //                                   0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+    // }
+    // vkCmdEndRendering(cmd);
 }
 
 VsmDebugPageCopyPass::VsmDebugPageCopyPass(RenderGraph* rg)
@@ -754,8 +754,8 @@ void DefaultUnlitPass::render(VkCommandBuffer cmd)
     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
     set_pc_default_unlit(cmd);
     r.bindless_pool->bind(cmd, pipeline->bind_point);
-    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
-                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.meshlets_indirect_draw_buffer).buffer,
+    vkCmdDrawIndexedIndirectCount(cmd, r.get_buffer(r.meshlets_ind_draw_buf).buffer,
+                                  sizeof(IndirectDrawCommandBufferHeader), r.get_buffer(r.meshlets_ind_draw_buf).buffer,
                                   0ull, r.max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
     vkCmdEndRendering(cmd);
 }

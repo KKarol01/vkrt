@@ -1,6 +1,5 @@
 #pragma once
 
-#include <eng/renderer/common.hpp>
 #include <eng/renderer/passes/passes.hpp>
 
 namespace gfx {

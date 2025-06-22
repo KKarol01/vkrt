@@ -6,7 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
-#include <eng/common/slotvec.hpp>
+#include <eng/common/slotallocator.hpp>
 
 namespace gfx
 {
@@ -25,12 +25,12 @@ class BindlessPool
     VkDescriptorSetLayout get_set_layout() const { return set_layout; }
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout; }
 
-    bindless_index_t allocate_buffer_index();
-    bindless_index_t allocate_texture_index();
-    void free_buffer_index(bindless_index_t slot);
-    void free_texture_index(bindless_index_t slot);
-    void update_index(bindless_index_t index, VkBuffer buffer);
-    void update_index(bindless_index_t index, VkImageView view, VkImageLayout layout, VkSampler sampler);
+    void get_index(Handle<Buffer> handle);
+    void get_index(Handle<Texture> handle);
+    void free_index(Handle<Buffer> handle);
+    void free_index(Handle<Texture> handle);
+    void update_index(Handle<Buffer> handle);
+    void update_index(Handle<Texture> handle);
 
   private:
     void update();
@@ -41,8 +41,10 @@ class BindlessPool
     VkPipelineLayout pipeline_layout{};
     VkDescriptorSet set{};
 
-    SlotVec<bindless_index_t> buffer_slots;
-    SlotVec<bindless_index_t> texture_slots;
+    SlotAllocator buffer_slots;
+    SlotAllocator texture_slots;
+    std::unordered_map<Handle<Buffer>, bindless_index_t> buffer_indices;
+    std::unordered_map<Handle<Texture>, bindless_index_t> texture_indices;
     std::vector<VkWriteDescriptorSet> updates;
     std::deque<VkDescriptorBufferInfo> buffer_updates;
     std::deque<VkDescriptorImageInfo> texture_updates;
