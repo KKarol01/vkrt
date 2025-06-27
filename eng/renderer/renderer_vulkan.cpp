@@ -241,7 +241,7 @@ void RendererVulkan::initialize_imgui()
 
     ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
 
-    VkFormat color_formats[]{ swapchain.images.at(0).vk_info.format };
+    VkFormat color_formats[]{ swapchain.images.at(0).format };
 
     VkDescriptorPoolSize sizes[]{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
     auto imgui_dpool_info = Vks(VkDescriptorPoolCreateInfo{
@@ -293,9 +293,7 @@ void RendererVulkan::initialize_imgui()
 void RendererVulkan::initialize_resources()
 {
     bindless_pool = new BindlessPool{ dev };
-    staging_buffer =
-        new StagingBuffer{ submit_queue, make_buffer(BufferCreateInfo{ "staging_buffer", VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR,
-                                                                       1024 * 1024 * 64, true }) };
+    staging_buffer = new StagingBuffer{ submit_queue };
     vertex_positions_buffer = make_buffer(BufferCreateInfo{
         "vertex_positions_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
@@ -348,39 +346,39 @@ void RendererVulkan::initialize_resources()
     vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     vsm.free_allocs_buffer = make_buffer(BufferCreateInfo{ "vms alloc buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
-    vsm.shadow_map_0 =
-        make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                                   .format = VK_FORMAT_R32_SFLOAT,
-                                                   .extent = { VSM_PHYSICAL_PAGE_RESOLUTION, VSM_PHYSICAL_PAGE_RESOLUTION, 1 },
-                                                   .mipLevels = 1,
-                                                   .arrayLayers = 1,
-                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT });
+    // vsm.shadow_map_0 =
+    //     make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+    //                                                .format = VK_FORMAT_R32_SFLOAT,
+    //                                                .extent = { VSM_PHYSICAL_PAGE_RESOLUTION, VSM_PHYSICAL_PAGE_RESOLUTION, 1 },
+    //                                                .mipLevels = 1,
+    //                                                .arrayLayers = 1,
+    //                                                .samples = VK_SAMPLE_COUNT_1_BIT,
+    //                                                .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+    //                                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT });
 
-    vsm.dir_light_page_table =
-        make_image("vsm dir light 0 page table",
-                   VkImageCreateInfo{
-                       .imageType = VK_IMAGE_TYPE_2D,
-                       .format = VK_FORMAT_R32_UINT,
-                       .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
-                       .mipLevels = 1,
-                       .arrayLayers = VSM_NUM_CLIPMAPS,
-                       .samples = VK_SAMPLE_COUNT_1_BIT,
-                       .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                   });
+    // vsm.dir_light_page_table =
+    //     make_image("vsm dir light 0 page table",
+    //                VkImageCreateInfo{
+    //                    .imageType = VK_IMAGE_TYPE_2D,
+    //                    .format = VK_FORMAT_R32_UINT,
+    //                    .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
+    //                    .mipLevels = 1,
+    //                    .arrayLayers = VSM_NUM_CLIPMAPS,
+    //                    .samples = VK_SAMPLE_COUNT_1_BIT,
+    //                    .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    //                });
 
-    vsm.dir_light_page_table_rgb8 =
-        make_image("vsm dir light 0 page table rgb8",
-                   VkImageCreateInfo{
-                       .imageType = VK_IMAGE_TYPE_2D,
-                       .format = VK_FORMAT_R8G8B8A8_UNORM,
-                       .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
-                       .mipLevels = 1,
-                       .arrayLayers = VSM_NUM_CLIPMAPS,
-                       .samples = VK_SAMPLE_COUNT_1_BIT,
-                       .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                   });
+    // vsm.dir_light_page_table_rgb8 =
+    //     make_image("vsm dir light 0 page table rgb8",
+    //                VkImageCreateInfo{
+    //                    .imageType = VK_IMAGE_TYPE_2D,
+    //                    .format = VK_FORMAT_R8G8B8A8_UNORM,
+    //                    .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
+    //                    .mipLevels = 1,
+    //                    .arrayLayers = VSM_NUM_CLIPMAPS,
+    //                    .samples = VK_SAMPLE_COUNT_1_BIT,
+    //                    .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+    //                });
 
     // create default material
     materials.insert(gfx::Material{});
@@ -392,28 +390,17 @@ void RendererVulkan::create_window_sized_resources()
     for(auto i = 0ull; i < frame_datas.size(); ++i)
     {
         auto& fd = frame_datas.at(i);
-        fd.gbuffer.color_image =
-            make_image(fmt::format("g_color_{}", i),
-                       VkImageCreateInfo{
-                           .imageType = VK_IMAGE_TYPE_2D,
-                           .format = VK_FORMAT_R8G8B8A8_SRGB,
-                           .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-                           .mipLevels = 1,
-                           .arrayLayers = 1,
-                           .samples = VK_SAMPLE_COUNT_1_BIT,
-                           .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        fd.gbuffer.depth_buffer_image =
-            make_image(fmt::format("g_depth_{}", i),
-                       VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                          .format = VK_FORMAT_D24_UNORM_S8_UINT,
-                                          .extent = { (uint32_t)Engine::get().window->width,
-                                                      (uint32_t)Engine::get().window->height, 1 },
-                                          .mipLevels = 1,
-                                          .arrayLayers = 1,
-                                          .samples = VK_SAMPLE_COUNT_1_BIT,
-                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        fd.gbuffer.color_image = make_image(ImageCreateInfo{
+            .name = fmt::format("g_color_{}", i),
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 0 },
+            .format = VK_FORMAT_R8G8B8A8_SRGB,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        fd.gbuffer.depth_buffer_image = make_image(ImageCreateInfo{
+            .name = fmt::format("g_depth_{}", i),
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 0 },
+            .format = VK_FORMAT_D24_UNORM_S8_UINT,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 
         /*make_image(&fd.gbuffer.color_image,
                    Image{ fmt::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
@@ -558,10 +545,9 @@ void RendererVulkan::update()
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
             .cam_pos = Engine::get().camera->pos,
         };
-        staging_buffer->create_batch()
-            .send(BufferCopy{ fd.constants, 0ull, constants })
-            .send(BufferCopy{ vsm.constants_buffer, 0ull, vsmconsts })
-            .submit();
+
+        staging_buffer->stage(fd.constants, constants, 0ull);
+        staging_buffer->stage(vsm.constants_buffer, vsmconsts, 0ull);
     }
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { upload_transforms(); }
@@ -637,15 +623,11 @@ static VkImageType deduce_image_type(ImageType dim)
 
 Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
 {
-    const auto handle = make_image(desc.name, Vks(VkImageCreateInfo{ .imageType = deduce_image_type(desc.type),
-                                                                     .format = deduce_image_format(desc.format),
-                                                                     .extent = { desc.width, desc.height, 1u },
-                                                                     .mipLevels = desc.mips,
-                                                                     .arrayLayers = 1u,
-                                                                     .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                                              VK_IMAGE_USAGE_TRANSFER_DST_BIT }));
-    upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
+    const auto handle = make_image(ImageCreateInfo{ .name = desc.name,
+                                                    .extent = { desc.width, desc.height, 0 },
+                                                    .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                             VK_IMAGE_USAGE_TRANSFER_DST_BIT });
+    staging_buffer->stage(handle, desc.data, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     return handle;
 }
 
@@ -668,8 +650,17 @@ Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
 
 Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
 {
-    Geometry geometry{ .vertex_range = { total_vertices, batch.vertices.size() },
-                       .index_range = { total_indices, batch.indices.size() } };
+    std::vector<gfx::Vertex> vertices;
+    std::vector<uint16_t> indices;
+    std::vector<gfx::Meshlet> meshlets;
+    meshletize_geometry(batch, vertices, indices, meshlets);
+
+    Geometry geometry{ .vertex_range = { mlbufs.num_vertices, vertices.size() },
+                       .index_range = { mlbufs.num_indices, indices.size() },
+                       .meshlet_range = { meshlets.size(), meshlets.size() } };
+
+    staging_buffer->stage(vertex_positions_buffer, vertices, STAGING_APPEND);
+    staging_buffer->stage(index16_buffer, indices, STAGING_APPEND);
 
     upload_vertices.insert(upload_vertices.end(), batch.vertices.begin(), batch.vertices.end());
     upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
@@ -688,6 +679,11 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
     // clang-format on
 
     return handle;
+}
+
+void RendererVulkan::meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
+                                         std::vector<uint16_t>& out_indices)
+{
 }
 
 Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& _batch)
@@ -808,11 +804,11 @@ Material RendererVulkan::get_material(Handle<Material> handle) const
 
 void RendererVulkan::upload_model_images()
 {
-    auto batch = staging_buffer->create_batch();
     for(auto& tex : upload_images)
     {
         Image& img = get_image(tex.image_handle);
         batch.send(ImageCopy{ tex.image_handle, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, tex.rgba_data });
+        staging_buffer->stage(tex.ima)
     }
     batch.submit();
     upload_images.clear();
@@ -1311,9 +1307,7 @@ Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
     return handle;
 }
 
-void RendererVulkan::update_resource(Handle<Buffer> dst) {
-    bindless_pool->update_index()
-}
+void RendererVulkan::update_resource(Handle<Buffer> dst){ bindless_pool -> update_index() }
 
 Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
 {

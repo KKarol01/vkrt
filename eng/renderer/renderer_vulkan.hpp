@@ -53,6 +53,7 @@ struct Geometry
 {
     Range vertex_range{};
     Range index_range{};
+    Range meshlet_range{};
 };
 
 struct Material
@@ -72,11 +73,8 @@ struct Texture
 /* subset of geometry's vertex and index buffers */
 struct Mesh
 {
-    // Flags<MeshFlags> flags;
     Handle<Geometry> geometry;
     Handle<Material> material;
-    // Handle<MeshMetadata> metadata;
-    //  Handle<gfx::BLAS> blas;
 };
 
 struct MeshInstance
@@ -90,6 +88,18 @@ struct MeshletInstance
     ecs::Entity entity;
     Handle<Mesh> mesh;
     uint32_t meshlet_index{ ~0u }; // global meshlet idx
+};
+
+struct GeometryBuffers
+{
+    Handle<Buffer> buf_vertices;
+    Handle<Buffer> buf_indices;
+    Handle<Buffer> buf_draw_cmds;
+    Handle<Buffer> buf_draw_settings;
+    VkIndexType index_type;
+    size_t num_vertices{};
+    size_t num_indices{};
+    size_t num_vertices{};
 };
 
 struct DDGI
@@ -238,6 +248,8 @@ class RendererVulkan : public Renderer
     Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
     Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
+    static void meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
+                                    std::vector<uint16_t>& out_indices);
     Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
     void instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
@@ -301,16 +313,18 @@ class RendererVulkan : public Renderer
     HandleMap<MeshMetadata> mesh_metadatas;
     HandleMap<Material> materials;
 
+    GeometryBuffers mlbufs;
+
     std::vector<MeshInstance> mesh_instances;
     std::vector<MeshletInstance> meshlet_instances;
     std::vector<Meshlet> meshlets;
     std::vector<ecs::Entity> blas_instances;
-    size_t max_draw_count{};
-    size_t total_vertices{};
-    size_t total_indices{};
-    size_t total_meshlets{};
-    size_t total_meshlets_vertices{};
-    size_t total_meshlets_triangles{};
+    // size_t max_draw_count{};
+    // size_t total_vertices{};
+    // size_t total_indices{};
+    // size_t total_meshlets{};
+    // size_t total_meshlets_vertices{};
+    // size_t total_meshlets_triangles{};
 
     VkAccelerationStructureKHR tlas{};
     Handle<Buffer> tlas_buffer;
@@ -320,10 +334,10 @@ class RendererVulkan : public Renderer
     Handle<Buffer> vertex_positions_buffer;
     Handle<Buffer> vertex_attributes_buffer;
     Handle<Buffer> index_buffer;
+    Handle<Buffer> index16_buffer;
 
     Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
     Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example: ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]]
-    Handle<Buffer> meshlets_index_buf;
     Handle<Buffer> meshlets_ind_draw_buf;
 
     Handle<Buffer> tlas_mesh_offsets_buffer;

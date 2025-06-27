@@ -19,7 +19,7 @@ struct BufferCreateInfo
 struct ImageCreateInfo
 {
     std::string name;
-    VkExtent3D extent{};
+    VkExtent3D extent{}; // 0 will be translated later to 1, but will be used to deduce 1d, 2d or 3d image.
     VkFormat format;
     VkImageUsageFlags usage{};
     uint32_t mips{ 1 };

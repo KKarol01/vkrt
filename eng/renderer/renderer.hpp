@@ -12,7 +12,6 @@ namespace gfx
 
 enum class GeometryFlags
 {
-    MESHLETS_BIT = 0x1,
 };
 enum class InstanceFlags
 {

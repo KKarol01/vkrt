@@ -47,7 +47,7 @@ struct Geometry
 {
     Handle<gfx::Geometry> gfx_handle;
     std::vector<gfx::Vertex> vertices;
-    std::vector<gfx::Index> indices;
+    std::vector<gfx::Index32> indices;
     std::vector<gfx::Meshlet> meshlets;
 };
 
@@ -96,12 +96,9 @@ class Scene
 {
   public:
     Handle<Model> load_from_file(const std::filesystem::path& path);
-    // Handle<Node> load_from_asset(assets::Asset& asset);
     Handle<ModelInstance> instance_model(Handle<Model> node);
-    // glm::mat4 get_final_transform(Handle<Entity> handle) const { return instance_handles.at(handle)->final_transform; }
 
     void update_transform(Handle<NodeInstance> entity, glm::mat4 transform);
-    // void _update_transform(uint32_t idx, glm::mat4 t = { 1.0f });
 
   private:
     void upload_model_data(Handle<Model> model);
@@ -110,11 +107,7 @@ class Scene
     void traverse_dfs(Node& node, const auto& func)
         requires std::invocable<decltype(func), scene::Node&>;
 
-    // TODO: maybe make this private too (used in many places -- possibly bad interface)
   public:
-    float debug_dir_light_dir[3]{ -0.45453298, -0.76604474, 0.45450562 };
-    float debug_dir_light_pos[3]{ 11.323357, 12.049147, -10.638633 };
-
     HandleMap<Image> images;
     HandleMap<Texture> textures;
     HandleMap<Material> materials;

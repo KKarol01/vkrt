@@ -155,7 +155,7 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
                 Submesh submesh;
                 auto& fprim = fmesh.primitives.at(j);
                 std::vector<gfx::Vertex> vertices;
-                std::vector<gfx::Index> indices;
+                std::vector<gfx::Index32> indices;
                 if(auto it = fprim.findAttribute("POSITION"); it != fprim.attributes.end())
                 {
                     auto& acc = fastasset.accessors.at(it->accessorIndex);
@@ -342,7 +342,7 @@ Handle<Model> Scene::load_from_file(const std::filesystem::path& _path)
             g.indices.clear();
             g.indices.reserve(meshlets_triangles.size());
             std::transform(meshlets_triangles.begin(), meshlets_triangles.end(), std::back_inserter(g.indices),
-                           [](auto idx) { return gfx::Index{ idx }; });
+                           [](auto idx) { return gfx::Index32{ idx }; });
             g.meshlets.resize(meshlet_count);
             for(auto i = 0u; i < meshlet_count; ++i)
             {

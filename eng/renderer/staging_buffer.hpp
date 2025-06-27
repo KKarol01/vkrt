@@ -90,6 +90,10 @@ class StagingBuffer
     {
         stage(dst, &src, dst_offset, sizeof(T));
     }
+    template <typename T> void stage(Handle<Buffer> dst, const std::vector<T>& src, size_t dst_offset)
+    {
+        stage(dst, src.data(), dst_offset, src.size() * sizeof(T));
+    }
     template <typename... Ts> void stage_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts)
     {
         const auto total_size = (sizeof(Ts) + ...);

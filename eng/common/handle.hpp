@@ -17,9 +17,9 @@ struct HandleGenerate_T
 };
 inline constexpr HandleGenerate_T generate_handle{};
 
-template <typename Handle> struct HandleDispatcher
+template <template <typename, typename> typename Handle, typename T, typename Storage> struct HandleDispatcher
 {
-    constexpr static T* get(Handle handle) = delete;
+    constexpr static T* get(Handle<T, Storage> handle) = delete;
 };
 
 template <typename T, typename Storage> struct Handle
