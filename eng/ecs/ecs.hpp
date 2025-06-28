@@ -105,50 +105,20 @@ class Registry
             assert(false);
             return e;
         }
-        metadata.emplace(e, EntityMetadata{});
+        metadatas.emplace(e, EntityMetadata{});
         return e;
     }
 
-    template <typename Component, typename... Args> Component* emplace(Entity e, Args&&... args)
-    {
-        if(!is_valid(e)) { return nullptr; }
-        const auto cidx = ComponentIdGenerator::generate<Component>();
-        metadata.at(e).components.set(cidx);
-        auto& comp_arr = get_or_make_comp_arr<Component>();
-        return &comp_arr.emplace(e, std::forward<Args>(args)...);
-    }
+    bool has(Entity e) const { return is_valid(e); }
 
-    void erase(Entity e)
+    template <typename Component> bool has(Entity e) const
     {
-        if(!is_valid(e)) { return; }
-        if(auto it = metadata.find(e); it != metadata.end())
-        {
-            auto& md = it->second;
-            for(auto i = 0u; i < MAX_COMPONENTS; ++i)
-            {
-                if(md.components.test(i)) { component_arrays.at(i)->erase(e); }
-            }
-            if(md.parent != INVALID_ENTITY) { remove_child(md.parent, e); }
-            for(auto c : md.children)
-            {
-                erase(c);
-            }
-            metadata.erase(it);
-            entities.erase(e);
-        }
-    }
-    template <typename Component> void erase(Entity e)
-    {
-        if(!is_valid(e)) { return; }
-        if(auto it = metadata.find(e); it != metadata.end())
+        if(is_valid(e))
         {
             const auto idx = ComponentIdGenerator::generate<Component>();
-            if(it->second.components.test(idx))
-            {
-                component_arrays.at(idx)->erase(e);
-                it->second.components.reset(idx);
-            }
+            return metadatas.at(e).components.test(idx);
         }
+        return false;
     }
 
     template <typename Component> Component* get(Entity e)
@@ -157,25 +127,53 @@ class Registry
         const auto idx = ComponentIdGenerator::generate<Component>();
         return static_cast<Component*>(component_arrays.at(idx)->get(e));
     }
+
     template <typename Component> const Component* get(Entity e) const { return const_cast<Registry*>(this)->get(e); }
 
-    bool has(Entity e) const { return entities.has(e); }
-    template <typename Component> bool has(Entity e) const
+    template <typename Component, typename... Args> Component* emplace(Entity e, Args&&... args)
     {
-        if(auto it = metadata.find(e); it != metadata.end())
+        if(!is_valid(e)) { return nullptr; }
+        const auto cidx = ComponentIdGenerator::generate<Component>();
+        metadatas.at(e).components.set(cidx);
+        auto& comp_arr = get_comp_arr<Component>();
+        return &comp_arr.emplace(e, std::forward<Args>(args)...);
+    }
+
+    void erase(Entity e)
+    {
+        if(!is_valid(e)) { return; }
+        auto& md = metadatas.at(e);
+        for(auto i = 0u; i < MAX_COMPONENTS; ++i)
         {
-            const auto idx = ComponentIdGenerator::generate<Component>();
-            return it->second.components.test(idx);
+            if(md.components.test(i)) { component_arrays.at(i)->erase(e); }
         }
-        return false;
+        if(md.parent != INVALID_ENTITY) { remove_child(md.parent, e); }
+        for(auto c : md.children)
+        {
+            erase(c);
+        }
+        metadatas.erase(e);
+        entities.erase(e);
+    }
+
+    template <typename Component> void erase(Entity e)
+    {
+        if(!is_valid(e)) { return; }
+        auto& md = metadatas.at(e);
+        const auto idx = ComponentIdGenerator::generate<Component>();
+        if(md.components.test(idx))
+        {
+            component_arrays.at(idx)->erase(e);
+            md.components.reset(idx);
+        }
     }
 
     void make_child(Entity p, Entity c)
     {
         if(is_valid(p) && is_valid(c))
         {
-            auto& pmd = metadata.at(p);
-            auto& cmd = metadata.at(c);
+            auto& pmd = metadatas.at(p);
+            auto& cmd = metadatas.at(c);
             if(cmd.parent == p) { return; }
             if(cmd.parent != INVALID_ENTITY) { remove_child(cmd.parent, c); }
             cmd.parent = p;
@@ -194,8 +192,8 @@ class Registry
     {
         if(is_valid(p) && is_valid(c))
         {
-            metadata.at(c).parent = INVALID_ENTITY;
-            auto& ch = metadata.at(p).children;
+            metadatas.at(c).parent = INVALID_ENTITY;
+            auto& ch = metadatas.at(p).children;
             const auto it = std::lower_bound(ch.begin(), ch.end(), c);
             if(it != ch.end() && *it == c) { ch.erase(it); }
         }
@@ -206,7 +204,7 @@ class Registry
         const auto dfs = [this, callback](Entity e, const auto& recursive) {
             if(!is_valid(e)) { return; }
             callback(e);
-            auto& ch = metadata.at(e).children;
+            auto& ch = metadatas.at(e).children;
             for(auto c : ch)
             {
                 recursive(c, recursive);
@@ -223,15 +221,15 @@ class Registry
         return res;
     }
 
-    template <typename Component> auto& get_or_make_comp_arr()
+    template <typename Component> auto& get_comp_arr()
     {
-        auto& comp_arr = component_arrays.at(ComponentIdGenerator::generate<Component>());
-        if(!comp_arr) { comp_arr = std::make_unique<ComponentPool<Component>>(); }
-        return *static_cast<ComponentPool<Component>*>(&*comp_arr);
+        auto& comparr = component_arrays.at(ComponentIdGenerator::generate<Component>());
+        if(!comparr) { comparr = std::make_unique<ComponentPool<Component>>(); }
+        return *static_cast<ComponentPool<Component>*>(&*comparr);
     }
 
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
-    std::unordered_map<Entity, EntityMetadata> metadata;
+    std::unordered_map<Entity, EntityMetadata> metadatas;
     SparseSet entities;
 };
 } // namespace ecs
