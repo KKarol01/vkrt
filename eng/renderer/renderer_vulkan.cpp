@@ -26,6 +26,7 @@
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
+#include <eng/common/to_vk.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b)
@@ -54,13 +55,15 @@ void RendererVulkan::init()
 {
     initialize_vulkan();
     initialize_resources();
+    initialize_materials();
+    initialize_mesh_passes();
     create_window_sized_resources();
     initialize_imgui();
     Engine::get().add_on_window_resize_callback([this] {
         on_window_resize();
         return true;
     });
-    flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
+    // flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
 }
 
 void RendererVulkan::initialize_vulkan()
@@ -282,16 +285,16 @@ void RendererVulkan::initialize_imgui()
     get_frame_data().cmdpool->end(cmdimgui);
     submit_queue->with_cmd_buf(cmdimgui).submit_wait(~0ull);
 
-    Engine::get().ui->add_tab("FFTOcean", [] {
-        auto* r = RendererVulkan::get_instance();
-        auto& fftc = r->fftocean.recalc_state_0;
-        fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 0.1f, 50.0f);
-        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
-        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 0.01, 10.0f);
-        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 0.01f, 10.0f);
-        ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, -10.0f, 10.0f);
-        fftc |= ImGui::SliderFloat("small l", &r->fftocean.settings.small_l, 0.001, 2.0f);
-    });
+    // Engine::get().ui->add_tab("FFTOcean", [] {
+    //     auto* r = RendererVulkan::get_instance();
+    //     auto& fftc = r->fftocean.recalc_state_0;
+    //     fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 0.1f, 50.0f);
+    //     fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
+    //     fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 0.01, 10.0f);
+    //     ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 0.01f, 10.0f);
+    //     ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, -10.0f, 10.0f);
+    //     fftc |= ImGui::SliderFloat("small l", &r->fftocean.settings.small_l, 0.001, 2.0f);
+    // });
 }
 
 void RendererVulkan::initialize_resources()
@@ -354,8 +357,8 @@ void RendererVulkan::initialize_resources()
             make_buffer(BufferCreateInfo{ fmt::format("transform_buffer_{}", i), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
-    vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
-    vsm.free_allocs_buffer = make_buffer(BufferCreateInfo{ "vms alloc buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    // vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    // vsm.free_allocs_buffer = make_buffer(BufferCreateInfo{ "vms alloc buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
     // vsm.shadow_map_0 =
     //     make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
@@ -392,8 +395,19 @@ void RendererVulkan::initialize_resources()
     //                });
 
     // create default material
-    materials.emplace_back();
 }
+
+void RendererVulkan::initialize_mesh_passes()
+{
+    const auto pipeline = make_pipeline(PipelineCreateInfo{
+        .shaders = { make_shader(Shader::Stage::VERTEX, "default_unlit/unlit.vert.glsl"),
+                     make_shader(Shader::Stage::PIXEL, "default_unlit/unlit.frag.glsl") } });
+    MeshPassCreateInfo info{ .name = "default_unlit" };
+    info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pipeline });
+    make_mesh_pass(info);
+}
+
+void RendererVulkan::initialize_materials() { default_material = materials.insert(Material{}).first; }
 
 void RendererVulkan::create_window_sized_resources()
 {
@@ -403,12 +417,14 @@ void RendererVulkan::create_window_sized_resources()
         auto& fd = frame_datas.at(i);
         fd.gbuffer.color_image = make_image(ImageCreateInfo{
             .name = fmt::format("g_color_{}", i),
+            .type = VK_IMAGE_TYPE_2D,
             .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 0 },
             .format = VK_FORMAT_R8G8B8A8_SRGB,
             .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
         fd.gbuffer.depth_buffer_image = make_image(ImageCreateInfo{
             .name = fmt::format("g_depth_{}", i),
+            .type = VK_IMAGE_TYPE_2D,
             .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 0 },
             .format = VK_FORMAT_D24_UNORM_S8_UINT,
             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
@@ -484,8 +500,9 @@ void RendererVulkan::update()
     }
     if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH))
     {
-        build_render_graph();
-        pipelines.threaded_compile();
+        assert(false);
+        // build_render_graph();
+        // pipelines.threaded_compile();
     }
     if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET))
     {
@@ -493,6 +510,8 @@ void RendererVulkan::update()
         submit_queue->wait_idle();
         // update_bindless_set();
     }
+    if(!shaders_to_compile.empty()) { compile_shaders(); }
+    if(!pipelines_to_compile.empty()) { compile_pipelines(); }
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
@@ -617,7 +636,9 @@ void RendererVulkan::on_window_resize()
 Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
 {
     const auto handle = make_image(ImageCreateInfo{ .name = desc.name,
-                                                    .extent = { desc.width, desc.height, 0 },
+                                                    .type = eng::to_vk(desc.type),
+                                                    .extent = { desc.width, desc.height, 1 },
+                                                    .format = eng::to_vk(desc.format),
                                                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                                              VK_IMAGE_USAGE_TRANSFER_DST_BIT });
     staging_buffer->stage(handle, desc.data, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
@@ -635,8 +656,7 @@ Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch)
 
 Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
 {
-
-    return materials.insert(Material{ .pipeline = desc.pipeline, .base_color_texture = desc.base_color_texture });
+    return materials.insert(Material{ .mesh_pass = desc.mesh_pass, .base_color_texture = desc.base_color_texture }).first;
 }
 
 Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
@@ -679,7 +699,7 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
             static_cast<float>(batch.indices.size_bytes()) / 1000.0f);
     // clang-format on
 
-    return handle;
+    return handle.first;
 }
 
 void RendererVulkan::meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
@@ -816,6 +836,10 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering
 }
 
 Handle<Image> RendererVulkan::get_color_output_texture() const { return get_frame_data().gbuffer.color_image; }
+
+void RendererVulkan::compile_shaders() { ENG_TODO(); }
+
+void RendererVulkan::compile_pipelines() { ENG_TODO(); }
 
 void RendererVulkan::bake_indirect_commands()
 {
@@ -1210,6 +1234,33 @@ void RendererVulkan::update_ddgi()
 #endif
 }
 
+Handle<Shader> RendererVulkan::make_shader(Shader::Stage stage, const std::filesystem::path& path)
+{
+    auto ret = shaders.emplace(path, Shader{ .stage = stage });
+    const auto handle = Handle<Shader>{ (uintptr_t)&ret.first->second };
+    if(ret.second) { shaders_to_compile.push_back(handle); }
+    return handle;
+}
+
+Handle<Pipeline> RendererVulkan::make_pipeline(const PipelineCreateInfo& info)
+{
+    Pipeline p{ .info = info };
+    auto ret = pipelines.insert(std::move(p));
+    if(ret.second) { pipelines_to_compile.push_back(ret.first); }
+    return ret.first;
+}
+
+Handle<ShaderEffect> RendererVulkan::make_shader_effect(const ShaderEffect& info)
+{
+    return shader_effects.insert(info).first;
+}
+
+Handle<MeshPass> RendererVulkan::make_mesh_pass(const MeshPassCreateInfo& info)
+{
+    auto it = mesh_passes.emplace(info.name, MeshPass{ .effects = info.effects });
+    return Handle<MeshPass>{ (uintptr_t)&it.first->second };
+}
+
 Handle<Buffer> RendererVulkan::make_buffer(const BufferCreateInfo& info)
 {
     auto handle = buffers.emplace(info);
@@ -1223,8 +1274,6 @@ Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
     handle->init();
     return handle;
 }
-
-// void RendererVulkan::update_resource(Handle<Buffer> dst){ bindless_pool -> update_index() }
 
 Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
 {
@@ -1293,15 +1342,15 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
 
     for(uint32_t i = 0; i < image_count; ++i)
     {
-        images[i] = Image{ fmt::format("swapchain_image_{}", i),
-                           vk_images.at(i),
-                           nullptr,
-                           VK_IMAGE_LAYOUT_UNDEFINED,
-                           VkExtent3D{ sinfo.imageExtent.width, sinfo.imageExtent.height, 0u },
-                           sinfo.imageFormat,
-                           1,
-                           1,
-                           sinfo.imageUsage };
+        images[i] = Image{};
+        images[i].name = fmt::format("swapchain_image_{}", i);
+        images[i].type = VK_IMAGE_TYPE_2D;
+        images[i].image = vk_images.at(i);
+        images[i].extent = VkExtent3D{ sinfo.imageExtent.width, sinfo.imageExtent.height, 0u };
+        images[i].format = sinfo.imageFormat;
+        images[i].mips = 1;
+        images[i].layers = 1;
+        images[i].usage = sinfo.imageUsage;
         views[i] = images[i].create_image_view();
     }
 }

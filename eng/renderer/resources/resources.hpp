@@ -24,7 +24,8 @@ struct ImageCreateInfo
 {
     auto operator==(const ImageCreateInfo&) const { return false; }
     std::string name;
-    VkExtent3D extent{}; // 0 will be translated later to 1, but will be used to deduce 1d, 2d or 3d image.
+    VkImageType type{};
+    VkExtent3D extent{};
     VkFormat format;
     VkImageUsageFlags usage{};
     uint32_t mips{ 1 };
@@ -54,14 +55,11 @@ struct Buffer
 struct Image
 {
     Image() noexcept = default;
-    Image(const std::string& name, VkImage image, VmaAllocation vmaa, VkImageLayout current_layout, VkExtent3D extent,
-          VkFormat format, uint32_t mips, uint32_t layers, VkImageUsageFlags usage) noexcept;
     explicit Image(const ImageCreateInfo& info) noexcept;
     bool operator==(const Image& b) const;
     void init();
     void destroy();
     VkImageAspectFlags deduce_aspect() const;
-    VkImageType deduce_image_type() const;
     VkImageViewType deduce_image_view_type() const;
     // On empty, returns default view. Caches the results.
     VkImageView create_image_view(const ImageViewDescriptor& info = {});
@@ -70,7 +68,8 @@ struct Image
     std::string name;
     VkImage image{};
     VmaAllocation vmaa{};
-    VkImageLayout current_layout{};
+    VkImageType type;
+    VkImageLayout current_layout{ VK_IMAGE_LAYOUT_UNDEFINED };
     VkExtent3D extent{};
     VkFormat format;
     uint32_t mips{};

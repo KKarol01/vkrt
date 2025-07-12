@@ -7,8 +7,8 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/renderer_vulkan_wrappers.hpp>
-#include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/pipeline.hpp>
+#include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/resources/resources.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
@@ -180,6 +180,15 @@ struct FFTOcean
     Handle<Image> gradient;
 };
 
+struct ShaderMetadata
+{
+    VkShaderModule shader{};
+};
+
+struct PipelineMetadata
+{
+};
+
 class SubmitQueue;
 class StagingBuffer;
 class BindlessPool;
@@ -198,11 +207,14 @@ class RendererVulkan : public Renderer
     void initialize_vulkan();
     void initialize_imgui();
     void initialize_resources();
+    void initialize_mesh_passes();
+    void initialize_materials();
     void create_window_sized_resources();
     void build_render_graph();
 
     void update() final;
     void on_window_resize() final;
+
     Handle<Image> batch_image(const ImageDescriptor& desc) final;
     Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
@@ -216,12 +228,18 @@ class RendererVulkan : public Renderer
     size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
 
+    void compile_shaders();
+    void compile_pipelines();
     void bake_indirect_commands();
 
     void build_blas();
     void build_tlas();
     void update_ddgi();
 
+    Handle<Shader> make_shader(Shader::Stage stage, const std::filesystem::path& path);
+    Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
+    Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
+    Handle<MeshPass> make_mesh_pass(const MeshPassCreateInfo& info);
     Handle<Buffer> make_buffer(const BufferCreateInfo& info);
     Handle<Image> make_image(const ImageCreateInfo& info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
@@ -249,7 +267,6 @@ class RendererVulkan : public Renderer
     StagingBuffer* staging_buffer{};
     BindlessPool* bindless_pool{};
     // RenderGraph rendergraph;
-    PipelineCompiler pipelines{};
 
     SamplerStorage samplers;
     HandleMap<Buffer> buffers;
@@ -257,6 +274,10 @@ class RendererVulkan : public Renderer
     HandleFlatSet<Texture> textures;
     HandleFlatSet<Geometry> geometries;
     HandleFlatSet<Material> materials;
+    HandleFlatSet<Pipeline> pipelines;
+    HandleFlatSet<ShaderEffect> shader_effects;
+    std::unordered_map<std::filesystem::path, Shader> shaders;
+    std::unordered_map<std::string, MeshPass> mesh_passes;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
     std::vector<uint32_t> mesh_instances;
@@ -289,9 +310,14 @@ class RendererVulkan : public Renderer
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
 
-    DDGI ddgi;
-    gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
-    FFTOcean fftocean;
+    Handle<Material> default_material;
+
+    // DDGI ddgi;
+    // gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
+    // FFTOcean fftocean;
+
+    std::vector<Handle<Shader>> shaders_to_compile;
+    std::vector<Handle<Pipeline>> pipelines_to_compile;
 };
 } // namespace gfx
 

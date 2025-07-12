@@ -63,7 +63,7 @@ enum class ImageAddressing
     CLAMP_EDGE
 };
 
-enum class PassType
+enum class MeshPassType
 {
     FORWARD,
     DIRECTIONAL_SHADOW,
@@ -89,35 +89,33 @@ struct Texture
     Handle<Sampler> sampler;
 };
 
-struct ShaderEffect {
+struct ShaderEffect
+{
+    auto operator<=>(const ShaderEffect&) const = default;
     Handle<Pipeline> pipeline;
+};
+
+struct MeshPassCreateInfo
+{
+    std::string name;
+    std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM> effects;
 };
 
 struct MeshPass
 {
-    std::array<Handle<ShaderEffect>, (size_t)PassType::LAST_ENUM> effects;
+    std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM> effects;
 };
 
 struct Material
 {
-    bool operator==(const Material& t) const
-    {
-        return base_color_texture == t.base_color_texture && mesh_pass == t.mesh_pass;
-    }
+    auto operator<=>(const Material& t) const = default;
     std::string mesh_pass{ "default_unlit" };
     Handle<Texture> base_color_texture{ ~0u };
 };
 
-// struct Submesh
-//{
-//     auto operator<=>(const Submesh& t) const = default;
-// };
-
 struct Mesh
 {
     auto operator<=>(const Mesh& t) const = default;
-    // std::string name;
-    // Range submeshes{};
     Handle<Geometry> geometry;
     Handle<Material> material;
 };
@@ -153,7 +151,7 @@ struct ImageDescriptor
     std::string name;
     uint32_t width{};
     uint32_t height{};
-    uint32_t depth{}; // for 2d, depth should be 0, even though the apis require it to be 1 (for automatic type deduction)
+    uint32_t depth{ 1 };
     uint32_t mips{ 1 };
     ImageFormat format{ ImageFormat::R8G8B8A8_UNORM };
     ImageType type{ ImageType::TYPE_2D };
@@ -184,7 +182,7 @@ struct TextureDescriptor
 
 struct MaterialDescriptor
 {
-    std::string material_pass{ "default_unlit" };
+    std::string mesh_pass{ "default_unlit" };
     Handle<Texture> base_color_texture;
     Handle<Texture> normal_texture;
     Handle<Texture> metallic_roughness_texture;
@@ -243,5 +241,6 @@ class Renderer
 DEFINE_STD_HASH(gfx::ImageViewDescriptor, eng::hash::combine_fnv1a(t.view_type, t.format, t.layers, t.mips));
 DEFINE_STD_HASH(gfx::Geometry, eng::hash::combine_fnv1a(t.vertex_range, t.index_range, t.meshlet_range));
 DEFINE_STD_HASH(gfx::Texture, eng::hash::combine_fnv1a(t.image, t.view, t.layout, t.sampler));
-DEFINE_STD_HASH(gfx::Material, eng::hash::combine_fnv1a(t.base_color_texture, t.pipeline));
+DEFINE_STD_HASH(gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.base_color_texture));
 DEFINE_STD_HASH(gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
+DEFINE_STD_HASH(gfx::ShaderEffect, eng::hash::combine_fnv1a(t.pipeline));

@@ -9,121 +9,92 @@
 namespace gfx
 {
 
-struct RasterizationSettings
-{
-    bool operator==(const RasterizationSettings& o) const;
-    uint32_t num_col_formats{ 1 };
-    std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
-    VkFormat dep_format{ VK_FORMAT_D24_UNORM_S8_UINT };
-    VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
-    bool depth_test{ false };
-    bool depth_write{ true };
-    VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
-};
-
-struct RaytracingSettings
-{
-    bool operator==(const RaytracingSettings& o) const
-    {
-        return recursion_depth == o.recursion_depth && sbt_buffer == o.sbt_buffer && groups.size() == o.groups.size() &&
-               [this, &o] {
-                   for(const auto& e : groups)
-                   {
-                       if(std::find_if(o.groups.begin(), o.groups.end(), [&e](auto& g) {
-                              return e.type == g.type && e.generalShader == g.generalShader &&
-                                     e.closestHitShader == g.closestHitShader && e.anyHitShader == g.anyHitShader &&
-                                     e.intersectionShader == g.intersectionShader;
-                          }) == o.groups.end())
-                       {
-                           return false;
-                       }
-                   }
-                   return true;
-               }();
-    }
-    uint32_t recursion_depth{ 1 };
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
-    Handle<Buffer> sbt_buffer;
-};
-
-struct PipelineSettings
-{
-    std::variant<std::monostate, RasterizationSettings> settings; // monostate for, for example, compute pipeline
-    std::vector<std::filesystem::path> shaders;
-};
-
 struct Shader
 {
-    std::filesystem::path path;
-    VkShaderStageFlagBits stage{};
-    VkShaderModule shader{};
+    enum class Stage
+    {
+        NONE,
+        VERTEX,
+        PIXEL,
+        COMPUTE
+    };
+
+    Stage stage{ Stage::NONE };
+    void* metadata{};
+};
+
+struct PipelineCreateInfo
+{
+    enum class CullMode
+    {
+        NONE,
+        FRONT,
+        BACK,
+        FRONT_AND_BACK,
+    };
+
+    struct VertexBinding
+    {
+        auto operator<=>(const VertexBinding&) const = default;
+        uint32_t binding;
+        uint32_t stride;
+        bool instanced{ false };
+    };
+
+    enum class VertexFormat
+    {
+        FLOAT,
+        UINT,
+    };
+
+    struct VertexAttribute
+    {
+        auto operator<=>(const VertexAttribute&) const = default;
+        uint32_t location;
+        uint32_t binding;
+        VertexFormat format_type{ VertexFormat::FLOAT };
+        uint32_t format_count;
+        uint32_t offset;
+    };
+
+    enum class DepthCompare
+    {
+        NEVER,
+        LESS,
+        EQUAL
+    };
+
+    auto operator<=>(const PipelineCreateInfo&) const = default;
+
+    std::vector<VertexBinding> bindings;
+    std::vector<VertexAttribute> attributes;
+    CullMode culling{ CullMode::NONE };
+    std::vector<Handle<Shader>> shaders;
+    bool depth_test{ false };
+    bool depth_write{ false };
+    DepthCompare depth_compare{ DepthCompare::NEVER };
 };
 
 struct Pipeline
 {
-    Pipeline& setDefaults();
-    Pipeline& addInputBinding(uint32_t binding, uint32_t stride, VkVertexInputRate inputRate);
-    Pipeline& addInputAttribute(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset);
-    Pipeline& setInputAssemblyState(VkPrimitiveTopology topology, VkBool32 primitiveRestartEnable);
-    // Pipeline& setTesselationState(uint32_t patchControlPoints);
-    Pipeline& addViewport(VkViewport pViewports);
-    Pipeline& addScissor(VkRect2D pScissors);
-    Pipeline& setRasterizationState(VkPolygonMode polygonMode, VkCullModeFlags cullMode, VkFrontFace frontFace);
-    Pipeline& setDepthStencilState(VkBool32 depthTestEnable, VkBool32 depthWriteEnable, VkCompareOp depthCompareOp);
-    Pipeline& setColorBlendState(VkBool32 logicOpEnable, VkLogicOp logicOp, float blendConstants[4]);
-    Pipeline& addColorAttachment(VkBool32 blendEnable, VkBlendFactor srcColorBlendFactor, VkBlendFactor dstColorBlendFactor,
-                                 VkBlendOp colorBlendOp, VkBlendFactor srcAlphaBlendFactor, VkBlendFactor dstAlphaBlendFactor,
-                                 VkBlendOp alphaBlendOp, VkColorComponentFlags colorWriteMask);
-    Pipeline& addColorAttachment();
-    Pipeline& addDefaultColorAttachment();
-    Pipeline& addDynamicState(void* state, size_t size);
-    Pipeline& addShaders(const Shader* shaders, size_t count);
-
-    VkPipelineBindPoint bind_point{};
-    VkPipeline pipeline{};
-    VkPipelineLayout layout{};
-    VkPipelineVertexInputStateCreateInfo input_state;
-    VkPipelineInputAssemblyStateCreateInfo assembly_state;
-    VkPipelineTessellationStateCreateInfo tesselation_state;
-    VkPipelineViewportStateCreateInfo viewport_state;
-    VkPipelineRasterizationStateCreateInfo rasterization_state;
-    VkPipelineMultisampleStateCreateInfo multisample_state;
-    VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
-    VkPipelineColorBlendStateCreateInfo color_blend_state;
-    std::vector<VkVertexInputBindingDescription> inputs;
-    std::vector<VkVertexInputAttributeDescription> attributes;
-    std::vector<VkViewport> viewports;
-    std::vector<VkRect2D> scissors;
-    std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments;
-    std::vector<void*> dynamic_states;
-    std::vector<const Shader*> shaders;
-};
-
-class PipelineCompiler
-{
-  public:
-    Shader* get_shader(const std::filesystem::path path);
-    Pipeline* get_pipeline(const PipelineSettings& settings);
-    void threaded_compile();
-    void compile_shader(Shader* shader);
-    void compile_pipeline(Pipeline* pipeline);
-    VkShaderStageFlagBits get_shader_stage(std::filesystem::path path) const;
-    void canonize_path(std::filesystem::path& p);
-
-    std::forward_list<Shader> shaders;
-    std::forward_list<Pipeline> pipelines;
-    std::unordered_map<std::filesystem::path, Shader*> compiled_shaders;
-    std::vector<Pipeline*> pipelines_to_compile;
-    std::vector<Shader*> shaders_to_compile;
+    auto operator==(const Pipeline& o) const { return (info <=> o.info) == 0; }
+    PipelineCreateInfo info;
+    void* metadata{};
 };
 
 } // namespace gfx
 
-DEFINE_STD_HASH(gfx::RasterizationSettings, [&t] {
-    uint32_t hash = 0;
-    for(auto i = 0; i < t.num_col_formats; ++i)
-    {
-        eng::hash::combine_fnv1a(hash, t.col_formats[i]);
-    }
-    return eng::hash::combine_fnv1a(t.num_col_formats, hash, t.dep_format, t.culling, t.depth_test, t.depth_write, t.depth_op);
+DEFINE_STD_HASH(gfx::PipelineCreateInfo::VertexBinding, eng::hash::combine_fnv1a(t.binding, t.stride, t.instanced));
+DEFINE_STD_HASH(gfx::PipelineCreateInfo::VertexAttribute,
+                eng::hash::combine_fnv1a(t.location, t.binding, t.format_type, t.format_count, t.offset));
+DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
+    uint64_t hash = 0;
+    // clang-format off
+    for(const auto& e : t.bindings) { hash = eng::hash::combine_fnv1a(hash, e); }
+    for(const auto& e : t.attributes) { hash = eng::hash::combine_fnv1a(hash, e); }
+    for(const auto& e : t.shaders) { hash = eng::hash::combine_fnv1a(hash, e); }
+    // clang-format on
+    hash = eng::hash::combine_fnv1a(hash, t.culling, t.depth_test, t.depth_write, t.depth_compare);
+    return hash;
 }());
+DEFINE_STD_HASH(gfx::Pipeline, eng::hash::combine_fnv1a(t.info));

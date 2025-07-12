@@ -51,7 +51,7 @@ class HandleFlatSet
         return &data.at(it->data);
     }
 
-    template <typename Val> handle_t insert(Val&& v)
+    template <typename Val> std::pair<handle_t, bool> insert(Val&& v)
     {
         resize();
         const auto hash = Hash{}(v);
@@ -68,9 +68,9 @@ class HandleFlatSet
             {
                 if(b.data == ~index_t{})
                 {
-                    b = cb;                               // overwrite empty bucket
-                    data.push_back(std::forward<Val>(v)); // append
-                    return handle_t{ data.size() - 1 };   // return index to last
+                    b = cb;                                       // overwrite empty bucket
+                    data.push_back(std::forward<Val>(v));         // append
+                    return { handle_t{ data.size() - 1 }, true }; // return index to last
                 }
                 else
                 {
@@ -79,13 +79,14 @@ class HandleFlatSet
                     data.at(cb.data) = std::forward<Val>(v); // overwrite destroyed element
                     if(swapped_at != ~index_t{})
                     {
+                        // if robin hood happened, the new bucket has default data.size() index, but along the way a free slot was found, so update it's index
                         buckets.at(swapped_at).data = cb.data;
-                    } // if robin hood happened, the new bucket has default data.size() index, but along the way a free slot was found, so update it's index
-                    return handle_t{ cb.data }; // return index to found free slot.
+                    }
+                    return { handle_t{ cb.data }, true }; // return index to found free slot.
                 }
             }
             // check for duplicate
-            if(b.hash == hash8 && EqualTo{}(data.at(b.data), v)) { return handle_t{ b.data }; }
+            if(b.hash == hash8 && EqualTo{}(data.at(b.data), v)) { return { handle_t{ b.data }, false }; }
             // robin hood and remember new bucket index in case of finding free slot (not appending means cb's index will erronously point to the end)
             if(b.psl < cb.psl)
             {
@@ -102,7 +103,10 @@ class HandleFlatSet
         }
     }
 
-    template <typename... Args> handle_t emplace(Args&&... args) { return insert(Key{ std::forward<Args>(args)... }); }
+    template <typename... Args> std::pair<handle_t, bool> emplace(Args&&... args)
+    {
+        return insert(Key{ std::forward<Args>(args)... });
+    }
 
     void erase(const Key& k) { backwards_erase(find_bucket(k)); }
 

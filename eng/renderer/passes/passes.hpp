@@ -32,7 +32,7 @@ struct Access
 class RenderPass
 {
   public:
-    RenderPass(const std::string& name, const PipelineSettings& settings = {});
+    RenderPass(const std::string& name, const PipelineCreateInfo& settings = {});
     virtual ~RenderPass() noexcept = default;
     virtual void render(VkCommandBuffer cmd) = 0;
 

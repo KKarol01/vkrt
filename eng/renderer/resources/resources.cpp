@@ -66,16 +66,9 @@ void Buffer::destroy()
     *this = Buffer{};
 }
 
-Image::Image(const std::string& name, VkImage image, VmaAllocation vmaa, VkImageLayout current_layout,
-             VkExtent3D extent, VkFormat format, uint32_t mips, uint32_t layers, VkImageUsageFlags usage) noexcept
-    : name(name), image(image), vmaa(vmaa), current_layout(current_layout), extent(extent), format(format), mips(mips),
-      layers(layers), usage(usage)
-{
-}
-
 Image::Image(const ImageCreateInfo& info) noexcept
-    : name(info.name), current_layout(info.current_layout), extent(info.extent), format(info.format), mips(info.mips),
-      layers(info.layers), usage(info.usage)
+    : name(info.name), type(info.type), current_layout(info.current_layout), extent(info.extent), format(info.format),
+      mips(info.mips), layers(info.layers), usage(info.usage)
 {
 }
 
@@ -102,7 +95,7 @@ void Image::init()
     auto* r = RendererVulkan::get_instance();
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
     const auto info = Vks(VkImageCreateInfo {
-        .imageType = deduce_image_type(),
+        .imageType = type,
         .format = format,
         .extent = {
             std::max(extent.width, 1u),
@@ -147,14 +140,11 @@ VkImageAspectFlags Image::deduce_aspect() const
     return VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
-VkImageType Image::deduce_image_type() const
-{
-    return extent.depth > 0 ? VK_IMAGE_TYPE_3D : extent.height > 0 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_1D;
-}
-
 VkImageViewType Image::deduce_image_view_type() const
 {
-    return extent.depth > 0 ? VK_IMAGE_VIEW_TYPE_3D : extent.height > 0 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_1D;
+    return type == VK_IMAGE_TYPE_3D   ? VK_IMAGE_VIEW_TYPE_3D
+           : type == VK_IMAGE_TYPE_2D ? VK_IMAGE_VIEW_TYPE_2D
+                                      : VK_IMAGE_VIEW_TYPE_1D;
 }
 
 VkImageView Image::create_image_view(const ImageViewDescriptor& info)
