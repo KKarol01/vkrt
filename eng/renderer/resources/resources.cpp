@@ -2,6 +2,8 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/set_debug_name.hpp>
+#include <eng/common/to_vk.hpp>
+#include <eng/common/to_string.hpp>
 
 namespace gfx
 {
@@ -9,6 +11,11 @@ namespace gfx
 Buffer::Buffer(const BufferCreateInfo& info) noexcept
     : name(info.name), usage(info.usage), capacity(std::max(info.size, 1024ull)), mapped(info.mapped)
 {
+}
+
+bool Buffer::operator==(const Buffer& b) const
+{
+    return buffer == b.buffer && usage == b.usage && capacity == b.capacity && size == b.size && mapped == b.mapped;
 }
 
 void Buffer::init()
@@ -19,7 +26,6 @@ void Buffer::init()
         return;
     }
 
-    auto* r = RendererVulkan::get_instance();
     if(buffer)
     {
         ENG_WARN("Allocating already allocated buffer.");
@@ -60,10 +66,24 @@ void Buffer::destroy()
     *this = Buffer{};
 }
 
+Image::Image(const std::string& name, VkImage image, VmaAllocation vmaa, VkImageLayout current_layout,
+             VkExtent3D extent, VkFormat format, uint32_t mips, uint32_t layers, VkImageUsageFlags usage) noexcept
+    : name(name), image(image), vmaa(vmaa), current_layout(current_layout), extent(extent), format(format), mips(mips),
+      layers(layers), usage(usage)
+{
+}
+
 Image::Image(const ImageCreateInfo& info) noexcept
     : name(info.name), current_layout(info.current_layout), extent(info.extent), format(info.format), mips(info.mips),
       layers(info.layers), usage(info.usage)
 {
+}
+
+bool Image::operator==(const Image& b) const
+{
+    return image == b.image && current_layout == b.current_layout && extent.width == b.extent.width &&
+           extent.height == b.extent.height && extent.depth == b.extent.depth && format == b.format && mips == b.mips &&
+           layers == b.layers && usage == b.usage;
 }
 
 void Image::init()
@@ -97,7 +117,11 @@ void Image::init()
         .initialLayout = current_layout
     });
     VK_CHECK(vmaCreateImage(r->vma, &info, &vma_info, &image, &vmaa, nullptr));
-    if(image) { set_debug_name(image, name); }
+    if(image)
+    {
+        set_debug_name(image, name);
+        create_image_view(ImageViewDescriptor{ .name = fmt::format("{}_default_view", name) });
+    }
     else { ENG_WARN("Could not create image {}", name); }
 }
 
@@ -105,6 +129,11 @@ void Image::destroy()
 {
     auto* r = RendererVulkan::get_instance();
     if(!image || !vmaa) { return; }
+    for(const auto& [info, view] : views)
+    {
+        vkDestroyImageView(r->dev, view, nullptr);
+    }
+    views.clear();
     vmaDestroyImage(r->vma, image, vmaa);
     *this = Image{};
 }
@@ -128,25 +157,27 @@ VkImageViewType Image::deduce_image_view_type() const
     return extent.depth > 0 ? VK_IMAGE_VIEW_TYPE_3D : extent.height > 0 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_1D;
 }
 
-VkImageView Image::create_image_view(const ImageViewCreateInfo& info)
+VkImageView Image::create_image_view(const ImageViewDescriptor& info)
 {
+    if(const auto it = views.find(info); it != views.end()) { return it->second; }
     auto* r = RendererVulkan::get_instance();
     const auto vkinfo = Vks(VkImageViewCreateInfo{
         .image = image,
-        .viewType = info.view_type ? *info.view_type : deduce_image_view_type(),
-        .format = format,
-        .components = info.swizzle,
-        .subresourceRange = info.range ? *info.range
-                                       : VkImageSubresourceRange{ .aspectMask = deduce_aspect(),
-                                                                  .baseMipLevel = 0,
-                                                                  .levelCount = VK_REMAINING_MIP_LEVELS,
-                                                                  .baseArrayLayer = 0,
-                                                                  .layerCount = VK_REMAINING_ARRAY_LAYERS } });
+        .viewType = info.view_type ? eng::to_vk(*info.view_type) : deduce_image_view_type(),
+        .format = info.format ? eng::to_vk(*info.format) : format,
+        .subresourceRange = { deduce_aspect(), (uint32_t)info.mips.offset, (uint32_t)info.mips.size,
+                              (uint32_t)info.layers.offset, (uint32_t)info.layers.size } });
     VkImageView view{};
     VK_CHECK(vkCreateImageView(r->dev, &vkinfo, {}, &view));
-    if(view) { set_debug_name(view, info.name); }
+    if(view)
+    {
+        set_debug_name(view, info.name);
+        views[info] = view;
+    }
     else { ENG_WARN("Could not create image view {}", info.name); }
     return view;
 }
+
+VkImageView Image::get_image_view(const ImageViewDescriptor& info) const { return views.at(info); }
 
 } // namespace gfx

@@ -6,29 +6,32 @@
 
 namespace gfx
 {
-struct ModelAsset;
-struct MeshAsset;
 struct Mesh;
-struct BLAS;
 struct Geometry;
 struct Material;
-enum class InstanceFlags;
 } // namespace gfx
 
-namespace components
+namespace ecs
 {
-
-/* Position on scene */
-struct Transform
+namespace comp
 {
-    /* World position after traversing node hierarchy */
-    glm::mat4 transform{ 1.0f };
+struct Node
+{
+    std::string name;
+    std::vector<Handle<gfx::Mesh>> meshes;
 };
 
 struct Mesh
 {
-    std::string name;
-    std::vector<Handle<gfx::Mesh>> submeshes;
+    Handle<gfx::Geometry> geometry;
+    Handle<gfx::Material> material;
 };
 
-} // namespace components
+struct Transform
+{
+    glm::mat4 local{ 1.0f };
+    glm::mat4 global{ 1.0f };
+};
+
+} // namespace comp
+} // namespace ecs

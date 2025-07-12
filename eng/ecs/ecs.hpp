@@ -109,7 +109,7 @@ class Registry
         return e;
     }
 
-    bool has(Entity e) const { return is_valid(e); }
+    bool has(Entity e) const { return entities.has(e); }
 
     template <typename Component> bool has(Entity e) const
     {

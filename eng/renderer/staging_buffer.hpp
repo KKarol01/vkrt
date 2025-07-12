@@ -71,8 +71,8 @@ class StagingBuffer
         Handle<Image> dst_image() const;
         Handle<Buffer> src_buffer() const;
         Handle<Image> src_image() const;
-        uint32_t dst_resource;
-        uint32_t src_resource;
+        uintptr_t dst_resource;
+        uintptr_t src_resource;
         size_t dst_offset;
         Range src_range;
         bool dst_is_buffer;
@@ -128,6 +128,8 @@ class StagingBuffer
     VkImageMemoryBarrier2 create_layout_transition(const Image& img, VkImageLayout src_layout, VkImageLayout dst_layout,
                                                    VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                                                    VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) const;
+
+    Buffer& get_buffer(Handle<Buffer> buffer);
 
     std::vector<Transaction> transactions;
     std::vector<std::pair<Handle<Buffer>, Buffer>> replacement_buffers;

@@ -1,18 +1,17 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <vulkan/vulkan.h>
 #include <eng/common/hash.hpp>
+#include <eng/renderer/resources/resources.hpp>
 
 namespace gfx
 {
 
 struct RasterizationSettings
 {
-    bool operator==(const RasterizationSettings& o) const
-    {
-        return std::hash<RasterizationSettings>{}(*this) == std::hash<RasterizationSettings>{}(o);
-    }
+    bool operator==(const RasterizationSettings& o) const;
     uint32_t num_col_formats{ 1 };
     std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
     VkFormat dep_format{ VK_FORMAT_D24_UNORM_S8_UINT };
@@ -62,9 +61,42 @@ struct Shader
 
 struct Pipeline
 {
-    PipelineSettings settings{};
+    Pipeline& setDefaults();
+    Pipeline& addInputBinding(uint32_t binding, uint32_t stride, VkVertexInputRate inputRate);
+    Pipeline& addInputAttribute(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset);
+    Pipeline& setInputAssemblyState(VkPrimitiveTopology topology, VkBool32 primitiveRestartEnable);
+    // Pipeline& setTesselationState(uint32_t patchControlPoints);
+    Pipeline& addViewport(VkViewport pViewports);
+    Pipeline& addScissor(VkRect2D pScissors);
+    Pipeline& setRasterizationState(VkPolygonMode polygonMode, VkCullModeFlags cullMode, VkFrontFace frontFace);
+    Pipeline& setDepthStencilState(VkBool32 depthTestEnable, VkBool32 depthWriteEnable, VkCompareOp depthCompareOp);
+    Pipeline& setColorBlendState(VkBool32 logicOpEnable, VkLogicOp logicOp, float blendConstants[4]);
+    Pipeline& addColorAttachment(VkBool32 blendEnable, VkBlendFactor srcColorBlendFactor, VkBlendFactor dstColorBlendFactor,
+                                 VkBlendOp colorBlendOp, VkBlendFactor srcAlphaBlendFactor, VkBlendFactor dstAlphaBlendFactor,
+                                 VkBlendOp alphaBlendOp, VkColorComponentFlags colorWriteMask);
+    Pipeline& addColorAttachment();
+    Pipeline& addDefaultColorAttachment();
+    Pipeline& addDynamicState(void* state, size_t size);
+    Pipeline& addShaders(const Shader* shaders, size_t count);
+
     VkPipelineBindPoint bind_point{};
     VkPipeline pipeline{};
+    VkPipelineLayout layout{};
+    VkPipelineVertexInputStateCreateInfo input_state;
+    VkPipelineInputAssemblyStateCreateInfo assembly_state;
+    VkPipelineTessellationStateCreateInfo tesselation_state;
+    VkPipelineViewportStateCreateInfo viewport_state;
+    VkPipelineRasterizationStateCreateInfo rasterization_state;
+    VkPipelineMultisampleStateCreateInfo multisample_state;
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
+    VkPipelineColorBlendStateCreateInfo color_blend_state;
+    std::vector<VkVertexInputBindingDescription> inputs;
+    std::vector<VkVertexInputAttributeDescription> attributes;
+    std::vector<VkViewport> viewports;
+    std::vector<VkRect2D> scissors;
+    std::vector<VkPipelineColorBlendAttachmentState> color_blend_attachments;
+    std::vector<void*> dynamic_states;
+    std::vector<const Shader*> shaders;
 };
 
 class PipelineCompiler
@@ -87,14 +119,11 @@ class PipelineCompiler
 
 } // namespace gfx
 
-namespace std
-{
-template <> struct hash<gfx::RasterizationSettings>
-{
-    size_t operator()(const gfx::RasterizationSettings& a) const
+DEFINE_STD_HASH(gfx::RasterizationSettings, [&t] {
+    uint32_t hash = 0;
+    for(auto i = 0; i < t.num_col_formats; ++i)
     {
-        return HashCombine::hash(a.num_col_formats, a.col_formats[0], a.col_formats[1], a.col_formats[2],
-                                 a.col_formats[3], a.dep_format, a.culling, a.depth_test, a.depth_write, a.depth_op);
+        eng::hash::combine_fnv1a(hash, t.col_formats[i]);
     }
-};
-} // namespace std
+    return eng::hash::combine_fnv1a(t.num_col_formats, hash, t.dep_format, t.culling, t.depth_test, t.depth_write, t.depth_op);
+}());

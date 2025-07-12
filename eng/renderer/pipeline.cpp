@@ -119,6 +119,7 @@ void PipelineCompiler::compile_shader(Shader* shader)
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
     options.SetTargetSpirv(shaderc_spirv_version_1_6);
     options.SetGenerateDebugInfo();
+    
     // options.AddMacroDefinition("ASDF");
     shaderc::Compiler c;
     std::string file_str = read_file(path);
@@ -260,6 +261,84 @@ void PipelineCompiler::canonize_path(std::filesystem::path& p)
     static const auto prefix = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders");
     if(!p.string().starts_with(prefix.string())) { p = prefix / p; }
     p.make_preferred();
+}
+
+bool RasterizationSettings::operator==(const RasterizationSettings& o) const
+{
+    return std::hash<RasterizationSettings>{}(*this) == std::hash<RasterizationSettings>{}(o);
+}
+
+Pipeline& Pipeline::setDefaults()
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addInputBinding(uint32_t binding, uint32_t stride, VkVertexInputRate inputRate)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addInputAttribute(uint32_t location, uint32_t binding, VkFormat format, uint32_t offset)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::setInputAssemblyState(VkPrimitiveTopology topology, VkBool32 primitiveRestartEnable)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addViewport(VkViewport pViewports)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addScissor(VkRect2D pScissors)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::setRasterizationState(VkPolygonMode polygonMode, VkCullModeFlags cullMode, VkFrontFace frontFace)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::setDepthStencilState(VkBool32 depthTestEnable, VkBool32 depthWriteEnable, VkCompareOp depthCompareOp)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::setColorBlendState(VkBool32 logicOpEnable, VkLogicOp logicOp, float blendConstants[4])
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addColorAttachment(VkBool32 blendEnable, VkBlendFactor srcColorBlendFactor,
+                                       VkBlendFactor dstColorBlendFactor, VkBlendOp colorBlendOp,
+                                       VkBlendFactor srcAlphaBlendFactor, VkBlendFactor dstAlphaBlendFactor,
+                                       VkBlendOp alphaBlendOp, VkColorComponentFlags colorWriteMask)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addColorAttachment()
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addDefaultColorAttachment()
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addDynamicState(void* state, size_t size)
+{
+    // TODO: insert return statement here
+}
+
+Pipeline& Pipeline::addShaders(const Shader* shaders, size_t count)
+{
+    // TODO: insert return statement here
 }
 
 } // namespace gfx

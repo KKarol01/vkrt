@@ -103,28 +103,28 @@ ImTextureID get_imgui_render_output_descriptor()
                                                                                  gfx::ImageAddressing::CLAMP_EDGE, 0));
 }
 
-void draw_scene_instance_tree(scene::NodeInstance* i)
-{
-    return;
-    /*if(!i->has_children()) {
-        ImGui::Selectable(i->name.c_str());
-    } else {
-        if(ImGui::TreeNode(i, "%s", i->name.c_str())) {
-            for(auto& e : i->children) {
-                if(e) { draw_scene_instance_tree(e); }
-            }
-            ImGui::TreePop();
+// void draw_scene_instance_tree(scene::NodeInstance* i)
+//{
+// return;
+/*if(!i->has_children()) {
+    ImGui::Selectable(i->name.c_str());
+} else {
+    if(ImGui::TreeNode(i, "%s", i->name.c_str())) {
+        for(auto& e : i->children) {
+            if(e) { draw_scene_instance_tree(e); }
         }
+        ImGui::TreePop();
     }
-    for(auto& p : i->primitives) {
-        if(auto* r = Engine::get().ecs_storage->try_get<components::Renderable>(p); r) {
-            const auto material = Engine::get().renderer->get_material(r->material_handle);
-            const auto imid = Engine::get().renderer->get_imgui_texture_id(material.textures.base_color_texture.handle,
-                                                                           material.textures.base_color_texture.filter,
-                                                                           material.textures.base_color_texture.addressing);
-            ImGui::Image(imid, { 25.0f, 25.0f });
-        }
-    }*/
 }
+for(auto& p : i->primitives) {
+    if(auto* r = Engine::get().ecs_storage->try_get<components::Renderable>(p); r) {
+        const auto material = Engine::get().renderer->get_material(r->material_handle);
+        const auto imid = Engine::get().renderer->get_imgui_texture_id(material.textures.base_color_texture.handle,
+                                                                       material.textures.base_color_texture.filter,
+                                                                       material.textures.base_color_texture.addressing);
+        ImGui::Image(imid, { 25.0f, 25.0f });
+    }
+}*/
+//}
 
-void draw_render_mesh(scene::NodeInstance* i) {}
+//void draw_render_mesh(scene::NodeInstance* i) {}

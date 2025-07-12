@@ -117,8 +117,6 @@ add_executable(vkrt
     "eng/renderer/renderer_vulkan.cpp" 
     "eng/renderer/renderer_vulkan_wrappers.cpp"
     "eng/renderer/bindlesspool.cpp"
-    
-    
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
     "eng/renderer/passes/rendergraph.cpp" 
@@ -126,7 +124,9 @@ add_executable(vkrt
     "eng/renderer/pipeline.cpp"
     "eng/ui.cpp"
     "eng/renderer/resources/resources.cpp"
-  )
+    "eng/to_string.cpp" 
+    "eng/renderer/to_vk.cpp"
+)
 
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)

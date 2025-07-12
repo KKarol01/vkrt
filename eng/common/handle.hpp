@@ -4,7 +4,7 @@
 #include <compare>
 #include <atomic>
 
-template <typename T, typename Storage = uint32_t> struct Handle;
+template <typename T, typename Storage = uint64_t> struct Handle;
 
 template <typename T, typename Storage> struct HandleGenerator
 {
@@ -17,10 +17,18 @@ struct HandleGenerate_T
 };
 inline constexpr HandleGenerate_T generate_handle{};
 
-template <template <typename, typename> typename Handle, typename T, typename Storage> struct HandleDispatcher
+template <typename T, typename Storage> struct HandleDispatcher
 {
-    constexpr static T* get(Handle<T, Storage> handle) = delete;
 };
+
+// clang-format off
+#define DEFINE_HANDLE_DISPATCHER(type, code)                                                                           \
+    template <typename Storage> struct HandleDispatcher<type, Storage>                                                 \
+    {                                                                                                                  \
+        type* get(auto handle) code                                                                                    \
+        const type* get(auto handle) const code                                                                        \
+    }
+// clang-format on
 
 template <typename T, typename Storage> struct Handle
 {
@@ -31,8 +39,19 @@ template <typename T, typename Storage> struct Handle
     constexpr Storage operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;
     constexpr explicit operator bool() const { return handle != ~Storage{}; }
-    constexpr T* operator->() const { return HandleDispatcher<Handle<T, Storage>>::get(*this); }
-    constexpr T& get() const { return *HandleDispatcher<Handle<T, Storage>>::get(*this); }
+
+    auto* operator->(this auto&& self)
+    {
+        auto dispatcher = HandleDispatcher<T, Storage>{};
+        return std::forward_like<decltype(self)>(dispatcher).get(self);
+    }
+
+    auto& get(this auto&& self)
+    {
+        auto dispatcher = HandleDispatcher<T, Storage>{};
+        return *std::forward_like<decltype(self)>(dispatcher).get(self);
+    }
+
     Storage handle{ ~Storage{} };
 };
 

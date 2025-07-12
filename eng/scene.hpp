@@ -11,111 +11,27 @@
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/renderer/renderer.hpp>
-#include <eng/common/slotmap.hpp>
-#include <eng/common/types.hpp>
+#include <eng/common/handlemap.hpp>
 
 namespace scene
 {
 
-struct Image
-{
-    std::string name;
-    Handle<gfx::Image> gfx_handle;
-    gfx::ImageFormat format;
-    std::vector<std::byte> data;
-    uint32_t width{};
-    uint32_t height{};
-    uint32_t depth{ 1 };
-};
-
-struct Texture
-{
-    Handle<Image> image;
-    Handle<gfx::Texture> gfx_handle;
-    gfx::ImageFiltering filtering{ gfx::ImageFiltering::LINEAR };
-    gfx::ImageAddressing addressing{ gfx::ImageAddressing::REPEAT };
-};
-
-struct Material
-{
-    std::string name;
-    Handle<gfx::Material> gfx_handle;
-    Handle<Texture> base_color_texture;
-};
-
-struct Geometry
-{
-    Handle<gfx::Geometry> gfx_handle;
-    std::vector<gfx::Vertex> vertices;
-    std::vector<gfx::Index32> indices;
-    std::vector<gfx::Meshlet> meshlets;
-};
-
-struct Submesh
-{
-    Handle<gfx::Mesh> gfx_handle;
-    Handle<Geometry> geometry;
-    Handle<Material> material;
-};
-
-struct Mesh
-{
-    std::string name;
-    std::vector<Submesh> submeshes;
-};
-
-struct Node
-{
-    std::string name;
-    std::vector<Handle<Node>> children;
-    glm::mat4 transform{ 1.0f };
-    glm::mat4 final_transform{ 1.0f };
-    Handle<Mesh> mesh;
-};
-
-struct Model
-{
-    std::filesystem::path path;
-    Handle<Node> root_node;
-};
-
-struct NodeInstance
-{
-    std::string name;
-    std::vector<Handle<NodeInstance>> children;
-    glm::mat4 transform{ 1.0f };
-    ecs::Entity entity;
-};
-
-struct ModelInstance
-{
-    Handle<NodeInstance> root_node;
-};
-
 class Scene
 {
   public:
-    Handle<Model> load_from_file(const std::filesystem::path& path);
-    Handle<ModelInstance> instance_model(Handle<Model> node);
+    ecs::Entity load_from_file(const std::filesystem::path& path);
+    ecs::Entity instance_entity(ecs::Entity node);
 
-    void update_transform(Handle<NodeInstance> entity, glm::mat4 transform);
-
-  private:
-    void upload_model_data(Handle<Model> model);
-
-    void traverse_dfs(Handle<Node> node, const auto& func);
-    void traverse_dfs(Node& node, const auto& func)
-        requires std::invocable<decltype(func), scene::Node&>;
+    void update_transform(ecs::Entity entity, glm::mat4 transform);
 
   public:
-    HandleMap<Image> images;
-    HandleMap<Texture> textures;
-    HandleMap<Material> materials;
-    HandleMap<Geometry> geometries;
-    HandleMap<Mesh> meshes;
-    HandleMap<Node> nodes;
-    HandleMap<Model> models;
-    HandleMap<NodeInstance> node_instances;
-    std::vector<ModelInstance> scene;
+    std::unordered_map<std::filesystem::path, ecs::Entity> nodes;
+    std::vector<ecs::Entity> scene;
+
+    std::vector<Handle<gfx::Geometry>> geometries;
+    std::vector<Handle<gfx::Image>> images;
+    std::vector<Handle<gfx::Texture>> textures;
+    std::vector<Handle<gfx::Material>> materials;
+    std::vector<std::vector<Handle<gfx::Mesh>>> meshes;
 };
 } // namespace scene

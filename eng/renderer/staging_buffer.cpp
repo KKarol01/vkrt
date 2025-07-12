@@ -46,9 +46,9 @@ void StagingBuffer::stage(Handle<Buffer> dst, const void* const src, size_t dst_
         const auto size = std::min(src_size - CAPACITY * i, CAPACITY);
         auto [pGPU, pOffset] = allocate(size);
         memcpy(pGPU, src, size);
-        transactions.push_back(Transaction{ *dst, ~0u, dst_offset + i * CAPACITY, { pOffset, src_size }, true, false, pGPU });
+        transactions.push_back(Transaction{ *dst, *buffer, dst_offset + i * CAPACITY, { pOffset, src_size }, true, true, pGPU });
     }
-    dst->size = std::max(dst->size, dst_offset + src_size);
+    get_buffer(dst).size = std::max(get_buffer(dst).size, dst_offset + src_size);
 }
 
 void StagingBuffer::stage(Handle<Buffer> dst, std::span<const std::byte> src, size_t dst_offset)
@@ -60,7 +60,7 @@ void StagingBuffer::stage(Handle<Image> dst, std::span<const std::byte> src, VkI
 {
     auto [pGPU, pOffset] = allocate(src.size_bytes());
     memcpy(pGPU, src.data(), src.size_bytes());
-    transactions.push_back(Transaction{ *dst, ~0u, 0ull, { pOffset, src.size_bytes() }, false, false, pGPU, final_layout });
+    transactions.push_back(Transaction{ *dst, *buffer, 0ull, { pOffset, src.size_bytes() }, false, true, pGPU, final_layout });
 }
 
 void StagingBuffer::flush()
@@ -90,9 +90,9 @@ void StagingBuffer::flush()
     {
         if(t.dst_is_buffer)
         {
-            if(t.src_is_buffer || t.alloc)
+            if(t.src_is_buffer)
             {
-                record_copy(t.dst_buffer().get(), t.src_buffer().get(), t.dst_offset, t.src_range);
+                record_copy(get_buffer(t.dst_buffer()), get_buffer(t.src_buffer()), t.dst_offset, t.src_range);
             }
             else { ENG_ERROR("Unsupported source type."); }
         }
@@ -100,7 +100,7 @@ void StagingBuffer::flush()
         {
             if(t.alloc) { record_copy(t.dst_image().get(), t.src_range.offset); }
             else { ENG_ERROR("Unsupported source type"); }
-            t.dst_image()->current_layout = t.final_layout;
+            auto h = t.dst_image()->current_layout = t.final_layout;
         }
     }
 
@@ -119,16 +119,14 @@ void StagingBuffer::flush()
     record_mem_barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE);
     cmdpool->end(cmd);
-    queue->with_cmd_buf(cmd).with_fence(fence).submit();
-
+    queue->with_cmd_buf(cmd).submit_wait(~0ull);
     for(auto& [h, nb] : replacement_buffers)
     {
         if(!h) { continue; }
+        std::swap(h.get(), nb);
         RendererVulkan::get_instance()->update_resource(h);
         nb.destroy();
     }
-
-    queue->wait_fence(fence, ~0ull);
     head = 0;
     cmdpool->reset();
     transactions.clear();
@@ -164,7 +162,7 @@ std::pair<void*, size_t> StagingBuffer::allocate(size_t size)
 
 size_t StagingBuffer::resize_buffer(Handle<Buffer> hbuf, size_t dst_offset, size_t src_size)
 {
-    Buffer& buf = hbuf.get();
+    Buffer& buf = get_buffer(hbuf);
     if(dst_offset == STAGING_APPEND) { dst_offset = buf.size; }
     const auto capacity = dst_offset + src_size;
     if(buf.capacity < capacity)
@@ -215,15 +213,12 @@ void StagingBuffer::record_replacement_buffers()
     buf_copies.reserve(replacement_buffers.size());
     for(auto& [h, nb] : replacement_buffers)
     {
-        if(h->size == 0)
-        {
-            h = Handle<Buffer>{}; // invalidate the handle to skip replacing
-            continue;
-        }
         nb.init();
-        record_copy(nb, h.get(), 0ull, { 0ull, h->size });
-        std::swap(h.get(), nb); // for later replacing in renderer
-        issue_barrier = true;
+        if(h->size != 0)
+        {
+            record_copy(nb, h.get(), 0ull, { 0ull, h->size });
+            issue_barrier = true;
+        }
     }
     if(issue_barrier)
     {
@@ -272,6 +267,17 @@ VkImageMemoryBarrier2 StagingBuffer::create_layout_transition(const Image& img, 
         .newLayout = dst_layout,
         .image = img.image,
         .subresourceRange = { img.deduce_aspect(), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS } });
+}
+
+Buffer& StagingBuffer::get_buffer(Handle<Buffer> buffer)
+{
+    if(auto it = std::find_if(replacement_buffers.begin(), replacement_buffers.end(),
+                              [buffer](const auto& e) { return e.first == buffer; });
+       it != replacement_buffers.end())
+    {
+        return it->second;
+    }
+    return buffer.get();
 }
 
 Handle<Buffer> StagingBuffer::Transaction::dst_buffer() const { return Handle<Buffer>{ dst_resource }; }

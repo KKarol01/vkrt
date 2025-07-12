@@ -10,7 +10,7 @@
 class SparseSet
 {
   public:
-    using key_t = uint32_t;
+    using key_t = uint64_t;
     using page_t = key_t*;
     using index_t = size_t;
     inline static constexpr size_t PAGE_SIZE = 4096;
@@ -39,6 +39,12 @@ class SparseSet
         return dense.at(it.index);
     }
 
+    Iterator get(key_t e)
+    {
+        if(has(e)) { return make_iterator(e, true); }
+        return Iterator{};
+    }
+
     Iterator insert(key_t e)
     {
         if(has(e)) { return make_iterator(e, false); }
@@ -62,7 +68,7 @@ class SparseSet
         return insert(free_list_head);
     }
 
-    // Returns index to removed element
+    // Returns index to element that replaced the moved element.
     Iterator erase(key_t e)
     {
         if(!has(e)) { return Iterator{}; }

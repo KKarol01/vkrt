@@ -1,16 +1,37 @@
 #pragma once
 
 #include <cstdint>
+#include <bit>
+#include <limits>
+#include <cassert>
 
-struct HashCombine
+namespace eng
 {
-    template <typename... Args> static uint64_t hash(const Args&... args)
-    {
-        uint64_t seed{};
-        (..., ([&seed](const auto& v) {
-             std::hash<typename std::remove_cvref<decltype(v)>::type> hasher;
-             seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-         })(args));
-        return seed;
+namespace hash
+{
+uint64_t combine_fnv1a(const auto&... args)
+{
+    static constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
+    static constexpr uint64_t prime = 0x100000001b3ull;
+    auto hash = offset_basis;
+    (..., [&hash](const auto& v) {
+        const uint64_t stdhash = std::hash<std::remove_cvref_t<decltype(v)>>{}(v);
+        for(auto i = 0; i < 8; ++i)
+        {
+            hash = hash ^ reinterpret_cast<const uint8_t*>(&stdhash)[i];
+            hash = hash * prime;
+        }
+    }(args));
+    return hash;
+}
+} // namespace hash
+} // namespace eng
+
+#define DEFINE_STD_HASH(type, code)                                                                                    \
+    namespace std                                                                                                      \
+    {                                                                                                                  \
+    template <> struct hash<type>                                                                                      \
+    {                                                                                                                  \
+        size_t operator()(const type& t) const { return code; }                                                        \
+    };                                                                                                                 \
     }
-};

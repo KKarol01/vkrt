@@ -15,7 +15,8 @@ int main()
     Engine::get().init();
 
     const auto scene_bunny = Engine::get().scene->load_from_file("bunny.glb");
-    const auto bunny_instance = Engine::get().scene->instance_model(scene_bunny);
+    const auto bunny_instance = Engine::get().scene->instance_entity(scene_bunny);
+    const auto bunny_instance2 = Engine::get().scene->instance_entity(scene_bunny);
 
     Engine::get().start();
 }
