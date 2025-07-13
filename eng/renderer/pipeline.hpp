@@ -19,6 +19,9 @@ struct Shader
         COMPUTE
     };
 
+    auto operator==(const Shader& o) const { return path == o.path; }
+
+    std::filesystem::path path;
     Stage stage{ Stage::NONE };
     void* metadata{};
 };
@@ -98,3 +101,4 @@ DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
     return hash;
 }());
 DEFINE_STD_HASH(gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
+DEFINE_STD_HASH(gfx::Shader, eng::hash::combine_fnv1a(t.path));

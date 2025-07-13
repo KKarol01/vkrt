@@ -25,8 +25,7 @@ template <typename T, typename Storage> struct HandleDispatcher
 #define DEFINE_HANDLE_DISPATCHER(type, code)                                                                           \
     template <typename Storage> struct HandleDispatcher<type, Storage>                                                 \
     {                                                                                                                  \
-        type* get(auto handle) code                                                                                    \
-        const type* get(auto handle) const code                                                                        \
+        auto* get(auto handle) code                                                                                    \
     }
 // clang-format on
 
@@ -43,13 +42,15 @@ template <typename T, typename Storage> struct Handle
     auto* operator->(this auto&& self)
     {
         auto dispatcher = HandleDispatcher<T, Storage>{};
-        return std::forward_like<decltype(self)>(dispatcher).get(self);
+        auto* tmp = dispatcher.get(self);
+        return std::forward_like<decltype(self)>(tmp);
     }
 
     auto& get(this auto&& self)
     {
         auto dispatcher = HandleDispatcher<T, Storage>{};
-        return *std::forward_like<decltype(self)>(dispatcher).get(self);
+        auto* tmp = dispatcher.get(self);
+        return *std::forward_like<decltype(self)>(tmp);
     }
 
     Storage handle{ ~Storage{} };

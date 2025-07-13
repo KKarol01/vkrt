@@ -33,32 +33,18 @@ enum class RenderFlags : uint32_t
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-// struct MeshInstance
-//{
-//     Handle<Mesh> mesh;
-// };
-
-struct MeshletInstance
-{
-    bool operator==(const MeshletInstance& o) const
-    {
-        return submesh_index == o.submesh_index && meshlet_index == o.meshlet_index;
-    }
-    ecs::Entity entity;
-    uint32_t submesh_index{ ~0u }; // global submesh index
-    uint32_t meshlet_index{ ~0u }; // global meshlet idx
-};
-
 struct GeometryBuffers
 {
     Handle<Buffer> buf_vpos;          // positions
     Handle<Buffer> buf_vattrs;        // rest of attributes
-    Handle<Buffer> buf_vidx;          // indices
+    Handle<Buffer> buf_indices;       // indices
     Handle<Buffer> buf_draw_cmds;     // draw commands
+    Handle<Buffer> buf_draw_ids;      // instance ids
     Handle<Buffer> buf_draw_settings; // draw settings (for cullling)
     VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
-    size_t num_vertices{};
-    size_t num_indices{};
+    size_t vertex_count{};
+    size_t index_count{};
+    size_t command_count{};
 };
 
 struct DDGI
@@ -100,12 +86,6 @@ struct DDGI
     Handle<Image> irradiance_texture;
     Handle<Image> visibility_texture;
     Handle<Image> probe_offsets_texture;
-};
-
-struct IndirectDrawCommandBufferHeader
-{
-    uint32_t draw_count{};
-    uint32_t geometry_instance_count{};
 };
 
 struct Swapchain
@@ -187,6 +167,30 @@ struct ShaderMetadata
 
 struct PipelineMetadata
 {
+    VkPipeline pipeline{};
+    VkPipelineLayout layout{};
+    VkPipelineBindPoint bind_point{};
+};
+
+struct MeshInstance
+{
+    uint32_t mesh;
+    uint32_t geometry;
+    uint32_t material;
+    uint32_t index;
+};
+
+struct MeshletInstance
+{
+    uint32_t mesh;
+    uint32_t meshlet;
+    uint32_t index;
+};
+
+struct MultiBatch
+{
+    Handle<Pipeline> pipeline;
+    uint32_t count;
 };
 
 class SubmitQueue;
@@ -247,6 +251,7 @@ class RendererVulkan : public Renderer
 
     void destroy_buffer(Handle<Buffer> buffer);
     void destroy_image(Handle<Image> image);
+    uint32_t get_bindless(Handle<Buffer> buffer);
     void update_resource(Handle<Buffer> dst);
 
     FrameData& get_frame_data(uint32_t offset = 0);
@@ -280,7 +285,11 @@ class RendererVulkan : public Renderer
     std::unordered_map<std::string, MeshPass> mesh_passes;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
-    std::vector<uint32_t> mesh_instances;
+
+    uint32_t mesh_instance_index{}; // todo: reuse slots
+    std::vector<MeshInstance> mesh_instances;
+    std::vector<MeshletInstance> meshlet_instances;
+    std::vector<MultiBatch> multibatches;
 
     GeometryBuffers geom_main_bufs;
 
@@ -292,14 +301,9 @@ class RendererVulkan : public Renderer
     Handle<Buffer> tlas_instance_buffer;
     Handle<Buffer> tlas_scratch_buffer;
 
-    Handle<Buffer> vertex_positions_buffer;
-    Handle<Buffer> vertex_attributes_buffer;
-    Handle<Buffer> index_buffer;
-    Handle<Buffer> index16_buffer;
-
-    Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
-    Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example: ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]]
-    Handle<Buffer> meshlets_ind_draw_buf;
+    // Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
+    // Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example:
+    // ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]] Handle<Buffer> meshlets_ind_draw_buf;
 
     Handle<Buffer> tlas_mesh_offsets_buffer;
     Handle<Buffer> tlas_transform_buffer;
@@ -318,6 +322,7 @@ class RendererVulkan : public Renderer
 
     std::vector<Handle<Shader>> shaders_to_compile;
     std::vector<Handle<Pipeline>> pipelines_to_compile;
+    std::vector<MeshInstance> mesh_instances_to_process;
 };
 } // namespace gfx
 
@@ -327,3 +332,5 @@ DEFINE_HANDLE_DISPATCHER(gfx::Geometry, { return &gfx::RendererVulkan::get_insta
 DEFINE_HANDLE_DISPATCHER(gfx::Mesh, { return &gfx::RendererVulkan::get_instance()->meshes.at(*handle); });
 DEFINE_HANDLE_DISPATCHER(gfx::Texture, { return &gfx::RendererVulkan::get_instance()->textures.at(handle); });
 DEFINE_HANDLE_DISPATCHER(gfx::Material, { return &gfx::RendererVulkan::get_instance()->materials.at(*handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Shader, { return reinterpret_cast<gfx::Shader*>(*handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(*handle); });

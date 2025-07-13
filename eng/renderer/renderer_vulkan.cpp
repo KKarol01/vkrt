@@ -4,6 +4,7 @@
 #include <fstream>
 #include <utility>
 #include <meshoptimizer/src/meshoptimizer.h>
+#include <stb/stb_include.h>
 #include <volk/volk.h>
 #include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -27,6 +28,7 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/common/to_vk.hpp>
+#include <eng/common/paths.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b)
@@ -314,12 +316,14 @@ void RendererVulkan::initialize_resources()
     // meshlets_mli_id_buf =
     //     make_buffer(BufferCreateInfo{ "meshlets_meshlest_instance_to_id_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
-    geom_main_bufs.buf_vpos = make_buffer(BufferCreateInfo{ "meshlets positions", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
-    geom_main_bufs.buf_vattrs = make_buffer(BufferCreateInfo{ "meshlets positions", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
-    geom_main_bufs.buf_vidx = make_buffer(BufferCreateInfo{
-        "meshlets positions", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT });
+    geom_main_bufs.buf_vpos = make_buffer(BufferCreateInfo{ "vertex positions", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_vattrs = make_buffer(BufferCreateInfo{ "vertex attributes", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_indices =
+        make_buffer(BufferCreateInfo{ "vertex indices", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT });
     geom_main_bufs.buf_draw_cmds = make_buffer(BufferCreateInfo{
-        "meshlets draw buffer", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT });
+        "meshlets draw cmds", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT });
+    geom_main_bufs.buf_draw_ids = make_buffer(BufferCreateInfo{
+        "meshlets instance id", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT });
 
     // auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     // auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -352,9 +356,9 @@ void RendererVulkan::initialize_resources()
         fd.sem_swapchain = submit_queue->make_semaphore();
         fd.sem_rendering_finished = submit_queue->make_semaphore();
         fd.fen_rendering_finished = submit_queue->make_fence(true);
-        fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+        fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
         fd.transform_buffers =
-            make_buffer(BufferCreateInfo{ fmt::format("transform_buffer_{}", i), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+            make_buffer(BufferCreateInfo{ fmt::format("transform_buffer_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
     // vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
@@ -593,12 +597,80 @@ void RendererVulkan::update()
 
     bake_indirect_commands();
 
+    staging_buffer->flush();
+
     const auto cmd = fd.cmdpool->begin();
     // rendergraph.render(cmd);
 
-    fd.cmdpool->end(cmd);
+    auto barrier = Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+                                              .srcAccessMask = VK_ACCESS_2_NONE,
+                                              .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                              .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                              .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                              .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                              .image = swapchain_image->image,
+                                              .subresourceRange = { swapchain_image->deduce_aspect(), 0, 1, 0, 1 } });
+    const auto bar_dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier });
 
-    staging_buffer->flush();
+    VkRenderingAttachmentInfo rainfos[]{ Vks(VkRenderingAttachmentInfo{
+        .imageView = swapchain_image->get_image_view(),
+        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } } }) };
+    const auto rinfo =
+        Vks(VkRenderingInfo{ .renderArea = { { 0, 0 }, { swapchain_image->extent.width, swapchain_image->extent.height } },
+                             .layerCount = 1,
+                             .colorAttachmentCount = 1,
+                             .pColorAttachments = rainfos });
+    struct push_constants_1
+    {
+        uint32_t indices_index;
+        uint32_t vertex_positions_index;
+        uint32_t vertex_attributes_index;
+        uint32_t transforms_index;
+        uint32_t constants_index;
+    };
+    push_constants_1 pc1{
+        .indices_index = bindless_pool->get_index(geom_main_bufs.buf_indices),
+        .vertex_positions_index = bindless_pool->get_index(geom_main_bufs.buf_vpos),
+        .vertex_attributes_index = bindless_pool->get_index(geom_main_bufs.buf_vattrs),
+        .transforms_index = ~0u,
+        .constants_index = bindless_pool->get_index(fd.constants),
+    };
+
+    vkCmdBindIndexBuffer(cmd, geom_main_bufs.buf_indices->buffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdPipelineBarrier2(cmd, &bar_dep);
+    vkCmdBeginRendering(cmd, &rinfo);
+    bindless_pool->bind(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
+    VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+    VkRect2D scissor{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+    for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
+    {
+        const auto& mb = multibatches.at(i);
+        const auto& p = pipelines.at(mb.pipeline);
+        const auto* pm = static_cast<PipelineMetadata*>(p.metadata);
+        vkCmdBindPipeline(cmd, pm->bind_point, pm->pipeline);
+        vkCmdPushConstants(cmd, pm->layout, VK_SHADER_STAGE_ALL, 0u, sizeof(pc1), &pc1);
+        vkCmdSetViewportWithCount(cmd, 1, &viewport);
+        vkCmdSetScissorWithCount(cmd, 1, &scissor);
+        vkCmdDrawIndexedIndirectCount(cmd, geom_main_bufs.buf_draw_cmds->buffer, sizeof(uint32_t) * 2 /*skip count*/,
+                                      geom_main_bufs.buf_draw_cmds->buffer, 0, geom_main_bufs.command_count,
+                                      sizeof(DrawIndirectCommand));
+    }
+    vkCmdEndRendering(cmd);
+
+    barrier = Vks(VkImageMemoryBarrier2{ .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                         .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                         .dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                         .dstAccessMask = VK_ACCESS_2_NONE,
+                                         .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                         .image = swapchain_image->image,
+                                         .subresourceRange = { swapchain_image->deduce_aspect(), 0, 1, 0, 1 } });
+    vkCmdPipelineBarrier2(cmd, &bar_dep);
+
+    fd.cmdpool->end(cmd);
 
     submit_queue->with_cmd_buf(cmd)
         .with_wait_sem(fd.sem_swapchain, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
@@ -666,8 +738,8 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
     std::vector<Meshlet> out_meshlets;
     meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
 
-    Geometry geometry{ .vertex_range = { geom_main_bufs.num_vertices, out_vertices.size() },
-                       .index_range = { geom_main_bufs.num_indices, out_indices.size() },
+    Geometry geometry{ .vertex_range = { geom_main_bufs.vertex_count, out_vertices.size() },
+                       .index_range = { geom_main_bufs.index_count, out_indices.size() },
                        .meshlet_range = { meshlets.size(), out_meshlets.size() } };
 
     static constexpr auto VXATTRSIZE = sizeof(Vertex) - sizeof(Vertex::position);
@@ -684,10 +756,10 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
 
     staging_buffer->stage(geom_main_bufs.buf_vpos, positions, STAGING_APPEND);
     staging_buffer->stage(geom_main_bufs.buf_vattrs, attributes, STAGING_APPEND);
-    staging_buffer->stage(geom_main_bufs.buf_vidx, out_indices, STAGING_APPEND);
+    staging_buffer->stage(geom_main_bufs.buf_indices, out_indices, STAGING_APPEND);
 
-    geom_main_bufs.num_vertices += positions.size();
-    geom_main_bufs.num_indices += out_indices.size();
+    geom_main_bufs.vertex_count += positions.size();
+    geom_main_bufs.index_count += out_indices.size();
     meshlets.insert(meshlets.end(), out_meshlets.begin(), out_meshlets.end());
 
     const auto handle = geometries.insert(std::move(geometry));
@@ -760,17 +832,22 @@ void RendererVulkan::meshletize_geometry(const GeometryDescriptor& batch, std::v
 Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch)
 {
     auto& bm = meshes.emplace_back(Mesh{ .geometry = batch.geometry, .material = batch.material });
-    if(!bm.material) { bm.material = Handle<Material>{}; }
+    if(!bm.material) { bm.material = default_material; }
     return Handle<Mesh>{ meshes.size() - 1 };
 }
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
     if(!settings.mesh) { return {}; }
-    mesh_instances.push_back((uint32_t)(*settings.mesh));
-    return Handle<Mesh>{ mesh_instances.size() - 1 };
-    // const auto& rm = settings.mesh.get();
-    //  flags.set(RenderFlags::DIRTY_MESH_INSTANCES);
+    const auto& mesh = settings.mesh.get();
+    const auto instance = MeshInstance{
+        .mesh = (uint32_t)*settings.mesh,
+        .geometry = (uint32_t)*mesh.geometry,
+        .material = (uint32_t)*mesh.material,
+        .index = mesh_instance_index++,
+    };
+    mesh_instances_to_process.push_back(instance);
+    return Handle<Mesh>{ instance.index };
 }
 
 void RendererVulkan::instance_blas(const BLASInstanceSettings& settings)
@@ -837,63 +914,252 @@ size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering
 
 Handle<Image> RendererVulkan::get_color_output_texture() const { return get_frame_data().gbuffer.color_image; }
 
-void RendererVulkan::compile_shaders() { ENG_TODO(); }
+void RendererVulkan::compile_shaders()
+{
+    for(auto& e : shaders_to_compile)
+    {
+        auto& sh = e.get();
+        sh.metadata = new ShaderMetadata{};
+        ShaderMetadata* shmd = (ShaderMetadata*)sh.metadata;
+        const auto& path = sh.path;
+        static const auto read_file = [](const std::filesystem::path& path) {
+            std::string path_str = path.string();
+            std::string path_to_includes = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
+            char error[256] = {};
+            char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
+            if(!parsed_file)
+            {
+                ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
+                return std::string{};
+            }
+            std::string parsed_file_str{ parsed_file };
+            free(parsed_file);
+            return parsed_file_str;
+        };
 
-void RendererVulkan::compile_pipelines() { ENG_TODO(); }
+        const auto kind = [stage = sh.stage] {
+            if(stage == Shader::Stage::VERTEX) { return shaderc_vertex_shader; }
+            if(stage == Shader::Stage::PIXEL) { return shaderc_fragment_shader; }
+            // if(stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { return shaderc_raygen_shader; }
+            // if(stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) { return shaderc_closesthit_shader; }
+            // if(stage == VK_SHADER_STAGE_MISS_BIT_KHR) { return shaderc_miss_shader; }
+            if(stage == Shader::Stage::COMPUTE) { return shaderc_compute_shader; }
+            ENG_ERROR("Unrecognized shader type");
+            return shaderc_vertex_shader;
+        }();
+
+        shaderc::CompileOptions options;
+        options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+        options.SetTargetSpirv(shaderc_spirv_version_1_6);
+        options.SetGenerateDebugInfo();
+
+        // options.AddMacroDefinition("ASDF");
+        shaderc::Compiler c;
+        std::string file_str = read_file(path);
+        const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
+        if(res.GetCompilationStatus() != shaderc_compilation_status_success)
+        {
+            ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
+            return;
+        }
+
+        const auto module_info = Vks(VkShaderModuleCreateInfo{
+            .codeSize = (res.end() - res.begin()) * sizeof(uint32_t),
+            .pCode = res.begin(),
+        });
+        VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
+    }
+
+    shaders_to_compile.clear();
+}
+
+void RendererVulkan::compile_pipelines()
+{
+    for(auto& e : pipelines_to_compile)
+    {
+        auto& p = e.get();
+        const auto& info = p.info;
+        p.metadata = new PipelineMetadata{};
+        auto* pm = (PipelineMetadata*)p.metadata;
+
+        {
+            const auto stage = info.shaders[0]->stage;
+            if(stage == Shader::Stage::VERTEX) { pm->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
+            else if(stage == Shader::Stage::COMPUTE) { pm->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+            else
+            {
+                assert(false);
+                continue;
+            }
+        }
+
+        pm->layout = bindless_pool->get_pipeline_layout();
+
+        auto pVertexInputState = Vks(VkPipelineVertexInputStateCreateInfo{});
+
+        auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST });
+
+        auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
+
+        auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
+
+        auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = eng::to_vk(info.culling),
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth = 1.0f,
+        });
+
+        auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        });
+
+        auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
+            .depthTestEnable = info.depth_test,
+            .depthWriteEnable = info.depth_write,
+            .depthCompareOp = eng::to_vk(info.depth_compare),
+            .depthBoundsTestEnable = false,
+            .stencilTestEnable = false,
+            .front = {},
+            .back = {},
+        });
+
+        std::array<VkPipelineColorBlendAttachmentState, 4> blends;
+        for(uint32_t i = 0; i < 1; ++i)
+        {
+            blends[i] = { .colorWriteMask = 0b1111 /*RGBA*/ };
+        }
+        auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
+            .attachmentCount = 1,
+            .pAttachments = blends.data(),
+        });
+
+        VkDynamicState dynstates[]{
+            VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+            VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+        };
+        auto pDynamicState = Vks(VkPipelineDynamicStateCreateInfo{
+            .dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]),
+            .pDynamicStates = dynstates,
+        });
+
+        VkFormat col_formats[]{ VK_FORMAT_R8G8B8A8_SRGB };
+        auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = col_formats,
+            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
+        });
+        // pDynamicRendering.stencilAttachmentFormat = rasterization_settings.st_format;
+
+        std::vector<VkPipelineShaderStageCreateInfo> stages;
+        stages.reserve(info.shaders.size());
+        for(const auto& e : info.shaders)
+        {
+            stages.push_back(Vks(VkPipelineShaderStageCreateInfo{
+                .stage = eng::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
+        }
+
+        auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
+            .pNext = &pDynamicRendering,
+            .stageCount = (uint32_t)stages.size(),
+            .pStages = stages.data(),
+            .pVertexInputState = &pVertexInputState,
+            .pInputAssemblyState = &pInputAssemblyState,
+            .pTessellationState = &pTessellationState,
+            .pViewportState = &pViewportState,
+            .pRasterizationState = &pRasterizationState,
+            .pMultisampleState = &pMultisampleState,
+            .pDepthStencilState = &pDepthStencilState,
+            .pColorBlendState = &pColorBlendState,
+            .pDynamicState = &pDynamicState,
+            .layout = RendererVulkan::get_instance()->bindless_pool->get_pipeline_layout(),
+        });
+        VK_CHECK(vkCreateGraphicsPipelines(dev, nullptr, 1, &vk_info, nullptr, &pm->pipeline));
+    }
+}
 
 void RendererVulkan::bake_indirect_commands()
 {
-    // todo: only sort on change
-    std::sort(mesh_instances.begin(), mesh_instances.end(), [this](const auto& a, const auto& b) {
-        const auto& ma = meshes.at(a);
-        const auto& mb = meshes.at(b);
-        if(ma.material >= mb.material) { return false; } // first sort by material
-        if(ma.geometry >= mb.geometry) { return false; } // then sort by geometry
-        return true;
-    });
-
-    std::vector<uint32_t> same_material_counts(mesh_instances.size());
-    std::vector<Range> meshlet_counts(mesh_instances.size());
-    uint32_t total_meshlets = 0;
-    const Mesh* prev_mesh = nullptr;
-    for(auto i = 0, j = -1; i < mesh_instances.size(); ++i)
+    if(!mesh_instances_to_process.empty())
     {
-        const auto& m = meshes.at(mesh_instances.at(i));
-        if(prev_mesh != &m)
+        const auto total_meshlets = std::accumulate(mesh_instances_to_process.begin(), mesh_instances_to_process.end(),
+                                                    0ull, [this](auto acc, const auto& e) {
+                                                        return acc + geometries.at(e.geometry).meshlet_range.size;
+                                                    });
+
+        meshlet_instances.reserve(meshlet_instances.size() + total_meshlets);
+
+        for(const auto& e : mesh_instances_to_process)
         {
-            ++j;
-            meshlet_counts.at(j) = m.geometry->meshlet_range;
-            total_meshlets += meshlet_counts.at(j).size;
-            prev_mesh = &m;
+            const auto& mesh = meshes.at(e.mesh);
+            const auto& geom = geometries.at(e.geometry);
+            for(auto i = 0u; i < geom.meshlet_range.size; ++i)
+            {
+                meshlet_instances.push_back(MeshletInstance{ .mesh = e.mesh, .meshlet = i, .index = e.index });
+            }
         }
-        ++same_material_counts.at(j);
+
+        mesh_instances.insert(mesh_instances.end(), mesh_instances_to_process.begin(), mesh_instances_to_process.end());
+        mesh_instances_to_process.clear();
+
+        std::sort(meshlet_instances.begin(), meshlet_instances.end(), [this](const auto& a, const auto& b) {
+            const auto& ma = meshes.at(a.mesh);
+            const auto& mb = meshes.at(b.mesh);
+            if(ma.material >= mb.material) { return false; } // first sort by material
+            if(ma.geometry >= mb.geometry) { return false; } // then sort by geometry
+            return true;
+        });
     }
 
-    std::vector<VkDrawIndexedIndirectCommand> gpu_cmds(total_meshlets);
-    for(auto i = 0u, counts_acc = 0u, meshlet_acc = 0u; i < same_material_counts.size(); ++i)
+    std::vector<DrawIndirectCommand> gpu_cmds(meshlet_instances.size());
+    std::vector<uint32_t> gpu_ids(meshlet_instances.size());
+    multibatches.clear();
+    multibatches.resize(meshlet_instances.size());
+    Handle<Pipeline> prev_pipeline;
+    uint32_t prev_mesh = ~0u;
+    uint32_t prev_meshlet = ~0u;
+    int64_t cmd_off = -1;
+    int64_t pp_off = -1;
+    for(auto i = 0u; i < meshlet_instances.size(); ++i)
     {
-        if(same_material_counts.at(i) == 0)
+        const auto& mi = meshlet_instances.at(i);
+        const auto& m = meshes.at(mi.mesh);
+        const auto& mp = mesh_passes.at(m.material->mesh_pass);
+        const auto& pipeline = shader_effects.at(mp.effects[(uint32_t)MeshPassType::FORWARD]).pipeline;
+        if(prev_pipeline != pipeline)
         {
-            gpu_cmds.resize(meshlet_acc);
-            break;
+            prev_pipeline = pipeline;
+            ++pp_off;
+            multibatches.at(pp_off).pipeline = pipeline;
         }
-        const auto& m = meshes.at(mesh_instances.at(counts_acc));
-        const auto& g = m.geometry.get();
-        for(auto mli = 0u; mli < g.meshlet_range.size; ++mli)
+        if(prev_mesh != mi.mesh || prev_meshlet != mi.meshlet)
         {
-            const auto& ml = meshlets.at(g.meshlet_range.offset + mli);
-            gpu_cmds.at(meshlet_acc).firstIndex = g.index_range.offset;
-            gpu_cmds.at(meshlet_acc).indexCount = g.index_range.size;
-            gpu_cmds.at(meshlet_acc).vertexOffset = g.vertex_range.offset;
-            gpu_cmds.at(meshlet_acc).firstInstance = counts_acc;
-            gpu_cmds.at(meshlet_acc).instanceCount = same_material_counts.at(i);
-            ++meshlet_acc;
+            const auto& g = m.geometry.get();
+            const auto& ml = meshlets.at(g.meshlet_range.offset + mi.meshlet);
+            prev_mesh = mi.mesh;
+            prev_meshlet = mi.meshlet;
+            ++cmd_off;
+            gpu_cmds.at(cmd_off) = DrawIndirectCommand{
+                .count = 0,
+                .indexCount = ml.triangle_count * 3,
+                .instanceCount = 0,
+                .firstIndex = (uint32_t)g.index_range.offset + ml.triangle_offset,
+                .vertexOffset = (int32_t)(g.vertex_range.offset + ml.vertex_offset),
+                .firstInstance = i,
+            };
         }
-        counts_acc += same_material_counts.at(i);
+        ++gpu_cmds.at(cmd_off).count;
+        ++gpu_cmds.at(cmd_off).instanceCount; // todo: set this to 0, and let the culling system handle it
+        ++multibatches.at(pp_off).count;
+        gpu_ids.at(i) = mi.index;
     }
+    gpu_cmds.resize(cmd_off + 1);
+    multibatches.resize(pp_off + 1);
+    geom_main_bufs.command_count = cmd_off + 1;
 
     staging_buffer->stage(geom_main_bufs.buf_draw_cmds, (uint32_t)gpu_cmds.size(), 0);
     staging_buffer->stage(geom_main_bufs.buf_draw_cmds, gpu_cmds, 4);
+    staging_buffer->stage(geom_main_bufs.buf_draw_ids, gpu_ids, 0);
 }
 
 void RendererVulkan::build_blas()
@@ -1236,7 +1502,7 @@ void RendererVulkan::update_ddgi()
 
 Handle<Shader> RendererVulkan::make_shader(Shader::Stage stage, const std::filesystem::path& path)
 {
-    auto ret = shaders.emplace(path, Shader{ .stage = stage });
+    auto ret = shaders.emplace(path, Shader{ .path = paths::canonize_path(path, "shaders"), .stage = stage });
     const auto handle = Handle<Shader>{ (uintptr_t)&ret.first->second };
     if(ret.second) { shaders_to_compile.push_back(handle); }
     return handle;
@@ -1277,11 +1543,12 @@ Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
 
 Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
 {
-    return {};
-    //    return textures.insert(Texture{ .image = image,
-    //                                    .view = Handle<ImageView>{ reinterpret_cast<uintptr_t>(view) },
-    //                                    .layout = Handle<ImageLayout>{ std::to_underlying(layout) },
-    //                                    .sampler = Handle<Sampler>{ reinterpret_cast<uintptr_t>(sampler) } });
+    return textures
+        .insert(Texture{ .image = image,
+                         .view = Handle<ImageView>{ reinterpret_cast<uintptr_t>(view) },
+                         .layout = Handle<ImageLayout>{ static_cast<uint64_t>(std::to_underlying(layout)) },
+                         .sampler = Handle<Sampler>{ reinterpret_cast<uintptr_t>(sampler) } })
+        .first;
 }
 
 Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)
@@ -1302,6 +1569,8 @@ void gfx::RendererVulkan::destroy_image(Handle<Image> image)
     images.erase(image);
 }
 
+uint32_t RendererVulkan::get_bindless(Handle<Buffer> buffer) { return bindless_pool->get_index(buffer); }
+
 void RendererVulkan::update_resource(Handle<Buffer> dst) { ENG_TODO(); }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset)
@@ -1321,7 +1590,7 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
         // sinfo.pNext = &format_list_info;
         .surface = RendererVulkan::get_instance()->window_surface,
         .minImageCount = image_count,
-        .imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
+        .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent = VkExtent2D{ width, height },
         .imageArrayLayers = 1,

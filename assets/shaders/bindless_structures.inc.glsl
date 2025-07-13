@@ -63,6 +63,16 @@
 
 // todo: make those readonly
 
+struct DrawIndirectCommand
+{
+    ENG_TYPE_UINT count; // pre-cull count
+    ENG_TYPE_UINT indexCount;
+    ENG_TYPE_UINT instanceCount;
+    ENG_TYPE_UINT firstIndex;
+    ENG_TYPE_INT vertexOffset;
+    ENG_TYPE_UINT firstInstance;
+};
+
 ENG_DECLARE_STORAGE_BUFFERS(GPUConstantsBuffer) {
 	ENG_TYPE_MAT4 view;
 	ENG_TYPE_MAT4 proj;

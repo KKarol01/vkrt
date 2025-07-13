@@ -25,8 +25,8 @@ class BindlessPool
     VkDescriptorSetLayout get_set_layout() const { return set_layout; }
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout; }
 
-    void get_index(Handle<Buffer> handle);
-    void get_index(Handle<Texture> handle);
+    uint32_t get_index(Handle<Buffer> handle);
+    uint32_t get_index(Handle<Texture> handle);
     void free_index(Handle<Buffer> handle);
     void free_index(Handle<Texture> handle);
     void update_index(Handle<Buffer> handle);

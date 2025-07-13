@@ -42,9 +42,10 @@ class HandleFlatSet
     // auto end() { return data.end(); }
     auto size() const { return data.size(); }
 
+    Key& at(index_t h) { return data.at(h); }
     Key& at(handle_t h) { return data.at(*h); }
 
-    Key* find(const Key& k)
+    const Key* find(const Key& k) const
     {
         auto it = find_bucket(k);
         if(it == buckets.end()) { return nullptr; }
@@ -137,7 +138,7 @@ class HandleFlatSet
         }
     }
 
-    auto find_bucket(const Key& k)
+    auto find_bucket(const Key& k) const
     {
         const auto hash = Hash{}(k);
         const uint8_t hash8 = hash & 0xFF;

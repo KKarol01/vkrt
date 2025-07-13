@@ -81,9 +81,19 @@ void BindlessPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
     vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
 }
 
-void BindlessPool::get_index(Handle<Buffer> handle) { buffer_indices.emplace(handle, buffer_slots.allocate_slot()); }
+uint32_t BindlessPool::get_index(Handle<Buffer> handle)
+{
+    const auto ret = buffer_indices.emplace(handle, buffer_slots.allocate_slot());
+    if(ret.second) { update_index(handle); }
+    return ret.first->second;
+}
 
-void BindlessPool::get_index(Handle<Texture> handle) { texture_indices.emplace(handle, texture_slots.allocate_slot()); }
+uint32_t BindlessPool::get_index(Handle<Texture> handle)
+{
+    const auto ret = texture_indices.emplace(handle, texture_slots.allocate_slot());
+    if(ret.second) { update_index(handle); }
+    return ret.first->second;
+}
 
 void BindlessPool::free_index(Handle<Buffer> handle)
 {

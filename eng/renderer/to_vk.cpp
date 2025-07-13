@@ -37,6 +37,39 @@ VkImageViewType to_vk(const gfx::ImageViewType& a)
         default: { ENG_ERROR("Unhandled case"); return {}; }
     }
 }
+
+VkCullModeFlags to_vk(const gfx::PipelineCreateInfo::CullMode& a)
+{
+    switch(a) 
+    {
+        case gfx::PipelineCreateInfo::CullMode::NONE: { return VK_CULL_MODE_NONE; }
+        case gfx::PipelineCreateInfo::CullMode::FRONT: { return VK_CULL_MODE_FRONT_BIT; }
+        case gfx::PipelineCreateInfo::CullMode::BACK: { return VK_CULL_MODE_BACK_BIT; }
+        case gfx::PipelineCreateInfo::CullMode::FRONT_AND_BACK: { return VK_CULL_MODE_FRONT_AND_BACK; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
+
+VkCompareOp to_vk(const gfx::PipelineCreateInfo::DepthCompare& a)
+{
+    switch(a) 
+    {
+        case gfx::PipelineCreateInfo::DepthCompare::NEVER: { return VK_COMPARE_OP_NEVER; }
+        case gfx::PipelineCreateInfo::DepthCompare::LESS: { return VK_COMPARE_OP_LESS; }
+        case gfx::PipelineCreateInfo::DepthCompare::EQUAL: { return VK_COMPARE_OP_EQUAL; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
+VkShaderStageFlagBits to_vk(const gfx::Shader::Stage& a)
+{
+    switch(a) 
+    {
+        case gfx::Shader::Stage::VERTEX: { return VK_SHADER_STAGE_VERTEX_BIT; }
+        case gfx::Shader::Stage::PIXEL: { return VK_SHADER_STAGE_FRAGMENT_BIT; }
+        case gfx::Shader::Stage::COMPUTE: { return VK_SHADER_STAGE_COMPUTE_BIT; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
 // clang-format on
 
 // VkImageViewCreateInfo to_vk(const gfx::ImageViewDescriptor& a)

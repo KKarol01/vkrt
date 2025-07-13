@@ -238,9 +238,8 @@ void StagingBuffer::record_copy(Buffer& dst, Buffer& src, size_t dst_offset, Ran
 
 void StagingBuffer::record_copy(Image& dst, size_t src_offset)
 {
-    const auto copy = Vks(VkBufferImageCopy2{ .bufferOffset = src_offset,
-                                              .imageSubresource = { dst.deduce_aspect(), 0, 0, VK_REMAINING_ARRAY_LAYERS },
-                                              .imageExtent = dst.extent });
+    const auto copy = Vks(VkBufferImageCopy2{
+        .bufferOffset = src_offset, .imageSubresource = { dst.deduce_aspect(), 0, 0, 1 }, .imageExtent = dst.extent });
     const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = buffer->buffer,
                                                     .dstImage = dst.image,
                                                     .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
