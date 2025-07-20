@@ -133,10 +133,8 @@ void Image::destroy()
 
 VkImageAspectFlags Image::deduce_aspect() const
 {
-    if(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
-    {
-        return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
+    if(format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT) { return VK_IMAGE_ASPECT_DEPTH_BIT; }
+    if(format == VK_FORMAT_D24_UNORM_S8_UINT) { return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; }
     return VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
@@ -155,8 +153,8 @@ VkImageView Image::create_image_view(const ImageViewDescriptor& info)
         .image = image,
         .viewType = info.view_type ? eng::to_vk(*info.view_type) : deduce_image_view_type(),
         .format = info.format ? eng::to_vk(*info.format) : format,
-        .subresourceRange = { deduce_aspect(), (uint32_t)info.mips.offset, (uint32_t)info.mips.size,
-                              (uint32_t)info.layers.offset, (uint32_t)info.layers.size } });
+        .subresourceRange = { info.aspect ? *info.aspect : deduce_aspect(), (uint32_t)info.mips.offset,
+                              (uint32_t)info.mips.size, (uint32_t)info.layers.offset, (uint32_t)info.layers.size } });
     VkImageView view{};
     VK_CHECK(vkCreateImageView(r->dev, &vkinfo, {}, &view));
     if(view)

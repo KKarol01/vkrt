@@ -99,7 +99,7 @@ void UI::update()
 ImTextureID get_imgui_render_output_descriptor()
 {
     return static_cast<ImTextureID>(Engine::get().renderer->get_imgui_texture_id(Engine::get().renderer->get_color_output_texture(),
-                                                                                 gfx::ImageFiltering::LINEAR,
+                                                                                 gfx::ImageFilter::LINEAR,
                                                                                  gfx::ImageAddressing::CLAMP_EDGE, 0));
 }
 

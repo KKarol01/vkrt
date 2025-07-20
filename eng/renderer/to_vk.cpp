@@ -4,14 +4,38 @@
 
 namespace eng
 {
-
 // clang-format off
+VkFilter to_vk(const gfx::ImageFilter& a) 
+{ 
+	switch(a) 
+    {
+        case gfx::ImageFilter::LINEAR: { return VK_FILTER_LINEAR; }
+        case gfx::ImageFilter::NEAREST: { return VK_FILTER_NEAREST; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
+
+VkSamplerAddressMode to_vk(const gfx::ImageAddressing& a) 
+{
+	switch(a) 
+    {
+        case gfx::ImageAddressing::REPEAT: { return VK_SAMPLER_ADDRESS_MODE_REPEAT; }
+        case gfx::ImageAddressing::CLAMP_EDGE: { return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
+
 VkFormat to_vk(const gfx::ImageFormat& a) 
 { 
 	switch(a) 
     {
+        case gfx::ImageFormat::UNDEFINED: { return VK_FORMAT_UNDEFINED; }
         case gfx::ImageFormat::R8G8B8A8_UNORM: { return VK_FORMAT_R8G8B8_UNORM; }
         case gfx::ImageFormat::R8G8B8A8_SRGB: { return VK_FORMAT_R8G8B8A8_SRGB; }
+        case gfx::ImageFormat::D16_UNORM: { return VK_FORMAT_D16_UNORM; }
+        case gfx::ImageFormat::D24_S8_UNORM: { return VK_FORMAT_D24_UNORM_S8_UINT; }
+        case gfx::ImageFormat::D32_SFLOAT: { return VK_FORMAT_D32_SFLOAT; }
+        case gfx::ImageFormat::R16F: { return VK_FORMAT_R16_SFLOAT; }
         default: { ENG_ERROR("Unhandled case"); return {}; }
     }
 }
@@ -60,6 +84,7 @@ VkCompareOp to_vk(const gfx::PipelineCreateInfo::DepthCompare& a)
         default: { ENG_ERROR("Unhandled case"); return {}; }
     }
 }
+
 VkShaderStageFlagBits to_vk(const gfx::Shader::Stage& a)
 {
     switch(a) 
@@ -70,14 +95,27 @@ VkShaderStageFlagBits to_vk(const gfx::Shader::Stage& a)
         default: { ENG_ERROR("Unhandled case"); return {}; }
     }
 }
+
+VkSamplerMipmapMode to_vk(const gfx::SamplerDescriptor::MipMapMode a)
+{
+    switch(a) 
+    {
+        case gfx::SamplerDescriptor::MipMapMode::NEAREST: { return VK_SAMPLER_MIPMAP_MODE_NEAREST; }
+        case gfx::SamplerDescriptor::MipMapMode::LINEAR: { return VK_SAMPLER_MIPMAP_MODE_LINEAR; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
+
+VkSamplerReductionMode to_vk(const gfx::SamplerDescriptor::ReductionMode a)
+{
+    switch(a) 
+    {
+        case gfx::SamplerDescriptor::ReductionMode::MIN: { return VK_SAMPLER_REDUCTION_MODE_MIN; }
+        case gfx::SamplerDescriptor::ReductionMode::MAX: { return VK_SAMPLER_REDUCTION_MODE_MAX; }
+        default: { ENG_ERROR("Unhandled case"); return {}; }
+    }
+}
+
 // clang-format on
 
-// VkImageViewCreateInfo to_vk(const gfx::ImageViewDescriptor& a)
-//{
-//     return Vks(VkImageViewCreateInfo{ .viewType = to_vk(*a.view_type),
-//                                       .format = to_vk(*a.format),
-//                                       .subresourceRange = { VkImageAspectFlagBits{}, (uint32_t)a.mips.offset,
-//                                                             (uint32_t)a.mips.size, (uint32_t)a.layers.offset,
-//                                                             (uint32_t)a.layers.size } });
-// }
 } // namespace eng

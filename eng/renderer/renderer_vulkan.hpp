@@ -6,7 +6,6 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/renderer/renderer_vulkan_wrappers.hpp>
 #include <eng/renderer/pipeline.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/resources/resources.hpp>
@@ -35,12 +34,14 @@ enum class RenderFlags : uint32_t
 
 struct GeometryBuffers
 {
-    Handle<Buffer> buf_vpos;          // positions
-    Handle<Buffer> buf_vattrs;        // rest of attributes
-    Handle<Buffer> buf_indices;       // indices
-    Handle<Buffer> buf_draw_cmds;     // draw commands
-    Handle<Buffer> buf_draw_ids;      // instance ids
-    Handle<Buffer> buf_draw_settings; // draw settings (for cullling)
+    Handle<Buffer> buf_vpos;           // positions
+    Handle<Buffer> buf_vattrs;         // rest of attributes
+    Handle<Buffer> buf_indices;        // indices
+    Handle<Buffer> buf_draw_cmds;      // draw commands
+    Handle<Buffer> buf_draw_ids;       // instance ids
+    Handle<Buffer> buf_final_draw_ids; // post cull instance ids
+    Handle<Buffer> buf_draw_bs;        // bouding spheres
+    Handle<Buffer> buf_draw_settings;  // draw settings (for cullling)
     VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
     size_t vertex_count{};
     size_t index_count{};
@@ -120,6 +121,8 @@ struct FrameData
     Handle<Buffer> constants{};
     Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
+    Handle<Image> hiz_pyramid;
+    Handle<Image> hiz_debug_output;
 };
 
 struct FFTOcean
@@ -172,17 +175,10 @@ struct PipelineMetadata
     VkPipelineBindPoint bind_point{};
 };
 
-struct MeshInstance
-{
-    uint32_t mesh;
-    uint32_t geometry;
-    uint32_t material;
-    uint32_t index;
-};
-
 struct MeshletInstance
 {
     uint32_t mesh;
+    uint32_t global_meshlet;
     uint32_t meshlet;
     uint32_t index;
 };
@@ -220,6 +216,7 @@ class RendererVulkan : public Renderer
     void on_window_resize() final;
 
     Handle<Image> batch_image(const ImageDescriptor& desc) final;
+    Handle<Sampler> batch_sampler(const SamplerDescriptor& batch) final;
     Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
     Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
@@ -229,7 +226,7 @@ class RendererVulkan : public Renderer
     Handle<Mesh> instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(ecs::Entity entity) final;
-    size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) final;
+    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
 
     void compile_shaders();
@@ -273,7 +270,6 @@ class RendererVulkan : public Renderer
     BindlessPool* bindless_pool{};
     // RenderGraph rendergraph;
 
-    SamplerStorage samplers;
     HandleMap<Buffer> buffers;
     HandleMap<Image> images;
     HandleFlatSet<Texture> textures;
@@ -281,15 +277,18 @@ class RendererVulkan : public Renderer
     HandleFlatSet<Material> materials;
     HandleFlatSet<Pipeline> pipelines;
     HandleFlatSet<ShaderEffect> shader_effects;
+    std::unordered_map<SamplerDescriptor, VkSampler> samplers;
     std::unordered_map<std::filesystem::path, Shader> shaders;
     std::unordered_map<std::string, MeshPass> mesh_passes;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
 
     uint32_t mesh_instance_index{}; // todo: reuse slots
-    std::vector<MeshInstance> mesh_instances;
     std::vector<MeshletInstance> meshlet_instances;
     std::vector<MultiBatch> multibatches;
+    Handle<Pipeline> cull_pipeline;
+    Handle<Pipeline> hiz_pipeline;
+    VkSampler hiz_sampler;
 
     GeometryBuffers geom_main_bufs;
 
@@ -300,10 +299,6 @@ class RendererVulkan : public Renderer
     Handle<Buffer> tlas_buffer;
     Handle<Buffer> tlas_instance_buffer;
     Handle<Buffer> tlas_scratch_buffer;
-
-    // Handle<Buffer> meshlets_bs_buf; // meshlets bounding spheres buffer - for culling
-    // Handle<Buffer> meshlets_mli_id_buf; // meshlet instance to meshlet id buffer; for example:
-    // ml_bs_buf[ml_mli_id_buf[gl_InstanceIndex]] Handle<Buffer> meshlets_ind_draw_buf;
 
     Handle<Buffer> tlas_mesh_offsets_buffer;
     Handle<Buffer> tlas_transform_buffer;
@@ -322,7 +317,7 @@ class RendererVulkan : public Renderer
 
     std::vector<Handle<Shader>> shaders_to_compile;
     std::vector<Handle<Pipeline>> pipelines_to_compile;
-    std::vector<MeshInstance> mesh_instances_to_process;
+    std::vector<MeshletInstance> meshlets_to_instance;
 };
 } // namespace gfx
 

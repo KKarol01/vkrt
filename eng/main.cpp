@@ -1,6 +1,3 @@
-#include <volk/volk.h>
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3.h>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <GLFW/glfw3native.h>
 #include <glm/vec3.hpp>

@@ -9,6 +9,7 @@ layout(location = 0) in VsOut {
     vec3 tangent;
     flat uint32_t instance_index;
     vec3 water_normal;
+     float ndc_bs;
 }
 fsin;
 
@@ -37,8 +38,18 @@ void main() {
         vec3(0.5, 0.5, 0.5)   // gray
     );
 
+    int lod = 0;
+
+    vec2 uv = (vec2(gl_FragCoord.xy)) / vec2(textureSize(hiz_pyramid, 0));
+    float hiz = textureLod(hiz_pyramid, uv, lod).x;
+    vec3 col = hiz < fsin.ndc_bs ? vec3(0.2) : vec3(1.0);
+   // col = vec3((hiz - fsin.ndc_bs));
+
     OUT_COLOR = vec4(
-        vec3(colors[fsin.instance_index % 10]), 1.0);
+        col,
+//        vec3(colors[fsin.instance_index % 10]), 
+    1.0
+    );
 
 #if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;

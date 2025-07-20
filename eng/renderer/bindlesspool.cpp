@@ -12,11 +12,17 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
     const auto MAX_COMBINED_IMAGES = 1024u;
     const auto MAX_STORAGE_IMAGES = 1024u;
     const auto MAX_STORAGE_BUFFERS = 1024u;
+    const auto MAX_SAMPLED_IMAGES = 1024u;
+    const auto MAX_SAMPLERS = 128u;
     const auto MAX_AS = 16u;
     const auto MAX_SETS = 2u;
-    std::vector<VkDescriptorPoolSize> sizes{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_SETS * MAX_COMBINED_IMAGES },
-                                             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_SETS * MAX_STORAGE_IMAGES },
-                                             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_SETS * MAX_STORAGE_BUFFERS } };
+    std::vector<VkDescriptorPoolSize> sizes{
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_SETS * MAX_COMBINED_IMAGES },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_SETS * MAX_STORAGE_IMAGES },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_SETS * MAX_STORAGE_BUFFERS },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_SETS * MAX_SAMPLED_IMAGES },
+        { VK_DESCRIPTOR_TYPE_SAMPLER, MAX_SETS * MAX_SAMPLERS },
+    };
     if(RendererVulkan::get_instance()->supports_raytracing)
     {
         sizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_AS });
@@ -31,20 +37,21 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
     assert(pool);
 
     std::vector<VkDescriptorSetLayoutBinding> bindings{
-        { BINDLESS_COMBINED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_COMBINED_IMAGES, VK_SHADER_STAGE_ALL },
-        { BINDLESS_STORAGE_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_STORAGE_IMAGES, VK_SHADER_STAGE_ALL },
         { BINDLESS_STORAGE_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_STORAGE_BUFFERS, VK_SHADER_STAGE_ALL },
+        { BINDLESS_STORAGE_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_STORAGE_IMAGES, VK_SHADER_STAGE_ALL },
+        { BINDLESS_COMBINED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_COMBINED_IMAGES, VK_SHADER_STAGE_ALL },
+        { BINDLESS_SAMPLED_IMAGE_BINDING, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_SAMPLED_IMAGES, VK_SHADER_STAGE_ALL },
+        { BINDLESS_SAMPLER_BINDING, VK_DESCRIPTOR_TYPE_SAMPLER, MAX_SAMPLERS, VK_SHADER_STAGE_ALL },
     };
 
     const auto binding_flag = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                               VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-    std::vector<VkDescriptorBindingFlags> binding_flags{ binding_flag, binding_flag, binding_flag };
     if(RendererVulkan::get_instance()->supports_raytracing)
     {
         bindings.push_back({ BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
                              MAX_SETS * MAX_AS, VK_SHADER_STAGE_ALL });
-        binding_flags.push_back(binding_flag);
     }
+    std::vector<VkDescriptorBindingFlags> binding_flags(bindings.size(), binding_flag);
     const auto binding_flags_info = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
         .bindingCount = (uint32_t)binding_flags.size(),
         .pBindingFlags = binding_flags.data(),

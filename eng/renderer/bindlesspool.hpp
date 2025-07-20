@@ -31,10 +31,9 @@ class BindlessPool
     void free_index(Handle<Texture> handle);
     void update_index(Handle<Buffer> handle);
     void update_index(Handle<Texture> handle);
-
-  private:
     void update();
 
+  private:
     VkDevice dev{};
     VkDescriptorPool pool{};
     VkDescriptorSetLayout set_layout{};

@@ -71,6 +71,8 @@ struct PipelineCreateInfo
 
     std::vector<VertexBinding> bindings;
     std::vector<VertexAttribute> attributes;
+    std::vector<ImageFormat> color_formats{ ImageFormat::R8G8B8A8_SRGB };
+    ImageFormat depth_format{ ImageFormat::UNDEFINED };
     CullMode culling{ CullMode::NONE };
     std::vector<Handle<Shader>> shaders;
     bool depth_test{ false };
@@ -95,9 +97,10 @@ DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
     // clang-format off
     for(const auto& e : t.bindings) { hash = eng::hash::combine_fnv1a(hash, e); }
     for(const auto& e : t.attributes) { hash = eng::hash::combine_fnv1a(hash, e); }
+    for(const auto& e : t.color_formats) { hash = eng::hash::combine_fnv1a(hash, e); }
     for(const auto& e : t.shaders) { hash = eng::hash::combine_fnv1a(hash, e); }
     // clang-format on
-    hash = eng::hash::combine_fnv1a(hash, t.culling, t.depth_test, t.depth_write, t.depth_compare);
+    hash = eng::hash::combine_fnv1a(hash, t.culling, t.depth_test, t.depth_write, t.depth_compare, t.depth_format);
     return hash;
 }());
 DEFINE_STD_HASH(gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
