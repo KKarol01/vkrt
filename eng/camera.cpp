@@ -45,6 +45,7 @@ void Camera::update()
     if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) { pos -= up * dt * 5.0f; }
     if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) { pos += up * dt * 5.0f; }
 
+    prev_view = view;
     view = glm::lookAt(pos, pos + forward, up);
     ENG_LOG("POS: {} {} {}", pos.x, pos.y, pos.z);
     ENG_LOG("DIR: {} {} {}", forward.x, forward.y, forward.z);

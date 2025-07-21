@@ -616,6 +616,9 @@ void RendererVulkan::update()
     submit_queue->reset_fence(get_frame_data().fen_rendering_finished);
     // vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
 
+    static glm::mat4 s_view = Engine::get().camera->prev_view;
+    if(glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS) { s_view = Engine::get().camera->prev_view; }
+
     {
         const float hx = (halton(Engine::get().frame_num() % 4u, 2) * 2.0 - 1.0);
         const float hy = (halton(Engine::get().frame_num() % 4u, 3) * 2.0 - 1.0);
@@ -654,6 +657,7 @@ void RendererVulkan::update()
         // }
 
         GPUConstantsBuffer constants{
+            .debug_view = s_view,
             .view = Engine::get().camera->get_view(),
             .proj = Engine::get().camera->get_projection(),
             .proj_view = Engine::get().camera->get_projection() * Engine::get().camera->get_view(),
@@ -727,54 +731,65 @@ void RendererVulkan::update()
         auto& dep_image = fd.gbuffer.depth_buffer_image.get();
         auto& hiz_image = fd.hiz_pyramid.get();
 
+        if(glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS)
         {
-            VkClearDepthStencilValue clear{ .depth = 1.0f, .stencil = 0 };
-            VkImageSubresourceRange range{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, hiz_image.mips, 0, 1 };
-            vkCmdClearDepthStencilImage(cmd, hiz_image.image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
-            insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+            {
+                VkClearDepthStencilValue clear{ .depth = 1.0f, .stencil = 0 };
+                VkImageSubresourceRange range{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, hiz_image.mips, 0, 1 };
+                vkCmdClearDepthStencilImage(cmd, hiz_image.image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
+                insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
 
+                insert_vk_img_barrier(cmd, fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                      VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                                      VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            }
+
+            push_constants_culling.hiz_width = hiz_image.extent.width;
+            push_constants_culling.hiz_height = hiz_image.extent.height;
+
+            auto* md = (PipelineMetadata*)hiz_pipeline->metadata;
+            vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
+            bindless_pool->bind(cmd, md->bind_point);
+            for(auto i = 0u; i < hiz_image.mips; ++i)
+            {
+                if(i == 0)
+                {
+                    push_constants_culling.hiz_source =
+                        bindless_pool->get_index(make_texture(fd.gbuffer.depth_buffer_image,
+                                                              dep_image.create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_DEPTH_BIT }),
+                                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, hiz_sampler));
+                }
+                else
+                {
+                    push_constants_culling.hiz_source =
+                        bindless_pool->get_index(make_texture(fd.hiz_pyramid,
+                                                              hiz_image.create_image_view(ImageViewDescriptor{
+                                                                  .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i - 1, 1 } }),
+                                                              VK_IMAGE_LAYOUT_GENERAL, hiz_sampler));
+                }
+                push_constants_culling.hiz_dest =
+                    bindless_pool->get_index(make_texture(fd.hiz_pyramid,
+                                                          hiz_image.create_image_view(ImageViewDescriptor{
+                                                              .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i, 1 } }),
+                                                          VK_IMAGE_LAYOUT_GENERAL, (VkSampler)(~0ull)));
+                push_constants_culling.hiz_width = std::max(hiz_image.extent.width >> i, 1u);
+                push_constants_culling.hiz_height = std::max(hiz_image.extent.height >> i, 1u);
+                vkCmdPushConstants(cmd, bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
+                                   sizeof(push_constants_culling), &push_constants_culling);
+                vkCmdDispatch(cmd, (push_constants_culling.hiz_width + 31) / 32, (push_constants_culling.hiz_height + 31) / 32, 1);
+                insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
+                                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                  VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
+            }
+        }
+        else
+        {
+            auto* md = (PipelineMetadata*)hiz_pipeline->metadata;
+            bindless_pool->bind(cmd, md->bind_point);
             insert_vk_img_barrier(cmd, fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                   VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
                                   VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        }
-
-        push_constants_culling.hiz_width = hiz_image.extent.width;
-        push_constants_culling.hiz_height = hiz_image.extent.height;
-
-        auto* md = (PipelineMetadata*)hiz_pipeline->metadata;
-        vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
-        bindless_pool->bind(cmd, md->bind_point);
-        for(auto i = 0u; i < hiz_image.mips; ++i)
-        {
-            if(i == 0)
-            {
-                push_constants_culling.hiz_source =
-                    bindless_pool->get_index(make_texture(fd.gbuffer.depth_buffer_image,
-                                                          dep_image.create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_DEPTH_BIT }),
-                                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, hiz_sampler));
-            }
-            else
-            {
-                push_constants_culling.hiz_source =
-                    bindless_pool->get_index(make_texture(fd.hiz_pyramid,
-                                                          hiz_image.create_image_view(ImageViewDescriptor{
-                                                              .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i - 1, 1 } }),
-                                                          VK_IMAGE_LAYOUT_GENERAL, hiz_sampler));
-            }
-            push_constants_culling.hiz_dest =
-                bindless_pool->get_index(make_texture(fd.hiz_pyramid,
-                                                      hiz_image.create_image_view(ImageViewDescriptor{
-                                                          .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i, 1 } }),
-                                                      VK_IMAGE_LAYOUT_GENERAL, (VkSampler)(~0ull)));
-            push_constants_culling.hiz_width = std::max(hiz_image.extent.width >> i, 1u);
-            push_constants_culling.hiz_height = std::max(hiz_image.extent.height >> i, 1u);
-            vkCmdPushConstants(cmd, bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
-                               sizeof(push_constants_culling), &push_constants_culling);
-            vkCmdDispatch(cmd, (push_constants_culling.hiz_width + 7), (push_constants_culling.hiz_height + 7), 1);
-            insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
-                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                              VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
         }
         push_constants_culling.hiz_source =
             bindless_pool->get_index(make_texture(fd.hiz_pyramid,
@@ -794,9 +809,12 @@ void RendererVulkan::update()
         }
         vkCmdPushConstants(cmd, bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
                            sizeof(push_constants_culling), &push_constants_culling);
-        md = (PipelineMetadata*)cull_pipeline->metadata;
+        auto* md = (PipelineMetadata*)cull_pipeline->metadata;
         vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
-        vkCmdDispatch(cmd, (meshlet_instances.size() + 63) / 64, 1, 1);
+        // if(glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_REPEAT)
+        {
+            vkCmdDispatch(cmd, (meshlet_instances.size() + 63) / 64, 1, 1);
+        }
         insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
     }
@@ -842,7 +860,7 @@ void RendererVulkan::update()
         .meshlet_ids_index = bindless_pool->get_index(geom_main_bufs.buf_final_draw_ids),
         .meshlet_bs_index = bindless_pool->get_index(geom_main_bufs.buf_draw_bs),
         .hiz_pyramid_index = push_constants_culling.hiz_source,
-        .hiz_debug_index = push_constants_culling.hiz_dest = bindless_pool->get_index(make_texture(
+        .hiz_debug_index = bindless_pool->get_index(make_texture(
             fd.hiz_debug_output, fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
             VK_IMAGE_LAYOUT_GENERAL, (VkSampler)*batch_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } }))),
     };
@@ -857,7 +875,9 @@ void RendererVulkan::update()
                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
     vkCmdBeginRendering(cmd, &rinfo);
     bindless_pool->bind(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
-    VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+    VkViewport viewport{
+        0.0f, Engine::get().window->height, Engine::get().window->width, -Engine::get().window->height, 0.0f, 1.0f
+    };
     VkRect2D scissor{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
     for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
     {

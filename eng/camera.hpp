@@ -15,6 +15,7 @@ class Camera
 
     glm::vec3 pos{ 0.24723034, 0.3212749, 2.013261 };
 
+    glm::mat4 prev_view{ 1.0f };
   private:
     glm::mat4 projection{ 1.0f };
     glm::mat4 view{ 1.0f };

@@ -71,7 +71,7 @@ void Engine::init()
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     window = new Window{ 1280.0f, 768.0f };
-    camera = new Camera{ glm::radians(90.0f), 0.1f, 50.0f };
+    camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
     ecs = new ecs::Registry{};
 
     glfwSetCursorPosCallback(window->window, on_mouse_move);

@@ -9,7 +9,7 @@ layout(location = 0) in VsOut {
     vec3 tangent;
     flat uint32_t instance_index;
     vec3 water_normal;
-     float ndc_bs;
+    flat vec2 aabb_center;
 }
 fsin;
 
@@ -40,14 +40,17 @@ void main() {
 
     int lod = 0;
 
-    vec2 uv = (vec2(gl_FragCoord.xy)) / vec2(textureSize(hiz_pyramid, 0));
-    float hiz = textureLod(hiz_pyramid, uv, lod).x;
-    vec3 col = hiz < fsin.ndc_bs ? vec3(0.2) : vec3(1.0);
+    vec2 uv = vec2(gl_FragCoord.xy) / vec2(1280.0, 768.0);
+
+    float hiz = textureLod(hiz_pyramid, fsin.aabb_center, lod).x;
+    vec3 col = hiz < 1.0 ? vec3(0.2) : vec3(1.0);
    // col = vec3((hiz - fsin.ndc_bs));
 
+//   gl_FragDepth = fsin.ndc_bs;
+
     OUT_COLOR = vec4(
-        col,
-//        vec3(colors[fsin.instance_index % 10]), 
+        vec3(0.5),
+        //vec3(colors[fsin.instance_index % 10]), 
     1.0
     );
 

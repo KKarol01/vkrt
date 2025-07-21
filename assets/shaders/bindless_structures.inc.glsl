@@ -86,6 +86,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndirectCommandsBuffer) {
 } ENG_DECLARE_BINDLESS(GPUDrawIndirectCommandsBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUConstantsBuffer) {
+    ENG_TYPE_MAT4 debug_view;
     ENG_TYPE_MAT4 view;
     ENG_TYPE_MAT4 proj;
     ENG_TYPE_MAT4 proj_view;
