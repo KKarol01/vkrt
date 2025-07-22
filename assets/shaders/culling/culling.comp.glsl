@@ -7,7 +7,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 bool frustum_cull(vec4 bounding_sphere)
 {
     // clang-format off
-    const vec4 pos = constants.view * vec4(bounding_sphere.xyz, 1.0);
+    const vec4 pos = constants.debug_view * vec4(bounding_sphere.xyz, 1.0);
     vec4 L = vec4(constants.proj[0][3] + constants.proj[0][0],
                   constants.proj[1][3] + constants.proj[1][0],
                   constants.proj[2][3] + constants.proj[2][0],
@@ -50,52 +50,48 @@ bool frustum_cull(vec4 bounding_sphere)
     // clang-format on
 }
 
-bool projectSphere(vec3 C, float r, float znear, float P00, float P11, out vec4 aabb)
+bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, out vec4 aabb)
 {
-	if (C.z < r + znear)
-		return false;
+    if (c.z < r + znear) return false;
 
-	vec2 cx = -C.xz;
-	vec2 vx = vec2(sqrt(dot(cx, cx) - r * r), r);
-	vec2 minx = mat2(vx.x, vx.y, -vx.y, vx.x) * cx;
-	vec2 maxx = mat2(vx.x, -vx.y, vx.y, vx.x) * cx;
+    vec3 cr = c * r;
+    float czr2 = c.z * c.z - r * r;
 
-	vec2 cy = -C.yz;
-	vec2 vy = vec2(sqrt(dot(cy, cy) - r * r), r);
-	vec2 miny = mat2(vy.x, vy.y, -vy.y, vy.x) * cy;
-	vec2 maxy = mat2(vy.x, -vy.y, vy.y, vy.x) * cy;
+    float vx = sqrt(c.x * c.x + czr2);
+    float minx = (vx * c.x - cr.z) / (vx * c.z + cr.x);
+    float maxx = (vx * c.x + cr.z) / (vx * c.z - cr.x);
 
-	aabb = vec4(minx.x / minx.y * P00, miny.x / miny.y * P11, maxx.x / maxx.y * P00, maxy.x / maxy.y * P11);
-	aabb = aabb.xwzy * vec4(0.5f, -0.5f, 0.5f, -0.5f) + vec4(0.5f); // clip space -> uv space
+    float vy = sqrt(c.y * c.y + czr2);
+    float miny = (vy * c.y - cr.z) / (vy * c.z + cr.y);
+    float maxy = (vy * c.y + cr.z) / (vy * c.z - cr.y);
 
-	return true;
+    aabb = vec4(minx * P00, miny * P11, maxx * P00, maxy * P11);
+    // clip space -> uv space
+    aabb = aabb.xwzy * vec4(0.5f, -0.5f, 0.5f, -0.5f) + vec4(0.5f);
+
+    return true;
 }
 
 bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
-//return true;
     vec3 center = vec3(constants.debug_view * vec4(bounding_sphere.xyz, 1.0));
-    float radius = bounding_sphere.w * 0.5;
-    //center.y *= -1.0;
-    center.z *= -1.0;
+    center.y *= -1.0;
+    float radius = max(bounding_sphere.w, 0.4) * 1.1;
 	vec4 aabb;
-	if (projectSphere(center, radius, 0.1, P00, P11, aabb))
+	if (project_sphere_bounds(vec3(center.xy, -center.z), radius, 0.1, P00, P11, aabb))
 	{
 		float width = (aabb.z - aabb.x) * float(textureSize(hiz_source, 0).x);
 		float height = (aabb.w - aabb.y) * float(textureSize(hiz_source, 0).y);
 
 		float level = floor(log2(max(width, height)));
 
-		// Sampler is set up to do min reduction, so this computes the minimum depth of a 2x2 texel quad
 		float depth = textureLod(hiz_source, (aabb.xy + aabb.zw) * 0.5, level).x;
 
-        //center.y *= -1.0;
-        center.z *= -1.0;
         vec4 proj_sphere = constants.proj * vec4(center.xy, center.z + radius, 1.0);
         proj_sphere /= proj_sphere.w;
 		float depthSphere = proj_sphere.z;
 		return depthSphere <= depth;
 	}
-    return false;
+    return true;
 }
 
 void main()
@@ -104,12 +100,12 @@ void main()
     if(instance_ids.count <= x) { return; }
 
     GPUInstanceId id = instance_ids.ids_us[x];
-
-    const vec4 bs = instance_bs[x];
+    vec4 bs = instance_bs[x];
 
     if(frustum_cull(bs) && occlusion_cull(bs, constants.proj[0][0], constants.proj[1][1]))
     {
         const uint off = atomicAdd(indirect_cmds.commands_us[id.batch_id].instanceCount, 1);
+        atomicAdd(indirect_cmds.post_cull_triangle_count, indirect_cmds.commands_us[id.batch_id].indexCount / 3);
         post_cull_instance_ids[indirect_cmds.commands_us[id.batch_id].firstInstance + off] = x;
     }
 }

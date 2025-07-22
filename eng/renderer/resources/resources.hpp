@@ -37,6 +37,11 @@ struct Buffer
 {
     constexpr Buffer() noexcept = default;
     explicit Buffer(const BufferCreateInfo& info) noexcept;
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+    Buffer(Buffer&&) = default;
+    Buffer& operator=(Buffer&&) = default;
+
     bool operator==(const Buffer& b) const;
     void init();
     void destroy();

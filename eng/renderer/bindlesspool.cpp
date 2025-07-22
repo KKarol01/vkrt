@@ -122,6 +122,7 @@ void BindlessPool::free_index(Handle<Texture> handle)
 
 void BindlessPool::update_index(Handle<Buffer> handle)
 {
+    if(!buffer_indices.contains(handle)) { return; }
     const auto index = buffer_indices.at(handle);
     const auto& update =
         buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = handle->buffer, .range = VK_WHOLE_SIZE }));

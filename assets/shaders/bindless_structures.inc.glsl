@@ -81,7 +81,7 @@ struct DrawIndirectCommand
 };
 ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndirectCommandsBuffer) {
     ENG_TYPE_UINT max_draw_count;
-    ENG_TYPE_UINT padding0;
+    ENG_TYPE_UINT post_cull_triangle_count;
     ENG_TYPE_UNSIZED(DrawIndirectCommand, commands);
 } ENG_DECLARE_BINDLESS(GPUDrawIndirectCommandsBuffer);
 

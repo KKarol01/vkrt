@@ -38,21 +38,8 @@ void main() {
         vec3(0.5, 0.5, 0.5)   // gray
     );
 
-    int lod = 0;
-
-    vec2 uv = vec2(gl_FragCoord.xy) / vec2(1280.0, 768.0);
-
-    float hiz = textureLod(hiz_pyramid, fsin.aabb_center, lod).x;
-    vec3 col = hiz < 1.0 ? vec3(0.2) : vec3(1.0);
-   // col = vec3((hiz - fsin.ndc_bs));
-
-//   gl_FragDepth = fsin.ndc_bs;
-
-    OUT_COLOR = vec4(
-        vec3(0.5),
-        //vec3(colors[fsin.instance_index % 10]), 
-    1.0
-    );
+    OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
+    OUT_COLOR = vec4(1.0);
 
 #if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;

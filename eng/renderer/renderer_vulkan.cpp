@@ -322,7 +322,7 @@ void RendererVulkan::initialize_resources()
     geom_main_bufs.buf_indices =
         make_buffer(BufferCreateInfo{ "vertex indices", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT });
     geom_main_bufs.buf_draw_cmds = make_buffer(BufferCreateInfo{
-        "meshlets draw cmds", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT });
+        "meshlets draw cmds", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true });
     geom_main_bufs.buf_draw_ids =
         make_buffer(BufferCreateInfo{ "meshlets instance id", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     geom_main_bufs.buf_final_draw_ids =
@@ -617,7 +617,10 @@ void RendererVulkan::update()
     // vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
 
     static glm::mat4 s_view = Engine::get().camera->prev_view;
-    if(glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS) { s_view = Engine::get().camera->prev_view; }
+    if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
+    {
+        s_view = Engine::get().camera->prev_view;
+    }
 
     {
         const float hx = (halton(Engine::get().frame_num() % 4u, 2) * 2.0 - 1.0);
@@ -731,7 +734,7 @@ void RendererVulkan::update()
         auto& dep_image = fd.gbuffer.depth_buffer_image.get();
         auto& hiz_image = fd.hiz_pyramid.get();
 
-        if(glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS)
+        if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
         {
             {
                 VkClearDepthStencilValue clear{ .depth = 1.0f, .stencil = 0 };
@@ -811,10 +814,7 @@ void RendererVulkan::update()
                            sizeof(push_constants_culling), &push_constants_culling);
         auto* md = (PipelineMetadata*)cull_pipeline->metadata;
         vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
-        // if(glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_REPEAT)
-        {
-            vkCmdDispatch(cmd, (meshlet_instances.size() + 63) / 64, 1, 1);
-        }
+        vkCmdDispatch(cmd, (meshlet_instances.size() + 63) / 64, 1, 1);
         insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
     }
@@ -875,9 +875,7 @@ void RendererVulkan::update()
                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
     vkCmdBeginRendering(cmd, &rinfo);
     bindless_pool->bind(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
-    VkViewport viewport{
-        0.0f, Engine::get().window->height, Engine::get().window->width, -Engine::get().window->height, 0.0f, 1.0f
-    };
+    VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
     VkRect2D scissor{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
     for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
     {
@@ -1363,7 +1361,6 @@ void RendererVulkan::bake_indirect_commands()
 
     std::vector<DrawIndirectCommand> gpu_cmds(meshlet_instances.size());
     std::vector<GPUInstanceId> gpu_ids(meshlet_instances.size());
-    // std::vector<Handle<Pipeline>> pipelines(meshlet_instances.size());
     multibatches.clear();
     multibatches.resize(meshlet_instances.size());
     Handle<Pipeline> prev_pipeline;
@@ -1376,7 +1373,6 @@ void RendererVulkan::bake_indirect_commands()
         const auto& m = meshes.at(mi.mesh);
         const auto& mp = mesh_passes.at(m.material->mesh_pass);
         const auto& pipeline = shader_effects.at(mp.effects[(uint32_t)MeshPassType::FORWARD]).pipeline;
-        // const auto& g = geometries.at(m.geometry);
 
         // if material changes (range of draw indirect commands that can be drawn with the same pipeline)
         if(prev_pipeline != pipeline)
@@ -1420,6 +1416,7 @@ void RendererVulkan::bake_indirect_commands()
     std::vector<uint32_t> final_ids(meshlet_instances.size());
 
     staging_buffer->stage(geom_main_bufs.buf_draw_cmds, (uint32_t)gpu_cmds.size(), 0);
+    staging_buffer->stage(geom_main_bufs.buf_draw_cmds, 0, 4);
     staging_buffer->stage(geom_main_bufs.buf_draw_cmds, gpu_cmds, 8);
     staging_buffer->stage(geom_main_bufs.buf_draw_ids, (uint32_t)meshlet_instances.size(), 0);
     staging_buffer->stage(geom_main_bufs.buf_draw_ids, gpu_ids, 8);
@@ -1836,7 +1833,7 @@ void gfx::RendererVulkan::destroy_image(Handle<Image> image)
 
 uint32_t RendererVulkan::get_bindless(Handle<Buffer> buffer) { return bindless_pool->get_index(buffer); }
 
-void RendererVulkan::update_resource(Handle<Buffer> dst) { ENG_TODO(); }
+void RendererVulkan::update_resource(Handle<Buffer> dst) { bindless_pool->update_index(dst); }
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset)
 {

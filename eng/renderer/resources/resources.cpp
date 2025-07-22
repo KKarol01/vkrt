@@ -61,7 +61,6 @@ void Buffer::destroy()
 {
     auto* r = RendererVulkan::get_instance();
     if(!buffer || !vmaa) { return; }
-    if(memory) { vmaUnmapMemory(r->vma, vmaa); }
     vmaDestroyBuffer(r->vma, buffer, vmaa);
     *this = Buffer{};
 }

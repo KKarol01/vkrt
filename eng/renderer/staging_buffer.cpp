@@ -39,6 +39,26 @@ void StagingBuffer::stage(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_off
 
 void StagingBuffer::stage(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size)
 {
+    if(dst->mapped)
+    {
+        auto& dstb = dst.get();
+        auto* r = RendererVulkan::get_instance();
+        assert(dstb.memory);
+        const auto offset = dst_offset == ~size_t{} ? dstb.size : dst_offset;
+        if(dstb.capacity < offset + src_size)
+        {
+            Buffer nb{ BufferCreateInfo{ dstb.name, offset + src_size, dstb.usage, dstb.mapped } };
+            nb.init();
+            assert(nb.memory);
+            memcpy(nb.memory, dstb.memory, dstb.size);
+            dstb.destroy();
+            dstb = std::move(nb);
+            r->update_resource(dst);
+        }
+        memcpy((std::byte*)dstb.memory + offset, src, src_size);
+        return;
+    }
+
     const auto num_splits = (src_size + CAPACITY - 1) / CAPACITY;
     dst_offset = resize_buffer(dst, dst_offset, src_size);
     for(auto i = 0ull; i < num_splits; ++i)
@@ -176,7 +196,7 @@ size_t StagingBuffer::resize_buffer(Handle<Buffer> hbuf, size_t dst_offset, size
         else
         {
             Buffer b{ BufferCreateInfo{ buf.name, capacity, buf.usage, buf.mapped } };
-            replacement_buffers.emplace_back(hbuf, b);
+            replacement_buffers.emplace_back(hbuf, std::move(b));
         }
     }
     return dst_offset;
