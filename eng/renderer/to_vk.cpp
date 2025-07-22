@@ -80,6 +80,7 @@ VkCompareOp to_vk(const gfx::PipelineCreateInfo::DepthCompare& a)
     {
         case gfx::PipelineCreateInfo::DepthCompare::NEVER: { return VK_COMPARE_OP_NEVER; }
         case gfx::PipelineCreateInfo::DepthCompare::LESS: { return VK_COMPARE_OP_LESS; }
+        case gfx::PipelineCreateInfo::DepthCompare::GREATER: { return VK_COMPARE_OP_GREATER; }
         case gfx::PipelineCreateInfo::DepthCompare::EQUAL: { return VK_COMPARE_OP_EQUAL; }
         default: { ENG_ERROR("Unhandled case"); return {}; }
     }

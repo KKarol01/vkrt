@@ -39,7 +39,7 @@ void main() {
     );
 
     OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
-    OUT_COLOR = vec4(1.0);
+    //OUT_COLOR = vec4(1.0);
 
 #if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;

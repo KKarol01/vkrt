@@ -64,6 +64,7 @@ struct PipelineCreateInfo
     {
         NEVER,
         LESS,
+        GREATER,
         EQUAL
     };
 

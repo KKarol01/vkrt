@@ -24,28 +24,26 @@ bool frustum_cull(vec4 bounding_sphere)
                   constants.proj[1][3] - constants.proj[1][1],
                   constants.proj[2][3] - constants.proj[2][1],
                   constants.proj[3][3] - constants.proj[3][1]);
-    vec4 N = vec4(constants.proj[0][2],
-                  constants.proj[1][2],
-                  constants.proj[2][2],
-                  constants.proj[3][2]);
-    vec4 F = vec4(constants.proj[0][3] - constants.proj[0][2],
-                  constants.proj[1][3] - constants.proj[1][2],
-                  constants.proj[2][3] - constants.proj[2][2],
-                  constants.proj[3][3] - constants.proj[3][2]);
+//    vec4 N = vec4(constants.proj[0][2],
+//                  constants.proj[1][2],
+//                  constants.proj[2][2],
+//                  constants.proj[3][2]);
+//    vec4 F = vec4(constants.proj[0][3] - constants.proj[0][2],
+//                  constants.proj[1][3] - constants.proj[1][2],
+//                  constants.proj[2][3] - constants.proj[2][2],
+//                  constants.proj[3][3] - constants.proj[3][2]);
 
     L /= length(L.xyz);
     R /= length(R.xyz);
     B /= length(B.xyz);
     T /= length(T.xyz);
-    N /= length(N.xyz);
-    F /= length(F.xyz);
+  //  N /= length(N.xyz);
+  //  F /= length(F.xyz);
 
     if(    dot(L.xyz, pos.xyz) + L.w + bounding_sphere.w >= 0.0
         && dot(R.xyz, pos.xyz) + R.w + bounding_sphere.w >= 0.0
         && dot(B.xyz, pos.xyz) + B.w + bounding_sphere.w >= 0.0
-        && dot(T.xyz, pos.xyz) + T.w + bounding_sphere.w >= 0.0
-        && dot(N.xyz, pos.xyz) + N.w + bounding_sphere.w >= 0.0
-        && dot(F.xyz, pos.xyz) + F.w + bounding_sphere.w >= 0.0) { return true; }
+        && dot(T.xyz, pos.xyz) + T.w + bounding_sphere.w >= 0.0) { return true; }
     return false;
     // clang-format on
 }
@@ -86,10 +84,8 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
 
 		float depth = textureLod(hiz_source, (aabb.xy + aabb.zw) * 0.5, level).x;
 
-        vec4 proj_sphere = constants.proj * vec4(center.xy, center.z + radius, 1.0);
-        proj_sphere /= proj_sphere.w;
-		float depthSphere = proj_sphere.z;
-		return depthSphere <= depth;
+		float depthSphere = 0.1 / (-center.z - radius);
+		return depthSphere >= depth;
 	}
     return true;
 }

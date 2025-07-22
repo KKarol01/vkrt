@@ -416,7 +416,7 @@ void RendererVulkan::initialize_mesh_passes()
         .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
         .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
         .mipmap_mode = SamplerDescriptor::MipMapMode::NEAREST,
-        .reduction_mode = SamplerDescriptor::ReductionMode::MAX }));
+        .reduction_mode = SamplerDescriptor::ReductionMode::MIN }));
 
     const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
         .depth_format = ImageFormat::D32_SFLOAT,
@@ -425,7 +425,7 @@ void RendererVulkan::initialize_mesh_passes()
                      make_shader(Shader::Stage::PIXEL, "default_unlit/unlit.frag.glsl") },
         .depth_test = true,
         .depth_write = true,
-        .depth_compare = PipelineCreateInfo::DepthCompare::LESS,
+        .depth_compare = PipelineCreateInfo::DepthCompare::GREATER,
     });
     MeshPassCreateInfo info{ .name = "default_unlit" };
     info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
@@ -523,7 +523,7 @@ void RendererVulkan::create_window_sized_resources()
         auto& img = frame_datas[i].gbuffer.depth_buffer_image.get();
         insert_vk_img_barrier(cmd, img, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                               VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkClearDepthStencilValue clear{ .depth = 1.0f, .stencil = 0 };
+        VkClearDepthStencilValue clear{ .depth = 0.0f, .stencil = 0 };
         VkImageSubresourceRange range{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
         vkCmdClearDepthStencilImage(cmd, img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
         insert_vk_img_barrier(cmd, img, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -737,7 +737,7 @@ void RendererVulkan::update()
         if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
         {
             {
-                VkClearDepthStencilValue clear{ .depth = 1.0f, .stencil = 0 };
+                VkClearDepthStencilValue clear{ .depth = 0.0f, .stencil = 0 };
                 VkImageSubresourceRange range{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, hiz_image.mips, 0, 1 };
                 vkCmdClearDepthStencilImage(cmd, hiz_image.image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
                 insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -829,7 +829,7 @@ void RendererVulkan::update()
                                        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                                       .clearValue = { .depthStencil = { .depth = 1.0f, .stencil = 0 } } })
+                                       .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0 } } })
     };
     const auto rinfo =
         Vks(VkRenderingInfo{ .renderArea = { { 0, 0 }, { swapchain_image->extent.width, swapchain_image->extent.height } },
