@@ -16,6 +16,17 @@
 namespace scene
 {
 
+struct LoadedNode
+{
+    ecs::Entity root;
+    std::vector<Handle<gfx::Geometry>> geometries;
+    std::vector<Handle<gfx::Image>> images;
+    std::vector<Handle<gfx::Sampler>> samplers;
+    std::vector<Handle<gfx::Texture>> textures;
+    std::vector<Handle<gfx::Material>> materials;
+    std::vector<ecs::comp::MeshRenderer> meshes;
+};
+
 class Scene
 {
   public:
@@ -25,7 +36,7 @@ class Scene
     void update_transform(ecs::Entity entity, glm::mat4 transform);
 
   public:
-    std::unordered_map<std::filesystem::path, ecs::Entity> nodes;
+    std::unordered_map<std::filesystem::path, LoadedNode> nodes;
     std::vector<ecs::Entity> scene;
 
     std::vector<Handle<gfx::Geometry>> geometries;

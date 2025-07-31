@@ -71,8 +71,8 @@ class StagingBuffer
         Handle<Image> dst_image() const;
         Handle<Buffer> src_buffer() const;
         Handle<Image> src_image() const;
-        uintptr_t dst_resource;
-        uintptr_t src_resource;
+        uint32_t dst_resource;
+        uint32_t src_resource;
         size_t dst_offset;
         Range src_range;
         bool dst_is_buffer;
@@ -95,19 +95,19 @@ class StagingBuffer
         stage(dst, src.data(), dst_offset, src.size() * sizeof(T));
     }
 
-    //broken for vectors
-    //template <typename... Ts> void stage_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts)
+    // broken for vectors
+    // template <typename... Ts> void stage_many(Handle<Buffer> dst, size_t dst_offset, const Ts&... ts)
     //{
-    //    const auto total_size = (sizeof(Ts) + ...);
-    //    const auto offset = resize_buffer(dst, dst_offset, total_size);
-    //    const auto prefix_sum = [] {
-    //        auto arr = std::array<size_t, sizeof...(Ts)>{ sizeof(Ts)... };
-    //        std::exclusive_scan(arr.begin(), arr.end(), arr.begin(), size_t{});
-    //        return arr;
-    //    }();
-    //    size_t idx = 0;
-    //    (..., stage(dst, &ts, offset + prefix_sum[idx++], sizeof(Ts)));
-    //}
+    //     const auto total_size = (sizeof(Ts) + ...);
+    //     const auto offset = resize_buffer(dst, dst_offset, total_size);
+    //     const auto prefix_sum = [] {
+    //         auto arr = std::array<size_t, sizeof...(Ts)>{ sizeof(Ts)... };
+    //         std::exclusive_scan(arr.begin(), arr.end(), arr.begin(), size_t{});
+    //         return arr;
+    //     }();
+    //     size_t idx = 0;
+    //     (..., stage(dst, &ts, offset + prefix_sum[idx++], sizeof(Ts)));
+    // }
 
     void stage(Handle<Image> dst, std::span<const std::byte> src, VkImageLayout final_layout);
     void flush();

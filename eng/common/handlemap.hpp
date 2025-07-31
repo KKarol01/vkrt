@@ -38,7 +38,7 @@ template <typename T, typename Hash = std::hash<T>, typename Storage = Handle<T>
     }
 
   private:
-    handle_t get_handle() { return handle_t{ set.allocate_slot() }; }
+    handle_t get_handle() { return handle_t{ (uint32_t)set.allocate_slot() }; }
 
     SlotAllocator set;
     std::unordered_map<handle_t, T> data;

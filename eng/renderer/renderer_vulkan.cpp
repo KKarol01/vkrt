@@ -57,7 +57,6 @@ void RendererVulkan::init()
 {
     initialize_vulkan();
     initialize_resources();
-    initialize_materials();
     initialize_mesh_passes();
     create_window_sized_resources();
     initialize_imgui();
@@ -412,11 +411,12 @@ void RendererVulkan::initialize_mesh_passes()
         .shaders = { make_shader(Shader::Stage::COMPUTE, "culling/culling.comp.glsl") } });
     hiz_pipeline = make_pipeline(PipelineCreateInfo{
         .shaders = { make_shader(Shader::Stage::COMPUTE, "culling/hiz.comp.glsl") } });
-    hiz_sampler = reinterpret_cast<VkSampler>(*batch_sampler(SamplerDescriptor{
-        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
-        .mipmap_mode = SamplerDescriptor::MipMapMode::NEAREST,
-        .reduction_mode = SamplerDescriptor::ReductionMode::MIN }));
+    hiz_sampler = batch_sampler(SamplerDescriptor{ .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+                                                   .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
+                                                                   ImageAddressing::CLAMP_EDGE },
+                                                   .mipmap_mode = SamplerDescriptor::MipMapMode::NEAREST,
+                                                   .reduction_mode = SamplerDescriptor::ReductionMode::MIN })
+                      ->sampler;
 
     const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
         .depth_format = ImageFormat::D32_SFLOAT,
@@ -429,10 +429,9 @@ void RendererVulkan::initialize_mesh_passes()
     });
     MeshPassCreateInfo info{ .name = "default_unlit" };
     info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
-    make_mesh_pass(info);
+    default_meshpass = make_mesh_pass(info);
+    default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
 }
-
-void RendererVulkan::initialize_materials() { default_material = materials.insert(Material{}).first; }
 
 void RendererVulkan::create_window_sized_resources()
 {
@@ -680,6 +679,7 @@ void RendererVulkan::update()
         // upload_transforms();
     }
 
+    uint32_t old_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 1);
     bake_indirect_commands();
 
     staging_buffer->flush();
@@ -775,7 +775,7 @@ void RendererVulkan::update()
                     bindless_pool->get_index(make_texture(fd.hiz_pyramid,
                                                           hiz_image.create_image_view(ImageViewDescriptor{
                                                               .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i, 1 } }),
-                                                          VK_IMAGE_LAYOUT_GENERAL, (VkSampler)(~0ull)));
+                                                          VK_IMAGE_LAYOUT_GENERAL, nullptr));
                 push_constants_culling.hiz_width = std::max(hiz_image.extent.width >> i, 1u);
                 push_constants_culling.hiz_height = std::max(hiz_image.extent.height >> i, 1u);
                 vkCmdPushConstants(cmd, bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
@@ -802,7 +802,7 @@ void RendererVulkan::update()
         push_constants_culling.hiz_dest =
             bindless_pool->get_index(make_texture(fd.hiz_debug_output,
                                                   fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
-                                                  VK_IMAGE_LAYOUT_GENERAL, (VkSampler)(~0ull)));
+                                                  VK_IMAGE_LAYOUT_GENERAL, nullptr));
         {
             VkClearColorValue clear{ .float32 = 0.0f };
             VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -862,7 +862,7 @@ void RendererVulkan::update()
         .hiz_pyramid_index = push_constants_culling.hiz_source,
         .hiz_debug_index = bindless_pool->get_index(make_texture(
             fd.hiz_debug_output, fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
-            VK_IMAGE_LAYOUT_GENERAL, (VkSampler)*batch_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } }))),
+            VK_IMAGE_LAYOUT_GENERAL, batch_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } })->sampler)),
     };
 
     vkCmdBindIndexBuffer(cmd, geom_main_bufs.buf_indices->buffer, 0, VK_INDEX_TYPE_UINT16);
@@ -914,6 +914,10 @@ void RendererVulkan::update()
 
     // flags.clear();
     submit_queue->wait_idle();
+
+    uint32_t new_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 2);
+    ENG_LOG("NUM TRIANGLES (PRE | POST) {} | {}; DIFF: {}", old_triangles, new_triangles, new_triangles - old_triangles);
+
     return;
 }
 
@@ -943,8 +947,8 @@ Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
 
 Handle<Sampler> RendererVulkan::batch_sampler(const SamplerDescriptor& batch)
 {
-    auto it = samplers.emplace(batch, nullptr);
-    if(it.second)
+    auto it = samplers.insert(Sampler{ batch, nullptr });
+    if(it.success)
     {
         auto info = Vks(VkSamplerCreateInfo{ .magFilter = eng::to_vk(batch.filtering[1]),
                                              .minFilter = eng::to_vk(batch.filtering[0]),
@@ -962,23 +966,26 @@ Handle<Sampler> RendererVulkan::batch_sampler(const SamplerDescriptor& batch)
             reduction.reductionMode = eng::to_vk(*batch.reduction_mode);
             info.pNext = &reduction;
         }
-        VK_CHECK(vkCreateSampler(dev, &info, {}, &it.first->second));
+        VK_CHECK(vkCreateSampler(dev, &info, {}, &samplers.at(it.handle).sampler));
     }
-    return Handle<Sampler>{ reinterpret_cast<uint64_t>(it.first->second) };
+    return it.handle;
 }
 
 Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch)
 {
+    if(!batch.image) { return {}; }
     const auto view = batch.image->get_image_view();
     const auto layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-    const auto sampler = reinterpret_cast<VkSampler>(*batch.sampler);
+    const auto sampler = batch.sampler ? samplers.at(batch.sampler).sampler : nullptr;
     assert(view);
     return make_texture(batch.image, view, layout, sampler);
 }
 
 Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
 {
-    return materials.insert(Material{ .mesh_pass = desc.mesh_pass, .base_color_texture = desc.base_color_texture }).first;
+    auto meshpass = mesh_passes.find(MeshPass{ .name = desc.mesh_pass });
+    if(!meshpass) { meshpass = default_meshpass; }
+    return materials.insert(Material{ .mesh_pass = meshpass, .base_color_texture = desc.base_color_texture }).handle;
 }
 
 Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
@@ -1021,7 +1028,7 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
             static_cast<float>(batch.indices.size_bytes()) / 1000.0f);
     // clang-format on
 
-    return handle.first;
+    return handle.handle;
 }
 
 void RendererVulkan::meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
@@ -1083,22 +1090,19 @@ Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch)
 {
     auto& bm = meshes.emplace_back(Mesh{ .geometry = batch.geometry, .material = batch.material });
     if(!bm.material) { bm.material = default_material; }
-    return Handle<Mesh>{ meshes.size() - 1 };
+    return Handle<Mesh>{ (uint32_t)meshes.size() - 1 };
 }
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
-    if(!settings.mesh) { return {}; }
-    const auto& mesh = settings.mesh.get();
-    const auto& geom = mesh.geometry.get();
-    meshlets_to_instance.reserve(meshlets_to_instance.size() + geom.meshlet_range.size);
-    for(auto i = 0u; i < geom.meshlet_range.size; ++i)
+    const auto* mr = Engine::get().ecs->get<ecs::comp::MeshRenderer>(settings.entity);
+    if(!mr) { return {}; }
+    for(const auto& e : mr->meshes)
     {
-        meshlets_to_instance.push_back(MeshletInstance{ .mesh = (uint32_t)*settings.mesh,
-                                                        .global_meshlet = (uint32_t)geom.meshlet_range.offset + i,
-                                                        .meshlet = i,
-                                                        .index = mesh_instance_index });
+        meshlets_to_instance.push_back(MeshletInstance{ .geometry = e->geometry, .material = e->material, .index = mesh_instance_index });
     }
+    assert(entities.size() == mesh_instance_index);
+    entities.push_back(settings.entity);
     return Handle<Mesh>{ mesh_instance_index++ };
 }
 
@@ -1346,18 +1350,29 @@ void RendererVulkan::bake_indirect_commands()
 {
     if(!meshlets_to_instance.empty())
     {
-        meshlet_instances.reserve(meshlet_instances.size() + meshlets_to_instance.size());
-        meshlet_instances.insert(meshlet_instances.end(), meshlets_to_instance.begin(), meshlets_to_instance.end());
+        for(const auto& e : meshlets_to_instance)
+        {
+            const auto& geom = e.geometry.get();
+            meshlet_instances.reserve(meshlet_instances.size() + geom.meshlet_range.offset);
+            for(auto i = 0u; i < geom.meshlet_range.size; ++i)
+            {
+                meshlet_instances.push_back(MeshletInstance{ .geometry = e.geometry,
+                                                             .material = e.material,
+                                                             .global_meshlet = (uint32_t)geom.meshlet_range.offset + i,
+                                                             .index = e.index });
+            }
+        }
+
         meshlets_to_instance.clear();
 
         std::sort(meshlet_instances.begin(), meshlet_instances.end(), [this](const auto& a, const auto& b) {
-            const auto& ma = meshes.at(a.mesh);
-            const auto& mb = meshes.at(b.mesh);
-            if(ma.material >= mb.material) { return false; }           // first sort by material
+            if(a.material >= b.material) { return false; }             // first sort by material
             if(a.global_meshlet >= b.global_meshlet) { return false; } // then sort by geometry
             return true;
         });
     }
+
+    auto* ecsr = Engine::get().ecs;
 
     std::vector<DrawIndirectCommand> gpu_cmds(meshlet_instances.size());
     std::vector<GPUInstanceId> gpu_ids(meshlet_instances.size());
@@ -1370,8 +1385,7 @@ void RendererVulkan::bake_indirect_commands()
     for(auto i = 0u; i < meshlet_instances.size(); ++i)
     {
         const auto& mi = meshlet_instances.at(i);
-        const auto& m = meshes.at(mi.mesh);
-        const auto& mp = mesh_passes.at(m.material->mesh_pass);
+        const auto& mp = mesh_passes.at(mi.material->mesh_pass);
         const auto& pipeline = shader_effects.at(mp.effects[(uint32_t)MeshPassType::FORWARD]).pipeline;
 
         // if material changes (range of draw indirect commands that can be drawn with the same pipeline)
@@ -1385,7 +1399,7 @@ void RendererVulkan::bake_indirect_commands()
         // if geometry changes, make new command
         if(prev_meshlet != mi.global_meshlet)
         {
-            const auto& g = m.geometry.get();
+            const auto& g = mi.geometry.get();
             const auto& ml = meshlets.at(mi.global_meshlet);
             prev_meshlet = mi.global_meshlet;
             ++cmd_off;
@@ -1764,29 +1778,28 @@ void RendererVulkan::update_ddgi()
 
 Handle<Shader> RendererVulkan::make_shader(Shader::Stage stage, const std::filesystem::path& path)
 {
-    auto ret = shaders.emplace(path, Shader{ .path = paths::canonize_path(path, "shaders"), .stage = stage });
-    const auto handle = Handle<Shader>{ (uintptr_t)&ret.first->second };
-    if(ret.second) { shaders_to_compile.push_back(handle); }
-    return handle;
+    auto ret = shaders.insert(Shader{ .path = paths::canonize_path(path, "shaders"), .stage = stage });
+    if(ret.success) { shaders_to_compile.push_back(ret.handle); }
+    return ret.handle;
 }
 
 Handle<Pipeline> RendererVulkan::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
     auto ret = pipelines.insert(std::move(p));
-    if(ret.second) { pipelines_to_compile.push_back(ret.first); }
-    return ret.first;
+    if(ret.success) { pipelines_to_compile.push_back(ret.handle); }
+    return ret.handle;
 }
 
 Handle<ShaderEffect> RendererVulkan::make_shader_effect(const ShaderEffect& info)
 {
-    return shader_effects.insert(info).first;
+    return shader_effects.insert(info).handle;
 }
 
 Handle<MeshPass> RendererVulkan::make_mesh_pass(const MeshPassCreateInfo& info)
 {
-    auto it = mesh_passes.emplace(info.name, MeshPass{ .effects = info.effects });
-    return Handle<MeshPass>{ (uintptr_t)&it.first->second };
+    auto it = mesh_passes.insert(MeshPass{ .name = info.name, .effects = info.effects });
+    return it.handle;
 }
 
 Handle<Buffer> RendererVulkan::make_buffer(const BufferCreateInfo& info)
@@ -1805,12 +1818,7 @@ Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
 
 Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
 {
-    return textures
-        .insert(Texture{ .image = image,
-                         .view = Handle<ImageView>{ reinterpret_cast<uintptr_t>(view) },
-                         .layout = Handle<ImageLayout>{ static_cast<uint64_t>(std::to_underlying(layout)) },
-                         .sampler = Handle<Sampler>{ reinterpret_cast<uintptr_t>(sampler) } })
-        .first;
+    return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler }).handle;
 }
 
 Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)

@@ -20,6 +20,7 @@ struct ImageLayout;
 struct ImageView;
 struct Sampler;
 struct Pipeline;
+struct Texture;
 
 enum class GeometryFlags
 {
@@ -85,15 +86,6 @@ struct Geometry
     // Handle<Buffer> blas_buffer{};
 };
 
-struct Texture
-{
-    auto operator<=>(const Texture& t) const = default;
-    Handle<Image> image;
-    Handle<ImageView> view;
-    Handle<ImageLayout> layout;
-    Handle<Sampler> sampler;
-};
-
 struct ShaderEffect
 {
     auto operator<=>(const ShaderEffect&) const = default;
@@ -108,14 +100,16 @@ struct MeshPassCreateInfo
 
 struct MeshPass
 {
+    bool operator==(const MeshPass& o) const { return name == o.name; }
+    std::string name;
     std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM> effects;
 };
 
 struct Material
 {
     auto operator<=>(const Material& t) const = default;
-    std::string mesh_pass{ "default_unlit" };
-    Handle<Texture> base_color_texture{ ~0u };
+    Handle<MeshPass> mesh_pass;
+    Handle<Texture> base_color_texture;
 };
 
 struct Mesh
@@ -135,7 +129,6 @@ struct Vertex
 
 struct Meshlet
 {
-    auto operator==(const Meshlet&) const { return false; }
     uint32_t vertex_offset;
     uint32_t vertex_count;
     uint32_t index_offset;
@@ -152,7 +145,6 @@ struct GeometryDescriptor
 
 struct ImageDescriptor
 {
-    auto operator==(const ImageDescriptor&) const { return false; }
     std::string name;
     uint32_t width{};
     uint32_t height{};
@@ -197,7 +189,7 @@ struct SamplerDescriptor
     std::array<ImageFilter, 2> filtering{ ImageFilter::LINEAR, ImageFilter::LINEAR }; // [min, mag]
     std::array<ImageAddressing, 3> addressing{ ImageAddressing::REPEAT, ImageAddressing::REPEAT, ImageAddressing::REPEAT }; // u, v, w
     std::array<float, 3> mip_lod{ 0.0f, VK_LOD_CLAMP_NONE, 0.0f }; // min, max, bias
-    MipMapMode mipmap_mode{ MipMapMode::NEAREST };
+    MipMapMode mipmap_mode{ MipMapMode::LINEAR };
     std::optional<ReductionMode> reduction_mode{};
 };
 
@@ -223,7 +215,7 @@ struct MeshDescriptor
 
 struct InstanceSettings
 {
-    Handle<Mesh> mesh;
+    ecs::Entity entity;
 };
 
 struct BLASInstanceSettings
@@ -268,9 +260,9 @@ class Renderer
 
 DEFINE_STD_HASH(gfx::ImageViewDescriptor, eng::hash::combine_fnv1a(t.view_type, t.format, t.aspect, t.layers, t.mips));
 DEFINE_STD_HASH(gfx::Geometry, eng::hash::combine_fnv1a(t.vertex_range, t.index_range, t.meshlet_range));
-DEFINE_STD_HASH(gfx::Texture, eng::hash::combine_fnv1a(t.image, t.view, t.layout, t.sampler));
 DEFINE_STD_HASH(gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.base_color_texture));
 DEFINE_STD_HASH(gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
+DEFINE_STD_HASH(gfx::MeshPass, eng::hash::combine_fnv1a(t.name));
 DEFINE_STD_HASH(gfx::ShaderEffect, eng::hash::combine_fnv1a(t.pipeline));
 DEFINE_STD_HASH(gfx::SamplerDescriptor,
                 eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],

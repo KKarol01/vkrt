@@ -1,8 +1,9 @@
 #pragma once
 
-#include <iostream>
+#include <span>
 #include <vector>
 #include <array>
+#include <stack>
 #include <cassert>
 #include <type_traits>
 #include <atomic>
@@ -39,11 +40,15 @@ class IComponentPool
     virtual ~IComponentPool() = default;
     virtual void* get(Entity e) = 0;
     virtual void erase(Entity e) = 0;
+    virtual void clone(Entity src, Entity dst) = 0;
 };
 
 template <typename T> class ComponentPool : public IComponentPool
 {
   public:
+    auto begin() { return components.begin(); }
+    auto end() { return components.begin() + size(); }
+
     void* get(Entity e) final
     {
         const auto it = entities.get(e);
@@ -69,7 +74,7 @@ template <typename T> class ComponentPool : public IComponentPool
         if(it.index < components.size()) { components.at(it.index) = T{ std::forward<Args>(args)... }; }
         else if(it.index == components.size()) { components.emplace_back(std::forward<Args>(args)...); }
         else { assert(false); }
-        return *static_cast<T*>(get(it.index));
+        return *static_cast<T*>(get(e));
     }
 
     void erase(Entity e) final
@@ -77,6 +82,19 @@ template <typename T> class ComponentPool : public IComponentPool
         const auto it = entities.erase(e);
         if(!it) { return; }
         components.at(it.index) = std::move(components.at(entities.size()));
+    }
+
+    void clone(Entity src, Entity dst) final
+    {
+        const auto srcit = entities.get(src);
+        auto dstit = entities.get(dst);
+        if(!srcit)
+        {
+            ENG_ERROR("Invalid entity for component cloning: {}, {}", src, dst);
+            return;
+        }
+        if(!dstit) { emplace(dst, components.at(srcit.index)); }
+        else { components.at(dstit.index) = components.at(srcit.index); }
     }
 
     size_t size() const { return entities.size(); }
@@ -96,6 +114,12 @@ class Registry
     };
 
   public:
+    template <typename Component> std::span<const Component> get_components()
+    {
+        const auto& arr = get_comp_arr<Component>();
+        return std::span{ arr.begin(), arr.end() };
+    }
+
     Entity create()
     {
         const auto e = entities.get(entities.insert());
@@ -168,6 +192,12 @@ class Registry
         }
     }
 
+    const std::vector<Entity>& get_children(Entity e) const
+    {
+        if(is_valid(e)) { return metadatas.at(e).children; }
+        return {};
+    }
+
     void make_child(Entity p, Entity c)
     {
         if(is_valid(p) && is_valid(c))
@@ -201,16 +231,48 @@ class Registry
 
     void traverse_hierarchy(Entity e, const auto& callback)
     {
-        const auto dfs = [this, callback](Entity e, const auto& recursive) {
-            if(!is_valid(e)) { return; }
-            callback(e);
+        if(!is_valid(e)) { return; }
+        const auto dfs = [this, callback](Entity p, Entity e, const auto& self) -> void {
+            callback(p, e);
             auto& ch = metadatas.at(e).children;
             for(auto c : ch)
             {
-                recursive(c, recursive);
+                self(e, c, self);
             }
         };
-        dfs(e, dfs);
+        dfs(INVALID_ENTITY, e, dfs);
+    }
+
+    Entity clone(Entity src)
+    {
+        if(!is_valid(src)) { return INVALID_ENTITY; }
+        std::stack<Entity> cparents;
+        Entity ret = INVALID_ENTITY;
+        traverse_hierarchy(src, [this, &cparents, &ret](auto p, auto e) {
+            auto clone = create();
+            if(ret == INVALID_ENTITY) { ret = clone; }
+            if(cparents.size())
+            {
+                auto pclone = cparents.top();
+                cparents.pop();
+                make_child(pclone, clone);
+            }
+            EntityMetadata& emd = metadatas.at(e);
+            for(auto i = 0u; i < MAX_COMPONENTS; ++i)
+            {
+                if(emd.components.test(i))
+                {
+                    metadatas.at(clone).components.set(i, true);
+                    component_arrays.at(i)->clone(e, clone);
+                }
+            }
+            for(auto i = 0u; i < emd.children.size(); ++i)
+            {
+                cparents.push(clone);
+            }
+        });
+        assert(cparents.empty());
+        return ret;
     }
 
   private:

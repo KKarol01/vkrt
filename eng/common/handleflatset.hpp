@@ -2,181 +2,241 @@
 
 #include <cstdint>
 #include <vector>
+#include <concepts>
 #include "handle.hpp"
 
-template <typename T, typename Hash, typename EqualTo>
-concept HandleFlatSetCompatible = requires(const T& t) {
-    { Hash{}(t) } -> std::convertible_to<bool>;
-    { EqualTo{}(t, t) } -> std::convertible_to<bool>;
+template <typename T>
+concept FlatSetCompatible = requires(const T& a, const T& b) {
+    { a == b } -> std::convertible_to<bool>;
+    { std::hash<T>{}(a) } -> std::convertible_to<uint64_t>;
 };
 
 // Idea stolen from https://github.com/martinus/unordered_dense.
 // Hashset, no duplicates, flat (vector) storage, hash and compare, robin hood replacing,
 // but with stable addressing and reuse of freed elements
-template <typename Key, typename Storage = Handle<Key>::Storage_T, typename Hash = std::hash<Key>, typename EqualTo = std::equal_to<Key>>
-    requires HandleFlatSetCompatible<Key, Hash, EqualTo>
-class HandleFlatSet
+template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>> class FlatSet
 {
   public:
     using index_t = uint32_t;
-    using handle_t = Handle<Key, Storage>;
-    static constexpr auto MAX_LOAD_FACTOR = 0.6f;
+    using offset_t = uint32_t;
 
+    inline static constexpr auto MAX_INDEX = ~index_t{};
+    inline static constexpr auto MAX_OFFSET = offset_t{ 0xFFFFFF };
+    inline static constexpr auto MAX_LOAD = 0.6f;
+
+  private:
     struct Bucket
     {
-        bool is_empty() const { return psl == ~0u >> 8; }
-        void invalidate() { psl = ~0u >> 8; }
-        uint32_t psl : 24 { ~0u };
-        uint32_t hash : 8 { 0u };
-        index_t data{ ~index_t{} };
+        bool empty() const { return offset == MAX_OFFSET; }
+        void invalidate() { offset = MAX_OFFSET; }
+        uint32_t hash : 8 {};
+        uint32_t offset : 24 { MAX_OFFSET };
+        index_t index{ MAX_INDEX };
     };
 
   public:
-    // for actually having dense, iterable, data array, a sparse set architecture would have
-    // to be added, adding third vector with indices to data array elements, and making buckets
-    // store in data member an index to the element inside indices array, and making data entries
-    // a pair of key and index to indices array, allowing swapping the last element in data array
-    // with the one to-be-deleted and for updating the indices to data inside indices array. that would
-    // add another 8-12 (alignment) bytes for bookeeping, totaling to 16-20 bytes per key.
-    // auto begin() { return data.begin(); }
-    // auto end() { return data.end(); }
-    auto size() const { return data.size(); }
-
-    Key& at(index_t h) { return data.at(h); }
-    Key& at(handle_t h) { return data.at(*h); }
-
-    const Key* find(const Key& k) const
+    struct InsertionResult
     {
-        auto it = find_bucket(k);
-        if(it == buckets.end()) { return nullptr; }
-        return &data.at(it->data);
+        index_t index;
+        bool success;
+    };
+
+    auto begin() { return data.begin(); }
+    auto end() { return data.begin() + size(); }
+
+    T& at(index_t i) { return data.at(offsets.at(i)); }
+    const T& at(index_t i) const { return data.at(offsets.at(i)); }
+    size_t size() const { return head; }
+
+    index_t find(const T& t)
+    {
+        const auto* b = find_bucket(t);
+        if(!b) { return MAX_INDEX; }
+        return b->index;
     }
 
-    template <typename Val> std::pair<handle_t, bool> insert(Val&& v)
+    template <typename Arg>
+        requires std::same_as<std::remove_cvref_t<Arg>, std::remove_cvref_t<T>>
+    InsertionResult insert(Arg&& t)
     {
-        resize();
-        const auto hash = Hash{}(v);
-        const uint8_t hash8 = hash & 0xFF;
-        const auto bs = buckets.size();
-        const auto max_psl = Bucket{}.psl;
-        auto bi = hash & (bs - 1);
-        Bucket cb{ 0, hash8, (index_t)data.size() };
-        index_t swapped_at = ~index_t{};
+        if(size() == MAX_INDEX)
+        {
+            auto* b = find_bucket(t);
+            if(b) { return { b->index, false }; }
+            return { MAX_INDEX, false };
+        }
+
+        maybe_resize();
+        const auto hash = Hash{}(t);
+        const auto hash8 = uint8_t{ hash & 0xFF };
+        auto idx = hash & (buckets.size() - 1);
+        Bucket nb{ hash8, 0u, (index_t)offsets.size() };
+        Bucket* ob{};
         while(true)
         {
-            auto& b = buckets.at(bi);
-            if(b.is_empty())
+            auto& b = buckets.at(idx);
+            if(b.empty())
             {
-                if(b.data == ~index_t{})
+                index_t ret_index{ MAX_INDEX };
+                if(b.index == MAX_INDEX)
                 {
-                    b = cb;                                       // overwrite empty bucket
-                    data.push_back(std::forward<Val>(v));         // append
-                    return { handle_t{ data.size() - 1 }, true }; // return index to last
+                    offsets.push_back(head);
+                    assert(head <= data.size());
+                    (head < data.size() ? data.at(head) : data.emplace_back()) = std::forward<Arg>(t);
+                    ret_index = (index_t)offsets.size() - 1;
+                }
+                else if(b.index < MAX_INDEX)
+                {
+                    if(!ob) { ob = &nb; }
+                    ob->index = b.index;
+                    offsets.at(b.index) = head;
+                    data.at(head) = std::forward<Arg>(t);
+                    ret_index = ob->index;
                 }
                 else
                 {
-                    cb.data = b.data;                        // data points to free slot inside data
-                    b = cb;                                  // overwrite empty bucket, keeping index to free slot
-                    data.at(cb.data) = std::forward<Val>(v); // overwrite destroyed element
-                    if(swapped_at != ~index_t{})
-                    {
-                        // if robin hood happened, the new bucket has default data.size() index, but along the way a free slot was found, so update it's index
-                        buckets.at(swapped_at).data = cb.data;
-                    }
-                    return { handle_t{ cb.data }, true }; // return index to found free slot.
+                    assert(false);
+                    return { MAX_INDEX, false };
                 }
+                b = nb;
+                ++head;
+                return { ret_index, true };
             }
-            // check for duplicate
-            if(b.hash == hash8 && EqualTo{}(data.at(b.data), v)) { return { handle_t{ b.data }, false }; }
-            // robin hood and remember new bucket index in case of finding free slot (not appending means cb's index will erronously point to the end)
-            if(b.psl < cb.psl)
+            if(b.hash == hash8 && EqualTo{}(at(b.index), t)) { return { b.index, false }; }
+            if(b.offset < nb.offset)
             {
-                std::swap(b, cb);
-                if(swapped_at == ~index_t{}) { swapped_at = bi; }
+                std::swap(b, nb);
+                if(!ob) { ob = &b; }
             }
-            bi = (bi + 1) & (bs - 1); // advance with wrap-around
-            ++cb.psl;                 // increase offset
-            if(cb.psl >= max_psl)
+            if(nb.offset == MAX_OFFSET)
             {
-                rehash(bs << 1);
-                return insert(std::forward<Val>(v));
+                rehash(buckets.size() << 1);
+                return insert(std::forward<Arg>(t));
             }
+            ++nb.offset;
+            idx = (idx + 1) & (buckets.size() - 1);
         }
     }
 
-    template <typename... Args> std::pair<handle_t, bool> emplace(Args&&... args)
+    bool erase(const T& t) { return erase(find_bucket(t)); }
+
+    bool erase(index_t t)
     {
-        return insert(Key{ std::forward<Args>(args)... });
-    }
+        if(offsets.size() <= t) { return false; }
+        auto* b = find_bucket(at(t));
+        if(!b) { return false; }
 
-    void erase(const Key& k) { backwards_erase(find_bucket(k)); }
+        const auto new_head = head - 1;
+        auto* eb = find_bucket(data.at(new_head));
+        assert(eb);
 
-    void erase(index_t bi) { erase(data.at(bi)); }
+        at(t) = std::move(data.at(new_head));
+        offsets.at(eb->index) = offsets.at(t);
+        --head;
 
-    void reserve(size_t size)
-    {
-        data.reserve(size);
-        rehash(std::bit_ceil((size_t)((float)size / MAX_LOAD_FACTOR)));
+        b->invalidate();
+        auto prev = std::distance(buckets.data(), b);
+        while(true)
+        {
+            auto curr = (prev + 1) & (buckets.size() - 1);
+            auto& cb = buckets.at(curr);
+            if(cb.empty() || cb.offset == 0) { break; }
+            --cb.offset;
+            buckets.at(prev) = cb;
+            cb = Bucket{};
+            prev = curr;
+        }
+
+        return true;
     }
 
   private:
-    void resize()
+    bool erase(Bucket* b)
     {
-        if(data.size() < buckets.size() * MAX_LOAD_FACTOR) { return; }
+        if(!b) { return false; }
+        return erase(b->index);
+    }
+
+    Bucket* find_bucket(const T& t)
+    {
+        if(!buckets.size()) { return nullptr; }
+        const auto hash = Hash{}(t);
+        const auto hash8 = uint8_t{ hash & 0xFF };
+        auto idx = hash & (buckets.size() - 1);
+        auto offset = 0u;
+        while(true)
+        {
+            auto& b = buckets.at(idx);
+            if(b.empty()) { return nullptr; }
+            if(b.offset < offset) { return nullptr; } // hash collision sequence has ended
+            if(b.hash == hash8 && EqualTo{}(at(b.index), t)) { return &b; }
+            ++offset;
+            idx = (idx + 1) & (buckets.size() - 1);
+        }
+    }
+
+    void maybe_resize()
+    {
+        if(size() < MAX_LOAD * buckets.size()) { return; }
         rehash(std::max(buckets.size() << 1, 1ull));
     }
 
     void rehash(size_t new_size)
     {
+        head = 0;
         buckets.clear();
         buckets.resize(new_size);
-        auto olddata = std::move(data);
-        data.reserve(olddata.size());
-        for(auto& e : olddata)
+        offsets.clear();
+        offsets.reserve(data.size());
+        auto old = std::move(data);
+        data.reserve(old.size());
+        for(auto& e : old)
         {
             insert(std::move(e));
         }
     }
 
-    auto find_bucket(const Key& k) const
-    {
-        const auto hash = Hash{}(k);
-        const uint8_t hash8 = hash & 0xFF;
-        const auto bs = buckets.size();
-        auto bi = hash & (bs - 1);
-        auto dist = 0ull;
-        while(true)
-        {
-            auto& b = buckets.at(bi);
-            if(b.is_empty()) { return buckets.end(); }
-            if(b.psl < dist) { return buckets.end(); }
-            if(b.hash == hash8 && EqualTo{}(data.at(b.data), k)) { return buckets.begin() + bi; }
-            bi = (bi + 1) & (bs - 1);
-            ++dist;
-        }
-    }
-
-    void backwards_erase(const auto it)
-    {
-        if(it == buckets.end()) { return; }
-        auto cur_bi = std::distance(buckets.begin(), it);
-        const auto bs = buckets.size();
-        buckets.at(cur_bi).invalidate();
-        data.at(buckets.at(cur_bi).data).~Key();
-        auto next_bi = (cur_bi + 1) & (bs - 1);
-        while(true)
-        {
-            auto& next_b = buckets.at(next_bi);
-            if(next_b.is_empty()) { break; }
-            if(next_b.psl == 0) { break; }
-            --next_b.psl;
-            buckets.at(cur_bi) = next_b;
-            next_b = Bucket{};
-            cur_bi = next_bi;
-            next_bi = (next_bi + 1) & (bs - 1);
-        }
-    }
-
-    std::vector<Key> data;
+    index_t head{};
+    std::vector<T> data;
+    std::vector<index_t> offsets;
     std::vector<Bucket> buckets;
+};
+
+template <FlatSetCompatible T, typename HandleStorage = Handle<T>::Storage_T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>>
+class HandleFlatSet
+{
+    using handle_t = Handle<T, HandleStorage>;
+    using set_t = FlatSet<T, Hash, EqualTo>;
+    using index_t = set_t::index_t;
+
+    struct WrappedInsertionResult
+    {
+        handle_t handle;
+        bool success;
+    };
+
+  public:
+    auto begin() { return set.begin(); }
+    auto end() { return set.end(); }
+    T& at(handle_t h) { return set.at(*h); }
+    const T& at(handle_t h) const { return set.at(*h); }
+    handle_t find(const T& t)
+    {
+        const auto idx = set.find(t);
+        if(idx == set.MAX_INDEX) { return handle_t{}; }
+        return handle_t{ idx };
+    }
+    size_t size() const { return set.size(); }
+
+    WrappedInsertionResult insert(auto&& t)
+    {
+        const auto ret = set.insert(std::forward<decltype(t)>(t));
+        return { handle_t{ ret.index }, ret.success };
+    }
+
+    bool erase(const T& t) { return set.erase(t); }
+    bool erase(index_t t) { return set.erase(t); }
+
+  private:
+    set_t set;
 };

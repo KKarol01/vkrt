@@ -4,7 +4,7 @@
 #include <compare>
 #include <atomic>
 
-template <typename T, typename Storage = uint64_t> struct Handle;
+template <typename T, typename Storage = uint32_t> struct Handle;
 
 template <typename T, typename Storage> struct HandleGenerator
 {

@@ -19,7 +19,7 @@ class SparseSet
     {
         explicit operator bool() const noexcept { return valid; }
         index_t index{ ~index_t{} }; // Index to dense.
-        bool valid{ false };         // Was insertion or deletion successful.
+        bool valid{ false };         // Was find, insertion or deletion successful.
     };
 
     bool has(key_t e) const

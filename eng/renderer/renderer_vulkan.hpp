@@ -16,6 +16,28 @@
 
 namespace gfx
 {
+struct Sampler
+{
+    bool operator==(const Sampler& o) const { return info == o.info; }
+    SamplerDescriptor info;
+    VkSampler sampler;
+};
+
+struct Texture
+{
+    auto operator<=>(const Texture& t) const = default;
+    Handle<Image> image;
+    VkImageView view;
+    VkImageLayout layout;
+    VkSampler sampler;
+};
+} // namespace gfx
+
+DEFINE_STD_HASH(gfx::Sampler, eng::hash::combine_fnv1a(t.info));
+DEFINE_STD_HASH(gfx::Texture, eng::hash::combine_fnv1a(t.image, t.view, t.layout, t.sampler));
+
+namespace gfx
+{
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t
@@ -177,9 +199,9 @@ struct PipelineMetadata
 
 struct MeshletInstance
 {
-    uint32_t mesh;
+    Handle<Geometry> geometry;
+    Handle<Material> material;
     uint32_t global_meshlet;
-    uint32_t meshlet;
     uint32_t index;
 };
 
@@ -277,14 +299,15 @@ class RendererVulkan : public Renderer
     HandleFlatSet<Material> materials;
     HandleFlatSet<Pipeline> pipelines;
     HandleFlatSet<ShaderEffect> shader_effects;
-    std::unordered_map<SamplerDescriptor, VkSampler> samplers;
-    std::unordered_map<std::filesystem::path, Shader> shaders;
-    std::unordered_map<std::string, MeshPass> mesh_passes;
+    HandleFlatSet<Shader> shaders;
+    HandleFlatSet<Sampler> samplers;
+    HandleFlatSet<MeshPass> mesh_passes;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
 
     uint32_t mesh_instance_index{}; // todo: reuse slots
     std::vector<MeshletInstance> meshlet_instances;
+    std::vector<ecs::Entity> entities;
     std::vector<MultiBatch> multibatches;
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> hiz_pipeline;
@@ -309,6 +332,7 @@ class RendererVulkan : public Renderer
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
 
+    Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
 
     // DDGI ddgi;
@@ -326,6 +350,7 @@ DEFINE_HANDLE_DISPATCHER(gfx::Image, { return &gfx::RendererVulkan::get_instance
 DEFINE_HANDLE_DISPATCHER(gfx::Geometry, { return &gfx::RendererVulkan::get_instance()->geometries.at(handle); });
 DEFINE_HANDLE_DISPATCHER(gfx::Mesh, { return &gfx::RendererVulkan::get_instance()->meshes.at(*handle); });
 DEFINE_HANDLE_DISPATCHER(gfx::Texture, { return &gfx::RendererVulkan::get_instance()->textures.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Material, { return &gfx::RendererVulkan::get_instance()->materials.at(*handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Shader, { return reinterpret_cast<gfx::Shader*>(*handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(*handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Material, { return &gfx::RendererVulkan::get_instance()->materials.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Shader, { return &gfx::RendererVulkan::get_instance()->shaders.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Sampler, { return &gfx::RendererVulkan::get_instance()->samplers.at(handle); });

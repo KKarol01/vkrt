@@ -139,10 +139,8 @@ void BindlessPool::update_index(Handle<Texture> handle)
 {
     const auto index = texture_indices.at(handle);
     const auto& txt = handle.get();
-    const auto& update =
-        texture_updates.emplace_back(Vks(VkDescriptorImageInfo{ .sampler = reinterpret_cast<VkSampler>(*txt.sampler),
-                                                                .imageView = reinterpret_cast<VkImageView>(*txt.view),
-                                                                .imageLayout = static_cast<VkImageLayout>(*txt.layout) }));
+    const auto& update = texture_updates.emplace_back(Vks(VkDescriptorImageInfo{
+        .sampler = txt.sampler, .imageView = txt.view, .imageLayout = txt.layout }));
     const auto write = Vks(VkWriteDescriptorSet{
         .dstSet = set,
         .dstBinding = (uint32_t)(txt.sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),

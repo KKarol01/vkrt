@@ -73,7 +73,7 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
 bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
     vec3 center = vec3(constants.debug_view * vec4(bounding_sphere.xyz, 1.0));
     center.y *= -1.0;
-    float radius = max(bounding_sphere.w, 0.4) * 1.1;
+    float radius = max(bounding_sphere.w, 0.4) * 1.2;
 	vec4 aabb;
 	if (project_sphere_bounds(vec3(center.xy, -center.z), radius, 0.1, P00, P11, aabb))
 	{
