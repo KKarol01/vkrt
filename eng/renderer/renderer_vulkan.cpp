@@ -302,7 +302,9 @@ void RendererVulkan::initialize_imgui()
 void RendererVulkan::initialize_resources()
 {
     bindless_pool = new BindlessPool{ dev };
-    staging_buffer = new StagingBuffer{ submit_queue };
+    staging_manager = new GPUStagingManager{};
+    staging_manager->init(submit_queue,
+                          [](Handle<Buffer> buffer) { RendererVulkan::get_instance()->update_resource(buffer); });
     // vertex_positions_buffer = make_buffer(BufferCreateInfo{
     //     "vertex_positions_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     //                                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
@@ -361,8 +363,6 @@ void RendererVulkan::initialize_resources()
         fd.sem_rendering_finished = submit_queue->make_semaphore();
         fd.fen_rendering_finished = submit_queue->make_fence(true);
         fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
-        fd.transform_buffers =
-            make_buffer(BufferCreateInfo{ fmt::format("transform_buffer_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
     // vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
@@ -494,19 +494,10 @@ void RendererVulkan::create_window_sized_resources()
                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
     }
 
-    static constexpr auto insert_vk_img_barrier = [](VkCommandBuffer cmd, Image& img, VkPipelineStageFlags2 src_stage,
+    static constexpr auto insert_vk_img_barrier = [](CommandBuffer* cmd, Image& img, VkPipelineStageFlags2 src_stage,
                                                      VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
                                                      VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout) {
-        const auto barr = Vks(VkImageMemoryBarrier2{ .srcStageMask = src_stage,
-                                                     .srcAccessMask = src_access,
-                                                     .dstStageMask = dst_stage,
-                                                     .dstAccessMask = dst_access,
-                                                     .oldLayout = old_layout,
-                                                     .newLayout = new_layout,
-                                                     .image = img.image,
-                                                     .subresourceRange = { img.deduce_aspect(), 0, img.mips, 0, img.layers } });
-        const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
-        vkCmdPipelineBarrier2(cmd, &dep);
+        cmd->barrier(img, src_stage, src_access, dst_stage, dst_access, old_layout, new_layout);
     };
 
     auto cmd = frame_datas[0].cmdpool->begin();
@@ -520,18 +511,17 @@ void RendererVulkan::create_window_sized_resources()
                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         auto& img = frame_datas[i].gbuffer.depth_buffer_image.get();
-        insert_vk_img_barrier(cmd, img, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                              VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkClearDepthStencilValue clear{ .depth = 0.0f, .stencil = 0 };
-        VkImageSubresourceRange range{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-        vkCmdClearDepthStencilImage(cmd, img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
+        cmd->clear_depth_stencil(img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, { 0, 1 }, { 0, 1 }, 0.0f, 0);
         insert_vk_img_barrier(cmd, img, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                               VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        geom_main_bufs.transform_bufs[i] = make_buffer(BufferCreateInfo{
+            fmt::format("transform_buffer_{}", i), 1024,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
     }
     frame_datas[0].cmdpool->end(cmd);
-    submit_queue->with_cmd_buf(cmd).submit_wait(-1ull);
+    submit_queue->with_cmd_buf(cmd).submit_wait(~0ull);
 }
 
 void RendererVulkan::build_render_graph()
@@ -668,21 +658,19 @@ void RendererVulkan::update()
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
             .cam_pos = Engine::get().camera->pos,
         };
-
-        staging_buffer->stage(fd.constants, constants, 0ull);
+        staging_manager->copy(fd.constants, &constants, 0, { 0, sizeof(constants) });
         // staging_buffer->stage(vsm.constants_buffer, vsmconsts, 0ull);
     }
 
     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT))
     {
-        assert(false);
-        // upload_transforms();
+        std::swap(geom_main_bufs.transform_bufs[0], geom_main_bufs.transform_bufs[1]);
     }
 
     uint32_t old_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 1);
     bake_indirect_commands();
 
-    staging_buffer->flush();
+    staging_manager->flush();
 
     static constexpr auto insert_vk_barrier = [](VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                                                  VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
@@ -727,33 +715,26 @@ void RendererVulkan::update()
                                                  .ids_index = bindless_pool->get_index(geom_main_bufs.buf_draw_ids),
                                                  .post_cull_ids_index = bindless_pool->get_index(geom_main_bufs.buf_final_draw_ids),
                                                  .bs_index = bindless_pool->get_index(geom_main_bufs.buf_draw_bs),
-                                                 .transforms_index = bindless_pool->get_index(fd.transform_buffers),
+                                                 .transforms_index = bindless_pool->get_index(geom_main_bufs.transform_bufs[0]),
                                                  .indirect_commands_index = bindless_pool->get_index(geom_main_bufs.buf_draw_cmds) };
 
     {
         auto& dep_image = fd.gbuffer.depth_buffer_image.get();
         auto& hiz_image = fd.hiz_pyramid.get();
-
+        cmd->bind_pipeline(hiz_pipeline.get());
         if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
         {
-            {
-                VkClearDepthStencilValue clear{ .depth = 0.0f, .stencil = 0 };
-                VkImageSubresourceRange range{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, hiz_image.mips, 0, 1 };
-                vkCmdClearDepthStencilImage(cmd, hiz_image.image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
-                insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
-
-                insert_vk_img_barrier(cmd, fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                      VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                                      VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            }
+            cmd->clear_depth_stencil(hiz_image, VK_IMAGE_LAYOUT_GENERAL, { 0, VK_REMAINING_MIP_LEVELS }, { 0, 1 }, 0.0f, 0);
+            cmd->barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
             push_constants_culling.hiz_width = hiz_image.extent.width;
             push_constants_culling.hiz_height = hiz_image.extent.height;
 
-            auto* md = (PipelineMetadata*)hiz_pipeline->metadata;
-            vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
-            bindless_pool->bind(cmd, md->bind_point);
+            bindless_pool->bind(cmd);
             for(auto i = 0u; i < hiz_image.mips; ++i)
             {
                 if(i == 0)
@@ -778,21 +759,19 @@ void RendererVulkan::update()
                                                           VK_IMAGE_LAYOUT_GENERAL, nullptr));
                 push_constants_culling.hiz_width = std::max(hiz_image.extent.width >> i, 1u);
                 push_constants_culling.hiz_height = std::max(hiz_image.extent.height >> i, 1u);
-                vkCmdPushConstants(cmd, bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
-                                   sizeof(push_constants_culling), &push_constants_culling);
-                vkCmdDispatch(cmd, (push_constants_culling.hiz_width + 31) / 32, (push_constants_culling.hiz_height + 31) / 32, 1);
-                insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
-                                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                                  VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
+                cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
+                cmd->dispatch((push_constants_culling.hiz_width + 31) / 32, (push_constants_culling.hiz_height + 31) / 32, 1);
+                cmd->barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
+                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
             }
         }
         else
         {
-            auto* md = (PipelineMetadata*)hiz_pipeline->metadata;
-            bindless_pool->bind(cmd, md->bind_point);
-            insert_vk_img_barrier(cmd, fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                  VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                                  VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            bindless_pool->bind(cmd);
+            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
         push_constants_culling.hiz_source =
             bindless_pool->get_index(make_texture(fd.hiz_pyramid,
@@ -803,20 +782,14 @@ void RendererVulkan::update()
             bindless_pool->get_index(make_texture(fd.hiz_debug_output,
                                                   fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
                                                   VK_IMAGE_LAYOUT_GENERAL, nullptr));
-        {
-            VkClearColorValue clear{ .float32 = 0.0f };
-            VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            vkCmdClearColorImage(cmd, fd.hiz_debug_output->image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
-            insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
-        }
-        vkCmdPushConstants(cmd, bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0,
-                           sizeof(push_constants_culling), &push_constants_culling);
-        auto* md = (PipelineMetadata*)cull_pipeline->metadata;
-        vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
-        vkCmdDispatch(cmd, (meshlet_instances.size() + 63) / 64, 1, 1);
-        insert_vk_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
-                          VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+        cmd->clear_color(fd.hiz_debug_output.get(), VK_IMAGE_LAYOUT_GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
+        cmd->barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+        cmd->bind_pipeline(cull_pipeline.get());
+        cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
+        cmd->dispatch((meshlet_instances.size() + 63) / 64, 1, 1);
+        cmd->barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
     }
 
     VkRenderingAttachmentInfo rainfos[]{
@@ -854,7 +827,7 @@ void RendererVulkan::update()
         .indices_index = bindless_pool->get_index(geom_main_bufs.buf_indices),
         .vertex_positions_index = bindless_pool->get_index(geom_main_bufs.buf_vpos),
         .vertex_attributes_index = bindless_pool->get_index(geom_main_bufs.buf_vattrs),
-        .transforms_index = ~0u,
+        .transforms_index = bindless_pool->get_index(geom_main_bufs.transform_bufs[0]),
         .constants_index = bindless_pool->get_index(fd.constants),
         .meshlet_instance_index = bindless_pool->get_index(geom_main_bufs.buf_draw_ids),
         .meshlet_ids_index = bindless_pool->get_index(geom_main_bufs.buf_final_draw_ids),
@@ -865,34 +838,33 @@ void RendererVulkan::update()
             VK_IMAGE_LAYOUT_GENERAL, batch_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } })->sampler)),
     };
 
-    vkCmdBindIndexBuffer(cmd, geom_main_bufs.buf_indices->buffer, 0, VK_INDEX_TYPE_UINT16);
-    insert_vk_img_barrier(cmd, *swapchain_image, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
-    insert_vk_img_barrier(cmd, fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                          VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
-    vkCmdBeginRendering(cmd, &rinfo);
-    bindless_pool->bind(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
+    cmd->bind_index(geom_main_bufs.buf_indices.get(), 0, VK_INDEX_TYPE_UINT16);
+    cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    cmd->begin_rendering(rinfo);
+
     VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
     VkRect2D scissor{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
     for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
     {
         const auto& mb = multibatches.at(i);
         const auto& p = pipelines.at(mb.pipeline);
-        const auto* pm = static_cast<PipelineMetadata*>(p.metadata);
-        vkCmdBindPipeline(cmd, pm->bind_point, pm->pipeline);
-        vkCmdPushConstants(cmd, pm->layout, VK_SHADER_STAGE_ALL, 0u, sizeof(pc1), &pc1);
-        vkCmdSetViewportWithCount(cmd, 1, &viewport);
-        vkCmdSetScissorWithCount(cmd, 1, &scissor);
-        vkCmdDrawIndexedIndirectCount(cmd, geom_main_bufs.buf_draw_cmds->buffer, 8, geom_main_bufs.buf_draw_cmds->buffer,
-                                      0, geom_main_bufs.command_count, sizeof(DrawIndirectCommand));
+        cmd->bind_pipeline(p);
+        if(i == 0) { bindless_pool->bind(cmd); }
+        cmd->push_constants(VK_SHADER_STAGE_ALL, &pc1, { 0u, sizeof(pc1) });
+        cmd->set_viewports(&viewport, 1);
+        cmd->set_scissors(&scissor, 1);
+        cmd->draw_indexed_indirect_count(geom_main_bufs.buf_draw_cmds.get(), 8, geom_main_bufs.buf_draw_cmds.get(), 0,
+                                         geom_main_bufs.command_count, sizeof(DrawIndirectCommand));
     }
-    vkCmdEndRendering(cmd);
-    insert_vk_img_barrier(cmd, *swapchain_image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                          VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    cmd->end_rendering();
+    cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     fd.cmdpool->end(cmd);
 
@@ -912,7 +884,7 @@ void RendererVulkan::update()
     vkQueuePresentKHR(submit_queue->queue, &pinfo);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
 
-    // flags.clear();
+    flags.clear();
     submit_queue->wait_idle();
 
     uint32_t new_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 2);
@@ -941,7 +913,7 @@ Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
                                                     .format = eng::to_vk(desc.format),
                                                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                                              VK_IMAGE_USAGE_TRANSFER_DST_BIT });
-    staging_buffer->stage(handle, desc.data, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    staging_manager->copy(handle, desc.data.data(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     return handle;
 }
 
@@ -1011,9 +983,9 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
         memcpy(&attributes[i * VXATTRSIZE], reinterpret_cast<const std::byte*>(&v) + sizeof(Vertex::position), VXATTRSIZE);
     }
 
-    staging_buffer->stage(geom_main_bufs.buf_vpos, positions, STAGING_APPEND);
-    staging_buffer->stage(geom_main_bufs.buf_vattrs, attributes, STAGING_APPEND);
-    staging_buffer->stage(geom_main_bufs.buf_indices, out_indices, STAGING_APPEND);
+    staging_manager->copy(geom_main_bufs.buf_vpos, positions, STAGING_APPEND);
+    staging_manager->copy(geom_main_bufs.buf_vattrs, attributes, STAGING_APPEND);
+    staging_manager->copy(geom_main_bufs.buf_indices, out_indices, STAGING_APPEND);
 
     geom_main_bufs.vertex_count += positions.size();
     geom_main_bufs.index_count += out_indices.size();
@@ -1095,7 +1067,9 @@ Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch)
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
+    const auto* transform = Engine::get().ecs->get<ecs::comp::Transform>(settings.entity);
     const auto* mr = Engine::get().ecs->get<ecs::comp::MeshRenderer>(settings.entity);
+    if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
     if(!mr) { return {}; }
     for(const auto& e : mr->meshes)
     {
@@ -1103,6 +1077,15 @@ Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
     }
     assert(entities.size() == mesh_instance_index);
     entities.push_back(settings.entity);
+    if(!flags.test(RenderFlags::DIRTY_TRANSFORMS_BIT))
+    {
+        flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
+        staging_manager->copy(geom_main_bufs.transform_bufs[1], geom_main_bufs.transform_bufs[0], 0,
+                              { 0, geom_main_bufs.transform_bufs[0]->size });
+        staging_manager->insert_barrier();
+    }
+    staging_manager->copy(geom_main_bufs.transform_bufs[1], &transform->global, mesh_instance_index * sizeof(glm::mat4),
+                          { 0, sizeof(glm::mat4) });
     return Handle<Mesh>{ mesh_instance_index++ };
 }
 
@@ -1236,13 +1219,12 @@ void RendererVulkan::compile_pipelines()
     {
         auto& p = e.get();
         const auto& info = p.info;
-        p.metadata = new PipelineMetadata{};
-        auto* pm = (PipelineMetadata*)p.metadata;
+        p.vkmetadata = new VkPipelineMetadata{};
 
         {
             const auto stage = info.shaders[0]->stage;
-            if(stage == Shader::Stage::VERTEX) { pm->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
-            else if(stage == Shader::Stage::COMPUTE) { pm->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+            if(stage == Shader::Stage::VERTEX) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
+            else if(stage == Shader::Stage::COMPUTE) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
             else
             {
                 assert(false);
@@ -1250,7 +1232,7 @@ void RendererVulkan::compile_pipelines()
             }
         }
 
-        pm->layout = bindless_pool->get_pipeline_layout();
+        p.vkmetadata->layout = bindless_pool->get_pipeline_layout();
 
         std::vector<VkPipelineShaderStageCreateInfo> stages;
         stages.reserve(info.shaders.size());
@@ -1260,10 +1242,10 @@ void RendererVulkan::compile_pipelines()
                 .stage = eng::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
         }
 
-        if(pm->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
+        if(p.vkmetadata->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
         {
-            const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = pm->layout });
-            VK_CHECK(vkCreateComputePipelines(dev, {}, 1, &vkinfo, {}, &pm->pipeline));
+            const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = p.vkmetadata->layout });
+            VK_CHECK(vkCreateComputePipelines(dev, {}, 1, &vkinfo, {}, &p.vkmetadata->pipeline));
             continue;
         }
 
@@ -1342,7 +1324,7 @@ void RendererVulkan::compile_pipelines()
             .pDynamicState = &pDynamicState,
             .layout = RendererVulkan::get_instance()->bindless_pool->get_pipeline_layout(),
         });
-        VK_CHECK(vkCreateGraphicsPipelines(dev, nullptr, 1, &vk_info, nullptr, &pm->pipeline));
+        VK_CHECK(vkCreateGraphicsPipelines(dev, nullptr, 1, &vk_info, nullptr, &p.vkmetadata->pipeline));
     }
 }
 
@@ -1427,15 +1409,16 @@ void RendererVulkan::bake_indirect_commands()
         gpu_bbs.at(i) = meshlets.at(e.global_meshlet).bounding_sphere;
     }
 
-    std::vector<uint32_t> final_ids(meshlet_instances.size());
-
-    staging_buffer->stage(geom_main_bufs.buf_draw_cmds, (uint32_t)gpu_cmds.size(), 0);
-    staging_buffer->stage(geom_main_bufs.buf_draw_cmds, 0, 4);
-    staging_buffer->stage(geom_main_bufs.buf_draw_cmds, gpu_cmds, 8);
-    staging_buffer->stage(geom_main_bufs.buf_draw_ids, (uint32_t)meshlet_instances.size(), 0);
-    staging_buffer->stage(geom_main_bufs.buf_draw_ids, gpu_ids, 8);
-    staging_buffer->stage(geom_main_bufs.buf_final_draw_ids, final_ids, 0);
-    staging_buffer->stage(geom_main_bufs.buf_draw_bs, gpu_bbs, 0);
+    const auto gpu_cmd_count = (uint32_t)gpu_cmds.size();
+    const auto post_cull_tri_count = 0u;
+    const auto meshlet_instance_count = (uint32_t)meshlet_instances.size();
+    staging_manager->copy(geom_main_bufs.buf_draw_cmds, &gpu_cmd_count, 0, { 0, 4 });
+    staging_manager->copy(geom_main_bufs.buf_draw_cmds, &post_cull_tri_count, 4, { 0, 4 });
+    staging_manager->copy(geom_main_bufs.buf_draw_cmds, gpu_cmds, 8);
+    staging_manager->copy(geom_main_bufs.buf_draw_ids, &meshlet_instance_count, 0, { 0, 4 });
+    staging_manager->copy(geom_main_bufs.buf_draw_ids, gpu_ids, 8);
+    staging_manager->resize(geom_main_bufs.buf_final_draw_ids, meshlet_instances.size() * 4);
+    staging_manager->copy(geom_main_bufs.buf_draw_bs, gpu_bbs, 0);
 }
 
 void RendererVulkan::build_blas()
@@ -1490,7 +1473,7 @@ void RendererVulkan::build_blas()
         meta.blas_buffer =
             make_buffer("blas_buffer", build_size_info.accelerationStructureSize,
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-        scratch_sizes.push_back(align_up(build_size_info.buildScratchSize,
+        scratch_sizes.push_back(align_up2(build_size_info.buildScratchSize,
                                          static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment)));
 
         auto blas_info = Vks(VkAccelerationStructureCreateInfoKHR{

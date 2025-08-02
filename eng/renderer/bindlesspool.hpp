@@ -11,6 +11,9 @@
 namespace gfx
 {
 
+struct Pipeline;
+struct CommandBuffer;
+
 class BindlessPool
 {
   public:
@@ -20,7 +23,7 @@ class BindlessPool
     BindlessPool() noexcept = default;
     BindlessPool(VkDevice dev) noexcept;
 
-    void bind(VkCommandBuffer cmd, VkPipelineBindPoint point);
+    void bind(CommandBuffer* cmd);
 
     VkDescriptorSetLayout get_set_layout() const { return set_layout; }
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout; }

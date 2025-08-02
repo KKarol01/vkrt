@@ -66,7 +66,6 @@ struct Image
     void destroy();
     VkImageAspectFlags deduce_aspect() const;
     VkImageViewType deduce_image_view_type() const;
-    // On empty, returns default view. Caches the results.
     VkImageView create_image_view(const ImageViewDescriptor& info = {});
     VkImageView get_image_view(const ImageViewDescriptor& info = {}) const;
 

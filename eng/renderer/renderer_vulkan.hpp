@@ -64,6 +64,8 @@ struct GeometryBuffers
     Handle<Buffer> buf_final_draw_ids; // post cull instance ids
     Handle<Buffer> buf_draw_bs;        // bouding spheres
     Handle<Buffer> buf_draw_settings;  // draw settings (for cullling)
+    Handle<Buffer> transform_bufs[2];
+
     VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
     size_t vertex_count{};
     size_t index_count{};
@@ -141,7 +143,6 @@ struct FrameData
     VkSemaphore sem_rendering_finished{};
     VkFence fen_rendering_finished{};
     Handle<Buffer> constants{};
-    Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
     Handle<Image> hiz_pyramid;
     Handle<Image> hiz_debug_output;
@@ -190,7 +191,7 @@ struct ShaderMetadata
     VkShaderModule shader{};
 };
 
-struct PipelineMetadata
+struct VkPipelineMetadata
 {
     VkPipeline pipeline{};
     VkPipelineLayout layout{};
@@ -212,7 +213,7 @@ struct MultiBatch
 };
 
 class SubmitQueue;
-class StagingBuffer;
+class GPUStagingManager;
 class BindlessPool;
 
 class RendererVulkan : public Renderer
@@ -268,6 +269,7 @@ class RendererVulkan : public Renderer
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
 
+    void resize_buffer(Handle<Buffer> buffer, size_t newsize);
     void destroy_buffer(Handle<Buffer> buffer);
     void destroy_image(Handle<Image> image);
     uint32_t get_bindless(Handle<Buffer> buffer);
@@ -288,7 +290,7 @@ class RendererVulkan : public Renderer
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
     SubmitQueue* submit_queue{};
-    StagingBuffer* staging_buffer{};
+    GPUStagingManager* staging_manager{};
     BindlessPool* bindless_pool{};
     // RenderGraph rendergraph;
 

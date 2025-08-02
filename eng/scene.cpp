@@ -132,6 +132,7 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
     imgd.width = (uint32_t)x;
     imgd.height = (uint32_t)y;
     const auto img = Engine::get().renderer->batch_image(imgd);
+    stbi_image_free(imgdata);
     ctx.images.at(index) = img;
     return img;
 }

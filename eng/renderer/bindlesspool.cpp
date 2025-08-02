@@ -2,6 +2,7 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/resources/resources.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
+#include <eng/renderer/submit_queue.hpp>
 
 namespace gfx
 {
@@ -82,10 +83,10 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
     assert(set);
 }
 
-void BindlessPool::bind(VkCommandBuffer cmd, VkPipelineBindPoint point)
+void BindlessPool::bind(CommandBuffer* cmd)
 {
     update();
-    vkCmdBindDescriptorSets(cmd, point, pipeline_layout, 0, 1, &set, 0, nullptr);
+    cmd->bind_descriptors(&set, { 0, 1 });
 }
 
 uint32_t BindlessPool::get_index(Handle<Buffer> handle)

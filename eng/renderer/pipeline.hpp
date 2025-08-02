@@ -9,6 +9,8 @@
 namespace gfx
 {
 
+struct VkPipelineMetadata;
+
 struct Shader
 {
     enum class Stage
@@ -85,7 +87,9 @@ struct Pipeline
 {
     auto operator==(const Pipeline& o) const { return (info <=> o.info) == 0; }
     PipelineCreateInfo info;
-    void* metadata{};
+    union {
+        VkPipelineMetadata* vkmetadata;
+    };
 };
 
 } // namespace gfx
