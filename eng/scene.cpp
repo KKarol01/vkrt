@@ -152,12 +152,12 @@ static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t in
         else if(*fsamp.minFilter == fastgltf::Filter::LinearMipMapNearest)
         {
             sampd.filtering[0] = gfx::ImageFilter::NEAREST;
-            sampd.mipmap_mode = gfx::SamplerDescriptor::MipMapMode::NEAREST;
+            sampd.mipmap_mode = gfx::SamplerMipmapMode::NEAREST;
         }
         else if(*fsamp.minFilter == fastgltf::Filter::LinearMipMapLinear)
         {
             sampd.filtering[0] = gfx::ImageFilter::LINEAR;
-            sampd.mipmap_mode = gfx::SamplerDescriptor::MipMapMode::LINEAR;
+            sampd.mipmap_mode = gfx::SamplerMipmapMode::LINEAR;
         }
     }
     if(fsamp.magFilter)
@@ -321,8 +321,7 @@ ecs::Entity Scene::instance_entity(ecs::Entity node)
     auto* r = Engine::get().renderer;
     auto root = ecs->clone(node);
     ecs->traverse_hierarchy(root, [ecs, r](auto p, auto e) {
-        auto* mr = ecs->get<ecs::comp::MeshRenderer>(e);
-        if(mr) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
+        if(ecs->has<ecs::comp::MeshRenderer>(e)) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
     });
     scene.push_back(root);
     return root;

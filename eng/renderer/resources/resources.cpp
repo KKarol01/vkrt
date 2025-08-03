@@ -150,8 +150,8 @@ VkImageView Image::create_image_view(const ImageViewDescriptor& info)
     auto* r = RendererVulkan::get_instance();
     const auto vkinfo = Vks(VkImageViewCreateInfo{
         .image = image,
-        .viewType = info.view_type ? eng::to_vk(*info.view_type) : deduce_image_view_type(),
-        .format = info.format ? eng::to_vk(*info.format) : format,
+        .viewType = info.view_type ? gfx::to_vk(*info.view_type) : deduce_image_view_type(),
+        .format = info.format ? gfx::to_vk(*info.format) : format,
         .subresourceRange = { info.aspect ? *info.aspect : deduce_aspect(), (uint32_t)info.mips.offset,
                               (uint32_t)info.mips.size, (uint32_t)info.layers.offset, (uint32_t)info.layers.size } });
     VkImageView view{};

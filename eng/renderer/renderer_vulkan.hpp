@@ -260,7 +260,7 @@ class RendererVulkan : public Renderer
     void build_tlas();
     void update_ddgi();
 
-    Handle<Shader> make_shader(Shader::Stage stage, const std::filesystem::path& path);
+    Handle<Shader> make_shader(ShaderStage stage, const std::filesystem::path& path);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
     Handle<MeshPass> make_mesh_pass(const MeshPassCreateInfo& info);

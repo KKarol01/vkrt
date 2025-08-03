@@ -408,24 +408,24 @@ void RendererVulkan::initialize_resources()
 void RendererVulkan::initialize_mesh_passes()
 {
     cull_pipeline = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader(Shader::Stage::COMPUTE, "culling/culling.comp.glsl") } });
-    hiz_pipeline = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader(Shader::Stage::COMPUTE, "culling/hiz.comp.glsl") } });
+        .shaders = { make_shader(ShaderStage::COMPUTE, "culling/culling.comp.glsl") } });
+    hiz_pipeline =
+        make_pipeline(PipelineCreateInfo{ .shaders = { make_shader(ShaderStage::COMPUTE, "culling/hiz.comp.glsl") } });
     hiz_sampler = batch_sampler(SamplerDescriptor{ .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
                                                    .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
                                                                    ImageAddressing::CLAMP_EDGE },
-                                                   .mipmap_mode = SamplerDescriptor::MipMapMode::NEAREST,
-                                                   .reduction_mode = SamplerDescriptor::ReductionMode::MIN })
+                                                   .mipmap_mode = SamplerMipmapMode::NEAREST,
+                                                   .reduction_mode = SamplerReductionMode::MIN })
                       ->sampler;
 
     const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
-        .depth_format = ImageFormat::D32_SFLOAT,
-        .culling = PipelineCreateInfo::CullMode::BACK,
-        .shaders = { make_shader(Shader::Stage::VERTEX, "default_unlit/unlit.vert.glsl"),
-                     make_shader(Shader::Stage::PIXEL, "default_unlit/unlit.frag.glsl") },
+        .shaders = { make_shader(ShaderStage::VERTEX, "default_unlit/unlit.vert.glsl"),
+                     make_shader(ShaderStage::PIXEL, "default_unlit/unlit.frag.glsl") },
+        .attachments = { .count = 1, .color_formats = { ImageFormat::R8G8B8A8_SRGB }, .depth_format = ImageFormat::D32_SFLOAT },
         .depth_test = true,
         .depth_write = true,
-        .depth_compare = PipelineCreateInfo::DepthCompare::GREATER,
+        .depth_compare = DepthCompare::GREATER,
+        .culling = CullFace::BACK,
     });
     MeshPassCreateInfo info{ .name = "default_unlit" };
     info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
@@ -908,9 +908,9 @@ void RendererVulkan::on_window_resize()
 Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
 {
     const auto handle = make_image(ImageCreateInfo{ .name = desc.name,
-                                                    .type = eng::to_vk(desc.type),
+                                                    .type = gfx::to_vk(desc.type),
                                                     .extent = { desc.width, desc.height, 1 },
-                                                    .format = eng::to_vk(desc.format),
+                                                    .format = gfx::to_vk(desc.format),
                                                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                                              VK_IMAGE_USAGE_TRANSFER_DST_BIT });
     staging_manager->copy(handle, desc.data.data(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
@@ -922,12 +922,12 @@ Handle<Sampler> RendererVulkan::batch_sampler(const SamplerDescriptor& batch)
     auto it = samplers.insert(Sampler{ batch, nullptr });
     if(it.success)
     {
-        auto info = Vks(VkSamplerCreateInfo{ .magFilter = eng::to_vk(batch.filtering[1]),
-                                             .minFilter = eng::to_vk(batch.filtering[0]),
-                                             .mipmapMode = eng::to_vk(batch.mipmap_mode),
-                                             .addressModeU = eng::to_vk(batch.addressing[0]),
-                                             .addressModeV = eng::to_vk(batch.addressing[1]),
-                                             .addressModeW = eng::to_vk(batch.addressing[2]),
+        auto info = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(batch.filtering[1]),
+                                             .minFilter = gfx::to_vk(batch.filtering[0]),
+                                             .mipmapMode = gfx::to_vk(batch.mipmap_mode),
+                                             .addressModeU = gfx::to_vk(batch.addressing[0]),
+                                             .addressModeV = gfx::to_vk(batch.addressing[1]),
+                                             .addressModeW = gfx::to_vk(batch.addressing[2]),
                                              .mipLodBias = batch.mip_lod[2],
                                              .minLod = batch.mip_lod[0],
                                              .maxLod = batch.mip_lod[1] });
@@ -935,7 +935,7 @@ Handle<Sampler> RendererVulkan::batch_sampler(const SamplerDescriptor& batch)
         auto reduction = Vks(VkSamplerReductionModeCreateInfo{});
         if(batch.reduction_mode)
         {
-            reduction.reductionMode = eng::to_vk(*batch.reduction_mode);
+            reduction.reductionMode = gfx::to_vk(*batch.reduction_mode);
             info.pNext = &reduction;
         }
         VK_CHECK(vkCreateSampler(dev, &info, {}, &samplers.at(it.handle).sampler));
@@ -1178,12 +1178,12 @@ void RendererVulkan::compile_shaders()
         };
 
         const auto kind = [stage = sh.stage] {
-            if(stage == Shader::Stage::VERTEX) { return shaderc_vertex_shader; }
-            if(stage == Shader::Stage::PIXEL) { return shaderc_fragment_shader; }
+            if(stage == ShaderStage::VERTEX) { return shaderc_vertex_shader; }
+            if(stage == ShaderStage::PIXEL) { return shaderc_fragment_shader; }
             // if(stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { return shaderc_raygen_shader; }
             // if(stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) { return shaderc_closesthit_shader; }
             // if(stage == VK_SHADER_STAGE_MISS_BIT_KHR) { return shaderc_miss_shader; }
-            if(stage == Shader::Stage::COMPUTE) { return shaderc_compute_shader; }
+            if(stage == ShaderStage::COMPUTE) { return shaderc_compute_shader; }
             ENG_ERROR("Unrecognized shader type");
             return shaderc_vertex_shader;
         }();
@@ -1223,8 +1223,8 @@ void RendererVulkan::compile_pipelines()
 
         {
             const auto stage = info.shaders[0]->stage;
-            if(stage == Shader::Stage::VERTEX) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
-            else if(stage == Shader::Stage::COMPUTE) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+            if(stage == ShaderStage::VERTEX) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
+            else if(stage == ShaderStage::COMPUTE) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
             else
             {
                 assert(false);
@@ -1239,7 +1239,7 @@ void RendererVulkan::compile_pipelines()
         for(const auto& e : info.shaders)
         {
             stages.push_back(Vks(VkPipelineShaderStageCreateInfo{
-                .stage = eng::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
+                .stage = gfx::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
         }
 
         if(p.vkmetadata->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
@@ -1249,7 +1249,23 @@ void RendererVulkan::compile_pipelines()
             continue;
         }
 
-        auto pVertexInputState = Vks(VkPipelineVertexInputStateCreateInfo{});
+        std::vector<VkVertexInputBindingDescription> vkbindings(info.bindings.size());
+        for(auto i = 0u; i < info.bindings.size(); ++i)
+        {
+            vkbindings.at(i) = { info.bindings.at(i).binding, info.bindings.at(i).stride,
+                                 info.bindings.at(i).instanced ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX };
+        }
+        std::vector<VkVertexInputAttributeDescription> vkattributes(info.attributes.size());
+        for(auto i = 0u; i < info.attributes.size(); ++i)
+        {
+            vkattributes.at(i) = { info.attributes.at(i).location, info.attributes.at(i).binding,
+                                   gfx::to_vk(info.attributes.at(i).format), info.attributes.at(i).offset };
+        }
+        auto pVertexInputState =
+            Vks(VkPipelineVertexInputStateCreateInfo{ .vertexBindingDescriptionCount = (uint32_t)info.bindings.size(),
+                                                      .pVertexBindingDescriptions = vkbindings.data(),
+                                                      .vertexAttributeDescriptionCount = (uint32_t)info.attributes.size(),
+                                                      .pVertexAttributeDescriptions = vkattributes.data() });
 
         auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST });
 
@@ -1258,34 +1274,63 @@ void RendererVulkan::compile_pipelines()
         auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
 
         auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
-            .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = eng::to_vk(info.culling),
-            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-            .lineWidth = 1.0f,
+            .polygonMode = gfx::to_vk(info.polygon_mode),
+            .cullMode = gfx::to_vk(info.culling),
+            .frontFace = info.front_is_ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE,
+            .lineWidth = info.line_width,
         });
 
         auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
             .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
         });
 
+        // vkstencil
         auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
             .depthTestEnable = info.depth_test,
             .depthWriteEnable = info.depth_write,
-            .depthCompareOp = eng::to_vk(info.depth_compare),
+            .depthCompareOp = gfx::to_vk(info.depth_compare),
             .depthBoundsTestEnable = false,
-            .stencilTestEnable = false,
-            .front = {},
-            .back = {},
+            .stencilTestEnable = info.stencil_test,
+            .front = {
+                gfx::to_vk(info.stencil_front.fail),
+                gfx::to_vk(info.stencil_front.pass),
+                gfx::to_vk(info.stencil_front.depth_fail),
+                gfx::to_vk(info.stencil_front.compare),
+                info.stencil_front.compare_mask,
+                info.stencil_front.write_mask,
+                info.stencil_front.ref,
+            },
+            .back = {
+                gfx::to_vk(info.stencil_back.fail),
+                gfx::to_vk(info.stencil_back.pass),
+                gfx::to_vk(info.stencil_back.depth_fail),
+                gfx::to_vk(info.stencil_back.compare),
+                info.stencil_back.compare_mask,
+                info.stencil_back.write_mask,
+                info.stencil_back.ref,
+            },
         });
 
-        std::array<VkPipelineColorBlendAttachmentState, 4> blends;
-        for(uint32_t i = 0; i < 1; ++i)
+        std::array<VkPipelineColorBlendAttachmentState, 8> vkblends;
+        std::array<VkFormat, 8> vkcol_formats;
+        for(uint32_t i = 0; i < info.attachments.count; ++i)
         {
-            blends[i] = { .colorWriteMask = 0b1111 /*RGBA*/ };
+            vkblends.at(i) = { info.attachments.blend_states.at(i).enable,
+                               gfx::to_vk(info.attachments.blend_states.at(i).src_color_factor),
+                               gfx::to_vk(info.attachments.blend_states.at(i).dst_color_factor),
+                               gfx::to_vk(info.attachments.blend_states.at(i).color_op),
+                               gfx::to_vk(info.attachments.blend_states.at(i).src_alpha_factor),
+                               gfx::to_vk(info.attachments.blend_states.at(i).dst_alpha_factor),
+                               gfx::to_vk(info.attachments.blend_states.at(i).alpha_op),
+                               VkColorComponentFlags{ ((uint32_t)info.attachments.blend_states.at(i).r) << 0 |
+                                                      ((uint32_t)info.attachments.blend_states.at(i).g) << 1 |
+                                                      ((uint32_t)info.attachments.blend_states.at(i).b) << 2 |
+                                                      ((uint32_t)info.attachments.blend_states.at(i).a) << 3 } };
+            vkcol_formats.at(i) = gfx::to_vk(info.attachments.color_formats.at(i));
         }
         auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
-            .attachmentCount = 1,
-            .pAttachments = blends.data(),
+            .attachmentCount = info.attachments.count,
+            .pAttachments = vkblends.data(),
         });
 
         VkDynamicState dynstates[]{
@@ -1297,17 +1342,12 @@ void RendererVulkan::compile_pipelines()
             .pDynamicStates = dynstates,
         });
 
-        std::vector<VkFormat> col_formats(info.color_formats.size());
-        for(auto i = 0u; i < info.color_formats.size(); ++i)
-        {
-            col_formats.at(i) = eng::to_vk(info.color_formats.at(i));
-        }
         auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
-            .colorAttachmentCount = (uint32_t)col_formats.size(),
-            .pColorAttachmentFormats = col_formats.data(),
-            .depthAttachmentFormat = eng::to_vk(info.depth_format),
+            .colorAttachmentCount = info.attachments.count,
+            .pColorAttachmentFormats = vkcol_formats.data(),
+            .depthAttachmentFormat = gfx::to_vk(info.attachments.depth_format),
+            .stencilAttachmentFormat = gfx::to_vk(info.attachments.stencil_format),
         });
-        // pDynamicRendering.stencilAttachmentFormat = rasterization_settings.st_format;
 
         auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
             .pNext = &pDynamicRendering,
@@ -1759,7 +1799,7 @@ void RendererVulkan::update_ddgi()
 #endif
 }
 
-Handle<Shader> RendererVulkan::make_shader(Shader::Stage stage, const std::filesystem::path& path)
+Handle<Shader> RendererVulkan::make_shader(ShaderStage stage, const std::filesystem::path& path)
 {
     auto ret = shaders.insert(Shader{ .path = paths::canonize_path(path, "shaders"), .stage = stage });
     if(ret.success) { shaders_to_compile.push_back(ret.handle); }

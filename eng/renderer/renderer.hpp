@@ -171,26 +171,27 @@ struct ImageViewDescriptor
     // swizzle always identity for now
 };
 
+enum class SamplerReductionMode
+{
+    MIN,
+    MAX
+};
+
+enum class SamplerMipmapMode
+{
+    NEAREST,
+    LINEAR,
+};
+
 struct SamplerDescriptor
 {
-    enum class ReductionMode
-    {
-        MIN,
-        MAX
-    };
-    enum class MipMapMode
-    {
-        NEAREST,
-        LINEAR,
-    };
-
     auto operator<=>(const SamplerDescriptor& o) const = default;
 
     std::array<ImageFilter, 2> filtering{ ImageFilter::LINEAR, ImageFilter::LINEAR }; // [min, mag]
     std::array<ImageAddressing, 3> addressing{ ImageAddressing::REPEAT, ImageAddressing::REPEAT, ImageAddressing::REPEAT }; // u, v, w
     std::array<float, 3> mip_lod{ 0.0f, VK_LOD_CLAMP_NONE, 0.0f }; // min, max, bias
-    MipMapMode mipmap_mode{ MipMapMode::LINEAR };
-    std::optional<ReductionMode> reduction_mode{};
+    SamplerMipmapMode mipmap_mode{ SamplerMipmapMode::LINEAR };
+    std::optional<SamplerReductionMode> reduction_mode{};
 };
 
 struct TextureDescriptor
