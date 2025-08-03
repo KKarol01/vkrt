@@ -4,27 +4,34 @@
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 
-namespace gfx {
-struct ModelAsset;
-struct MeshAsset;
+namespace gfx
+{
 struct Mesh;
-struct BLAS;
 struct Geometry;
 struct Material;
-enum class InstanceFlags;
 } // namespace gfx
 
-namespace components {
+namespace ecs
+{
+namespace comp
+{
 
-/* Position on scene */
-struct Transform {
-    /* World position after traversing node hierarchy */
-    glm::mat4 transform{ 1.0f };
+struct Transform
+{
+    glm::mat4 local{ 1.0f };
+    glm::mat4 global{ 1.0f };
 };
 
-struct Mesh {
+struct Node
+{
     std::string name;
-    std::vector<Handle<gfx::Mesh>> submeshes;
 };
 
-} // namespace components
+struct MeshRenderer
+{
+    std::string name;
+    std::vector<Handle<gfx::Mesh>> meshes;
+};
+
+} // namespace comp
+} // namespace ecs

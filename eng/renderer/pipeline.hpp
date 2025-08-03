@@ -1,84 +1,112 @@
 #pragma once
 
-#include <eng/renderer/common.hpp>
+#include <array>
+#include <filesystem>
 #include <vulkan/vulkan.h>
+#include <eng/common/hash.hpp>
+#include <eng/renderer/resources/resources.hpp>
 
-namespace gfx {
+namespace gfx
+{
 
-struct RasterizationSettings {
-    bool operator==(const RasterizationSettings& o) const {
-        return num_col_formats == o.num_col_formats &&
-               [this, &o] {
-                   for(auto i = 0u; i < num_col_formats; ++i) {
-                       if(col_formats[i] != o.col_formats[i]) { return false; }
-                       return true;
-                   }
-               }() &&
-               dep_format == o.dep_format && culling == o.culling && depth_test == o.depth_test &&
-               depth_write == o.depth_write && depth_op == o.depth_op;
-    }
-    uint32_t num_col_formats{ 1 };
-    std::array<VkFormat, 4> col_formats{ { VK_FORMAT_R8G8B8A8_SRGB } };
-    VkFormat dep_format{ VK_FORMAT_D24_UNORM_S8_UINT };
-    VkCullModeFlags culling{ VK_CULL_MODE_BACK_BIT };
-    bool depth_test{ false };
-    bool depth_write{ true };
-    VkCompareOp depth_op{ VK_COMPARE_OP_LESS };
-};
+struct VkPipelineMetadata;
 
-struct RaytracingSettings {
-    bool operator==(const RaytracingSettings& o) const {
-        return recursion_depth == o.recursion_depth && sbt_buffer == o.sbt_buffer && groups.size() == o.groups.size() &&
-               [this, &o] {
-                   for(const auto& e : groups) {
-                       if(std::find_if(o.groups.begin(), o.groups.end(), [&e](auto& g) {
-                              return e.type == g.type && e.generalShader == g.generalShader &&
-                                     e.closestHitShader == g.closestHitShader && e.anyHitShader == g.anyHitShader &&
-                                     e.intersectionShader == g.intersectionShader;
-                          }) == o.groups.end()) {
-                           return false;
-                       }
-                   }
-                   return true;
-               }();
-    }
-    uint32_t recursion_depth{ 1 };
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
-    Handle<Buffer> sbt_buffer;
-};
+struct Shader
+{
+    enum class Stage
+    {
+        NONE,
+        VERTEX,
+        PIXEL,
+        COMPUTE
+    };
 
-struct PipelineSettings {
-    std::variant<std::monostate, RasterizationSettings> settings; // monostate for, for example, compute pipeline
-    std::vector<std::filesystem::path> shaders;
-};
+    auto operator==(const Shader& o) const { return path == o.path; }
 
-struct Shader {
     std::filesystem::path path;
-    VkShaderStageFlagBits stage{};
-    VkShaderModule shader{};
+    Stage stage{ Stage::NONE };
+    void* metadata{};
 };
 
-struct Pipeline {
-    PipelineSettings settings{};
-    VkPipelineBindPoint bind_point{};
-    VkPipeline pipeline{};
+struct PipelineCreateInfo
+{
+    enum class CullMode
+    {
+        NONE,
+        FRONT,
+        BACK,
+        FRONT_AND_BACK,
+    };
+
+    struct VertexBinding
+    {
+        auto operator<=>(const VertexBinding&) const = default;
+        uint32_t binding;
+        uint32_t stride;
+        bool instanced{ false };
+    };
+
+    enum class VertexFormat
+    {
+        FLOAT,
+        UINT,
+    };
+
+    struct VertexAttribute
+    {
+        auto operator<=>(const VertexAttribute&) const = default;
+        uint32_t location;
+        uint32_t binding;
+        VertexFormat format_type{ VertexFormat::FLOAT };
+        uint32_t format_count;
+        uint32_t offset;
+    };
+
+    enum class DepthCompare
+    {
+        NEVER,
+        LESS,
+        GREATER,
+        EQUAL
+    };
+
+    auto operator<=>(const PipelineCreateInfo&) const = default;
+
+    std::vector<VertexBinding> bindings;
+    std::vector<VertexAttribute> attributes;
+    std::vector<ImageFormat> color_formats{ ImageFormat::R8G8B8A8_SRGB };
+    ImageFormat depth_format{ ImageFormat::UNDEFINED };
+    CullMode culling{ CullMode::NONE };
+    std::vector<Handle<Shader>> shaders;
+    bool depth_test{ false };
+    bool depth_write{ false };
+    DepthCompare depth_compare{ DepthCompare::NEVER };
 };
 
-class PipelineCompiler {
-  public:
-    Shader* get_shader(const std::filesystem::path path);
-    Pipeline* get_pipeline(const PipelineSettings& settings);
-    void threaded_compile();
-    void compile_shader(Shader* shader);
-    void compile_pipeline(Pipeline* pipeline);
-    VkShaderStageFlagBits get_shader_stage(std::filesystem::path path) const;
-    void canonize_path(std::filesystem::path& p);
-
-    std::forward_list<Shader> shaders;
-    std::forward_list<Pipeline> pipelines;
-    std::unordered_map<std::filesystem::path, Shader*> compiled_shaders;
-    std::vector<Pipeline*> pipelines_to_compile;
-    std::vector<Shader*> shaders_to_compile;
+struct Pipeline
+{
+    auto operator==(const Pipeline& o) const { return (info <=> o.info) == 0; }
+    PipelineCreateInfo info;
+    union {
+        VkPipelineMetadata* vkmetadata;
+    };
 };
 
 } // namespace gfx
+
+DEFINE_STD_HASH(gfx::PipelineCreateInfo::VertexBinding, eng::hash::combine_fnv1a(t.binding, t.stride, t.instanced));
+DEFINE_STD_HASH(gfx::PipelineCreateInfo::VertexAttribute,
+                eng::hash::combine_fnv1a(t.location, t.binding, t.format_type, t.format_count, t.offset));
+DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
+    uint64_t hash = 0;
+    // clang-format off
+    for(const auto& e : t.bindings) { hash = eng::hash::combine_fnv1a(hash, e); }
+    for(const auto& e : t.attributes) { hash = eng::hash::combine_fnv1a(hash, e); }
+    for(const auto& e : t.color_formats) { hash = eng::hash::combine_fnv1a(hash, e); }
+    for(const auto& e : t.shaders) { hash = eng::hash::combine_fnv1a(hash, e); }
+    // clang-format on
+    hash = eng::hash::combine_fnv1a(hash, t.culling, t.depth_test, t.depth_write, t.depth_compare, t.depth_format);
+    return hash;
+}());
+DEFINE_STD_HASH(gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
+DEFINE_STD_HASH(gfx::Shader, eng::hash::combine_fnv1a(t.path));

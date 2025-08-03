@@ -1,19 +1,47 @@
 #pragma once
 
-#include <eng/common/handle_map.hpp>
-#include <eng/renderer/common.hpp>
+#include <vector>
+#include <array>
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/renderer/renderer_vulkan_wrappers.hpp>
-#include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/renderer/pipeline.hpp>
+#include <eng/renderer/passes/rendergraph.hpp>
+#include <eng/renderer/resources/resources.hpp>
+#include <eng/common/hash.hpp>
+#include <eng/common/handle.hpp>
+#include <eng/common/handlemap.hpp>
+#include <eng/common/handleflatset.hpp>
 
-namespace gfx {
+namespace gfx
+{
+struct Sampler
+{
+    bool operator==(const Sampler& o) const { return info == o.info; }
+    SamplerDescriptor info;
+    VkSampler sampler;
+};
+
+struct Texture
+{
+    auto operator<=>(const Texture& t) const = default;
+    Handle<Image> image;
+    VkImageView view;
+    VkImageLayout layout;
+    VkSampler sampler;
+};
+} // namespace gfx
+
+DEFINE_STD_HASH(gfx::Sampler, eng::hash::combine_fnv1a(t.info));
+DEFINE_STD_HASH(gfx::Texture, eng::hash::combine_fnv1a(t.image, t.view, t.layout, t.sampler));
+
+namespace gfx
+{
 
 /* Controls renderer's behavior */
-enum class RenderFlags : uint32_t {
+enum class RenderFlags : uint32_t
+{
     DIRTY_MESH_INSTANCES = 0x1,
     DIRTY_GEOMETRY_BATCHES_BIT = 0x2,
     DIRTY_BLAS_BIT = 0x4,
@@ -26,53 +54,28 @@ enum class RenderFlags : uint32_t {
     // RESIZE_SCREEN_RECT_BIT = 0x80,
 };
 
-enum class GeometryFlags : uint32_t { DIRTY_BLAS_BIT = 0x1 };
-enum class MeshFlags : uint32_t {};
+struct GeometryBuffers
+{
+    Handle<Buffer> buf_vpos;           // positions
+    Handle<Buffer> buf_vattrs;         // rest of attributes
+    Handle<Buffer> buf_indices;        // indices
+    Handle<Buffer> buf_draw_cmds;      // draw commands
+    Handle<Buffer> buf_draw_ids;       // instance ids
+    Handle<Buffer> buf_final_draw_ids; // post cull instance ids
+    Handle<Buffer> buf_draw_bs;        // bouding spheres
+    Handle<Buffer> buf_draw_settings;  // draw settings (for cullling)
+    Handle<Buffer> transform_bufs[2];
 
-struct GeometryMetadata {
-    VkAccelerationStructureKHR blas{};
-    Handle<Buffer> blas_buffer{};
+    VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
+    size_t vertex_count{};
+    size_t index_count{};
+    size_t command_count{};
 };
 
-struct MeshMetadata {};
-
-/* position inside vertex and index buffer*/
-struct Geometry {
-    Flags<GeometryFlags> flags;
-    Handle<GeometryMetadata> metadata;
-    uint32_t vertex_offset{ 0 };
-    uint32_t vertex_count{ 0 };
-    uint32_t index_offset{ 0 };
-    uint32_t index_count{ 0 };
-};
-
-struct Material {
-    Handle<Texture> base_color_texture{ ~0u };
-};
-
-struct Texture {
-    Handle<Image> image;
-    VkImageView view{};
-    VkImageLayout layout{};
-    VkSampler sampler{};
-};
-
-/* subset of geometry's vertex and index buffers */
-struct Mesh {
-    // Flags<MeshFlags> flags;
-    Handle<Geometry> geometry;
-    Handle<Material> material;
-    // Handle<MeshMetadata> metadata;
-    //  Handle<gfx::BLAS> blas;
-};
-
-struct MeshInstance {
-    ecs::Entity entity;
-    Handle<Mesh> mesh;
-};
-
-struct DDGI {
-    struct GPULayout {
+struct DDGI
+{
+    struct GPULayout
+    {
         glm::ivec2 radiance_tex_size;
         glm::ivec2 irradiance_tex_size;
         glm::ivec2 visibility_tex_size;
@@ -94,7 +97,7 @@ struct DDGI {
     };
     using GPUProbeOffsetsLayout = glm::vec3;
 
-    BoundingBox probe_dims;
+    // BoundingBox probe_dims;
     float probe_distance{ 0.4f };
     glm::uvec3 probe_counts;
     glm::vec3 probe_walk;
@@ -110,12 +113,8 @@ struct DDGI {
     Handle<Image> probe_offsets_texture;
 };
 
-struct IndirectDrawCommandBufferHeader {
-    uint32_t draw_count{};
-    uint32_t geometry_instance_count{};
-};
-
-struct Swapchain {
+struct Swapchain
+{
     void create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height);
     uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
     Image& get_current_image();
@@ -126,7 +125,8 @@ struct Swapchain {
     uint32_t current_index{ 0ul };
 };
 
-struct GBuffer {
+struct GBuffer
+{
     Handle<Image> color_image{};
     Handle<Image> view_space_positions_image{};
     Handle<Image> view_space_normals_image{};
@@ -136,27 +136,32 @@ struct GBuffer {
 
 class CommandPool;
 
-struct FrameData {
+struct FrameData
+{
     CommandPool* cmdpool{};
     VkSemaphore sem_swapchain{};
     VkSemaphore sem_rendering_finished{};
     VkFence fen_rendering_finished{};
     Handle<Buffer> constants{};
-    Handle<Buffer> transform_buffers{};
     GBuffer gbuffer{};
+    Handle<Image> hiz_pyramid;
+    Handle<Image> hiz_debug_output;
 };
 
-struct FFTOcean {
-    struct FFTOceanSettings {
-        float num_samples{ 512.0f };          // N
-        float patch_size{ 3.7f };            // L
-        glm::vec2 wind_dir{ 0.0f, -2.5f}; // w
-        float phillips_const{ 0.59f };        // A
+struct FFTOcean
+{
+    struct FFTOceanSettings
+    {
+        float num_samples{ 512.0f };       // N
+        float patch_size{ 3.7f };          // L
+        glm::vec2 wind_dir{ 0.0f, -2.5f }; // w
+        float phillips_const{ 0.59f };     // A
         float time_speed{ 0.24f };
         float disp_lambda{ -1.58f };
         float small_l{ 0.0001f };
     };
-    struct FFTOceanPushConstants {
+    struct FFTOceanPushConstants
+    {
         FFTOceanSettings settings;
         uint32_t gaussian;
         uint32_t h0;
@@ -181,13 +186,40 @@ struct FFTOcean {
     Handle<Image> gradient;
 };
 
-class SubmitQueue;
-class StagingBuffer;
-class BindlessDescriptorPool;
+struct ShaderMetadata
+{
+    VkShaderModule shader{};
+};
 
-class RendererVulkan : public gfx::Renderer {
+struct VkPipelineMetadata
+{
+    VkPipeline pipeline{};
+    VkPipelineLayout layout{};
+    VkPipelineBindPoint bind_point{};
+};
+
+struct MeshletInstance
+{
+    Handle<Geometry> geometry;
+    Handle<Material> material;
+    uint32_t global_meshlet;
+    uint32_t index;
+};
+
+struct MultiBatch
+{
+    Handle<Pipeline> pipeline;
+    uint32_t count;
+};
+
+class SubmitQueue;
+class GPUStagingManager;
+class BindlessPool;
+
+class RendererVulkan : public Renderer
+{
   public:
-    static RendererVulkan* get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
+    static RendererVulkan* get_instance();
 
     RendererVulkan() = default;
     RendererVulkan(const RendererVulkan&) = delete;
@@ -198,56 +230,53 @@ class RendererVulkan : public gfx::Renderer {
     void initialize_vulkan();
     void initialize_imgui();
     void initialize_resources();
+    void initialize_mesh_passes();
+    void initialize_materials();
     void create_window_sized_resources();
     void build_render_graph();
 
     void update() final;
     void on_window_resize() final;
-    // void set_screen(ScreenRect screen) final;
+
     Handle<Image> batch_image(const ImageDescriptor& desc) final;
+    Handle<Sampler> batch_sampler(const SamplerDescriptor& batch) final;
     Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
     Handle<Material> batch_material(const MaterialDescriptor& desc) final;
     Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
+    static void meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
+                                    std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
-    void instance_mesh(const InstanceSettings& settings) final;
+    Handle<Mesh> instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(ecs::Entity entity) final;
-    size_t get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) final;
+    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) final;
     Handle<Image> get_color_output_texture() const final;
-    Material get_material(Handle<Material> handle) const final;
-    VsmData& get_vsm_data() final;
 
-    void upload_model_images();
-    void upload_staged_models();
+    void compile_shaders();
+    void compile_pipelines();
     void bake_indirect_commands();
-    void upload_transforms();
 
     void build_blas();
     void build_tlas();
     void update_ddgi();
 
-    Handle<Buffer> make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info);
-    Handle<Buffer> make_buffer(const std::string& name, buffer_resizable_t resizable, const VkBufferCreateInfo& vk_info,
-                               const VmaAllocationCreateInfo& vma_info);
-    Handle<Image> make_image(const std::string& name, const VkImageCreateInfo& vk_info);
+    Handle<Shader> make_shader(Shader::Stage stage, const std::filesystem::path& path);
+    Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
+    Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
+    Handle<MeshPass> make_mesh_pass(const MeshPassCreateInfo& info);
+    Handle<Buffer> make_buffer(const BufferCreateInfo& info);
+    Handle<Image> make_image(const ImageCreateInfo& info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
-    VkImageView make_image_view(Handle<Image> handle);
-    VkImageView make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info);
 
-    static Buffer& get_buffer(Handle<Buffer> handle);
-    static Image& get_image(Handle<Image> handle);
+    void resize_buffer(Handle<Buffer> buffer, size_t newsize);
     void destroy_buffer(Handle<Buffer> buffer);
-    void replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer);
-    uint32_t get_bindless_index(Handle<Buffer> handle);
-    uint32_t get_bindless_index(Handle<Texture> handle);
+    void destroy_image(Handle<Image> image);
+    uint32_t get_bindless(Handle<Buffer> buffer);
+    void update_resource(Handle<Buffer> dst);
 
     FrameData& get_frame_data(uint32_t offset = 0);
     const FrameData& get_frame_data(uint32_t offset = 0) const;
-
-    uint32_t get_total_vertices() const { return total_vertices; }
-    uint32_t get_total_indices() const { return total_indices; }
-    uint32_t get_total_triangles() const { return total_indices / 3u; }
 
     VkInstance instance;
     VkDevice dev;
@@ -261,33 +290,41 @@ class RendererVulkan : public gfx::Renderer {
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
 
     SubmitQueue* submit_queue{};
-    StagingBuffer* staging_buffer{};
-    BindlessDescriptorPool* bindless_pool{};
-    RenderGraph rendergraph;
-    PipelineCompiler pipelines{};
+    GPUStagingManager* staging_manager{};
+    BindlessPool* bindless_pool{};
+    // RenderGraph rendergraph;
 
-    HandleMap<Geometry> geometries;
-    HandleMap<GeometryMetadata> geometry_metadatas;
-    HandleMap<Mesh> meshes;
-    HandleMap<MeshMetadata> mesh_metadatas;
-    HandleMap<Material> materials;
+    HandleMap<Buffer> buffers;
+    HandleMap<Image> images;
+    HandleFlatSet<Texture> textures;
+    HandleFlatSet<Geometry> geometries;
+    HandleFlatSet<Material> materials;
+    HandleFlatSet<Pipeline> pipelines;
+    HandleFlatSet<ShaderEffect> shader_effects;
+    HandleFlatSet<Shader> shaders;
+    HandleFlatSet<Sampler> samplers;
+    HandleFlatSet<MeshPass> mesh_passes;
+    std::vector<Meshlet> meshlets;
+    std::vector<Mesh> meshes;
 
-    std::vector<MeshInstance> mesh_instances;
-    // std::unordered_map<ecs::Entity, uint32_t> mesh_instance_idxs;
+    uint32_t mesh_instance_index{}; // todo: reuse slots
+    std::vector<MeshletInstance> meshlet_instances;
+    std::vector<ecs::Entity> entities;
+    std::vector<MultiBatch> multibatches;
+    Handle<Pipeline> cull_pipeline;
+    Handle<Pipeline> hiz_pipeline;
+    VkSampler hiz_sampler;
+
+    GeometryBuffers geom_main_bufs;
+
+    // std::vector<MeshletInstance> meshlet_instances;
     std::vector<ecs::Entity> blas_instances;
-    uint32_t max_draw_count{};
-    uint32_t total_vertices{};
-    uint32_t total_indices{};
 
     VkAccelerationStructureKHR tlas{};
     Handle<Buffer> tlas_buffer;
     Handle<Buffer> tlas_instance_buffer;
     Handle<Buffer> tlas_scratch_buffer;
-    Handle<Buffer> vertex_positions_buffer;
-    Handle<Buffer> vertex_attributes_buffer;
-    Handle<Buffer> index_buffer;
-    Handle<Buffer> indirect_draw_buffer;
-    Handle<Buffer> mesh_instance_mesh_id_buffer;
+
     Handle<Buffer> tlas_mesh_offsets_buffer;
     Handle<Buffer> tlas_transform_buffer;
     Handle<Buffer> blas_mesh_offsets_buffer;
@@ -297,23 +334,25 @@ class RendererVulkan : public gfx::Renderer {
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
 
-    SamplerStorage samplers;
-    HandleMap<Image> images;
-    HandleMap<Texture> textures;
-    HandleMap<Buffer> buffers;
+    Handle<MeshPass> default_meshpass;
+    Handle<Material> default_material;
 
-    DDGI ddgi;
-    gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
-    FFTOcean fftocean;
+    // DDGI ddgi;
+    // gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
+    // FFTOcean fftocean;
 
-    struct UploadImage {
-        Handle<Image> image_handle;
-        std::vector<std::byte> rgba_data;
-    };
-    std::vector<gfx::Vertex> upload_vertices;
-    std::vector<uint32_t> upload_indices;
-    std::vector<UploadImage> upload_images;
-    std::vector<ecs::Entity> update_positions;
+    std::vector<Handle<Shader>> shaders_to_compile;
+    std::vector<Handle<Pipeline>> pipelines_to_compile;
+    std::vector<MeshletInstance> meshlets_to_instance;
 };
-
 } // namespace gfx
+
+DEFINE_HANDLE_DISPATCHER(gfx::Buffer, { return &gfx::RendererVulkan::get_instance()->buffers.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Image, { return &gfx::RendererVulkan::get_instance()->images.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Geometry, { return &gfx::RendererVulkan::get_instance()->geometries.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Mesh, { return &gfx::RendererVulkan::get_instance()->meshes.at(*handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Texture, { return &gfx::RendererVulkan::get_instance()->textures.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Material, { return &gfx::RendererVulkan::get_instance()->materials.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Shader, { return &gfx::RendererVulkan::get_instance()->shaders.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(handle); });
+DEFINE_HANDLE_DISPATCHER(gfx::Sampler, { return &gfx::RendererVulkan::get_instance()->samplers.at(handle); });

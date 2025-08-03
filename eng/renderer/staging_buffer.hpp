@@ -2,93 +2,129 @@
 
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/common/handle.hpp>
+#include <eng/renderer/resources/resources.hpp>
 #include <vulkan/vulkan.h>
 #include <span>
 #include <vector>
-#include <variant>
 #include <thread>
 #include <atomic>
 #include <memory>
-#include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
+#include <deque>
+#include <mutex>
+#include <numeric>
+#include <functional>
+#include <eng/common/types.hpp>
 
-namespace gfx {
+namespace gfx
+{
+struct Buffer;
 
-class StagingBuffer {
-    struct TransferBuffer {
-        Handle<Buffer> handle{};
-        size_t offset{};
-        std::vector<std::byte> data;
-    };
-    struct TransferImage {
-        Handle<Image> handle{};
-        VkImageLayout final_layout{};
-        VkBufferImageCopy2 region{};
-        std::vector<std::byte> data;
-    };
-    struct TransferFromBuffer {
-        Handle<Buffer> dst_buffer{};
-        size_t dst_offset{};
-        Handle<Buffer> src_buffer{};
-        size_t src_offset{};
-        size_t size{};
-    };
+static constexpr auto STAGING_APPEND = ~0ull;
 
-    struct Submission {
-        bool started() const { return !transfers.empty(); }
-        std::vector<std::variant<TransferBuffer, TransferImage, TransferFromBuffer>> transfers;
-        VkFence fence{};
-    };
+class GPUStagingManager
+{
+    static constexpr auto CAPACITY = 64ull * 1024 * 1024;
+    static constexpr auto ALIGNMENT = 512ull;
 
   public:
-    StagingBuffer(SubmitQueue* queue, Handle<Buffer> staging_buffer) noexcept;
+    void init(SubmitQueue* queue, const std::function<void(Handle<Buffer>)>& on_buffer_resize = {});
 
-    StagingBuffer(StagingBuffer&& o) noexcept;
-    StagingBuffer& operator=(StagingBuffer&& o) noexcept;
-
-    template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const T& t);
-    template <typename T> StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts);
-    template <typename T>
-    StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
-                           const std::vector<T>& ts);
-    StagingBuffer& send_to(Handle<Buffer> dst_buffer, size_t dst_offset, Handle<Buffer> src_buffer, size_t src_offset, size_t size);
-    void submit(VkFence fence = nullptr);
-    void submit_wait(VkFence fence = nullptr);
+    void resize(Handle<Buffer> buffer, size_t newsize);
+    void copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range range);
+    void copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, Range range);
+    template <typename T> void copy(Handle<Buffer> dst, const std::vector<T>& vec, size_t dst_offset)
+    {
+        copy(dst, vec.data(), dst_offset, { 0, vec.size() * sizeof(T) });
+    }
+    void insert_barrier();
+    void copy(Handle<Image> dst, const void* const src, VkImageLayout final_layout);
+    void flush();
+    void reset();
 
   private:
-    Submission& get_submission() { return *submissions[0]; }
-    void swap_submissions();
-    StagingBuffer& send_to(Handle<Buffer> buffer, size_t offset, const std::span<const std::byte> ts);
-    StagingBuffer& send_to(Handle<Image> image, VkImageLayout final_layout, const VkBufferImageCopy2 region,
-                           const std::span<const std::byte> ts);
-    void resize(Handle<Buffer> buffer, size_t new_size);
-    VkImageMemoryBarrier2 generate_image_barrier(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
-    void transition_image(Handle<Image> image, VkImageLayout layout, bool is_final_layout);
-    void process_submission();
-    size_t push_data(const std::vector<std::byte>& data);
+    void allocate_new_cmd();
+    std::pair<void*, size_t> allocate(size_t size);
+    size_t get_offset(const void* const alloc) { return (uintptr_t)alloc - (uintptr_t)buffer.memory; }
 
+    size_t head{};
+    Buffer buffer;
     SubmitQueue* queue{};
     CommandPool* cmdpool{};
-    VkCommandBuffer cmds[2]{};
-    Buffer* staging_buffer{};
-    std::unique_ptr<Submission> submissions[2]{};
-    std::jthread on_submit_complete_thread;
-    std::atomic_bool submission_done{ true };
-    VkFence submission_thread_fence{};
+    CommandBuffer* cmd{};
+    std::vector<CommandBuffer*> cmds;
+    std::function<void(Handle<Buffer>)> on_buffer_resize;
 };
 
-template <typename T> inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const T& t) {
-    return send_to(buffer, offset, std::as_bytes(std::span{ &t, 1 }));
-}
-
-template <typename T>
-inline StagingBuffer& StagingBuffer::send_to(Handle<Buffer> buffer, size_t offset, const std::vector<T>& ts) { // todo: maybe vector to span<T>
-    return send_to(buffer, offset, std::as_bytes(std::span{ ts.begin(), ts.end() }));
-}
-
-template <typename T>
-inline StagingBuffer& StagingBuffer::send_to(Handle<Image> image, VkImageLayout final_layout,
-                                             const VkBufferImageCopy2 region, const std::vector<T>& ts) {
-    return send_to(image, final_layout, region, std::as_bytes(std::span{ ts.begin(), ts.end() }));
-}
+// class StagingBuffer
+//{
+//     static constexpr auto CAPACITY = 64ull * 1024 * 1024;
+//     static constexpr auto ALIGNMENT = 512u;
+//
+//     struct Transaction
+//     {
+//         Handle<Buffer> dst_buffer() const;
+//         Handle<Image> dst_image() const;
+//         Handle<Buffer> src_buffer() const;
+//         Handle<Image> src_image() const;
+//         uint32_t dst_resource;
+//         uint32_t src_resource;
+//         size_t dst_offset;
+//         Range src_range;
+//         bool dst_is_buffer;
+//         bool src_is_buffer;
+//         const void* alloc{};
+//         VkImageLayout final_layout{};
+//     };
+//
+//   public:
+//     StagingBuffer(SubmitQueue* queue) noexcept;
+//     void stage(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range src_range);
+//     void stage(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size);
+//     void stage(Handle<Buffer> dst, std::span<const std::byte> src, size_t dst_offset);
+//     template <typename T> void stage(Handle<Buffer> dst, const T& src, size_t dst_offset)
+//     {
+//         stage(dst, &src, dst_offset, sizeof(T));
+//     }
+//     template <typename T> void stage(Handle<Buffer> dst, const std::vector<T>& src, size_t dst_offset)
+//     {
+//         stage(dst, src.data(), dst_offset, src.size() * sizeof(T));
+//     }
+//
+//     void stage(Handle<Image> dst, std::span<const std::byte> src, VkImageLayout final_layout);
+//     void flush();
+//
+//   private:
+//     void* try_allocate(size_t size);
+//     std::pair<void*, size_t> allocate(size_t size);
+//     void* head_to_ptr() const { return static_cast<std::byte*>(data) + head; }
+//     size_t get_free_space() const { return CAPACITY - head; }
+//     size_t align(size_t sz) const { return (sz + ALIGNMENT - 1) & -ALIGNMENT; }
+//     size_t resize_buffer(Handle<Buffer> hbuf, size_t dst_offset, size_t src_size);
+//     size_t calc_alloc_head(void* ptr) const { return (std::uintptr_t)ptr - (std::uintptr_t)data; }
+//     void begin_cmd_buffer();
+//     void record_mem_barrier(VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
+//                             VkAccessFlags2 dst_access);
+//     void record_mem_barrier(std::span<const VkImageMemoryBarrier2> barriers);
+//     void record_replacement_buffers();
+//     void record_copy(Buffer& dst, Buffer& src, size_t dst_offset, Range src_range);
+//     void record_copy(Image& dst, size_t src_offset);
+//     VkBufferCopy2 create_copy(size_t dst_offset, Range src_range) const;
+//     VkImageMemoryBarrier2 create_layout_transition(const Image& img, VkImageLayout src_layout, VkImageLayout dst_layout,
+//                                                    VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+//                                                    VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) const;
+//
+//     Buffer& get_buffer(Handle<Buffer> buffer);
+//
+//     std::vector<Transaction> transactions;
+//     std::vector<std::pair<Handle<Buffer>, Buffer>> replacement_buffers;
+//
+//     SubmitQueue* queue{};
+//     VkFence fence{};
+//     CommandPool* cmdpool{};
+//     VkCommandBuffer cmd{};
+//     Handle<Buffer> buffer{};
+//     void* data{};
+//     size_t head{};
+// };
 
 } // namespace gfx

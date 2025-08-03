@@ -10,7 +10,7 @@ template <typename T> struct INIT_VK_STYPE;
 #ifndef NDEBUG
 #include <eng/common/logger.hpp>
 #define VK_CHECK(func)                                                                                                 \
-    if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); }
+    if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); assert(false); }
 #else
 #define VK_CHECK(func) func
 #endif
@@ -35,6 +35,7 @@ INIT_VK_STRUCT(VkCommandPoolCreateInfo, VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_IN
 INIT_VK_STRUCT(VkCommandBufferAllocateInfo, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
 INIT_VK_STRUCT(VkCopyBufferToImageInfo2, VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2);
 INIT_VK_STRUCT(VkBufferImageCopy2, VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2);
+INIT_VK_STRUCT(VkBufferImageCopy);
 INIT_VK_STRUCT(VkImageCopy);
 INIT_VK_STRUCT(VkImageMemoryBarrier2, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2);
 INIT_VK_STRUCT(VkDependencyInfo, VK_STRUCTURE_TYPE_DEPENDENCY_INFO);
@@ -103,6 +104,8 @@ INIT_VK_STRUCT(VkDescriptorImageInfo);
 INIT_VK_STRUCT(VkCopyBufferInfo2, VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2);
 INIT_VK_STRUCT(VkBufferCopy2, VK_STRUCTURE_TYPE_BUFFER_COPY_2);
 INIT_VK_STRUCT(VkMemoryBarrier2, VK_STRUCTURE_TYPE_MEMORY_BARRIER_2);
+INIT_VK_STRUCT(VkBufferCopy);
+INIT_VK_STRUCT(VkSamplerReductionModeCreateInfo, VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO);
 
 template<typename T> concept INIT_VK_STYPE_EXISTS = requires() {
 	INIT_VK_STYPE<T>{};

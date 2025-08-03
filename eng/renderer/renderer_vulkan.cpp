@@ -3,11 +3,13 @@
 #include <numeric>
 #include <fstream>
 #include <utility>
+#include <meshoptimizer/src/meshoptimizer.h>
+#include <stb/stb_include.h>
 #include <volk/volk.h>
 #include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
@@ -22,18 +24,22 @@
 #include <eng/utils.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 #include <eng/renderer/staging_buffer.hpp>
-#include <eng/renderer/descpool.hpp>
+#include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
+#include <eng/common/to_vk.hpp>
+#include <eng/common/paths.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
-static float halton(int i, int b) {
+static float halton(int i, int b)
+{
     /* Creates a halton sequence of values between 0 and 1.
         https://en.wikipedia.org/wiki/Halton_sequence
         Used for jittering based on a constant set of 2D points. */
     float f = 1.0;
     float r = 0.0;
-    while(i > 0) {
+    while(i > 0)
+    {
         f = f / float(b);
         r = r + f * float(i % b);
         i = i / b;
@@ -42,19 +48,27 @@ static float halton(int i, int b) {
     return r;
 }
 
-using namespace gfx;
+namespace gfx
+{
 
-void RendererVulkan::init() {
+RendererVulkan* RendererVulkan::get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
+
+void RendererVulkan::init()
+{
     initialize_vulkan();
     initialize_resources();
+    initialize_mesh_passes();
+    create_window_sized_resources();
     initialize_imgui();
     Engine::get().add_on_window_resize_callback([this] {
         on_window_resize();
         return true;
     });
+    // flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
 }
 
-void RendererVulkan::initialize_vulkan() {
+void RendererVulkan::initialize_vulkan()
+{
     // TODO: remove throws
     if(volkInitialize() != VK_SUCCESS) { throw std::runtime_error{ "Volk loader not found. Stopping" }; }
 
@@ -97,7 +111,8 @@ void RendererVulkan::initialize_vulkan() {
                          .allow_any_gpu_device_type(false)
                          .select_devices();
     auto phys_ret = [&phys_rets] {
-        for(auto& pd : *phys_rets) {
+        for(auto& pd : *phys_rets)
+        {
             if(pd.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { return pd; }
         }
         return *phys_rets->begin();
@@ -131,6 +146,7 @@ void RendererVulkan::initialize_vulkan() {
         .descriptorBindingPartiallyBound = true,
         .descriptorBindingVariableDescriptorCount = true,
         .runtimeDescriptorArray = true,
+        .samplerFilterMinmax = true,
         .scalarBlockLayout = true,
         .hostQueryReset = true,
         .timelineSemaphore = true,
@@ -160,7 +176,8 @@ void RendererVulkan::initialize_vulkan() {
     rt_acc_props = Vks(VkPhysicalDeviceAccelerationStructurePropertiesKHR{});
     vkb::DeviceBuilder device_builder{ phys_ret };
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
-    if(supports_raytracing) {
+    if(supports_raytracing)
+    {
         device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&rayq_features);
     }
     auto dev_ret = device_builder.build();
@@ -222,7 +239,8 @@ void RendererVulkan::initialize_vulkan() {
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
 }
 
-void RendererVulkan::initialize_imgui() {
+void RendererVulkan::initialize_imgui()
+{
     IMGUI_CHECKVERSION();
     void* user_data;
     ImGui::CreateContext();
@@ -232,7 +250,7 @@ void RendererVulkan::initialize_imgui() {
 
     ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
 
-    VkFormat color_formats[]{ swapchain.images.at(0).vk_info.format };
+    VkFormat color_formats[]{ swapchain.images.at(0).format };
 
     VkDescriptorPoolSize sizes[]{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
     auto imgui_dpool_info = Vks(VkDescriptorPoolCreateInfo{
@@ -269,50 +287,49 @@ void RendererVulkan::initialize_imgui() {
     get_frame_data().cmdpool->end(cmdimgui);
     submit_queue->with_cmd_buf(cmdimgui).submit_wait(~0ull);
 
-    Engine::get().ui->add_tab("FFTOcean", [] {
-        auto* r = RendererVulkan::get_instance();
-        auto& fftc = r->fftocean.recalc_state_0;
-        fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 0.1f, 50.0f);
-        fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
-        fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 0.01, 10.0f);
-        ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 0.01f, 10.0f);
-        ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, -10.0f, 10.0f);
-        fftc |= ImGui::SliderFloat("small l", &r->fftocean.settings.small_l, 0.001, 2.0f);
-    });
+    // Engine::get().ui->add_tab("FFTOcean", [] {
+    //     auto* r = RendererVulkan::get_instance();
+    //     auto& fftc = r->fftocean.recalc_state_0;
+    //     fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 0.1f, 50.0f);
+    //     fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
+    //     fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 0.01, 10.0f);
+    //     ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 0.01f, 10.0f);
+    //     ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, -10.0f, 10.0f);
+    //     fftc |= ImGui::SliderFloat("small l", &r->fftocean.settings.small_l, 0.001, 2.0f);
+    // });
 }
 
-void RendererVulkan::initialize_resources() {
-    bindless_pool = new BindlessDescriptorPool{ dev };
+void RendererVulkan::initialize_resources()
+{
+    bindless_pool = new BindlessPool{ dev };
+    staging_manager = new GPUStagingManager{};
+    staging_manager->init(submit_queue,
+                          [](Handle<Buffer> buffer) { RendererVulkan::get_instance()->update_resource(buffer); });
+    // vertex_positions_buffer = make_buffer(BufferCreateInfo{
+    //     "vertex_positions_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+    //                                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
+    // vertex_attributes_buffer = make_buffer(BufferCreateInfo{
+    //     "vertex_attributes_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
+    // index_buffer =
+    //     make_buffer(BufferCreateInfo{ "index_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+    //                                                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+    //                                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT });
+    // meshlets_bs_buf = make_buffer(BufferCreateInfo{ "meshlets_bounding_spheres_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    // meshlets_mli_id_buf =
+    //     make_buffer(BufferCreateInfo{ "meshlets_meshlest_instance_to_id_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
-    staging_buffer = new StagingBuffer{
-        submit_queue,
-        make_buffer("staging_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 1024, .usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR }),
-                    VmaAllocationCreateInfo{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-                                             .usage = VMA_MEMORY_USAGE_AUTO,
-                                             .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT })
-    };
-
-    vertex_positions_buffer =
-        make_buffer("vertex_positions_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{
-                        .size = 1024 * 1024 * 128,
-                        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                    }),
-                    VmaAllocationCreateInfo{});
-    vertex_attributes_buffer =
-        make_buffer("vertex_attributes_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                    VmaAllocationCreateInfo{});
-    index_buffer =
-        make_buffer("index_buffer", buffer_resizable,
-                    Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
-                                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                    VmaAllocationCreateInfo{});
+    geom_main_bufs.buf_vpos = make_buffer(BufferCreateInfo{ "vertex positions", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_vattrs = make_buffer(BufferCreateInfo{ "vertex attributes", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_indices =
+        make_buffer(BufferCreateInfo{ "vertex indices", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT });
+    geom_main_bufs.buf_draw_cmds = make_buffer(BufferCreateInfo{
+        "meshlets draw cmds", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true });
+    geom_main_bufs.buf_draw_ids =
+        make_buffer(BufferCreateInfo{ "meshlets instance id", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_final_draw_ids =
+        make_buffer(BufferCreateInfo{ "meshlets final instance id", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_draw_bs =
+        make_buffer(BufferCreateInfo{ "meshlets instance bbs", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
     // auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     // auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -338,175 +355,234 @@ void RendererVulkan::initialize_resources() {
     //                                         VK_IMAGE_LAYOUT_GENERAL);
     // make_image(ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
 
-    for(uint32_t i = 0; i < frame_datas.size(); ++i) {
+    for(uint32_t i = 0; i < frame_datas.size(); ++i)
+    {
         auto& fd = frame_datas[i];
         fd.cmdpool = submit_queue->make_command_pool();
         fd.sem_swapchain = submit_queue->make_semaphore();
         fd.sem_rendering_finished = submit_queue->make_semaphore();
         fd.fen_rendering_finished = submit_queue->make_fence(true);
-        fd.constants =
-            make_buffer(fmt::format("constants_{}", i),
-                        Vks(VkBufferCreateInfo{ .size = 512ul, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                        VmaAllocationCreateInfo{});
-        fd.transform_buffers = make_buffer(fmt::format("transform_buffer_{}", i), buffer_resizable,
-                                           Vks(VkBufferCreateInfo{ .size = 1024 * 1024 * 128,
-                                                                   .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT }),
-                                           VmaAllocationCreateInfo{});
+        fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
-    vsm.constants_buffer = make_buffer("vms buffer",
-                                       Vks(VkBufferCreateInfo{ .size = sizeof(GPUVsmConstantsBuffer) + 64 * 64 * 4,
-                                                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
-                                       VmaAllocationCreateInfo{});
-    // GPUVsmConstantsBuffer vsm_constants{
-    //     .dir_light_view = glm::mat4{ 1.0f },
-    //     .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
-    //     .max_clipmap_index = 0,
-    //     .texel_resolution = 1024.0f * 8.0f,
-    // };
-    //  send_to(vsm.constants_buffer, 0, &vsm_constants, sizeof(vsm_constants));
-    vsm.free_allocs_buffer =
-        make_buffer("vms alloc buffer",
-                    Vks(VkBufferCreateInfo{ .size = sizeof(GPUVsmAllocConstantsBuffer), .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT }),
-                    VmaAllocationCreateInfo{});
-    // GPUVsmAllocConstantsBuffer vsm_allocs{ .free_list_head = 0 };
-    // staging_buffer->send_to(vsm.constants_buffer, 0, vsm_constants).send_to(vsm.free_allocs_buffer, 0, vsm_allocs).submit();
-    //  send_to(vsm.free_allocs_buffer, 0, &vsm_allocs, sizeof(vsm_allocs));
+    // vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    // vsm.free_allocs_buffer = make_buffer(BufferCreateInfo{ "vms alloc buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
-    vsm.shadow_map_0 =
-        make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                                   .format = VK_FORMAT_R32_SFLOAT,
-                                                   .extent = { VSM_PHYSICAL_PAGE_RESOLUTION, VSM_PHYSICAL_PAGE_RESOLUTION, 1 },
-                                                   .mipLevels = 1,
-                                                   .arrayLayers = 1,
-                                                   .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT });
+    // vsm.shadow_map_0 =
+    //     make_image("vsm image", VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
+    //                                                .format = VK_FORMAT_R32_SFLOAT,
+    //                                                .extent = { VSM_PHYSICAL_PAGE_RESOLUTION, VSM_PHYSICAL_PAGE_RESOLUTION, 1 },
+    //                                                .mipLevels = 1,
+    //                                                .arrayLayers = 1,
+    //                                                .samples = VK_SAMPLE_COUNT_1_BIT,
+    //                                                .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+    //                                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT });
 
-    vsm.dir_light_page_table =
-        make_image("vsm dir light 0 page table",
-                   VkImageCreateInfo{
-                       .imageType = VK_IMAGE_TYPE_2D,
-                       .format = VK_FORMAT_R32_UINT,
-                       .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
-                       .mipLevels = 1,
-                       .arrayLayers = VSM_NUM_CLIPMAPS,
-                       .samples = VK_SAMPLE_COUNT_1_BIT,
-                       .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                   });
+    // vsm.dir_light_page_table =
+    //     make_image("vsm dir light 0 page table",
+    //                VkImageCreateInfo{
+    //                    .imageType = VK_IMAGE_TYPE_2D,
+    //                    .format = VK_FORMAT_R32_UINT,
+    //                    .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
+    //                    .mipLevels = 1,
+    //                    .arrayLayers = VSM_NUM_CLIPMAPS,
+    //                    .samples = VK_SAMPLE_COUNT_1_BIT,
+    //                    .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    //                });
 
-    vsm.dir_light_page_table_rgb8 =
-        make_image("vsm dir light 0 page table rgb8",
-                   VkImageCreateInfo{
-                       .imageType = VK_IMAGE_TYPE_2D,
-                       .format = VK_FORMAT_R8G8B8A8_UNORM,
-                       .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
-                       .mipLevels = 1,
-                       .arrayLayers = VSM_NUM_CLIPMAPS,
-                       .samples = VK_SAMPLE_COUNT_1_BIT,
-                       .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                   });
+    // vsm.dir_light_page_table_rgb8 =
+    //     make_image("vsm dir light 0 page table rgb8",
+    //                VkImageCreateInfo{
+    //                    .imageType = VK_IMAGE_TYPE_2D,
+    //                    .format = VK_FORMAT_R8G8B8A8_UNORM,
+    //                    .extent = { VSM_VIRTUAL_PAGE_RESOLUTION, VSM_VIRTUAL_PAGE_RESOLUTION, 1 },
+    //                    .mipLevels = 1,
+    //                    .arrayLayers = VSM_NUM_CLIPMAPS,
+    //                    .samples = VK_SAMPLE_COUNT_1_BIT,
+    //                    .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+    //                });
 
-    create_window_sized_resources();
-    flags.set(RenderFlags::REBUILD_RENDER_GRAPH);
+    // create default material
 }
 
-void RendererVulkan::create_window_sized_resources() {
+void RendererVulkan::initialize_mesh_passes()
+{
+    cull_pipeline = make_pipeline(PipelineCreateInfo{
+        .shaders = { make_shader(Shader::Stage::COMPUTE, "culling/culling.comp.glsl") } });
+    hiz_pipeline = make_pipeline(PipelineCreateInfo{
+        .shaders = { make_shader(Shader::Stage::COMPUTE, "culling/hiz.comp.glsl") } });
+    hiz_sampler = batch_sampler(SamplerDescriptor{ .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+                                                   .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
+                                                                   ImageAddressing::CLAMP_EDGE },
+                                                   .mipmap_mode = SamplerDescriptor::MipMapMode::NEAREST,
+                                                   .reduction_mode = SamplerDescriptor::ReductionMode::MIN })
+                      ->sampler;
+
+    const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
+        .depth_format = ImageFormat::D32_SFLOAT,
+        .culling = PipelineCreateInfo::CullMode::BACK,
+        .shaders = { make_shader(Shader::Stage::VERTEX, "default_unlit/unlit.vert.glsl"),
+                     make_shader(Shader::Stage::PIXEL, "default_unlit/unlit.frag.glsl") },
+        .depth_test = true,
+        .depth_write = true,
+        .depth_compare = PipelineCreateInfo::DepthCompare::GREATER,
+    });
+    MeshPassCreateInfo info{ .name = "default_unlit" };
+    info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
+    default_meshpass = make_mesh_pass(info);
+    default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
+}
+
+void RendererVulkan::create_window_sized_resources()
+{
     swapchain.create(dev, frame_datas.size(), Engine::get().window->width, Engine::get().window->height);
-    for(auto i = 0ull; i < frame_datas.size(); ++i) {
+
+    for(auto i = 0ull; i < frame_datas.size(); ++i)
+    {
         auto& fd = frame_datas.at(i);
-        fd.gbuffer.color_image =
-            make_image(fmt::format("g_color_{}", i),
-                       VkImageCreateInfo{
-                           .imageType = VK_IMAGE_TYPE_2D,
-                           .format = VK_FORMAT_R8G8B8A8_SRGB,
-                           .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-                           .mipLevels = 1,
-                           .arrayLayers = 1,
-                           .samples = VK_SAMPLE_COUNT_1_BIT,
-                           .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        fd.gbuffer.depth_buffer_image =
-            make_image(fmt::format("g_depth_{}", i),
-                       VkImageCreateInfo{ .imageType = VK_IMAGE_TYPE_2D,
-                                          .format = VK_FORMAT_D24_UNORM_S8_UINT,
-                                          .extent = { (uint32_t)Engine::get().window->width,
-                                                      (uint32_t)Engine::get().window->height, 1 },
-                                          .mipLevels = 1,
-                                          .arrayLayers = 1,
-                                          .samples = VK_SAMPLE_COUNT_1_BIT,
-                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+
+        fd.hiz_pyramid = make_image(ImageCreateInfo{
+            .name = fmt::format("hiz_pyramid_{}", i),
+            .type = VK_IMAGE_TYPE_2D,
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
+            .format = VK_FORMAT_D32_SFLOAT,
+            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            .mips = (uint32_t)std::log2f(std::max(Engine::get().window->width, Engine::get().window->height)) + 1 });
+        fd.hiz_debug_output = make_image(ImageCreateInfo{
+            .name = fmt::format("hiz_debug_output_{}", i),
+            .type = VK_IMAGE_TYPE_2D,
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
+            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            .mips = 1 });
+
+        fd.gbuffer.color_image = make_image(ImageCreateInfo{
+            .name = fmt::format("g_color_{}", i),
+            .type = VK_IMAGE_TYPE_2D,
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
+            .format = VK_FORMAT_R8G8B8A8_SRGB,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+        fd.gbuffer.depth_buffer_image = make_image(ImageCreateInfo{
+            .name = fmt::format("g_depth_{}", i),
+            .type = VK_IMAGE_TYPE_2D,
+            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
+            .format = VK_FORMAT_D32_SFLOAT,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 
         /*make_image(&fd.gbuffer.color_image,
-                   Image{ fmt::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
-                          VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
-                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        make_image(&fd.gbuffer.view_space_positions_image,
-                   Image{ fmt::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
-                          VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
-        make_image(&fd.gbuffer.view_space_normals_image,
-                   Image{ fmt::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
-                          VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        make_image(&fd.gbuffer.depth_buffer_image,
-                   Image{ fmt::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
-                          VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
-                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        make_image(&fd.gbuffer.ambient_occlusion_image,
-                   Image{ fmt::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
-                          VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
-                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
+                     Image{ fmt::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                            VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
+                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+          make_image(&fd.gbuffer.view_space_positions_image,
+                     Image{ fmt::format("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                            VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
+          make_image(&fd.gbuffer.view_space_normals_image,
+                     Image{ fmt::format("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                            VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+          make_image(&fd.gbuffer.depth_buffer_image,
+                     Image{ fmt::format("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                            VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
+                            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+          make_image(&fd.gbuffer.ambient_occlusion_image,
+                     Image{ fmt::format("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+                            VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
     }
+
+    static constexpr auto insert_vk_img_barrier = [](CommandBuffer* cmd, Image& img, VkPipelineStageFlags2 src_stage,
+                                                     VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
+                                                     VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout) {
+        cmd->barrier(img, src_stage, src_access, dst_stage, dst_access, old_layout, new_layout);
+    };
+
+    auto cmd = frame_datas[0].cmdpool->begin();
+    for(auto i = 0ull; i < frame_datas.size(); ++i)
+    {
+        insert_vk_img_barrier(cmd, frame_datas[i].hiz_pyramid.get(), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_GENERAL);
+        insert_vk_img_barrier(cmd, frame_datas[i].hiz_debug_output.get(), VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                              VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        auto& img = frame_datas[i].gbuffer.depth_buffer_image.get();
+        cmd->clear_depth_stencil(img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, { 0, 1 }, { 0, 1 }, 0.0f, 0);
+        insert_vk_img_barrier(cmd, img, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        geom_main_bufs.transform_bufs[i] = make_buffer(BufferCreateInfo{
+            fmt::format("transform_buffer_{}", i), 1024,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
+    }
+    frame_datas[0].cmdpool->end(cmd);
+    submit_queue->with_cmd_buf(cmd).submit_wait(~0ull);
 }
 
-void RendererVulkan::build_render_graph() {
-    rendergraph.clear_passes();
-    rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenFourierPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenDisplacementPass>(&rendergraph);
-    rendergraph.add_pass<FFTOceanDebugGenGradientPass>(&rendergraph);
-    rendergraph.add_pass<ZPrepassPass>(&rendergraph);
-    rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
-    rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
-    rendergraph.add_pass<VsmShadowsPass>(&rendergraph);
-    rendergraph.add_pass<VsmDebugPageCopyPass>(&rendergraph);
-    rendergraph.add_pass<DefaultUnlitPass>(&rendergraph);
-    rendergraph.add_pass<ImguiPass>(&rendergraph);
-    rendergraph.add_pass<SwapchainPresentPass>(&rendergraph);
-    rendergraph.bake();
+void RendererVulkan::build_render_graph()
+{
+    ENG_TODO();
+    // rendergraph.clear_passes();
+    //  rendergraph.add_pass<FFTOceanDebugGenH0Pass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanDebugGenHtPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanDebugGenFourierPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanDebugGenDisplacementPass>(&rendergraph);
+    //  rendergraph.add_pass<FFTOceanDebugGenGradientPass>(&rendergraph);
+    // rendergraph.add_pass<ZPrepassPass>(&rendergraph);
+    //  rendergraph.add_pass<VsmClearPagesPass>(&rendergraph);
+    //  rendergraph.add_pass<VsmPageAllocPass>(&rendergraph);
+    //  rendergraph.add_pass<VsmShadowsPass>(&rendergraph);
+    //  rendergraph.add_pass<VsmDebugPageCopyPass>(&rendergraph);
+    // rendergraph.add_pass<DefaultUnlitPass>(&rendergraph);
+    // rendergraph.add_pass<ImguiPass>(&rendergraph);
+    // rendergraph.add_pass<SwapchainPresentPass>(&rendergraph);
+    // rendergraph.bake();
 }
 
-void RendererVulkan::update() {
+void RendererVulkan::update()
+{
     if(flags.test(RenderFlags::PAUSE_RENDERING)) { return; }
-    if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT)) { upload_staged_models(); }
-    if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES)) {
-        bake_indirect_commands();
-        upload_transforms();
+    if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT))
+    {
+        // assert(false);
+        //  upload_staged_models();
+    }
+    if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES))
+    {
+        // assert(false);
+        //  upload_transforms();
     }
     if(flags.test_clear(RenderFlags::DIRTY_BLAS_BIT)) { build_blas(); }
-    if(flags.test_clear(RenderFlags::DIRTY_TLAS_BIT)) {
+    if(flags.test_clear(RenderFlags::DIRTY_TLAS_BIT))
+    {
         build_tlas();
         update_ddgi();
         // TODO: prepare ddgi on scene update
     }
-    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT)) {
+    if(flags.test_clear(RenderFlags::RESIZE_SWAPCHAIN_BIT))
+    {
         submit_queue->wait_idle();
         create_window_sized_resources();
     }
-    if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH)) {
-        build_render_graph();
-        pipelines.threaded_compile();
+    if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH))
+    {
+        assert(false);
+        // build_render_graph();
+        // pipelines.threaded_compile();
     }
-    if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET)) {
+    if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET))
+    {
         assert(false);
         submit_queue->wait_idle();
         // update_bindless_set();
     }
+    if(!shaders_to_compile.empty()) { compile_shaders(); }
+    if(!pipelines_to_compile.empty()) { compile_pipelines(); }
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
@@ -518,7 +594,8 @@ void RendererVulkan::update() {
     {
         VkResult acquire_ret;
         swapchain_index = swapchain.acquire(&acquire_ret, ~0ull, fd.sem_swapchain);
-        if(acquire_ret != VK_SUCCESS) {
+        if(acquire_ret != VK_SUCCESS)
+        {
             ENG_WARN("Acquire image failed with: {}", static_cast<uint32_t>(acquire_ret));
             return;
         }
@@ -528,43 +605,51 @@ void RendererVulkan::update() {
     submit_queue->reset_fence(get_frame_data().fen_rendering_finished);
     // vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
 
+    static glm::mat4 s_view = Engine::get().camera->prev_view;
+    if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
+    {
+        s_view = Engine::get().camera->prev_view;
+    }
+
     {
         const float hx = (halton(Engine::get().frame_num() % 4u, 2) * 2.0 - 1.0);
         const float hy = (halton(Engine::get().frame_num() % 4u, 3) * 2.0 - 1.0);
         const glm::mat3 rand_mat =
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
-        const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
-        const auto cam = Engine::get().camera->pos;
-        auto eye = -ldir * 30.0f;
-        const auto lview = glm::lookAt(eye, eye + ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
-        const auto eyelpos = lview * glm::vec4{ cam, 1.0f };
-        const auto offset = glm::translate(glm::mat4{ 1.0f }, -glm::vec3{ eyelpos.x, eyelpos.y, 0.0f });
-        const auto dir_light_view = offset * lview;
-        const auto eyelpos2 = dir_light_view * glm::vec4{ cam, 1.0f };
-        ENG_LOG("CAMERA EYE DOT {} {}", eyelpos2.x, eyelpos2.y);
-        // const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
+        // const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
+        // const auto cam = Engine::get().camera->pos;
+        // auto eye = -ldir * 30.0f;
+        // const auto lview = glm::lookAt(eye, eye + ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
+        // const auto eyelpos = lview * glm::vec4{ cam, 1.0f };
+        // const auto offset = glm::translate(glm::mat4{ 1.0f }, -glm::vec3{ eyelpos.x, eyelpos.y, 0.0f });
+        // const auto dir_light_view = offset * lview;
+        // const auto eyelpos2 = dir_light_view * glm::vec4{ cam, 1.0f };
+        // ENG_LOG("CAMERA EYE DOT {} {}", eyelpos2.x, eyelpos2.y);
+        //// const auto dir_light_proj = glm::perspectiveFov(glm::radians(90.0f), 8.0f * 1024.0f, 8.0f * 1024.0f, 0.0f, 150.0f);
 
-        GPUVsmConstantsBuffer vsmconsts{
-            .dir_light_view = dir_light_view,
-            .dir_light_dir = ldir,
-            .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
-            .max_clipmap_index = 0,
-            .texel_resolution = float(VSM_PHYSICAL_PAGE_RESOLUTION),
-            .num_frags = 0,
-        };
+        // GPUVsmConstantsBuffer vsmconsts{
+        //     .dir_light_view = dir_light_view,
+        //     .dir_light_dir = ldir,
+        //     .num_pages_xy = VSM_VIRTUAL_PAGE_RESOLUTION,
+        //     .max_clipmap_index = 0,
+        //     .texel_resolution = float(VSM_PHYSICAL_PAGE_RESOLUTION),
+        //     .num_frags = 0,
+        // };
 
-        for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
-            float halfSize = float(VSM_CLIP0_LENGTH) * 0.5f * std::exp2f(float(i));
-            float splitNear = (i == 0) ? 0.1f : float(VSM_CLIP0_LENGTH) * std::exp2f(float(i - 1));
-            float splitFar = float(VSM_CLIP0_LENGTH) * std::exp2f(float(i));
-            splitNear = 1.0;
-            splitFar = 75.0;
-            vsmconsts.dir_light_proj_view[i] =
-                glm::ortho(-halfSize, +halfSize, -halfSize, +halfSize, splitNear, splitFar) * dir_light_view;
-        }
+        // for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i)
+        //{
+        //     float halfSize = float(VSM_CLIP0_LENGTH) * 0.5f * std::exp2f(float(i));
+        //     float splitNear = (i == 0) ? 0.1f : float(VSM_CLIP0_LENGTH) * std::exp2f(float(i - 1));
+        //     float splitFar = float(VSM_CLIP0_LENGTH) * std::exp2f(float(i));
+        //     splitNear = 1.0;
+        //     splitFar = 75.0;
+        //     vsmconsts.dir_light_proj_view[i] =
+        //         glm::ortho(-halfSize, +halfSize, -halfSize, +halfSize, splitNear, splitFar) * dir_light_view;
+        // }
 
         GPUConstantsBuffer constants{
+            .debug_view = s_view,
             .view = Engine::get().camera->get_view(),
             .proj = Engine::get().camera->get_projection(),
             .proj_view = Engine::get().camera->get_projection() * Engine::get().camera->get_view(),
@@ -573,13 +658,216 @@ void RendererVulkan::update() {
             .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
             .cam_pos = Engine::get().camera->pos,
         };
-        staging_buffer->send_to(fd.constants, 0ull, constants).send_to(vsm.constants_buffer, 0ull, vsmconsts).submit();
+        staging_manager->copy(fd.constants, &constants, 0, { 0, sizeof(constants) });
+        // staging_buffer->stage(vsm.constants_buffer, vsmconsts, 0ull);
     }
 
-    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { upload_transforms(); }
+    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT))
+    {
+        std::swap(geom_main_bufs.transform_bufs[0], geom_main_bufs.transform_bufs[1]);
+    }
+
+    uint32_t old_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 1);
+    bake_indirect_commands();
+
+    staging_manager->flush();
+
+    static constexpr auto insert_vk_barrier = [](VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                                                 VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
+        const auto barr = Vks(VkMemoryBarrier2{
+            .srcStageMask = src_stage, .srcAccessMask = src_access, .dstStageMask = dst_stage, .dstAccessMask = dst_access });
+        const auto dep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &barr });
+        vkCmdPipelineBarrier2(cmd, &dep);
+    };
+    static constexpr auto insert_vk_img_barrier = [](VkCommandBuffer cmd, Image& img, VkPipelineStageFlags2 src_stage,
+                                                     VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
+                                                     VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout) {
+        const auto barr = Vks(VkImageMemoryBarrier2{ .srcStageMask = src_stage,
+                                                     .srcAccessMask = src_access,
+                                                     .dstStageMask = dst_stage,
+                                                     .dstAccessMask = dst_access,
+                                                     .oldLayout = old_layout,
+                                                     .newLayout = new_layout,
+                                                     .image = img.image,
+                                                     .subresourceRange = { img.deduce_aspect(), 0, img.mips, 0, img.layers } });
+        const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
+        vkCmdPipelineBarrier2(cmd, &dep);
+    };
+
     const auto cmd = fd.cmdpool->begin();
-    rendergraph.render(cmd);
+    // rendergraph.render(cmd);
+
+    struct PushConstantsCulling
+    {
+        uint32_t constants_index;
+        uint32_t ids_index;
+        uint32_t post_cull_ids_index;
+        uint32_t bs_index;
+        uint32_t transforms_index;
+        uint32_t indirect_commands_index;
+        uint32_t hiz_source;
+        uint32_t hiz_dest;
+        uint32_t hiz_width;
+        uint32_t hiz_height;
+    };
+
+    PushConstantsCulling push_constants_culling{ .constants_index = bindless_pool->get_index(fd.constants),
+                                                 .ids_index = bindless_pool->get_index(geom_main_bufs.buf_draw_ids),
+                                                 .post_cull_ids_index = bindless_pool->get_index(geom_main_bufs.buf_final_draw_ids),
+                                                 .bs_index = bindless_pool->get_index(geom_main_bufs.buf_draw_bs),
+                                                 .transforms_index = bindless_pool->get_index(geom_main_bufs.transform_bufs[0]),
+                                                 .indirect_commands_index = bindless_pool->get_index(geom_main_bufs.buf_draw_cmds) };
+
+    {
+        auto& dep_image = fd.gbuffer.depth_buffer_image.get();
+        auto& hiz_image = fd.hiz_pyramid.get();
+        cmd->bind_pipeline(hiz_pipeline.get());
+        if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
+        {
+            cmd->clear_depth_stencil(hiz_image, VK_IMAGE_LAYOUT_GENERAL, { 0, VK_REMAINING_MIP_LEVELS }, { 0, 1 }, 0.0f, 0);
+            cmd->barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            push_constants_culling.hiz_width = hiz_image.extent.width;
+            push_constants_culling.hiz_height = hiz_image.extent.height;
+
+            bindless_pool->bind(cmd);
+            for(auto i = 0u; i < hiz_image.mips; ++i)
+            {
+                if(i == 0)
+                {
+                    push_constants_culling.hiz_source =
+                        bindless_pool->get_index(make_texture(fd.gbuffer.depth_buffer_image,
+                                                              dep_image.create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_DEPTH_BIT }),
+                                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, hiz_sampler));
+                }
+                else
+                {
+                    push_constants_culling.hiz_source =
+                        bindless_pool->get_index(make_texture(fd.hiz_pyramid,
+                                                              hiz_image.create_image_view(ImageViewDescriptor{
+                                                                  .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i - 1, 1 } }),
+                                                              VK_IMAGE_LAYOUT_GENERAL, hiz_sampler));
+                }
+                push_constants_culling.hiz_dest =
+                    bindless_pool->get_index(make_texture(fd.hiz_pyramid,
+                                                          hiz_image.create_image_view(ImageViewDescriptor{
+                                                              .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i, 1 } }),
+                                                          VK_IMAGE_LAYOUT_GENERAL, nullptr));
+                push_constants_culling.hiz_width = std::max(hiz_image.extent.width >> i, 1u);
+                push_constants_culling.hiz_height = std::max(hiz_image.extent.height >> i, 1u);
+                cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
+                cmd->dispatch((push_constants_culling.hiz_width + 31) / 32, (push_constants_culling.hiz_height + 31) / 32, 1);
+                cmd->barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
+                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
+            }
+        }
+        else
+        {
+            bindless_pool->bind(cmd);
+            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+        push_constants_culling.hiz_source =
+            bindless_pool->get_index(make_texture(fd.hiz_pyramid,
+                                                  hiz_image.create_image_view(ImageViewDescriptor{
+                                                      .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { 0u, hiz_image.mips } }),
+                                                  VK_IMAGE_LAYOUT_GENERAL, hiz_sampler));
+        push_constants_culling.hiz_dest =
+            bindless_pool->get_index(make_texture(fd.hiz_debug_output,
+                                                  fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
+                                                  VK_IMAGE_LAYOUT_GENERAL, nullptr));
+        cmd->clear_color(fd.hiz_debug_output.get(), VK_IMAGE_LAYOUT_GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
+        cmd->barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+        cmd->bind_pipeline(cull_pipeline.get());
+        cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
+        cmd->dispatch((meshlet_instances.size() + 63) / 64, 1, 1);
+        cmd->barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+    }
+
+    VkRenderingAttachmentInfo rainfos[]{
+        Vks(VkRenderingAttachmentInfo{ .imageView = swapchain_image->get_image_view(),
+                                       .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                       .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } } }),
+        Vks(VkRenderingAttachmentInfo{ .imageView = fd.gbuffer.depth_buffer_image->get_image_view(),
+                                       .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                                       .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                       .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0 } } })
+    };
+    const auto rinfo =
+        Vks(VkRenderingInfo{ .renderArea = { { 0, 0 }, { swapchain_image->extent.width, swapchain_image->extent.height } },
+                             .layerCount = 1,
+                             .colorAttachmentCount = 1,
+                             .pColorAttachments = rainfos,
+                             .pDepthAttachment = &rainfos[1] });
+    struct push_constants_1
+    {
+        uint32_t indices_index;
+        uint32_t vertex_positions_index;
+        uint32_t vertex_attributes_index;
+        uint32_t transforms_index;
+        uint32_t constants_index;
+        uint32_t meshlet_instance_index;
+        uint32_t meshlet_ids_index;
+        uint32_t meshlet_bs_index;
+        uint32_t hiz_pyramid_index;
+        uint32_t hiz_debug_index;
+    };
+    push_constants_1 pc1{
+        .indices_index = bindless_pool->get_index(geom_main_bufs.buf_indices),
+        .vertex_positions_index = bindless_pool->get_index(geom_main_bufs.buf_vpos),
+        .vertex_attributes_index = bindless_pool->get_index(geom_main_bufs.buf_vattrs),
+        .transforms_index = bindless_pool->get_index(geom_main_bufs.transform_bufs[0]),
+        .constants_index = bindless_pool->get_index(fd.constants),
+        .meshlet_instance_index = bindless_pool->get_index(geom_main_bufs.buf_draw_ids),
+        .meshlet_ids_index = bindless_pool->get_index(geom_main_bufs.buf_final_draw_ids),
+        .meshlet_bs_index = bindless_pool->get_index(geom_main_bufs.buf_draw_bs),
+        .hiz_pyramid_index = push_constants_culling.hiz_source,
+        .hiz_debug_index = bindless_pool->get_index(make_texture(
+            fd.hiz_debug_output, fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
+            VK_IMAGE_LAYOUT_GENERAL, batch_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } })->sampler)),
+    };
+
+    cmd->bind_index(geom_main_bufs.buf_indices.get(), 0, VK_INDEX_TYPE_UINT16);
+    cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    cmd->begin_rendering(rinfo);
+
+    VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+    VkRect2D scissor{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+    for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
+    {
+        const auto& mb = multibatches.at(i);
+        const auto& p = pipelines.at(mb.pipeline);
+        cmd->bind_pipeline(p);
+        if(i == 0) { bindless_pool->bind(cmd); }
+        cmd->push_constants(VK_SHADER_STAGE_ALL, &pc1, { 0u, sizeof(pc1) });
+        cmd->set_viewports(&viewport, 1);
+        cmd->set_scissors(&scissor, 1);
+        cmd->draw_indexed_indirect_count(geom_main_bufs.buf_draw_cmds.get(), 8, geom_main_bufs.buf_draw_cmds.get(), 0,
+                                         geom_main_bufs.command_count, sizeof(DrawIndirectCommand));
+    }
+    cmd->end_rendering();
+    cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
     fd.cmdpool->end(cmd);
+
     submit_queue->with_cmd_buf(cmd)
         .with_wait_sem(fd.sem_swapchain, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
         .with_sig_sem(fd.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
@@ -596,12 +884,17 @@ void RendererVulkan::update() {
     vkQueuePresentKHR(submit_queue->queue, &pinfo);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
 
-    // flags.clear();
+    flags.clear();
     submit_queue->wait_idle();
+
+    uint32_t new_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 2);
+    ENG_LOG("NUM TRIANGLES (PRE | POST) {} | {}; DIFF: {}", old_triangles, new_triangles, new_triangles - old_triangles);
+
     return;
 }
 
-void RendererVulkan::on_window_resize() {
+void RendererVulkan::on_window_resize()
+{
     flags.set(RenderFlags::RESIZE_SWAPCHAIN_BIT);
     // set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
 }
@@ -612,79 +905,93 @@ void RendererVulkan::on_window_resize() {
 //     //  ENG_WARN("TODO: Resize resources on new set_screen()");
 // }
 
-static VkFormat deduce_image_format(ImageFormat format) {
-    switch(format) {
-    case ImageFormat::R8G8B8A8_UNORM:
-        return VK_FORMAT_R8G8B8A8_UNORM;
-    case ImageFormat::R8G8B8A8_SRGB:
-        return VK_FORMAT_R8G8B8A8_SRGB;
-    default: {
-        assert(false);
-        return VK_FORMAT_MAX_ENUM;
-    }
-    }
-}
-
-static VkImageType deduce_image_type(ImageType dim) {
-    switch(dim) {
-    case ImageType::TYPE_1D:
-        return VK_IMAGE_TYPE_1D;
-    case ImageType::TYPE_2D:
-        return VK_IMAGE_TYPE_2D;
-    case ImageType::TYPE_3D:
-        return VK_IMAGE_TYPE_3D;
-    default: {
-        assert(false);
-        return VK_IMAGE_TYPE_MAX_ENUM;
-    }
-    }
-}
-
-Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc) {
-    const auto handle = make_image(desc.name, Vks(VkImageCreateInfo{ .imageType = deduce_image_type(desc.type),
-                                                                     .format = deduce_image_format(desc.format),
-                                                                     .extent = { desc.width, desc.height, 1u },
-                                                                     .mipLevels = desc.mips,
-                                                                     .arrayLayers = 1u,
-                                                                     .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                                              VK_IMAGE_USAGE_TRANSFER_DST_BIT }));
-    upload_images.push_back(UploadImage{ handle, { desc.data.begin(), desc.data.end() } });
+Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
+{
+    const auto handle = make_image(ImageCreateInfo{ .name = desc.name,
+                                                    .type = eng::to_vk(desc.type),
+                                                    .extent = { desc.width, desc.height, 1 },
+                                                    .format = eng::to_vk(desc.format),
+                                                    .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                             VK_IMAGE_USAGE_TRANSFER_DST_BIT });
+    staging_manager->copy(handle, desc.data.data(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
     return handle;
 }
 
-Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch) {
-    const auto view = get_image(batch.image).get_view();
+Handle<Sampler> RendererVulkan::batch_sampler(const SamplerDescriptor& batch)
+{
+    auto it = samplers.insert(Sampler{ batch, nullptr });
+    if(it.success)
+    {
+        auto info = Vks(VkSamplerCreateInfo{ .magFilter = eng::to_vk(batch.filtering[1]),
+                                             .minFilter = eng::to_vk(batch.filtering[0]),
+                                             .mipmapMode = eng::to_vk(batch.mipmap_mode),
+                                             .addressModeU = eng::to_vk(batch.addressing[0]),
+                                             .addressModeV = eng::to_vk(batch.addressing[1]),
+                                             .addressModeW = eng::to_vk(batch.addressing[2]),
+                                             .mipLodBias = batch.mip_lod[2],
+                                             .minLod = batch.mip_lod[0],
+                                             .maxLod = batch.mip_lod[1] });
+
+        auto reduction = Vks(VkSamplerReductionModeCreateInfo{});
+        if(batch.reduction_mode)
+        {
+            reduction.reductionMode = eng::to_vk(*batch.reduction_mode);
+            info.pNext = &reduction;
+        }
+        VK_CHECK(vkCreateSampler(dev, &info, {}, &samplers.at(it.handle).sampler));
+    }
+    return it.handle;
+}
+
+Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch)
+{
+    if(!batch.image) { return {}; }
+    const auto view = batch.image->get_image_view();
     const auto layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-    const auto sampler = samplers.get_sampler(batch.filtering, batch.addressing);
+    const auto sampler = batch.sampler ? samplers.at(batch.sampler).sampler : nullptr;
+    assert(view);
     return make_texture(batch.image, view, layout, sampler);
 }
 
-Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc) {
-    for(const auto& [h, m] : materials) {
-        if(m.base_color_texture == desc.base_color_texture) {}
-    }
-    return Handle<Material>{ *materials.insert(Material{ .base_color_texture = desc.base_color_texture }) };
+Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
+{
+    auto meshpass = mesh_passes.find(MeshPass{ .name = desc.mesh_pass });
+    if(!meshpass) { meshpass = default_meshpass; }
+    return materials.insert(Material{ .mesh_pass = meshpass, .base_color_texture = desc.base_color_texture }).handle;
 }
 
-Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch) {
-    const auto total_vertices = get_total_vertices();
-    const auto total_indices = get_total_indices();
+Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
+{
+    std::vector<Vertex> out_vertices;
+    std::vector<uint16_t> out_indices;
+    std::vector<Meshlet> out_meshlets;
+    meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
 
-    Geometry geometry{ .metadata = geometry_metadatas.emplace(),
-                       .vertex_offset = total_vertices,
-                       .vertex_count = (uint32_t)batch.vertices.size(),
-                       .index_offset = total_indices,
-                       .index_count = (uint32_t)batch.indices.size() };
+    Geometry geometry{ .vertex_range = { geom_main_bufs.vertex_count, out_vertices.size() },
+                       .index_range = { geom_main_bufs.index_count, out_indices.size() },
+                       .meshlet_range = { meshlets.size(), out_meshlets.size() } };
 
-    upload_vertices.insert(upload_vertices.end(), batch.vertices.begin(), batch.vertices.end());
-    upload_indices.insert(upload_indices.end(), batch.indices.begin(), batch.indices.end());
+    static constexpr auto VXATTRSIZE = sizeof(Vertex) - sizeof(Vertex::position);
+    std::vector<glm::vec3> positions;
+    std::vector<std::byte> attributes;
+    positions.resize(out_vertices.size());
+    attributes.resize(out_vertices.size() * VXATTRSIZE);
+    for(auto i = 0ull; i < out_vertices.size(); ++i)
+    {
+        auto& v = out_vertices.at(i);
+        positions[i] = v.position;
+        memcpy(&attributes[i * VXATTRSIZE], reinterpret_cast<const std::byte*>(&v) + sizeof(Vertex::position), VXATTRSIZE);
+    }
 
-    this->total_vertices += geometry.vertex_count;
-    this->total_indices += geometry.index_count;
+    staging_manager->copy(geom_main_bufs.buf_vpos, positions, STAGING_APPEND);
+    staging_manager->copy(geom_main_bufs.buf_vattrs, attributes, STAGING_APPEND);
+    staging_manager->copy(geom_main_bufs.buf_indices, out_indices, STAGING_APPEND);
 
-    Handle<Geometry> handle = geometries.insert(geometry);
+    geom_main_bufs.vertex_count += positions.size();
+    geom_main_bufs.index_count += out_indices.size();
+    meshlets.insert(meshlets.end(), out_meshlets.begin(), out_meshlets.end());
 
+    const auto handle = geometries.insert(std::move(geometry));
     flags.set(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT);
 
     // clang-format off
@@ -693,27 +1000,97 @@ Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
             static_cast<float>(batch.indices.size_bytes()) / 1000.0f);
     // clang-format on
 
-    return handle;
+    return handle.handle;
 }
 
-Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch) {
-    for(const auto& [h, m] : meshes) {
-        if(m.geometry == batch.geometry && m.material == batch.material) { return h; }
+void RendererVulkan::meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
+                                         std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets)
+{
+    static constexpr auto max_verts = 64u;
+    static constexpr auto max_tris = 124u;
+    static constexpr auto cone_weight = 0.0f;
+
+    const auto& indices = batch.indices;
+    const auto& vertices = batch.vertices;
+    const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
+    std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+    std::vector<meshopt_Bounds> meshlets_bounds;
+    std::vector<uint32_t> meshlets_verts(max_meshlets * max_verts);
+    std::vector<uint8_t> meshlets_triangles(max_meshlets * max_tris * 3);
+
+    const auto meshlet_count = meshopt_buildMeshlets(meshlets.data(), meshlets_verts.data(), meshlets_triangles.data(),
+                                                     indices.data(), indices.size(), &vertices[0].position.x,
+                                                     vertices.size(), sizeof(vertices[0]), max_verts, max_tris, cone_weight);
+
+    const auto& last_meshlet = meshlets.at(meshlet_count - 1);
+    meshlets_verts.resize(last_meshlet.vertex_offset + last_meshlet.vertex_count);
+    meshlets_triangles.resize(last_meshlet.triangle_offset + ((last_meshlet.triangle_count * 3 + 3) & ~3));
+    meshlets.resize(meshlet_count);
+    meshlets_bounds.reserve(meshlet_count);
+
+    for(auto& m : meshlets)
+    {
+        meshopt_optimizeMeshlet(&meshlets_verts.at(m.vertex_offset), &meshlets_triangles.at(m.triangle_offset),
+                                m.triangle_count, m.vertex_count);
+        const auto mbounds =
+            meshopt_computeMeshletBounds(&meshlets_verts.at(m.vertex_offset), &meshlets_triangles.at(m.triangle_offset),
+                                         m.triangle_count, &vertices[0].position.x, vertices.size(), sizeof(vertices[0]));
+        meshlets_bounds.push_back(mbounds);
     }
-    Mesh mesh{ .geometry = batch.geometry, .material = batch.material };
-    return meshes.insert(mesh);
-}
 
-void RendererVulkan::instance_mesh(const InstanceSettings& settings) {
-    const auto& mesh = Engine::get().ecs_system->get<components::Mesh>(settings.entity);
-    mesh_instances.reserve(mesh_instances.size() + mesh.submeshes.size());
-    for(auto i = 0u; i < mesh.submeshes.size(); ++i) {
-        mesh_instances.push_back(MeshInstance{ .entity = settings.entity, .mesh = mesh.submeshes.at(i) });
+    out_vertices.resize(meshlets_verts.size());
+    std::transform(meshlets_verts.begin(), meshlets_verts.end(), out_vertices.begin(),
+                   [&vertices](uint32_t idx) { return vertices[idx]; });
+
+    out_indices.resize(meshlets_triangles.size());
+    std::transform(meshlets_triangles.begin(), meshlets_triangles.end(), out_indices.begin(),
+                   [](auto idx) { return static_cast<uint16_t>(idx); });
+    out_meshlets.resize(meshlet_count);
+    for(auto i = 0u; i < meshlet_count; ++i)
+    {
+        const auto& m = meshlets.at(i);
+        const auto& mb = meshlets_bounds.at(i);
+        out_meshlets.at(i) = gfx::Meshlet{ .vertex_offset = m.vertex_offset,
+                                           .vertex_count = m.vertex_count,
+                                           .index_offset = m.triangle_offset,
+                                           .index_count = m.triangle_count * 3,
+                                           .bounding_sphere = glm::vec4{ mb.center[0], mb.center[1], mb.center[2], mb.radius } };
     }
-    flags.set(RenderFlags::DIRTY_MESH_INSTANCES);
 }
 
-void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
+Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch)
+{
+    auto& bm = meshes.emplace_back(Mesh{ .geometry = batch.geometry, .material = batch.material });
+    if(!bm.material) { bm.material = default_material; }
+    return Handle<Mesh>{ (uint32_t)meshes.size() - 1 };
+}
+
+Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
+{
+    const auto* transform = Engine::get().ecs->get<ecs::comp::Transform>(settings.entity);
+    const auto* mr = Engine::get().ecs->get<ecs::comp::MeshRenderer>(settings.entity);
+    if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
+    if(!mr) { return {}; }
+    for(const auto& e : mr->meshes)
+    {
+        meshlets_to_instance.push_back(MeshletInstance{ .geometry = e->geometry, .material = e->material, .index = mesh_instance_index });
+    }
+    assert(entities.size() == mesh_instance_index);
+    entities.push_back(settings.entity);
+    if(!flags.test(RenderFlags::DIRTY_TRANSFORMS_BIT))
+    {
+        flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
+        staging_manager->copy(geom_main_bufs.transform_bufs[1], geom_main_bufs.transform_bufs[0], 0,
+                              { 0, geom_main_bufs.transform_bufs[0]->size });
+        staging_manager->insert_barrier();
+    }
+    staging_manager->copy(geom_main_bufs.transform_bufs[1], &transform->global, mesh_instance_index * sizeof(glm::mat4),
+                          { 0, sizeof(glm::mat4) });
+    return Handle<Mesh>{ mesh_instance_index++ };
+}
+
+void RendererVulkan::instance_blas(const BLASInstanceSettings& settings)
+{
     ENG_TODO("Implement blas instancing");
     // auto& r = Engine::get().ecs_storage->get<components::Renderable>(settings.entity);
     // auto& mesh = meshes.at(r.mesh_handle);
@@ -727,181 +1104,325 @@ void RendererVulkan::instance_blas(const BLASInstanceSettings& settings) {
     // }
 }
 
-void RendererVulkan::update_transform(ecs::Entity entity) {
-    update_positions.push_back(entity);
+void RendererVulkan::update_transform(ecs::Entity entity)
+{
+    // update_positions.push_back(entity);
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
 
-size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFiltering filter, ImageAddressing addressing, uint32_t layer) {
-    struct ImguiTextureId {
-        ImTextureID id;
-        VkImage image;
-        ImageFiltering filter;
-        ImageAddressing addressing;
-        uint32_t layer;
-    };
-    static std::unordered_multimap<Handle<Image>, ImguiTextureId> tex_ids;
-    auto range = tex_ids.equal_range(handle);
-    auto delete_it = tex_ids.end();
-    for(auto it = range.first; it != range.second; ++it) {
-        if(it->second.filter == filter && it->second.addressing == addressing && it->second.layer == layer) {
-            if(it->second.image != get_image(handle).image) {
-                ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(it->second.id));
-                delete_it = it;
-                break;
-            }
-            return it->second.id;
-        }
-    }
-    if(delete_it != tex_ids.end()) { tex_ids.erase(delete_it); }
-    ImguiTextureId id{
-        .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(
-            samplers.get_sampler(filter, addressing),
-            get_image(handle).get_view(Vks(VkImageViewCreateInfo{
-                .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .baseArrayLayer = layer, .layerCount = 1 } })),
-            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
-        .image = get_image(handle).image,
-        .filter = filter,
-        .addressing = addressing,
-        .layer = layer,
-    };
-    tex_ids.emplace(handle, id);
-    return id.id;
+size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer)
+{
+    return ~0ull;
+    // struct ImguiTextureId
+    //{
+    //     ImTextureID id;
+    //     VkImage image;
+    //     ImageFilter filter;
+    //     ImageAddressing addressing;
+    //     uint32_t layer;
+    // };
+    // static std::unordered_multimap<Handle<Image>, ImguiTextureId> tex_ids;
+    // auto range = tex_ids.equal_range(handle);
+    // auto delete_it = tex_ids.end();
+    // for(auto it = range.first; it != range.second; ++it)
+    //{
+    //     if(it->second.filter == filter && it->second.addressing == addressing && it->second.layer == layer)
+    //     {
+    //         if(it->second.image != handle->image)
+    //         {
+    //             ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(it->second.id));
+    //             delete_it = it;
+    //             break;
+    //         }
+    //         return it->second.id;
+    //     }
+    // }
+    // if(delete_it != tex_ids.end()) { tex_ids.erase(delete_it); }
+    // ImguiTextureId id{
+    //     .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(
+    //         samplers.get_sampler(filter, addressing),
+    //         handle->get_image_view(ImageViewDescriptor{ .name = "imgui_view", .mips = { 0, 1 }, .layers = { 0, 1 }
+    //         }), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
+    //     .image = handle->image,
+    //     .filter = filter,
+    //     .addressing = addressing,
+    //     .layer = layer,
+    // };
+    // tex_ids.emplace(handle, id);
+    // return id.id;
 }
 
 Handle<Image> RendererVulkan::get_color_output_texture() const { return get_frame_data().gbuffer.color_image; }
 
-Material RendererVulkan::get_material(Handle<Material> handle) const {
-    if(!handle) { return Material{}; }
-    return materials.at(handle);
-}
+void RendererVulkan::compile_shaders()
+{
+    for(auto& e : shaders_to_compile)
+    {
+        auto& sh = e.get();
+        sh.metadata = new ShaderMetadata{};
+        ShaderMetadata* shmd = (ShaderMetadata*)sh.metadata;
+        const auto& path = sh.path;
+        static const auto read_file = [](const std::filesystem::path& path) {
+            std::string path_str = path.string();
+            std::string path_to_includes = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
+            char error[256] = {};
+            char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
+            if(!parsed_file)
+            {
+                ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
+                return std::string{};
+            }
+            std::string parsed_file_str{ parsed_file };
+            free(parsed_file);
+            return parsed_file_str;
+        };
 
-VsmData& RendererVulkan::get_vsm_data() { return vsm; }
+        const auto kind = [stage = sh.stage] {
+            if(stage == Shader::Stage::VERTEX) { return shaderc_vertex_shader; }
+            if(stage == Shader::Stage::PIXEL) { return shaderc_fragment_shader; }
+            // if(stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { return shaderc_raygen_shader; }
+            // if(stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) { return shaderc_closesthit_shader; }
+            // if(stage == VK_SHADER_STAGE_MISS_BIT_KHR) { return shaderc_miss_shader; }
+            if(stage == Shader::Stage::COMPUTE) { return shaderc_compute_shader; }
+            ENG_ERROR("Unrecognized shader type");
+            return shaderc_vertex_shader;
+        }();
 
-void RendererVulkan::upload_model_images() {
-    for(auto& tex : upload_images) {
-        Image& img = get_image(tex.image_handle);
-        // VkBufferImageCopy copy{
-        //     .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0,
-        //     .layerCount = 1 }, .imageOffset = {}, .imageExtent = img.extent,
-        // };
-        // staging_buffer->send_to(img, std::as_bytes(std::span{ tex.rgba_data }), copy);
-        staging_buffer->send_to(tex.image_handle, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, {}, tex.rgba_data);
-    }
-    staging_buffer->submit();
-    upload_images.clear();
-}
+        shaderc::CompileOptions options;
+        options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+        options.SetTargetSpirv(shaderc_spirv_version_1_6);
+        options.SetGenerateDebugInfo();
 
-void RendererVulkan::upload_staged_models() {
-    upload_model_images();
-    std::vector<glm::vec3> positions;
-    std::vector<float> attributes;
-    positions.reserve(upload_vertices.size());
-    attributes.reserve(upload_vertices.size() * ((sizeof(Vertex) - sizeof(glm::vec3)) / sizeof(float)));
-    for(auto& e : upload_vertices) {
-        positions.push_back(e.pos);
-        attributes.push_back(e.nor.x);
-        attributes.push_back(e.nor.y);
-        attributes.push_back(e.nor.z);
-        attributes.push_back(e.uv.x);
-        attributes.push_back(e.uv.y);
-        attributes.push_back(e.tang.x);
-        attributes.push_back(e.tang.y);
-        attributes.push_back(e.tang.z);
-        attributes.push_back(e.tang.w);
-    }
-    staging_buffer->send_to(vertex_positions_buffer, ~0ull, positions)
-        .send_to(vertex_attributes_buffer, ~0ull, attributes)
-        .send_to(index_buffer, ~0ull, upload_indices)
-        .submit();
-    upload_vertices.clear();
-    upload_indices.clear();
-}
-
-void RendererVulkan::bake_indirect_commands() {
-    std::sort(mesh_instances.begin(), mesh_instances.end(), [this](auto a, auto b) {
-        const auto& ra = meshes.at(a.mesh);
-        const auto& rb = meshes.at(b.mesh);
-        if(ra.geometry >= rb.geometry) { return false; }
-        if(ra.material >= rb.material) { return false; }
-        // blas left out
-        return true;
-    });
-
-    // mesh_instance_idxs.clear();
-    // mesh_instance_idxs.reserve(mesh_instances.size());
-    // for(uint32_t i = 0; i < mesh_instances.size(); ++i) {
-    //     mesh_instance_idxs[mesh_instances.at(i).submesh] = i;
-    // }
-
-    const auto total_triangles = get_total_triangles();
-    std::vector<GPUMeshInstance> gpu_mesh_instances;
-    std::vector<VkDrawIndexedIndirectCommand> gpu_draw_commands;
-    IndirectDrawCommandBufferHeader gpu_draw_header;
-
-    for(uint32_t i = 0u; i < mesh_instances.size(); ++i) {
-        const MeshInstance& smi = mesh_instances.at(i);
-        const Mesh& m = meshes.at(smi.mesh);
-        const Geometry& geom = geometries.at(m.geometry);
-        const Material& mat = materials.at(m.material);
-        gpu_mesh_instances.push_back(GPUMeshInstance{
-            .vertex_offset = geom.vertex_offset,
-            .index_offset = geom.index_offset,
-            .color_texture_idx = get_bindless_index(mat.base_color_texture),
-            .normal_texture_idx = ~0ul,
-            .metallic_roughness_idx = ~0ul,
-        });
-        if(i == 0 || mesh_instances.at(i - 1).mesh != smi.mesh) {
-            gpu_draw_commands.push_back(VkDrawIndexedIndirectCommand{ .indexCount = geom.index_count,
-                                                                      .instanceCount = 1,
-                                                                      .firstIndex = geom.index_offset,
-                                                                      .vertexOffset = (int32_t)geom.vertex_offset, /*(int32_t)(geom.vertex_offset),*/
-                                                                      .firstInstance = i });
-        } else {
-            ++gpu_draw_commands.back().instanceCount;
+        // options.AddMacroDefinition("ASDF");
+        shaderc::Compiler c;
+        std::string file_str = read_file(path);
+        const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
+        if(res.GetCompilationStatus() != shaderc_compilation_status_success)
+        {
+            ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
+            return;
         }
+
+        const auto module_info = Vks(VkShaderModuleCreateInfo{
+            .codeSize = (res.end() - res.begin()) * sizeof(uint32_t),
+            .pCode = res.begin(),
+        });
+        VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
     }
 
-    gpu_draw_header.draw_count = gpu_draw_commands.size();
-    gpu_draw_header.geometry_instance_count = mesh_instances.size();
-    max_draw_count = gpu_draw_commands.size();
-
-    // clang-format off
-    if(!indirect_draw_buffer){
-        indirect_draw_buffer = make_buffer("indirect draw", 
-            Vks(VkBufferCreateInfo{
-                    .size = sizeof(IndirectDrawCommandBufferHeader) + gpu_draw_commands.size() * sizeof(gpu_draw_commands[0]),
-                    .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
-                }), VmaAllocationCreateInfo{});
-    }
-    staging_buffer->send_to(indirect_draw_buffer, 0ull, gpu_draw_header).submit();
-    staging_buffer->send_to(indirect_draw_buffer, ~0ull, gpu_draw_commands).submit();
-
-    if(!mesh_instances_buffer) {
-        mesh_instances_buffer = make_buffer("mesh instances", 
-            Vks(VkBufferCreateInfo{
-                    .size = gpu_mesh_instances.size() * sizeof(gpu_mesh_instances[0]),
-                    .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                }), VmaAllocationCreateInfo{});
-    }
-    staging_buffer->send_to(mesh_instances_buffer, 0ull, gpu_mesh_instances).submit();
-    // clang-format on
+    shaders_to_compile.clear();
 }
 
-void RendererVulkan::upload_transforms() {
-    std::swap(get_frame_data().transform_buffers, get_frame_data(1).transform_buffers);
-    Buffer& dst_transforms = get_buffer(get_frame_data().transform_buffers);
-    std::vector<glm::mat4> transforms;
-    transforms.reserve(mesh_instances.size());
-    for(auto e : mesh_instances) {
-        transforms.push_back(Engine::get().ecs_system->get<components::Transform>(e.entity).transform);
+void RendererVulkan::compile_pipelines()
+{
+    for(auto& e : pipelines_to_compile)
+    {
+        auto& p = e.get();
+        const auto& info = p.info;
+        p.vkmetadata = new VkPipelineMetadata{};
+
+        {
+            const auto stage = info.shaders[0]->stage;
+            if(stage == Shader::Stage::VERTEX) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
+            else if(stage == Shader::Stage::COMPUTE) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+            else
+            {
+                assert(false);
+                continue;
+            }
+        }
+
+        p.vkmetadata->layout = bindless_pool->get_pipeline_layout();
+
+        std::vector<VkPipelineShaderStageCreateInfo> stages;
+        stages.reserve(info.shaders.size());
+        for(const auto& e : info.shaders)
+        {
+            stages.push_back(Vks(VkPipelineShaderStageCreateInfo{
+                .stage = eng::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
+        }
+
+        if(p.vkmetadata->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
+        {
+            const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = p.vkmetadata->layout });
+            VK_CHECK(vkCreateComputePipelines(dev, {}, 1, &vkinfo, {}, &p.vkmetadata->pipeline));
+            continue;
+        }
+
+        auto pVertexInputState = Vks(VkPipelineVertexInputStateCreateInfo{});
+
+        auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST });
+
+        auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
+
+        auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
+
+        auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = eng::to_vk(info.culling),
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth = 1.0f,
+        });
+
+        auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        });
+
+        auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
+            .depthTestEnable = info.depth_test,
+            .depthWriteEnable = info.depth_write,
+            .depthCompareOp = eng::to_vk(info.depth_compare),
+            .depthBoundsTestEnable = false,
+            .stencilTestEnable = false,
+            .front = {},
+            .back = {},
+        });
+
+        std::array<VkPipelineColorBlendAttachmentState, 4> blends;
+        for(uint32_t i = 0; i < 1; ++i)
+        {
+            blends[i] = { .colorWriteMask = 0b1111 /*RGBA*/ };
+        }
+        auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
+            .attachmentCount = 1,
+            .pAttachments = blends.data(),
+        });
+
+        VkDynamicState dynstates[]{
+            VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+            VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+        };
+        auto pDynamicState = Vks(VkPipelineDynamicStateCreateInfo{
+            .dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]),
+            .pDynamicStates = dynstates,
+        });
+
+        std::vector<VkFormat> col_formats(info.color_formats.size());
+        for(auto i = 0u; i < info.color_formats.size(); ++i)
+        {
+            col_formats.at(i) = eng::to_vk(info.color_formats.at(i));
+        }
+        auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
+            .colorAttachmentCount = (uint32_t)col_formats.size(),
+            .pColorAttachmentFormats = col_formats.data(),
+            .depthAttachmentFormat = eng::to_vk(info.depth_format),
+        });
+        // pDynamicRendering.stencilAttachmentFormat = rasterization_settings.st_format;
+
+        auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
+            .pNext = &pDynamicRendering,
+            .stageCount = (uint32_t)stages.size(),
+            .pStages = stages.data(),
+            .pVertexInputState = &pVertexInputState,
+            .pInputAssemblyState = &pInputAssemblyState,
+            .pTessellationState = &pTessellationState,
+            .pViewportState = &pViewportState,
+            .pRasterizationState = &pRasterizationState,
+            .pMultisampleState = &pMultisampleState,
+            .pDepthStencilState = &pDepthStencilState,
+            .pColorBlendState = &pColorBlendState,
+            .pDynamicState = &pDynamicState,
+            .layout = RendererVulkan::get_instance()->bindless_pool->get_pipeline_layout(),
+        });
+        VK_CHECK(vkCreateGraphicsPipelines(dev, nullptr, 1, &vk_info, nullptr, &p.vkmetadata->pipeline));
     }
-    staging_buffer->send_to(get_frame_data().transform_buffers, 0ull, transforms)
-        .send_to(get_frame_data(1).transform_buffers, 0ull, transforms)
-        .submit();
 }
 
-void RendererVulkan::build_blas() {
+void RendererVulkan::bake_indirect_commands()
+{
+    if(!meshlets_to_instance.empty())
+    {
+        for(const auto& e : meshlets_to_instance)
+        {
+            const auto& geom = e.geometry.get();
+            meshlet_instances.reserve(meshlet_instances.size() + geom.meshlet_range.offset);
+            for(auto i = 0u; i < geom.meshlet_range.size; ++i)
+            {
+                meshlet_instances.push_back(MeshletInstance{ .geometry = e.geometry,
+                                                             .material = e.material,
+                                                             .global_meshlet = (uint32_t)geom.meshlet_range.offset + i,
+                                                             .index = e.index });
+            }
+        }
+
+        meshlets_to_instance.clear();
+
+        std::sort(meshlet_instances.begin(), meshlet_instances.end(), [this](const auto& a, const auto& b) {
+            if(a.material >= b.material) { return false; }             // first sort by material
+            if(a.global_meshlet >= b.global_meshlet) { return false; } // then sort by geometry
+            return true;
+        });
+    }
+
+    auto* ecsr = Engine::get().ecs;
+
+    std::vector<DrawIndirectCommand> gpu_cmds(meshlet_instances.size());
+    std::vector<GPUInstanceId> gpu_ids(meshlet_instances.size());
+    multibatches.clear();
+    multibatches.resize(meshlet_instances.size());
+    Handle<Pipeline> prev_pipeline;
+    uint32_t prev_meshlet = ~0u;
+    int64_t cmd_off = -1;
+    int64_t pp_off = -1;
+    for(auto i = 0u; i < meshlet_instances.size(); ++i)
+    {
+        const auto& mi = meshlet_instances.at(i);
+        const auto& mp = mesh_passes.at(mi.material->mesh_pass);
+        const auto& pipeline = shader_effects.at(mp.effects[(uint32_t)MeshPassType::FORWARD]).pipeline;
+
+        // if material changes (range of draw indirect commands that can be drawn with the same pipeline)
+        if(prev_pipeline != pipeline)
+        {
+            prev_pipeline = pipeline;
+            ++pp_off;
+            multibatches.at(pp_off).pipeline = pipeline;
+        }
+
+        // if geometry changes, make new command
+        if(prev_meshlet != mi.global_meshlet)
+        {
+            const auto& g = mi.geometry.get();
+            const auto& ml = meshlets.at(mi.global_meshlet);
+            prev_meshlet = mi.global_meshlet;
+            ++cmd_off;
+            gpu_cmds.at(cmd_off) = DrawIndirectCommand{
+                .indexCount = ml.index_count,
+                .instanceCount = 0,
+                .firstIndex = (uint32_t)g.index_range.offset + ml.index_offset,
+                .vertexOffset = (int32_t)(g.vertex_range.offset + ml.vertex_offset),
+                .firstInstance = i,
+            };
+        }
+
+        ++multibatches.at(pp_off).count;
+        gpu_ids.at(i) = { (uint32_t)cmd_off, ~0ul, ~0ul };
+    }
+    gpu_cmds.resize(cmd_off + 1);
+    multibatches.resize(pp_off + 1);
+    geom_main_bufs.command_count = cmd_off + 1;
+
+    std::vector<glm::vec4> gpu_bbs(meshlet_instances.size());
+    for(auto i = 0u; i < meshlet_instances.size(); ++i)
+    {
+        // todo: use transform
+        const auto& e = meshlet_instances.at(i);
+        gpu_bbs.at(i) = meshlets.at(e.global_meshlet).bounding_sphere;
+    }
+
+    const auto gpu_cmd_count = (uint32_t)gpu_cmds.size();
+    const auto post_cull_tri_count = 0u;
+    const auto meshlet_instance_count = (uint32_t)meshlet_instances.size();
+    staging_manager->copy(geom_main_bufs.buf_draw_cmds, &gpu_cmd_count, 0, { 0, 4 });
+    staging_manager->copy(geom_main_bufs.buf_draw_cmds, &post_cull_tri_count, 4, { 0, 4 });
+    staging_manager->copy(geom_main_bufs.buf_draw_cmds, gpu_cmds, 8);
+    staging_manager->copy(geom_main_bufs.buf_draw_ids, &meshlet_instance_count, 0, { 0, 4 });
+    staging_manager->copy(geom_main_bufs.buf_draw_ids, gpu_ids, 8);
+    staging_manager->resize(geom_main_bufs.buf_final_draw_ids, meshlet_instances.size() * 4);
+    staging_manager->copy(geom_main_bufs.buf_draw_bs, gpu_bbs, 0);
+}
+
+void RendererVulkan::build_blas()
+{
     ENG_TODO("IMPLEMENT BACK");
     return;
 #if 0
@@ -952,7 +1473,7 @@ void RendererVulkan::build_blas() {
         meta.blas_buffer =
             make_buffer("blas_buffer", build_size_info.accelerationStructureSize,
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-        scratch_sizes.push_back(align_up(build_size_info.buildScratchSize,
+        scratch_sizes.push_back(align_up2(build_size_info.buildScratchSize,
                                          static_cast<VkDeviceSize>(rt_acc_props.minAccelerationStructureScratchOffsetAlignment)));
 
         auto blas_info = Vks(VkAccelerationStructureCreateInfoKHR{
@@ -1000,7 +1521,8 @@ void RendererVulkan::build_blas() {
 #endif
 }
 
-void RendererVulkan::build_tlas() {
+void RendererVulkan::build_tlas()
+{
     return;
     // std::vector<uint32_t> tlas_mesh_offsets;
     // std::vector<uint32_t> blas_mesh_offsets;
@@ -1121,7 +1643,8 @@ void RendererVulkan::build_tlas() {
 #endif
 }
 
-void RendererVulkan::update_ddgi() {
+void RendererVulkan::update_ddgi()
+{
 #if 0
     // assert(false && "no allocating new pointers for images");
 
@@ -1236,79 +1759,91 @@ void RendererVulkan::update_ddgi() {
 #endif
 }
 
-Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, const VkBufferCreateInfo& vk_info,
-                                           const VmaAllocationCreateInfo& vma_info) {
-    return buffers.insert(Buffer{ name, dev, vma, vk_info, vma_info });
+Handle<Shader> RendererVulkan::make_shader(Shader::Stage stage, const std::filesystem::path& path)
+{
+    auto ret = shaders.insert(Shader{ .path = paths::canonize_path(path, "shaders"), .stage = stage });
+    if(ret.success) { shaders_to_compile.push_back(ret.handle); }
+    return ret.handle;
 }
 
-Handle<Buffer> RendererVulkan::make_buffer(const std::string& name, buffer_resizable_t resizable,
-                                           const VkBufferCreateInfo& vk_info, const VmaAllocationCreateInfo& vma_info) {
-    return buffers.insert(Buffer{ name, dev, vma, resizable, vk_info, vma_info });
+Handle<Pipeline> RendererVulkan::make_pipeline(const PipelineCreateInfo& info)
+{
+    Pipeline p{ .info = info };
+    auto ret = pipelines.insert(std::move(p));
+    if(ret.success) { pipelines_to_compile.push_back(ret.handle); }
+    return ret.handle;
 }
 
-Handle<Image> RendererVulkan::make_image(const std::string& name, const VkImageCreateInfo& vk_info) {
-    return images.insert(Image{ name, dev, vma, vk_info });
+Handle<ShaderEffect> RendererVulkan::make_shader_effect(const ShaderEffect& info)
+{
+    return shader_effects.insert(info).handle;
 }
 
-Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler) {
-    for(const auto& [h, t] : textures) {
-        if(t.image == image && t.view == view && t.layout == layout && t.sampler == sampler) { return h; }
-    }
-    return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler });
+Handle<MeshPass> RendererVulkan::make_mesh_pass(const MeshPassCreateInfo& info)
+{
+    auto it = mesh_passes.insert(MeshPass{ .name = info.name, .effects = info.effects });
+    return it.handle;
 }
 
-Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler) {
-    const auto view = make_image_view(image);
+Handle<Buffer> RendererVulkan::make_buffer(const BufferCreateInfo& info)
+{
+    auto handle = buffers.emplace(info);
+    handle->init();
+    return handle;
+}
+
+Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
+{
+    auto handle = images.emplace(info);
+    handle->init();
+    return handle;
+}
+
+Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
+{
+    return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler }).handle;
+}
+
+Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)
+{
+    const auto view = image->create_image_view();
     return make_texture(image, view, layout, sampler);
 }
 
-VkImageView RendererVulkan::make_image_view(Handle<Image> handle) {
-    return make_image_view(handle, Vks(VkImageViewCreateInfo{}));
+void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
+{
+    buffer->destroy();
+    buffers.erase(buffer);
 }
 
-VkImageView RendererVulkan::make_image_view(Handle<Image> handle, const VkImageViewCreateInfo& vk_info) {
-    return get_image(handle).get_view(vk_info);
+void gfx::RendererVulkan::destroy_image(Handle<Image> image)
+{
+    image->destroy();
+    images.erase(image);
 }
 
-Buffer& RendererVulkan::get_buffer(Handle<Buffer> handle) { return get_instance()->buffers.at(handle); }
+uint32_t RendererVulkan::get_bindless(Handle<Buffer> buffer) { return bindless_pool->get_index(buffer); }
 
-Image& RendererVulkan::get_image(Handle<Image> handle) { return get_instance()->images.at(handle); }
+void RendererVulkan::update_resource(Handle<Buffer> dst) { bindless_pool->update_index(dst); }
 
-void RendererVulkan::destroy_buffer(Handle<Buffer> buffer) {
-    auto& b = get_buffer(buffer);
-    vmaDestroyBuffer(b.vma, b.buffer, b.alloc);
-    b = Buffer{};
-}
-
-void RendererVulkan::replace_buffer(Handle<Buffer> dst_buffer, Buffer&& src_buffer) {
-    destroy_buffer(dst_buffer);
-    buffers.at(dst_buffer) = std::move(src_buffer);
-    bindless_pool->update_bindless_resource(dst_buffer);
-}
-
-uint32_t RendererVulkan::get_bindless_index(Handle<Buffer> handle) { return bindless_pool->get_bindless_index(handle); }
-
-uint32_t RendererVulkan::get_bindless_index(Handle<Texture> handle) {
-    if(!handle) { return ~0u; }
-    const auto& tex = textures.at(handle);
-    return bindless_pool->get_bindless_index(handle);
-}
-
-FrameData& RendererVulkan::get_frame_data(uint32_t offset) {
+FrameData& RendererVulkan::get_frame_data(uint32_t offset)
+{
     return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];
 }
 
-const FrameData& RendererVulkan::get_frame_data(uint32_t offset) const {
+const FrameData& RendererVulkan::get_frame_data(uint32_t offset) const
+{
     return const_cast<RendererVulkan*>(this)->get_frame_data();
 }
 
-void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height) {
+void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height)
+{
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
         .surface = RendererVulkan::get_instance()->window_surface,
         .minImageCount = image_count,
-        .imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
+        .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent = VkExtent2D{ width, height },
         .imageArrayLayers = 1,
@@ -1327,21 +1862,23 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
 
     VK_CHECK(vkGetSwapchainImagesKHR(dev, swapchain, &image_count, vk_images.data()));
 
-    for(uint32_t i = 0; i < image_count; ++i) {
-        images[i] =
-            Image{ fmt::format("swapchain_image_{}", i), dev, vk_images[i],
-                   Vks(VkImageCreateInfo{
-                       .imageType = VK_IMAGE_TYPE_2D,
-                       .format = sinfo.imageFormat,
-                       .extent = VkExtent3D{ .width = sinfo.imageExtent.width, .height = sinfo.imageExtent.height, .depth = 1u },
-                       .mipLevels = 1,
-                       .arrayLayers = 1,
-                       .usage = sinfo.imageUsage }) };
-        views[i] = images[i].get_view();
+    for(uint32_t i = 0; i < image_count; ++i)
+    {
+        images[i] = Image{};
+        images[i].name = fmt::format("swapchain_image_{}", i);
+        images[i].type = VK_IMAGE_TYPE_2D;
+        images[i].image = vk_images.at(i);
+        images[i].extent = VkExtent3D{ sinfo.imageExtent.width, sinfo.imageExtent.height, 0u };
+        images[i].format = sinfo.imageFormat;
+        images[i].mips = 1;
+        images[i].layers = 1;
+        images[i].usage = sinfo.imageUsage;
+        views[i] = images[i].create_image_view();
     }
 }
 
-uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence) {
+uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence)
+{
     uint32_t idx;
     auto result = vkAcquireNextImageKHR(RendererVulkan::get_instance()->dev, swapchain, timeout, semaphore, fence, &idx);
     if(res) { *res = result; }
@@ -1352,3 +1889,5 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semapho
 Image& Swapchain::get_current_image() { return images.at(current_index); }
 
 VkImageView& Swapchain::get_current_view() { return views.at(current_index); }
+
+} // namespace gfx

@@ -28,10 +28,13 @@
 //     UIContext** context{};
 // };
 
-namespace eng {
+namespace eng
+{
 
-class UI {
-    struct Tab {
+class UI
+{
+    struct Tab
+    {
         std::string name;
         std::function<void()> cb;
     };

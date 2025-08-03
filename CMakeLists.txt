@@ -37,7 +37,7 @@ add_subdirectory(third_party/fastgltf)
 
 add_library(build_header_only STATIC
     "eng/build_header_only.cpp"
-)
+ )
 target_compile_definitions(build_header_only
     PRIVATE
         STB_IMAGE_IMPLEMENTATION
@@ -66,7 +66,7 @@ add_library(imgui STATIC
     "third_party/imgui/imgui_widgets.cpp"
     "third_party/imgui/backends/imgui_impl_glfw.cpp"
     "third_party/imgui/backends/imgui_impl_vulkan.cpp"
-)
+ )
 target_include_directories(imgui 
     PUBLIC
         third_party/imgui 
@@ -83,7 +83,7 @@ target_compile_definitions(imgui
 
 add_library(imguizmo STATIC
     "third_party/ImGuizmo/ImGuizmo.cpp"
-)
+ )
 target_include_directories(imguizmo
     PRIVATE
         "third_party/imgui"
@@ -106,24 +106,27 @@ set(FMT_SYSTEM_HEADERS OFF CACHE BOOL "" FORCE)
 set(FMT_UNICODE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fmt)
 
+set(MESHOPT_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/meshoptimizer)
+
 add_executable(vkrt 
     "eng/main.cpp"
     "eng/engine.cpp"  
     "eng/camera.cpp"
     "eng/scene.cpp"
     "eng/renderer/renderer_vulkan.cpp" 
-    "eng/renderer/renderer_vulkan_wrappers.cpp"
-    "eng/renderer/descpool.cpp"
-    "eng/renderer/buffer.cpp"
-    "eng/renderer/image.cpp"
+    
+    "eng/renderer/bindlesspool.cpp"
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
     "eng/renderer/passes/rendergraph.cpp" 
     "eng/renderer/passes/passes.cpp" 
     "eng/renderer/pipeline.cpp"
-    "eng/assets/importer.cpp"
     "eng/ui.cpp"
- )
+    "eng/renderer/resources/resources.cpp"
+    "eng/to_string.cpp" 
+    "eng/renderer/to_vk.cpp"
+)
 
 target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(vkrt PRIVATE cxx_std_23)
@@ -141,6 +144,7 @@ target_link_libraries(vkrt
     $<$<CONFIG:Debug>:shaderc_combinedd>
     $<$<CONFIG:Release>:shaderc_combined>
     fastgltf
+    meshoptimizer
 )
 target_compile_definitions(vkrt
     PRIVATE
