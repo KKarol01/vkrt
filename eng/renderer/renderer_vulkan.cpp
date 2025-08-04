@@ -27,8 +27,10 @@
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
+#include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/common/to_vk.hpp>
 #include <eng/common/paths.hpp>
+#include <eng/common/to_string.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b)
@@ -241,62 +243,8 @@ void RendererVulkan::initialize_vulkan()
 
 void RendererVulkan::initialize_imgui()
 {
-    IMGUI_CHECKVERSION();
-    void* user_data;
-    ImGui::CreateContext();
-    // ImGui::GetAllocatorFunctions(&Engine::get().ui_ctx->alloc_callbacks->imgui_alloc,
-    //                              &Engine::get().ui_ctx->alloc_callbacks->imgui_free, &user_data);
-    ImGui::StyleColorsDark();
-
-    ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
-
-    VkFormat color_formats[]{ swapchain.images.at(0).format };
-
-    VkDescriptorPoolSize sizes[]{ { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
-    auto imgui_dpool_info = Vks(VkDescriptorPoolCreateInfo{
-        .maxSets = 1024,
-        .poolSizeCount = 1,
-        .pPoolSizes = sizes,
-    });
-    VkDescriptorPool imgui_dpool;
-    VK_CHECK(vkCreateDescriptorPool(dev, &imgui_dpool_info, nullptr, &imgui_dpool));
-
-    ImGui_ImplVulkan_InitInfo init_info = { 
-        .Instance = instance,
-        .PhysicalDevice = pdev,
-        .Device = dev,
-        .QueueFamily = submit_queue->family_idx,
-        .Queue = submit_queue->queue,
-        .DescriptorPool = imgui_dpool,
-        .MinImageCount = (uint32_t)frame_datas.size(),
-        .ImageCount = (uint32_t)frame_datas.size(),
-        .UseDynamicRendering = true,
-        .PipelineRenderingCreateInfo = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = color_formats,
-        },
-    };
-    ImGui_ImplVulkan_Init(&init_info);
-
-    ImGuiIO& io = ImGui::GetIO();
-    io.Fonts->AddFontDefault();
-
-    auto cmdimgui = get_frame_data().cmdpool->begin();
-    ImGui_ImplVulkan_CreateFontsTexture();
-    get_frame_data().cmdpool->end(cmdimgui);
-    submit_queue->with_cmd_buf(cmdimgui).submit_wait(~0ull);
-
-    // Engine::get().ui->add_tab("FFTOcean", [] {
-    //     auto* r = RendererVulkan::get_instance();
-    //     auto& fftc = r->fftocean.recalc_state_0;
-    //     fftc |= ImGui::SliderFloat("patch size", &r->fftocean.settings.patch_size, 0.1f, 50.0f);
-    //     fftc |= ImGui::SliderFloat2("wind dir", &r->fftocean.settings.wind_dir.x, -100.0f, 100.0f);
-    //     fftc |= ImGui::SliderFloat("phillips const", &r->fftocean.settings.phillips_const, 0.01, 10.0f);
-    //     ImGui::SliderFloat("time speed", &r->fftocean.settings.time_speed, 0.01f, 10.0f);
-    //     ImGui::SliderFloat("lambda", &r->fftocean.settings.disp_lambda, -10.0f, 10.0f);
-    //     fftc |= ImGui::SliderFloat("small l", &r->fftocean.settings.small_l, 0.001, 2.0f);
-    // });
+    imgui_renderer = new ImGuiRenderer{};
+    imgui_renderer->initialize();
 }
 
 void RendererVulkan::initialize_resources()
@@ -359,9 +307,9 @@ void RendererVulkan::initialize_resources()
     {
         auto& fd = frame_datas[i];
         fd.cmdpool = submit_queue->make_command_pool();
-        fd.sem_swapchain = submit_queue->make_semaphore();
-        fd.sem_rendering_finished = submit_queue->make_semaphore();
-        fd.fen_rendering_finished = submit_queue->make_fence(true);
+        fd.acquire_semaphore = Sync::init_binary_sem();
+        fd.rendering_semaphore = Sync::init_binary_sem();
+        fd.rendering_fence = Sync::init_fence(true);
         fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
@@ -494,28 +442,20 @@ void RendererVulkan::create_window_sized_resources()
                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
     }
 
-    static constexpr auto insert_vk_img_barrier = [](CommandBuffer* cmd, Image& img, VkPipelineStageFlags2 src_stage,
-                                                     VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                                                     VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout) {
-        cmd->barrier(img, src_stage, src_access, dst_stage, dst_access, old_layout, new_layout);
-    };
-
     auto cmd = frame_datas[0].cmdpool->begin();
     for(auto i = 0ull; i < frame_datas.size(); ++i)
     {
-        insert_vk_img_barrier(cmd, frame_datas[i].hiz_pyramid.get(), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-                              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_GENERAL);
-        insert_vk_img_barrier(cmd, frame_datas[i].hiz_debug_output.get(), VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                              VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        cmd->barrier(frame_datas[i].hiz_pyramid.get(), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        cmd->barrier(frame_datas[i].hiz_debug_output.get(), VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         auto& img = frame_datas[i].gbuffer.depth_buffer_image.get();
         cmd->clear_depth_stencil(img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, { 0, 1 }, { 0, 1 }, 0.0f, 0);
-        insert_vk_img_barrier(cmd, img, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        cmd->barrier(img, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         geom_main_bufs.transform_bufs[i] = make_buffer(BufferCreateInfo{
             fmt::format("transform_buffer_{}", i), 1024,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
@@ -586,14 +526,14 @@ void RendererVulkan::update()
 
     auto& fd = get_frame_data();
     const auto frame_num = Engine::get().frame_num();
-    submit_queue->wait_fence(fd.fen_rendering_finished, -1ull); // todo: maybe wait here for 10secs and crash to desktop.
+    fd.rendering_fence->wait_cpu(~0ull);
     fd.cmdpool->reset();
 
     uint32_t swapchain_index{};
     Image* swapchain_image{};
     {
         VkResult acquire_ret;
-        swapchain_index = swapchain.acquire(&acquire_ret, ~0ull, fd.sem_swapchain);
+        swapchain_index = swapchain.acquire(&acquire_ret, ~0ull, fd.acquire_semaphore);
         if(acquire_ret != VK_SUCCESS)
         {
             ENG_WARN("Acquire image failed with: {}", static_cast<uint32_t>(acquire_ret));
@@ -602,8 +542,7 @@ void RendererVulkan::update()
         swapchain_image = &swapchain.images[swapchain_index];
     }
 
-    submit_queue->reset_fence(get_frame_data().fen_rendering_finished);
-    // vkResetFences(dev, 1, &get_frame_data().fen_rendering_finished.fence);
+    fd.rendering_fence->reset();
 
     static glm::mat4 s_view = Engine::get().camera->prev_view;
     if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
@@ -671,28 +610,6 @@ void RendererVulkan::update()
     bake_indirect_commands();
 
     staging_manager->flush();
-
-    static constexpr auto insert_vk_barrier = [](VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                                                 VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
-        const auto barr = Vks(VkMemoryBarrier2{
-            .srcStageMask = src_stage, .srcAccessMask = src_access, .dstStageMask = dst_stage, .dstAccessMask = dst_access });
-        const auto dep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &barr });
-        vkCmdPipelineBarrier2(cmd, &dep);
-    };
-    static constexpr auto insert_vk_img_barrier = [](VkCommandBuffer cmd, Image& img, VkPipelineStageFlags2 src_stage,
-                                                     VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                                                     VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout) {
-        const auto barr = Vks(VkImageMemoryBarrier2{ .srcStageMask = src_stage,
-                                                     .srcAccessMask = src_access,
-                                                     .dstStageMask = dst_stage,
-                                                     .dstAccessMask = dst_access,
-                                                     .oldLayout = old_layout,
-                                                     .newLayout = new_layout,
-                                                     .image = img.image,
-                                                     .subresourceRange = { img.deduce_aspect(), 0, img.mips, 0, img.layers } });
-        const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
-        vkCmdPipelineBarrier2(cmd, &dep);
-    };
 
     const auto cmd = fd.cmdpool->begin();
     // rendergraph.render(cmd);
@@ -869,19 +786,12 @@ void RendererVulkan::update()
     fd.cmdpool->end(cmd);
 
     submit_queue->with_cmd_buf(cmd)
-        .with_wait_sem(fd.sem_swapchain, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
-        .with_sig_sem(fd.sem_rendering_finished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
-        .with_fence(fd.fen_rendering_finished)
+        .wait_sync(fd.acquire_semaphore, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+        .signal_sync(fd.rendering_fence, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
+        .wait_sync(fd.rendering_fence)
         .submit();
 
-    auto pinfo = Vks(VkPresentInfoKHR{
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &fd.sem_rendering_finished,
-        .swapchainCount = 1,
-        .pSwapchains = &swapchain.swapchain,
-        .pImageIndices = &swapchain_index,
-    });
-    vkQueuePresentKHR(submit_queue->queue, &pinfo);
+    submit_queue->present(&swapchain);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
 
     flags.clear();
@@ -1555,9 +1465,9 @@ void RendererVulkan::build_blas()
     auto cmd = get_frame_data().cmdpool->begin_onetime();
     vkCmdBuildAccelerationStructuresKHR(cmd, blas_geo_build_infos.size(), blas_geo_build_infos.data(), poffsets.data());
     get_frame_data().cmdpool->end(cmd);
-    Fence f{ dev, false };
+    Sync f{ dev, false };
     gq.submit(cmd, &f);
-    f.wait();
+    f.wait_cpu();
 #endif
 }
 
@@ -1850,6 +1760,23 @@ Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLa
     return make_texture(image, view, layout, sampler);
 }
 
+Sync* RendererVulkan::make_sync() { return syncs.emplace_back(new Sync{}); }
+
+void RendererVulkan::destroy_sync(Sync* sync)
+{
+    if(!sync) { return; }
+    for(auto it = syncs.begin(); it != syncs.end(); ++it)
+    {
+        if(*it == sync)
+        {
+            sync->destroy();
+            delete sync;
+            syncs.erase(it);
+            return;
+        }
+    }
+}
+
 void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
 {
     buffer->destroy();
@@ -1917,10 +1844,30 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
     }
 }
 
-uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, VkSemaphore semaphore, VkFence fence)
+uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, Sync* semaphore, Sync* fence)
 {
     uint32_t idx;
-    auto result = vkAcquireNextImageKHR(RendererVulkan::get_instance()->dev, swapchain, timeout, semaphore, fence, &idx);
+    VkSemaphore vksem{};
+    VkFence vkfen{};
+    if(semaphore)
+    {
+        if(semaphore->type == SyncType::BINARY_SEMAPHORE)
+        {
+            vksem = semaphore->semaphore;
+            semaphore->value = 1;
+        }
+        else { ENG_ERROR("Invalid sync type: {}", eng::to_string(semaphore->type)); }
+    }
+    if(fence)
+    {
+        if(semaphore->type == SyncType::FENCE)
+        {
+            vkfen = semaphore->fence;
+            semaphore->value = 1;
+        }
+        else { ENG_ERROR("Invalid sync type: {}", eng::to_string(semaphore->type)); }
+    }
+    auto result = vkAcquireNextImageKHR(RendererVulkan::get_instance()->dev, swapchain, timeout, vksem, vkfen, &idx);
     if(res) { *res = result; }
     current_index = idx;
     return idx;

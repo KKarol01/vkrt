@@ -3,6 +3,7 @@
 #include <fmt/format.h>
 #include <eng/common/logger.hpp>
 #include <eng/renderer/renderer.hpp>
+#include <eng/renderer/submit_queue.hpp>
 
 namespace eng
 {
@@ -38,7 +39,6 @@ std::string to_string(const gfx::ImageViewType& a)
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
-// clang-format on
 
 std::string to_string(const gfx::ImageViewDescriptor& a)
 {
@@ -46,5 +46,19 @@ std::string to_string(const gfx::ImageViewDescriptor& a)
                        a.view_type ? to_string(*a.view_type) : "EMPTY", a.mips.offset, a.mips.size, a.layers.offset,
                        a.layers.size);
 }
+
+std::string to_string(const gfx::SyncType& a)
+{
+    switch(a) 
+    {
+        case gfx::SyncType::UNKNOWN: { return "UNKNOWN"; }
+        case gfx::SyncType::FENCE: { return "FENCE"; }
+        case gfx::SyncType::BINARY_SEMAPHORE: { return "BINARY_SEMAPHORE"; }
+        case gfx::SyncType::TIMELINE_SEMAPHORE: { return "TIMELINE_SEMAPHORE"; }
+        default: { ENG_ERROR("Unhandled case"); return ""; }
+    }
+}
+
+// clang-format on
 
 } // namespace eng

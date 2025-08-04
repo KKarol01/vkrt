@@ -16,6 +16,12 @@
 
 namespace gfx
 {
+class SubmitQueue;
+class GPUStagingManager;
+class BindlessPool;
+class ImGuiRenderer;
+struct Sync;
+
 struct Sampler
 {
     bool operator==(const Sampler& o) const { return info == o.info; }
@@ -116,7 +122,7 @@ struct DDGI
 struct Swapchain
 {
     void create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height);
-    uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, VkSemaphore semaphore = {}, VkFence fence = {});
+    uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* = nullptr);
     Image& get_current_image();
     VkImageView& get_current_view();
     VkSwapchainKHR swapchain{};
@@ -139,9 +145,9 @@ class CommandPool;
 struct FrameData
 {
     CommandPool* cmdpool{};
-    VkSemaphore sem_swapchain{};
-    VkSemaphore sem_rendering_finished{};
-    VkFence fen_rendering_finished{};
+    Sync* acquire_semaphore{};
+    Sync* rendering_semaphore{};
+    Sync* rendering_fence{};
     Handle<Buffer> constants{};
     GBuffer gbuffer{};
     Handle<Image> hiz_pyramid;
@@ -212,10 +218,6 @@ struct MultiBatch
     uint32_t count;
 };
 
-class SubmitQueue;
-class GPUStagingManager;
-class BindlessPool;
-
 class RendererVulkan : public Renderer
 {
   public:
@@ -268,6 +270,8 @@ class RendererVulkan : public Renderer
     Handle<Image> make_image(const ImageCreateInfo& info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
+    Sync* make_sync();
+    void destroy_sync(Sync* sync);
 
     void resize_buffer(Handle<Buffer> buffer, size_t newsize);
     void destroy_buffer(Handle<Buffer> buffer);
@@ -306,6 +310,7 @@ class RendererVulkan : public Renderer
     HandleFlatSet<MeshPass> mesh_passes;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
+    std::vector<Sync*> syncs;
 
     uint32_t mesh_instance_index{}; // todo: reuse slots
     std::vector<MeshletInstance> meshlet_instances;
@@ -333,6 +338,7 @@ class RendererVulkan : public Renderer
 
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
+    ImGuiRenderer* imgui_renderer{};
 
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;

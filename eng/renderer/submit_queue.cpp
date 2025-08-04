@@ -3,6 +3,8 @@
 #include <eng/common/logger.hpp>
 #include <eng/renderer/resources/resources.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/common/to_string.hpp>
+#include <eng/renderer/set_debug_name.hpp>
 
 namespace gfx
 {
@@ -161,8 +163,101 @@ void CommandPool::reset()
     free = std::move(used);
 }
 
+Sync* Sync::init(const SyncCreateInfo& info)
+{
+    auto* s = RendererVulkan::get_instance()->make_sync();
+    if(s->type != UNKNOWN)
+    {
+        ENG_ERROR("Trying to init already created Sync object");
+        return nullptr;
+    }
+    s->type = info.type;
+    s->value = info.value;
+    if(s->type == FENCE)
+    {
+        const auto vkinfo =
+            Vks(VkFenceCreateInfo{ .flags = s->value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
+        VK_CHECK(vkCreateFence(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &s->fence));
+    }
+    else
+    {
+        auto vkinfo = Vks(VkSemaphoreCreateInfo{});
+        const auto timeline_info =
+            Vks(VkSemaphoreTypeCreateInfo{ .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = s->value });
+        if(s->type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeline_info; }
+        VK_CHECK(vkCreateSemaphore(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &s->semaphore));
+    }
+    return s;
+}
+
+Sync* Sync::init_fence(bool signaled) { return init(SyncCreateInfo{ FENCE, signaled ? 1u : 0u }); }
+
+Sync* Sync::init_binary_sem() { return init(SyncCreateInfo{ BINARY_SEMAPHORE, 0u }); }
+
+Sync* Sync::init_timeline_sem(uint32_t value) { return init(SyncCreateInfo{ TIMELINE_SEMAPHORE, value }); }
+
+void Sync::destroy()
+{
+    if(type == UNKNOWN) { return; }
+    if(type == FENCE) { vkDestroyFence(RendererVulkan::get_instance()->dev, fence, nullptr); }
+    else { vkDestroySemaphore(RendererVulkan::get_instance()->dev, semaphore, nullptr); }
+    type = UNKNOWN;
+    value = 0u;
+}
+
+void Sync::signal_cpu(uint64_t value)
+{
+    if(value == ~0ull) { value = this->value + 1; }
+    if(type == TIMELINE_SEMAPHORE)
+    {
+        const auto info = Vks(VkSemaphoreSignalInfo{ .semaphore = semaphore, .value = value });
+        vkSignalSemaphore(RendererVulkan::get_instance()->dev, &info);
+    }
+    else
+    {
+        ENG_ERROR("Sync object of type {} cannot be signaled on.", eng::to_string(type));
+        return;
+    }
+    this->value = value;
+}
+
+VkResult Sync::wait_cpu(size_t timeout, uint64_t value)
+{
+    if(type == UNKNOWN)
+    {
+        ENG_ERROR("Sync object was not initialized.");
+        return VK_ERROR_UNKNOWN;
+    }
+    if(value == ~0ull) { value = this->value; }
+    if(type == FENCE) { return vkWaitForFences(RendererVulkan::get_instance()->dev, 1, &fence, true, timeout); }
+    else if(type == TIMELINE_SEMAPHORE)
+    {
+        const auto info = Vks(VkSemaphoreWaitInfo{ .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &value });
+        return vkWaitSemaphores(RendererVulkan::get_instance()->dev, &info, timeout);
+    }
+    ENG_ERROR("Sync object of type {} cannot be waited on.", eng::to_string(type));
+    return VK_ERROR_UNKNOWN;
+}
+
+uint64_t Sync::signal_gpu(uint64_t value)
+{
+    this->value = value == ~0ull ? (this->value + 1) : value;
+    return this->value;
+}
+
+void Sync::reset(uint64_t value)
+{
+    if(type == UNKNOWN) { return; }
+    if(type == FENCE) { vkResetFences(RendererVulkan::get_instance()->dev, 1, &fence); }
+    else
+    {
+        destroy();
+        *this = std::move(*Sync::init(SyncCreateInfo{ type, value }));
+    }
+}
+
 SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
-    : dev(dev), queue(queue), family_idx(family_idx)
+    : dev(dev), queue(queue), family_idx(family_idx), fence(Sync::init_fence())
 {
 }
 
@@ -171,79 +266,71 @@ CommandPool* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
     return &command_pools.emplace_back(dev, family_idx, flags);
 }
 
-VkFence SubmitQueue::make_fence(bool signaled)
+SubmitQueue& SubmitQueue::wait_sync(Sync* sync, VkPipelineStageFlags2 stages, uint64_t value)
 {
-    const auto vk_info = Vks(VkFenceCreateInfo{ .flags = signaled ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
-    auto& fence = fences.emplace_back();
-    VK_CHECK(vkCreateFence(dev, &vk_info, nullptr, &fence));
-    return fence;
-}
-
-VkSemaphore SubmitQueue::make_semaphore()
-{
-    const auto vk_info = Vks(VkSemaphoreCreateInfo{});
-    auto& sem = semaphores.emplace_back();
-    VK_CHECK(vkCreateSemaphore(dev, &vk_info, nullptr, &sem));
-    return sem;
-}
-
-void SubmitQueue::reset_fence(VkFence fence) { VK_CHECK(vkResetFences(dev, 1, &fence)); }
-
-void SubmitQueue::destroy_fence(VkFence fence)
-{
-    if(fence)
+    if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
     {
-        auto it = std::find(fences.begin(), fences.end(), fence);
-        assert(it != fences.end());
-        if(it != fences.end())
-        {
-            fences.erase(it);
-            vkDestroyFence(dev, fence, nullptr);
-        }
+        submission.wait_sems.push_back(sync);
+        submission.wait_values.push_back(sync->signal_gpu(value));
+        submission.wait_stages.push_back(stages);
     }
-}
-
-VkResult SubmitQueue::wait_fence(VkFence fence, uint64_t timeout)
-{
-    return vkWaitForFences(dev, 1, &fence, true, timeout);
-}
-
-SubmitQueue& SubmitQueue::with_fence(VkFence fence)
-{
-    if(submission.fence) { ENG_WARN("Overwriting already defined fence in submission"); }
-    submission.fence = fence;
     return *this;
 }
 
-SubmitQueue& SubmitQueue::with_wait_sem(VkSemaphore sem, VkPipelineStageFlags2 stages)
+SubmitQueue& SubmitQueue::signal_sync(Sync* sync, VkPipelineStageFlags2 stages, uint64_t value)
 {
-    submission.wait_sems.push_back(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem, .stageMask = stages }));
-    return *this;
-}
-
-SubmitQueue& SubmitQueue::with_sig_sem(VkSemaphore sem, VkPipelineStageFlags2 stages)
-{
-    submission.sig_sems.push_back(Vks(VkSemaphoreSubmitInfo{ .semaphore = sem, .stageMask = stages }));
+    if(sync->type == SyncType::FENCE)
+    {
+        assert(!submission.fence);
+        submission.fence = sync;
+    }
+    else if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
+    {
+        submission.signal_sems.push_back(sync);
+        submission.signal_values.push_back(sync->signal_gpu(value));
+        submission.signal_stages.push_back(stages);
+    }
     return *this;
 }
 
 SubmitQueue& SubmitQueue::with_cmd_buf(CommandBuffer* cmd)
 {
-    submission.cmds.push_back(Vks(VkCommandBufferSubmitInfo{ .commandBuffer = cmd->cmd }));
+    submission.cmds.push_back(cmd);
     return *this;
 }
 
 VkResult SubmitQueue::submit()
 {
+    std::vector<VkSemaphoreSubmitInfo> wait_sems(submission.wait_sems.size());
+    std::vector<VkSemaphoreSubmitInfo> sig_sems(submission.signal_sems.size());
+    std::vector<VkCommandBufferSubmitInfo> cmds(submission.cmds.size());
+
+    for(auto i = 0u; i < wait_sems.size(); ++i)
+    {
+        wait_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.wait_sems[i]->semaphore,
+                                                  .value = submission.wait_values[i],
+                                                  .stageMask = submission.wait_stages[i] });
+    }
+    for(auto i = 0u; i < sig_sems.size(); ++i)
+    {
+        sig_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.signal_sems[i]->semaphore,
+                                                 .value = submission.signal_values[i],
+                                                 .stageMask = submission.signal_stages[i] });
+    }
+    for(auto i = 0u; i < cmds.size(); ++i)
+    {
+        cmds[i] = Vks(VkCommandBufferSubmitInfo{ .commandBuffer = submission.cmds[i]->cmd });
+    }
+
     const auto vk_info = Vks(VkSubmitInfo2{
-        .waitSemaphoreInfoCount = (uint32_t)submission.wait_sems.size(),
-        .pWaitSemaphoreInfos = submission.wait_sems.data(),
-        .commandBufferInfoCount = (uint32_t)submission.cmds.size(),
-        .pCommandBufferInfos = submission.cmds.data(),
-        .signalSemaphoreInfoCount = (uint32_t)submission.sig_sems.size(),
-        .pSignalSemaphoreInfos = submission.sig_sems.data(),
+        .waitSemaphoreInfoCount = (uint32_t)wait_sems.size(),
+        .pWaitSemaphoreInfos = wait_sems.data(),
+        .commandBufferInfoCount = (uint32_t)cmds.size(),
+        .pCommandBufferInfos = cmds.data(),
+        .signalSemaphoreInfoCount = (uint32_t)sig_sems.size(),
+        .pSignalSemaphoreInfos = sig_sems.data(),
     });
-    const auto sres = vkQueueSubmit2(queue, 1, &vk_info, submission.fence);
+    const auto sres = vkQueueSubmit2(queue, 1, &vk_info, submission.fence ? submission.fence->fence : nullptr);
     VK_CHECK(sres);
     submission = Submission{};
     return sres;
@@ -251,22 +338,36 @@ VkResult SubmitQueue::submit()
 
 VkResult SubmitQueue::submit_wait(uint64_t timeout)
 {
-    VkFence fence{};
     bool is_fence_temp = false;
-    if(submission.fence) { fence = submission.fence; }
-    else
+    Sync* sfence{};
+    if(!submission.fence)
     {
-        fence = make_fence(false);
-        submission.fence = fence;
+        sfence = fence;
+        signal_sync(fence);
         is_fence_temp = true;
     }
-    assert(fence);
-    if(!fence) { return VK_ERROR_DEVICE_LOST; }
+    else { sfence = submission.fence; }
+    assert(sfence);
     const auto sres = submit();
-    const auto res = wait_fence(fence, timeout);
-    if(is_fence_temp) { destroy_fence(fence); }
-    if(res == VK_SUCCESS) { return sres; }
+    const auto res = sfence->wait_cpu(timeout);
+    if(is_fence_temp) { sfence->reset(); }
     return res;
+}
+
+void SubmitQueue::present(Swapchain* swapchain)
+{
+    std::vector<VkSemaphore> wait_sems(submission.wait_sems.size());
+    for(auto i = 0u; i < wait_sems.size(); ++i)
+    {
+        wait_sems[i] = submission.wait_sems[i]->semaphore;
+    }
+
+    const auto pinfo = Vks(VkPresentInfoKHR{ .waitSemaphoreCount = (uint32_t)wait_sems.size(),
+                                             .pWaitSemaphores = wait_sems.data(),
+                                             .swapchainCount = 1,
+                                             .pSwapchains = &swapchain->swapchain,
+                                             .pImageIndices = &swapchain->current_index });
+    vkQueuePresentKHR(queue, &pinfo);
 }
 
 void SubmitQueue::wait_idle() { vkQueueWaitIdle(queue); }

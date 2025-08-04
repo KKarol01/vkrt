@@ -13,6 +13,7 @@ namespace gfx
 struct Buffer;
 struct Image;
 struct Pipeline;
+struct Swapchain;
 
 class CommandPool;
 
@@ -67,14 +68,75 @@ class CommandPool
     VkCommandPool pool{};
 };
 
+enum class SyncType
+{
+    UNKNOWN,
+    FENCE,
+    BINARY_SEMAPHORE,
+    TIMELINE_SEMAPHORE
+};
+
+struct SyncCreateInfo
+{
+    SyncType type{};
+    uint64_t value{}; // fence & value=1 -> create signaled; bin sem -> ignored; timeline -> set value
+    // std::string name;
+};
+
+struct Sync
+{
+    using enum SyncType;
+
+    Sync() noexcept = default;
+    Sync(Sync&& s) noexcept { *this = std::move(s); }
+    Sync& operator=(Sync&& s) noexcept
+    {
+        type = std::exchange(s.type, UNKNOWN);
+        value = std::exchange(s.value, 0);
+        if(type == FENCE) { fence = std::exchange(s.fence, nullptr); }
+        else if(type == BINARY_SEMAPHORE || type == TIMELINE_SEMAPHORE)
+        {
+            semaphore = std::exchange(s.semaphore, nullptr);
+        }
+        return *this;
+    }
+    bool operator==(const Sync& s) const
+    {
+        return type != UNKNOWN && type == s.type &&
+               ([this, &s] -> bool { return type == FENCE ? fence == s.fence : semaphore == s.semaphore; })();
+    }
+
+    static Sync* init(const SyncCreateInfo& info);
+    static Sync* init_fence(bool signaled = false);
+    static Sync* init_binary_sem();
+    static Sync* init_timeline_sem(uint32_t value = 0);
+    void destroy();
+
+    void signal_cpu(uint64_t value = ~0ull);
+    VkResult wait_cpu(size_t timeout, uint64_t value = ~0ull);
+    uint64_t signal_gpu(uint64_t value = ~0ull);
+    void reset(uint64_t value = 0);
+
+    SyncType type{};
+    uint64_t value{};
+    union {
+        VkFence fence{};
+        VkSemaphore semaphore;
+    };
+};
+
 class SubmitQueue
 {
     struct Submission
     {
-        VkFence fence{};
-        std::vector<VkCommandBufferSubmitInfo> cmds;
-        std::vector<VkSemaphoreSubmitInfo> wait_sems;
-        std::vector<VkSemaphoreSubmitInfo> sig_sems;
+        std::vector<Sync*> wait_sems;
+        std::vector<uint64_t> wait_values;
+        std::vector<VkPipelineStageFlags2> wait_stages;
+        std::vector<Sync*> signal_sems;
+        std::vector<uint64_t> signal_values;
+        std::vector<VkPipelineStageFlags2> signal_stages;
+        std::vector<CommandBuffer*> cmds;
+        Sync* fence{};
     };
 
   public:
@@ -82,26 +144,20 @@ class SubmitQueue
     SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept;
 
     CommandPool* make_command_pool(VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
-    VkFence make_fence(bool signaled);
-    VkSemaphore make_semaphore();
-    void reset_fence(VkFence fence);
-    void destroy_fence(VkFence fence);
-    VkResult wait_fence(VkFence fence, uint64_t timeout);
 
-    SubmitQueue& with_fence(VkFence fence);
-    SubmitQueue& with_wait_sem(VkSemaphore sem, VkPipelineStageFlags2 stages);
-    SubmitQueue& with_sig_sem(VkSemaphore sem, VkPipelineStageFlags2 stages);
+    SubmitQueue& wait_sync(Sync* sync, VkPipelineStageFlags2 stages = {}, uint64_t value = ~0ull);
+    SubmitQueue& signal_sync(Sync* sync, VkPipelineStageFlags2 stages = {}, uint64_t value = ~0ull);
     SubmitQueue& with_cmd_buf(CommandBuffer* cmd);
     VkResult submit();
     VkResult submit_wait(uint64_t timeout);
+    void present(Swapchain* swapchain);
     void wait_idle();
 
     VkDevice dev{};
     VkQueue queue{};
     uint32_t family_idx{ ~0u };
+    Sync* fence{};
     std::deque<CommandPool> command_pools;
-    std::deque<VkSemaphore> semaphores;
-    std::deque<VkFence> fences;
     Submission submission;
 };
 

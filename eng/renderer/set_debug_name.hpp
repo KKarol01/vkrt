@@ -12,6 +12,8 @@ template<> struct VkObject<VkImage> { inline static constexpr VkObjectType type 
 template<> struct VkObject<VkImageView> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_IMAGE_VIEW; };
 template<> struct VkObject<VkBuffer> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_BUFFER; };
 template<> struct VkObject<VkPipeline> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_PIPELINE; };
+template<> struct VkObject<VkSemaphore> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_SEMAPHORE; };
+template<> struct VkObject<VkFence> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_FENCE; };
 // clang-format on
 
 template <typename VkStruct> inline void set_debug_name(VkStruct object, const std::string& name)
