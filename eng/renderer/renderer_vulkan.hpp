@@ -21,6 +21,7 @@ class GPUStagingManager;
 class BindlessPool;
 class ImGuiRenderer;
 struct Sync;
+struct SyncCreateInfo;
 
 struct Sampler
 {
@@ -270,8 +271,7 @@ class RendererVulkan : public Renderer
     Handle<Image> make_image(const ImageCreateInfo& info);
     Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
     Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
-    Sync* make_sync();
-    void destroy_sync(Sync* sync);
+    Sync* make_sync(const SyncCreateInfo& info);
 
     void resize_buffer(Handle<Buffer> buffer, size_t newsize);
     void destroy_buffer(Handle<Buffer> buffer);

@@ -5,6 +5,7 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/set_debug_name.hpp>
+#include <eng/engine.hpp>
 
 namespace gfx
 {
@@ -163,38 +164,32 @@ void CommandPool::reset()
     free = std::move(used);
 }
 
-Sync* Sync::init(const SyncCreateInfo& info)
+void Sync::init(const SyncCreateInfo& info)
 {
-    auto* s = RendererVulkan::get_instance()->make_sync();
-    if(s->type != UNKNOWN)
+    if(type != UNKNOWN)
     {
         ENG_ERROR("Trying to init already created Sync object");
-        return nullptr;
+        return;
     }
-    s->type = info.type;
-    s->value = info.value;
-    if(s->type == FENCE)
+    type = info.type;
+    value = info.value;
+    name = info.name;
+    if(type == FENCE)
     {
-        const auto vkinfo =
-            Vks(VkFenceCreateInfo{ .flags = s->value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
-        VK_CHECK(vkCreateFence(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &s->fence));
+        const auto vkinfo = Vks(VkFenceCreateInfo{ .flags = value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
+        VK_CHECK(vkCreateFence(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &fence));
+        if(name.size()) { set_debug_name(fence, name); }
     }
     else
     {
         auto vkinfo = Vks(VkSemaphoreCreateInfo{});
         const auto timeline_info =
-            Vks(VkSemaphoreTypeCreateInfo{ .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = s->value });
-        if(s->type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeline_info; }
-        VK_CHECK(vkCreateSemaphore(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &s->semaphore));
+            Vks(VkSemaphoreTypeCreateInfo{ .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = value });
+        if(type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeline_info; }
+        VK_CHECK(vkCreateSemaphore(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &semaphore));
+        if(name.size()) { set_debug_name(semaphore, name); }
     }
-    return s;
 }
-
-Sync* Sync::init_fence(bool signaled) { return init(SyncCreateInfo{ FENCE, signaled ? 1u : 0u }); }
-
-Sync* Sync::init_binary_sem() { return init(SyncCreateInfo{ BINARY_SEMAPHORE, 0u }); }
-
-Sync* Sync::init_timeline_sem(uint32_t value) { return init(SyncCreateInfo{ TIMELINE_SEMAPHORE, value }); }
 
 void Sync::destroy()
 {
@@ -203,6 +198,7 @@ void Sync::destroy()
     else { vkDestroySemaphore(RendererVulkan::get_instance()->dev, semaphore, nullptr); }
     type = UNKNOWN;
     value = 0u;
+    name.clear();
 }
 
 void Sync::signal_cpu(uint64_t value)
@@ -245,19 +241,28 @@ uint64_t Sync::signal_gpu(uint64_t value)
     return this->value;
 }
 
+uint64_t Sync::wait_gpu(uint64_t value)
+{
+    const auto val = value == ~0ull ? this->value : value;
+    if(type == BINARY_SEMAPHORE) { this->value = 0; }
+    return val;
+}
+
 void Sync::reset(uint64_t value)
 {
     if(type == UNKNOWN) { return; }
     if(type == FENCE) { vkResetFences(RendererVulkan::get_instance()->dev, 1, &fence); }
     else
     {
+        auto type = this->type;
+        auto name = this->name;
         destroy();
-        *this = std::move(*Sync::init(SyncCreateInfo{ type, value }));
+        init({ type, value, name });
     }
 }
 
 SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
-    : dev(dev), queue(queue), family_idx(family_idx), fence(Sync::init_fence())
+    : dev(dev), queue(queue), family_idx(family_idx), fence(RendererVulkan::get_instance()->make_sync({ SyncType::FENCE }))
 {
 }
 
@@ -271,7 +276,7 @@ SubmitQueue& SubmitQueue::wait_sync(Sync* sync, VkPipelineStageFlags2 stages, ui
     if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
     {
         submission.wait_sems.push_back(sync);
-        submission.wait_values.push_back(sync->signal_gpu(value));
+        submission.wait_values.push_back(sync->wait_gpu(value));
         submission.wait_stages.push_back(stages);
     }
     return *this;
@@ -368,6 +373,7 @@ void SubmitQueue::present(Swapchain* swapchain)
                                              .pSwapchains = &swapchain->swapchain,
                                              .pImageIndices = &swapchain->current_index });
     vkQueuePresentKHR(queue, &pinfo);
+    submission = {};
 }
 
 void SubmitQueue::wait_idle() { vkQueueWaitIdle(queue); }

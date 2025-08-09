@@ -251,7 +251,7 @@ void RendererVulkan::initialize_resources()
 {
     bindless_pool = new BindlessPool{ dev };
     staging_manager = new GPUStagingManager{};
-    staging_manager->init(submit_queue,
+    staging_manager->init(new SubmitQueue{ dev, submit_queue->queue, submit_queue->family_idx },
                           [](Handle<Buffer> buffer) { RendererVulkan::get_instance()->update_resource(buffer); });
     // vertex_positions_buffer = make_buffer(BufferCreateInfo{
     //     "vertex_positions_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -307,9 +307,9 @@ void RendererVulkan::initialize_resources()
     {
         auto& fd = frame_datas[i];
         fd.cmdpool = submit_queue->make_command_pool();
-        fd.acquire_semaphore = Sync::init_binary_sem();
-        fd.rendering_semaphore = Sync::init_binary_sem();
-        fd.rendering_fence = Sync::init_fence(true);
+        fd.acquire_semaphore = make_sync({ SyncType::BINARY_SEMAPHORE, 0, "acquire semaphore" });
+        fd.rendering_semaphore = make_sync({ SyncType::BINARY_SEMAPHORE, 0, "rendering semaphore" });
+        fd.rendering_fence = make_sync({ SyncType::FENCE, 1, "rendering fence" });
         fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
     }
 
@@ -609,8 +609,6 @@ void RendererVulkan::update()
     uint32_t old_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 1);
     bake_indirect_commands();
 
-    staging_manager->flush();
-
     const auto cmd = fd.cmdpool->begin();
     // rendergraph.render(cmd);
 
@@ -786,12 +784,13 @@ void RendererVulkan::update()
     fd.cmdpool->end(cmd);
 
     submit_queue->with_cmd_buf(cmd)
-        .wait_sync(fd.acquire_semaphore, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
-        .signal_sync(fd.rendering_fence, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
-        .wait_sync(fd.rendering_fence)
+        .wait_sync(staging_manager->flush(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
+        .wait_sync(fd.acquire_semaphore, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+        .signal_sync(fd.rendering_semaphore, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
+        .signal_sync(fd.rendering_fence)
         .submit();
 
-    submit_queue->present(&swapchain);
+    submit_queue->wait_sync(fd.rendering_semaphore, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT).present(&swapchain);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
 
     flags.clear();
@@ -799,7 +798,6 @@ void RendererVulkan::update()
 
     uint32_t new_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 2);
     ENG_LOG("NUM TRIANGLES (PRE | POST) {} | {}; DIFF: {}", old_triangles, new_triangles, new_triangles - old_triangles);
-
     return;
 }
 
@@ -990,12 +988,13 @@ Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
     if(!flags.test(RenderFlags::DIRTY_TRANSFORMS_BIT))
     {
         flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
-        staging_manager->copy(geom_main_bufs.transform_bufs[1], geom_main_bufs.transform_bufs[0], 0,
-                              { 0, geom_main_bufs.transform_bufs[0]->size });
-        staging_manager->insert_barrier();
+        // staging_manager->copy(geom_main_bufs.transform_bufs[1], geom_main_bufs.transform_bufs[0], 0,
+        //                       { 0, geom_main_bufs.transform_bufs[0]->size });
+        // staging_manager->flush();
+        // staging_manager->wait_for_sync();
     }
-    staging_manager->copy(geom_main_bufs.transform_bufs[1], &transform->global, mesh_instance_index * sizeof(glm::mat4),
-                          { 0, sizeof(glm::mat4) });
+    // staging_manager->copy(geom_main_bufs.transform_bufs[1], &transform->global, mesh_instance_index * sizeof(glm::mat4),
+    //                       { 0, sizeof(glm::mat4) });
     return Handle<Mesh>{ mesh_instance_index++ };
 }
 
@@ -1125,6 +1124,8 @@ void RendererVulkan::compile_shaders()
 
 void RendererVulkan::compile_pipelines()
 {
+    ENG_LOG("Compiling Pipelines");
+
     for(auto& e : pipelines_to_compile)
     {
         auto& p = e.get();
@@ -1276,6 +1277,8 @@ void RendererVulkan::compile_pipelines()
         });
         VK_CHECK(vkCreateGraphicsPipelines(dev, nullptr, 1, &vk_info, nullptr, &p.vkmetadata->pipeline));
     }
+
+    pipelines_to_compile.clear();
 }
 
 void RendererVulkan::bake_indirect_commands()
@@ -1760,21 +1763,11 @@ Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLa
     return make_texture(image, view, layout, sampler);
 }
 
-Sync* RendererVulkan::make_sync() { return syncs.emplace_back(new Sync{}); }
-
-void RendererVulkan::destroy_sync(Sync* sync)
+Sync* RendererVulkan::make_sync(const SyncCreateInfo& info)
 {
-    if(!sync) { return; }
-    for(auto it = syncs.begin(); it != syncs.end(); ++it)
-    {
-        if(*it == sync)
-        {
-            sync->destroy();
-            delete sync;
-            syncs.erase(it);
-            return;
-        }
-    }
+    auto* s = syncs.emplace_back(new Sync{});
+    s->init(info);
+    return s;
 }
 
 void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
@@ -1851,21 +1844,21 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, Sync* semaphore, Sy
     VkFence vkfen{};
     if(semaphore)
     {
-        if(semaphore->type == SyncType::BINARY_SEMAPHORE)
+        if(semaphore->type == SyncType::BINARY_SEMAPHORE) { vksem = semaphore->semaphore; }
+        else
         {
-            vksem = semaphore->semaphore;
-            semaphore->value = 1;
+            ENG_ERROR("Invalid sync type: {}", eng::to_string(semaphore->type));
+            return ~0ull;
         }
-        else { ENG_ERROR("Invalid sync type: {}", eng::to_string(semaphore->type)); }
     }
     if(fence)
     {
-        if(semaphore->type == SyncType::FENCE)
+        if(fence->type == SyncType::FENCE) { vkfen = fence->fence; }
+        else
         {
-            vkfen = semaphore->fence;
-            semaphore->value = 1;
+            ENG_ERROR("Invalid sync type: {}", eng::to_string(fence->type));
+            return ~0ull;
         }
-        else { ENG_ERROR("Invalid sync type: {}", eng::to_string(semaphore->type)); }
     }
     auto result = vkAcquireNextImageKHR(RendererVulkan::get_instance()->dev, swapchain, timeout, vksem, vkfen, &idx);
     if(res) { *res = result; }

@@ -80,45 +80,24 @@ struct SyncCreateInfo
 {
     SyncType type{};
     uint64_t value{}; // fence & value=1 -> create signaled; bin sem -> ignored; timeline -> set value
-    // std::string name;
+    std::string name;
 };
 
 struct Sync
 {
     using enum SyncType;
 
-    Sync() noexcept = default;
-    Sync(Sync&& s) noexcept { *this = std::move(s); }
-    Sync& operator=(Sync&& s) noexcept
-    {
-        type = std::exchange(s.type, UNKNOWN);
-        value = std::exchange(s.value, 0);
-        if(type == FENCE) { fence = std::exchange(s.fence, nullptr); }
-        else if(type == BINARY_SEMAPHORE || type == TIMELINE_SEMAPHORE)
-        {
-            semaphore = std::exchange(s.semaphore, nullptr);
-        }
-        return *this;
-    }
-    bool operator==(const Sync& s) const
-    {
-        return type != UNKNOWN && type == s.type &&
-               ([this, &s] -> bool { return type == FENCE ? fence == s.fence : semaphore == s.semaphore; })();
-    }
-
-    static Sync* init(const SyncCreateInfo& info);
-    static Sync* init_fence(bool signaled = false);
-    static Sync* init_binary_sem();
-    static Sync* init_timeline_sem(uint32_t value = 0);
+    void init(const SyncCreateInfo& info);
     void destroy();
-
     void signal_cpu(uint64_t value = ~0ull);
     VkResult wait_cpu(size_t timeout, uint64_t value = ~0ull);
     uint64_t signal_gpu(uint64_t value = ~0ull);
+    uint64_t wait_gpu(uint64_t value = ~0ull);
     void reset(uint64_t value = 0);
 
     SyncType type{};
     uint64_t value{};
+    std::string name;
     union {
         VkFence fence{};
         VkSemaphore semaphore;
