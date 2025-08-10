@@ -777,12 +777,14 @@ void RendererVulkan::update()
                                          geom_main_bufs.command_count, sizeof(DrawIndirectCommand));
     }
     cmd->end_rendering();
+
+    imgui_renderer->render(cmd);
+
     cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
                  VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     fd.cmdpool->end(cmd);
-
     submit_queue->with_cmd_buf(cmd)
         .wait_sync(staging_manager->flush(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
         .wait_sync(fd.acquire_semaphore, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)

@@ -9,7 +9,7 @@ struct ImGuiVertex
 {
     vec2 pos;
     vec2 uv;
-    vec4 color;
+    uint32_t color;
 };
 
 ENG_DECLARE_STORAGE_BUFFER(GPUImGuiVertexBuffer) {

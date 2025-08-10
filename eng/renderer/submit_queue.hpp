@@ -41,6 +41,8 @@ class CommandBuffer
 
     void begin_rendering(const VkRenderingInfo& info);
     void end_rendering();
+    void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset, uint32_t vertex_offset,
+                      uint32_t instance_offset);
     void draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count, size_t count_offset,
                                      uint32_t max_draw_count, uint32_t stride);
     void dispatch(uint32_t x, uint32_t y, uint32_t z);

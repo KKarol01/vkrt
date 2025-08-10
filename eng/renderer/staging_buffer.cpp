@@ -72,8 +72,8 @@ void GPUStagingManager::copy(Handle<Buffer> dst, const void* const src, size_t d
         size_t uploaded = 0;
         while(uploaded < range.size)
         {
-            auto [mem, size] = allocate(range.size);
-            memcpy(mem, (const std::byte*)src + uploaded, size);
+            auto [mem, size] = allocate(range.size - uploaded);
+            memcpy(mem, (const std::byte*)src + range.offset + uploaded, size);
             get_cmd()->copy(dst.get(), buffer, dst_offset + uploaded, { get_offset(mem), size });
             uploaded += size;
         }
@@ -158,6 +158,12 @@ std::pair<void*, size_t> GPUStagingManager::allocate(size_t size)
     void* const mem = (std::byte*)buffer.memory + head;
     head += aligned_size;
     return { mem, std::min(size, aligned_size) };
+}
+
+uint32_t GPUStagingManager::get_cmd_index() const
+{
+    assert(cmdcount > 0);
+    return (cmdstart + cmdcount - 1) % CMD_COUNT;
 }
 
 GPUStagingManager::CmdBufWrapper& GPUStagingManager::get_wrapped_cmd()

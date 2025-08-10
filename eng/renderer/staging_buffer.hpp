@@ -52,7 +52,7 @@ class GPUStagingManager
     void begin_new_cmd_buffer();
     std::pair<void*, size_t> allocate(size_t size);
     size_t get_offset(const void* const alloc) { return (uintptr_t)alloc - (uintptr_t)buffer.memory; }
-    uint32_t get_cmd_index() const { return (cmdstart + cmdcount - 1) % CMD_COUNT; }
+    uint32_t get_cmd_index() const;
     CmdBufWrapper& get_wrapped_cmd();
     CommandBuffer* get_cmd();
 

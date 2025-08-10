@@ -111,6 +111,12 @@ void CommandBuffer::begin_rendering(const VkRenderingInfo& info) { vkCmdBeginRen
 
 void CommandBuffer::end_rendering() { vkCmdEndRendering(cmd); }
 
+void CommandBuffer::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
+                                 uint32_t vertex_offset, uint32_t instance_offset)
+{
+    vkCmdDrawIndexed(cmd, index_count, instance_count, index_offset, vertex_offset, instance_offset);
+}
+
 void CommandBuffer::draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count,
                                                 size_t count_offset, uint32_t max_draw_count, uint32_t stride)
 {
