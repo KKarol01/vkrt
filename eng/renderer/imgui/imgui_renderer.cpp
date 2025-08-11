@@ -23,6 +23,7 @@ void ImGuiRenderer::initialize()
 
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     unsigned char* pixels;
     int width, height;
@@ -63,7 +64,8 @@ void ImGuiRenderer::initialize()
 
     font_texture = r->batch_texture(TextureDescriptor{ font_image, sampler });
 
-    vertex_buffer = r->make_buffer(BufferCreateInfo{ "imgui vertex buffer", 1024 * 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
+    vertex_buffer =
+        r->make_buffer(BufferCreateInfo{ "imgui vertex buffer", 1024 * 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
     index_buffer = r->make_buffer(BufferCreateInfo{ "imgui index buffer", 1024 * 1024, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, false });
 }
 
@@ -82,6 +84,9 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     ImGui::Begin("test");
     static float f = 0.0f;
     ImGui::SliderFloat("lalala", &f, 0.0f, 1.0f);
+    ImGui::End();
+    ImGui::Begin("test2");
+    ImGui::Text("asdf");
     ImGui::End();
     ImGui::Render();
 
