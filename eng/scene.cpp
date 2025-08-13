@@ -260,7 +260,7 @@ namespace scene
 
 ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
 {
-    const auto filepath = paths::canonize_path(_path, "models");
+    const auto filepath = eng::paths::canonize_path(eng::paths::MODELS_DIR / _path);
 
     if(const auto it = nodes.find(filepath); it != nodes.end()) { return it->second.root; }
 

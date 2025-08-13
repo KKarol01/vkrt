@@ -56,17 +56,14 @@ class Engine
     eng::UI* ui{};
     scene::Scene* scene{};
     double get_time_secs();
-    double last_frame_time() { return _last_frame_time; }
-    double delta_time() { return _delta_time; }
-    uint64_t frame_num() { return _frame_num; }
+    double last_frame_time{};
+    double delta_time{};
+    uint64_t frame_num{};
+    float refresh_rate{ 1.0f / 60.0f };
 
     std::deque<std::string> msg_log;
 
   private:
-    double _last_frame_time{};
-    double _delta_time{};
-    uint64_t _frame_num{};
-    float _refresh_rate{ 1.0f / 60.0f };
     std::function<void()> _on_update_callback;
     std::vector<std::function<bool()>> _on_window_resize_callbacks;
     std::vector<std::function<void()>> m_on_window_focus_callbacks;

@@ -78,7 +78,7 @@ void Engine::init()
     glfwSetFramebufferSizeCallback(window->window, on_window_resize);
     glfwSetWindowFocusCallback(window->window, on_window_focus);
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-    if(monitor_videomode) { _refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
+    if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
     renderer = new gfx::RendererVulkan{};
     scene = new scene::Scene{};
@@ -93,16 +93,16 @@ void Engine::start()
 {
     while(!window->should_close())
     {
-        if(get_time_secs() - last_frame_time() >= _refresh_rate)
+        if(get_time_secs() - last_frame_time >= refresh_rate)
         {
             const float now = get_time_secs();
             if(_on_update_callback) { _on_update_callback(); }
             camera->update();
             renderer->update();
-            ++_frame_num;
-            _last_frame_time = now;
+            ++frame_num;
+            last_frame_time = now;
         }
-        _delta_time = get_time_secs() - _last_frame_time;
+        delta_time = get_time_secs() - last_frame_time;
         glfwPollEvents();
     }
 }

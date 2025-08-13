@@ -3,6 +3,7 @@
 #include <numeric>
 #include <fstream>
 #include <utility>
+#include <chrono>
 #include <meshoptimizer/src/meshoptimizer.h>
 #include <stb/stb_include.h>
 #include <volk/volk.h>
@@ -525,7 +526,7 @@ void RendererVulkan::update()
     if(!pipelines_to_compile.empty()) { compile_pipelines(); }
 
     auto& fd = get_frame_data();
-    const auto frame_num = Engine::get().frame_num();
+    const auto frame_num = Engine::get().frame_num;
     fd.rendering_fence->wait_cpu(~0ull);
     fd.cmdpool->reset();
 
@@ -551,8 +552,8 @@ void RendererVulkan::update()
     }
 
     {
-        const float hx = (halton(Engine::get().frame_num() % 4u, 2) * 2.0 - 1.0);
-        const float hy = (halton(Engine::get().frame_num() % 4u, 3) * 2.0 - 1.0);
+        const float hx = (halton(Engine::get().frame_num % 4u, 2) * 2.0 - 1.0);
+        const float hy = (halton(Engine::get().frame_num % 4u, 3) * 2.0 - 1.0);
         const glm::mat3 rand_mat =
             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 
@@ -1067,6 +1068,9 @@ Handle<Image> RendererVulkan::get_color_output_texture() const { return get_fram
 
 void RendererVulkan::compile_shaders()
 {
+    std::chrono::high_resolution_clock::duration total_reading{};
+    std::chrono::high_resolution_clock::duration total_hashing{};
+    std::chrono::high_resolution_clock::duration total_compiling{};
     for(auto& e : shaders_to_compile)
     {
         auto& sh = e.get();
@@ -1106,21 +1110,67 @@ void RendererVulkan::compile_shaders()
 
         // options.AddMacroDefinition("ASDF");
         shaderc::Compiler c;
-        std::string file_str = read_file(path);
-        const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
-        if(res.GetCompilationStatus() != shaderc_compilation_status_success)
         {
-            ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
-            return;
+            auto t1 = std::chrono::high_resolution_clock::now();
+            std::string file_str = read_file(path);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            total_reading += (t2 - t1);
+            t1 = std::chrono::high_resolution_clock::now();
+            const auto hash = eng::hash::combine_fnv1a(file_str);
+            t2 = std::chrono::high_resolution_clock::now();
+            total_hashing += (t2 - t1);
+
+            std::vector<uint32_t> shader_spv;
+            const auto precompiled_path = std::filesystem::path{ path.string() + ".precompiled" };
+            std::fstream precompiled_file{ precompiled_path, std::fstream::binary | std::fstream::ate | std::fstream::in };
+            if(precompiled_file.is_open())
+            {
+                const size_t length = precompiled_file.tellg();
+                precompiled_file.seekg(std::ios::beg);
+                assert(length > 0);
+                char hash_bytes[8];
+                precompiled_file.read(hash_bytes, 8);
+                const auto read_hash = std::bit_cast<uint64_t>(hash_bytes);
+                if(read_hash == hash)
+                {
+                    shader_spv.resize((length - 8) / sizeof(shader_spv[0]));
+                    precompiled_file.read(reinterpret_cast<char*>(shader_spv.data()), length - 8);
+                }
+            }
+
+            if(shader_spv.empty())
+            {
+                t1 = std::chrono::high_resolution_clock::now();
+                const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
+                t2 = std::chrono::high_resolution_clock::now();
+                total_compiling += (t2 - t1);
+                if(res.GetCompilationStatus() != shaderc_compilation_status_success)
+                {
+                    ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
+                    return;
+                }
+                shader_spv = { res.begin(), res.end() };
+                precompiled_file.open(precompiled_path, std::fstream::out | std::fstream::binary);
+                char hash_bytes[8];
+                memcpy(hash_bytes, &hash, 8);
+                precompiled_file.write(hash_bytes, 8);
+                precompiled_file.write(reinterpret_cast<const char*>(shader_spv.data()),
+                                       shader_spv.size() * sizeof(shader_spv[0]));
+            }
+
+            precompiled_file.close();
+
+            const auto module_info = Vks(VkShaderModuleCreateInfo{
+                .codeSize = shader_spv.size() * sizeof(uint32_t),
+                .pCode = shader_spv.data(),
+            });
+            VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
         }
-
-        const auto module_info = Vks(VkShaderModuleCreateInfo{
-            .codeSize = (res.end() - res.begin()) * sizeof(uint32_t),
-            .pCode = res.begin(),
-        });
-        VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
     }
-
+    ENG_LOG("Compiling {} shader(s) finished. Parsing: {}ms, Hashing: {}ms, Compiling: {}ms", shaders_to_compile.size(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(total_reading).count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(total_hashing).count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(total_compiling).count());
     shaders_to_compile.clear();
 }
 
@@ -1716,7 +1766,7 @@ void RendererVulkan::update_ddgi()
 
 Handle<Shader> RendererVulkan::make_shader(ShaderStage stage, const std::filesystem::path& path)
 {
-    auto ret = shaders.insert(Shader{ .path = paths::canonize_path(path, "shaders"), .stage = stage });
+    auto ret = shaders.insert(Shader{ .path = eng::paths::canonize_path(eng::paths::SHADERS_DIR / path), .stage = stage });
     if(ret.success) { shaders_to_compile.push_back(ret.handle); }
     return ret.handle;
 }
@@ -1790,7 +1840,7 @@ void RendererVulkan::update_resource(Handle<Buffer> dst) { bindless_pool->update
 
 FrameData& RendererVulkan::get_frame_data(uint32_t offset)
 {
-    return frame_datas[(Engine::get().frame_num() + offset) % frame_datas.size()];
+    return frame_datas[(Engine::get().frame_num + offset) % frame_datas.size()];
 }
 
 const FrameData& RendererVulkan::get_frame_data(uint32_t offset) const

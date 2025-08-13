@@ -34,7 +34,7 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
 void Camera::update()
 {
     GLFWwindow* window = Engine::get().window->window;
-    const float dt = Engine::get().delta_time() * 5.0f;
+    const float dt = Engine::get().delta_time * 5.0f;
 
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && glfwGetTime() - last_press_time > 0.3f)
     {

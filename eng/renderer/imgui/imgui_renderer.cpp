@@ -81,7 +81,9 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     // ImGuizmo::BeginFrame();
 
     // Engine::get().ui->update();
-    ImGui::Begin("test");
+    ImGui::SetNextWindowPos({}, ImGuiCond_Once);
+    ImGui::SetNextWindowSize({ 200.0f, Engine::get().window->height }, ImGuiCond_Always);
+    ImGui::Begin("test", 0, ImGuiWindowFlags_NoMove);
     static float f = 0.0f;
     ImGui::SliderFloat("lalala", &f, 0.0f, 1.0f);
     ImGui::End();
