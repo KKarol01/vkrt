@@ -52,17 +52,17 @@ void ImGuiRenderer::initialize()
 
     // cmdpool = r->submit_queue->make_command_pool();
 
-    font_image = r->batch_image(ImageDescriptor{
-        .name = "imgui font",
-        .width = (uint32_t)width,
-        .height = (uint32_t)height,
-        .depth = 1,
-        .format = ImageFormat::R8G8B8A8_UNORM,
-        .type = ImageType::TYPE_2D,
-        .data = std::as_bytes(std::span{ pixels, upload_size }),
-    });
+    // font_image = r->batch_image(ImageDescriptor{
+    //     .name = "imgui font",
+    //     .width = (uint32_t)width,
+    //     .height = (uint32_t)height,
+    //     .depth = 1,
+    //     .format = ImageFormat::R8G8B8A8_UNORM,
+    //     .type = ImageType::TYPE_2D,
+    //     .data = std::as_bytes(std::span{ pixels, upload_size }),
+    // });
 
-    font_texture = r->batch_texture(TextureDescriptor{ font_image, sampler });
+    // font_texture = r->batch_texture(TextureDescriptor{ font_image, sampler });
 
     vertex_buffer =
         r->make_buffer(BufferCreateInfo{ "imgui vertex buffer", 1024 * 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
@@ -88,6 +88,7 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     ImGui::SliderFloat("lalala", &f, 0.0f, 1.0f);
     ImGui::End();
     ImGui::Begin("test2");
+    if(textures.size()) { ImGui::Image((ImTextureID)(*textures.front() + 1), { 100.0f, 100.0f }); }
     ImGui::Text("asdf");
     ImGui::End();
     ImGui::Render();
@@ -98,6 +99,14 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     if(fb_width <= 0 || fb_height <= 0) { return; }
     if(draw_data)
     {
+        if(draw_data->Textures != nullptr)
+        {
+            for(ImTextureData* tex : *draw_data->Textures)
+            {
+                handle_texture(tex);
+            }
+        }
+
         uint64_t vtx_off = 0;
         uint64_t idx_off = 0;
         int global_vtx_offset = 0;
@@ -146,9 +155,7 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
 
         {
             const auto vertex_idx = r->bindless_pool->get_index(vertex_buffer);
-            const auto texture_idx = r->bindless_pool->get_index(font_texture);
             cmd->push_constants(VK_SHADER_STAGE_ALL, &vertex_idx, { 16, 4 });
-            cmd->push_constants(VK_SHADER_STAGE_ALL, &texture_idx, { 20, 4 });
         }
 
         cmd->begin_rendering(rendering_info);
@@ -170,13 +177,13 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
             const ImDrawList* draw_list = draw_data->CmdLists[n];
             for(int cmd_i = 0; cmd_i < draw_list->CmdBuffer.Size; cmd_i++)
             {
-                const ImDrawCmd* pcmd = &draw_list->CmdBuffer[cmd_i];
+                const ImDrawCmd* imcmd = &draw_list->CmdBuffer[cmd_i];
 
                 // Project scissor/clipping rectangles into framebuffer space
-                ImVec2 clip_min((pcmd->ClipRect.x - clip_off.x) * clip_scale.x,
-                                (pcmd->ClipRect.y - clip_off.y) * clip_scale.y);
-                ImVec2 clip_max((pcmd->ClipRect.z - clip_off.x) * clip_scale.x,
-                                (pcmd->ClipRect.w - clip_off.y) * clip_scale.y);
+                ImVec2 clip_min((imcmd->ClipRect.x - clip_off.x) * clip_scale.x,
+                                (imcmd->ClipRect.y - clip_off.y) * clip_scale.y);
+                ImVec2 clip_max((imcmd->ClipRect.z - clip_off.x) * clip_scale.x,
+                                (imcmd->ClipRect.w - clip_off.y) * clip_scale.y);
 
                 // Clamp to viewport as vkCmdSetScissor() won't accept values that are off bounds
                 if(clip_min.x < 0.0f) { clip_min.x = 0.0f; }
@@ -193,16 +200,10 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
                 scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
                 cmd->set_scissors(&scissor, 1);
 
-                // Bind DescriptorSet with font or user texture
-                // VkDescriptorSet desc_set[1] = { (VkDescriptorSet)pcmd->TextureId };
-                // if(sizeof(ImTextureID) < sizeof(ImU64))
-                //{
-                //     // We don't support texture switches if ImTextureID hasn't been redefined to be 64-bit. Do a
-                //     flaky check that other textures haven't been used. IM_ASSERT(pcmd->TextureId ==
-                //     (ImTextureID)bd->FontDescriptorSet); desc_set[0] = bd->FontDescriptorSet;
-                // }
-
-                cmd->draw_indexed(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
+                const auto texid = r->bindless_pool->get_index(Handle<Texture>{ (uint32_t)imcmd->GetTexID() - 1 });
+                cmd->push_constants(VK_SHADER_STAGE_ALL, &texid, { 20, 4 });
+                cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
+                                  imcmd->VtxOffset + global_vtx_offset, 0);
             }
             global_idx_offset += draw_list->IdxBuffer.Size;
             global_vtx_offset += draw_list->VtxBuffer.Size;
@@ -210,4 +211,37 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
         cmd->end_rendering();
     }
 }
+
+void ImGuiRenderer::handle_texture(ImTextureData* imtex)
+{
+    if(imtex->Status == ImTextureStatus_OK) { return; }
+
+    auto* r = RendererVulkan::get_instance();
+    Handle<Image> image;
+    if(imtex->Status == ImTextureStatus_WantCreate)
+    {
+        image = r->make_image(ImageCreateInfo{ "imgui image",
+                                               VK_IMAGE_TYPE_2D,
+                                               { (uint32_t)imtex->Width, (uint32_t)imtex->Height, 1u },
+                                               VK_FORMAT_R8G8B8A8_UNORM,
+                                               VK_IMAGE_USAGE_SAMPLED_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT });
+        auto texture = r->batch_texture(TextureDescriptor{ image, sampler });
+        images.push_back(image);
+        textures.push_back(texture);
+        imtex->SetTexID((ImTextureID)(*texture + 1)); // +1 so GetTexID doesn't complain when it's 0.
+    }
+
+    if(imtex->Status == ImTextureStatus_WantCreate || imtex->Status == ImTextureStatus_WantUpdates)
+    {
+        const int upload_x = (imtex->Status == ImTextureStatus_WantCreate) ? 0 : imtex->UpdateRect.x;
+        const int upload_y = (imtex->Status == ImTextureStatus_WantCreate) ? 0 : imtex->UpdateRect.y;
+        const int upload_w = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Width : imtex->UpdateRect.w;
+        const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
+        assert(image);
+        assert(upload_w == imtex->Width && upload_h == imtex->Height);
+        r->staging_manager->copy(image, imtex->Pixels, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+        imtex->SetStatus(ImTextureStatus_OK);
+    }
+}
+
 } // namespace gfx

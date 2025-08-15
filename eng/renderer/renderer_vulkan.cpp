@@ -1073,26 +1073,25 @@ void RendererVulkan::compile_shaders()
     std::chrono::high_resolution_clock::duration total_compiling{};
     for(auto& e : shaders_to_compile)
     {
-        auto& sh = e.get();
-        sh.metadata = new ShaderMetadata{};
-        ShaderMetadata* shmd = (ShaderMetadata*)sh.metadata;
-        const auto& path = sh.path;
-        static const auto read_file = [](const std::filesystem::path& path) {
-            std::string path_str = path.string();
-            std::string path_to_includes = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
-            char error[256] = {};
-            char* parsed_file = stb_include_file(path_str.data(), nullptr, path_to_includes.data(), error);
-            if(!parsed_file)
+        auto& shader = e.get();
+        shader.metadata = new ShaderMetadata{};
+        ShaderMetadata* shmd = (ShaderMetadata*)shader.metadata;
+        static const auto read_file = [](const std::filesystem::path& file_path) {
+            std::string file_path_str = file_path.string();
+            std::string include_paths = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
+            char stbi_error[256] = {};
+            char* stb_include_cstr = stb_include_file(file_path_str.data(), nullptr, include_paths.data(), stbi_error);
+            if(!stb_include_cstr)
             {
-                ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", path_str, error);
+                ENG_WARN("STBI_INCLUDE cannot parse file [{}]: {}", file_path_str, stbi_error);
                 return std::string{};
             }
-            std::string parsed_file_str{ parsed_file };
-            free(parsed_file);
-            return parsed_file_str;
+            std::string stb_include_str{ stb_include_cstr };
+            free(stb_include_cstr);
+            return stb_include_str;
         };
 
-        const auto kind = [stage = sh.stage] {
+        const auto shckind = [stage = shader.stage] {
             if(stage == ShaderStage::VERTEX) { return shaderc_vertex_shader; }
             if(stage == ShaderStage::PIXEL) { return shaderc_fragment_shader; }
             // if(stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { return shaderc_raygen_shader; }
@@ -1103,70 +1102,68 @@ void RendererVulkan::compile_shaders()
             return shaderc_vertex_shader;
         }();
 
-        shaderc::CompileOptions options;
-        options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
-        options.SetTargetSpirv(shaderc_spirv_version_1_6);
-        options.SetGenerateDebugInfo();
+        shaderc::CompileOptions shcopts;
+        shcopts.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+        shcopts.SetTargetSpirv(shaderc_spirv_version_1_6);
+        shcopts.SetGenerateDebugInfo();
+        // shcopts.AddMacroDefinition("ASDF");
 
-        // options.AddMacroDefinition("ASDF");
-        shaderc::Compiler c;
+        auto t1 = std::chrono::high_resolution_clock::now();
+        std::string shader_str = read_file(shader.path);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        total_reading += (t2 - t1);
+        t1 = std::chrono::high_resolution_clock::now();
+        const auto shader_str_hash = eng::hash::combine_fnv1a(shader_str);
+        t2 = std::chrono::high_resolution_clock::now();
+        total_hashing += (t2 - t1);
+
+        std::vector<uint32_t> out_spv;
+        const auto pc_spv_path = std::filesystem::path{ shader.path.string() + ".precompiled" };
+        std::fstream pc_spv_file{ pc_spv_path, std::fstream::binary | std::fstream::ate | std::fstream::in };
+        if(pc_spv_file.is_open())
         {
-            auto t1 = std::chrono::high_resolution_clock::now();
-            std::string file_str = read_file(path);
-            auto t2 = std::chrono::high_resolution_clock::now();
-            total_reading += (t2 - t1);
-            t1 = std::chrono::high_resolution_clock::now();
-            const auto hash = eng::hash::combine_fnv1a(file_str);
-            t2 = std::chrono::high_resolution_clock::now();
-            total_hashing += (t2 - t1);
-
-            std::vector<uint32_t> shader_spv;
-            const auto precompiled_path = std::filesystem::path{ path.string() + ".precompiled" };
-            std::fstream precompiled_file{ precompiled_path, std::fstream::binary | std::fstream::ate | std::fstream::in };
-            if(precompiled_file.is_open())
+            const size_t pc_spv_file_size = pc_spv_file.tellg();
+            pc_spv_file.seekg(std::ios::beg);
+            assert(pc_spv_file_size > 0);
+            char pc_spv_hash_arr[8];
+            pc_spv_file.read(pc_spv_hash_arr, 8);
+            const auto pc_spv_hash = std::bit_cast<uint64_t>(pc_spv_hash_arr);
+            if(pc_spv_hash == shader_str_hash)
             {
-                const size_t length = precompiled_file.tellg();
-                precompiled_file.seekg(std::ios::beg);
-                assert(length > 0);
-                char hash_bytes[8];
-                precompiled_file.read(hash_bytes, 8);
-                const auto read_hash = std::bit_cast<uint64_t>(hash_bytes);
-                if(read_hash == hash)
-                {
-                    shader_spv.resize((length - 8) / sizeof(shader_spv[0]));
-                    precompiled_file.read(reinterpret_cast<char*>(shader_spv.data()), length - 8);
-                }
+                out_spv.resize((pc_spv_file_size - sizeof(pc_spv_hash)) / sizeof(out_spv[0]));
+                pc_spv_file.read(reinterpret_cast<char*>(out_spv.data()), pc_spv_file_size - 8);
             }
-
-            if(shader_spv.empty())
-            {
-                t1 = std::chrono::high_resolution_clock::now();
-                const auto res = c.CompileGlslToSpv(file_str, kind, path.filename().string().c_str(), options);
-                t2 = std::chrono::high_resolution_clock::now();
-                total_compiling += (t2 - t1);
-                if(res.GetCompilationStatus() != shaderc_compilation_status_success)
-                {
-                    ENG_WARN("Could not compile shader : {}, because : \"{}\"", path.string(), res.GetErrorMessage());
-                    return;
-                }
-                shader_spv = { res.begin(), res.end() };
-                precompiled_file.open(precompiled_path, std::fstream::out | std::fstream::binary);
-                char hash_bytes[8];
-                memcpy(hash_bytes, &hash, 8);
-                precompiled_file.write(hash_bytes, 8);
-                precompiled_file.write(reinterpret_cast<const char*>(shader_spv.data()),
-                                       shader_spv.size() * sizeof(shader_spv[0]));
-            }
-
-            precompiled_file.close();
-
-            const auto module_info = Vks(VkShaderModuleCreateInfo{
-                .codeSize = shader_spv.size() * sizeof(uint32_t),
-                .pCode = shader_spv.data(),
-            });
-            VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
         }
+
+        if(out_spv.empty())
+        {
+            shaderc::Compiler shccomp;
+            t1 = std::chrono::high_resolution_clock::now();
+            const auto res = shccomp.CompileGlslToSpv(shader_str, shckind, shader.path.filename().string().c_str(), shcopts);
+            t2 = std::chrono::high_resolution_clock::now();
+            total_compiling += (t2 - t1);
+            if(res.GetCompilationStatus() != shaderc_compilation_status_success)
+            {
+                ENG_WARN("Could not compile shader : {}, because : \"{}\"", shader.path.string(), res.GetErrorMessage());
+                return;
+            }
+            out_spv = { res.begin(), res.end() };
+            pc_spv_file.open(pc_spv_path, std::fstream::out | std::fstream::binary);
+            char pc_spv_hash_arr[8];
+            memcpy(pc_spv_hash_arr, &shader_str_hash, 8);
+            pc_spv_file.write(pc_spv_hash_arr, 8);
+            pc_spv_file.write(reinterpret_cast<const char*>(out_spv.data()), out_spv.size() * sizeof(out_spv[0]));
+        }
+
+        pc_spv_file.close();
+
+        const auto module_info = Vks(VkShaderModuleCreateInfo{
+            .codeSize = out_spv.size() * sizeof(uint32_t),
+            .pCode = out_spv.data(),
+        });
+        VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
     }
+
     ENG_LOG("Compiling {} shader(s) finished. Parsing: {}ms, Hashing: {}ms, Compiling: {}ms", shaders_to_compile.size(),
             std::chrono::duration_cast<std::chrono::milliseconds>(total_reading).count(),
             std::chrono::duration_cast<std::chrono::milliseconds>(total_hashing).count(),

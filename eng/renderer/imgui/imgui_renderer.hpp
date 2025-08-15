@@ -2,6 +2,8 @@
 
 #include <eng/common/handle.hpp>
 
+struct ImTextureData;
+
 namespace gfx
 {
 class CommandPool;
@@ -19,12 +21,13 @@ class ImGuiRenderer
     void render(CommandBuffer* cmd);
 
   private:
+    void handle_texture(ImTextureData* imtex);
+
     Handle<Pipeline> pipeline;
-    //CommandPool* cmdpool;
     Handle<Sampler> sampler;
-    Handle<Image> font_image;
-    Handle<Texture> font_texture;
     Handle<Buffer> vertex_buffer;
     Handle<Buffer> index_buffer;
+    std::vector<Handle<Image>> images;
+    std::vector<Handle<Texture>> textures;
 };
 } // namespace gfx
