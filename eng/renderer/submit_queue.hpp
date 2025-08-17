@@ -2,6 +2,7 @@
 
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
+#include <eng/renderer/renderer.hpp>
 #include <vulkan/vulkan.h>
 #include <cstdint>
 #include <vector>
@@ -20,15 +21,16 @@ class CommandPool;
 class CommandBuffer
 {
   public:
-    void barrier(VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access);
-    void barrier(Image& image, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                 VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout);
+    void barrier(PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
+                 PipelineAccessFlags dst_access);
+    void barrier(Image& image, PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
+                 PipelineAccessFlags dst_access, ImageLayout old_layout, ImageLayout new_layout);
 
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range);
     void copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count);
 
-    void clear_color(Image& image, VkImageLayout layout, Range mips, Range layers, float color);
-    void clear_depth_stencil(Image& image, VkImageLayout layout, Range mips, Range layers, float clear_depth, uint32_t clear_stencil);
+    void clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color);
+    void clear_depth_stencil(Image& image, ImageLayout layout, Range mips, Range layers, float clear_depth, uint32_t clear_stencil);
 
     void bind_index(Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);
@@ -112,10 +114,10 @@ class SubmitQueue
     {
         std::vector<Sync*> wait_sems;
         std::vector<uint64_t> wait_values;
-        std::vector<VkPipelineStageFlags2> wait_stages;
+        std::vector<PipelineStageFlags> wait_stages;
         std::vector<Sync*> signal_sems;
         std::vector<uint64_t> signal_values;
-        std::vector<VkPipelineStageFlags2> signal_stages;
+        std::vector<PipelineStageFlags> signal_stages;
         std::vector<CommandBuffer*> cmds;
         Sync* fence{};
     };
@@ -126,8 +128,8 @@ class SubmitQueue
 
     CommandPool* make_command_pool(VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    SubmitQueue& wait_sync(Sync* sync, VkPipelineStageFlags2 stages = {}, uint64_t value = ~0ull);
-    SubmitQueue& signal_sync(Sync* sync, VkPipelineStageFlags2 stages = {}, uint64_t value = ~0ull);
+    SubmitQueue& wait_sync(Sync* sync, PipelineStageFlags stages = {}, uint64_t value = ~0ull);
+    SubmitQueue& signal_sync(Sync* sync, PipelineStageFlags stages = {}, uint64_t value = ~0ull);
     SubmitQueue& with_cmd_buf(CommandBuffer* cmd);
     VkResult submit();
     VkResult submit_wait(uint64_t timeout);

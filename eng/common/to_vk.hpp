@@ -1,6 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
-#include <eng/renderer/pipeline.hpp>
+#include <eng/common/flags.hpp>
 #include <eng/renderer/renderer.hpp>
 
 namespace gfx
@@ -11,7 +11,9 @@ enum class ImageType;
 enum class ImageViewType;
 enum class ImageFilter;
 enum class ImageAddressing;
-enum class ShaderStage;
+enum class ImageAspect;
+enum class ImageLayout;
+enum class ImageUsage;
 enum class CullFace;
 enum class VertexFormat;
 enum class DepthCompare;
@@ -22,6 +24,9 @@ enum class BlendFactor;
 enum class BlendOp;
 enum class SamplerReductionMode;
 enum class SamplerMipmapMode;
+enum class BufferUsage;
+enum class PipelineStage : uint32_t;
+enum class PipelineAccess : uint32_t;
 
 VkFilter to_vk(const ImageFilter& a);
 VkSamplerAddressMode to_vk(const ImageAddressing& a);
@@ -29,6 +34,9 @@ VkFormat to_vk(const ImageFormat& a);
 VkFormat to_vk(const VertexFormat& a);
 VkImageType to_vk(const ImageType& a);
 VkImageViewType to_vk(const ImageViewType& a);
+VkImageAspectFlags to_vk(const ImageAspect& a);
+VkImageLayout to_vk(const ImageLayout& a);
+VkImageUsageFlags to_vk(const Flags<ImageUsage>& a);
 VkCullModeFlags to_vk(const CullFace& a);
 VkCompareOp to_vk(const DepthCompare& a);
 VkShaderStageFlagBits to_vk(const ShaderStage& a);
@@ -39,4 +47,8 @@ VkStencilOp to_vk(const StencilOp& a);
 VkCompareOp to_vk(const CompareOp& a);
 VkBlendFactor to_vk(const BlendFactor& a);
 VkBlendOp to_vk(const BlendOp& a);
+VkBufferUsageFlags to_vk(const Flags<BufferUsage>& a);
+VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a);
+VkAccessFlags2 to_vk(const PipelineAccessFlags& a);
+
 } // namespace gfx

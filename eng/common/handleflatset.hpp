@@ -235,7 +235,7 @@ class HandleFlatSet
     }
 
     bool erase(const T& t) { return set.erase(t); }
-    bool erase(index_t t) { return set.erase(t); }
+    bool erase(handle_t t) { return set.erase(*t); }
 
   private:
     set_t set;

@@ -1,8 +1,8 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/common/logger.hpp>
-#include <eng/renderer/resources/resources.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/common/to_vk.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/engine.hpp>
@@ -10,26 +10,29 @@
 namespace gfx
 {
 
-void CommandBuffer::barrier(VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                            VkAccessFlags2 dst_access)
+void CommandBuffer::barrier(PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
+                            PipelineAccessFlags dst_access)
 {
-    const auto barrier = Vks(VkMemoryBarrier2{
-        .srcStageMask = src_stage, .srcAccessMask = src_access, .dstStageMask = dst_stage, .dstAccessMask = dst_access });
+    const auto barrier = Vks(VkMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
+                                               .srcAccessMask = to_vk(src_access),
+                                               .dstStageMask = to_vk(dst_stage),
+                                               .dstAccessMask = to_vk(dst_access) });
     const auto dep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &barrier });
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-void CommandBuffer::barrier(Image& image, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkPipelineStageFlags2 dst_stage,
-                            VkAccessFlags2 dst_access, VkImageLayout old_layout, VkImageLayout new_layout)
+void CommandBuffer::barrier(Image& image, PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
+                            PipelineAccessFlags dst_access, ImageLayout old_layout, ImageLayout new_layout)
 {
-    const auto barr = Vks(VkImageMemoryBarrier2{ .srcStageMask = src_stage,
-                                                 .srcAccessMask = src_access,
-                                                 .dstStageMask = dst_stage,
-                                                 .dstAccessMask = dst_access,
-                                                 .oldLayout = old_layout,
-                                                 .newLayout = new_layout,
-                                                 .image = image.image,
-                                                 .subresourceRange = { image.deduce_aspect(), 0, image.mips, 0, image.layers } });
+    const auto barr =
+        Vks(VkImageMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
+                                   .srcAccessMask = to_vk(src_access),
+                                   .dstStageMask = to_vk(dst_stage),
+                                   .dstAccessMask = to_vk(dst_access),
+                                   .oldLayout = to_vk(old_layout),
+                                   .newLayout = to_vk(new_layout),
+                                   .image = VkImageMetadata::get(image).image,
+                                   .subresourceRange = { to_vk(image.deduce_aspect()), 0, image.mips, 0, image.layers } });
     const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
     image.current_layout = new_layout;
     vkCmdPipelineBarrier2(cmd, &dep);
@@ -38,17 +41,20 @@ void CommandBuffer::barrier(Image& image, VkPipelineStageFlags2 src_stage, VkAcc
 void CommandBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range)
 {
     VkBufferCopy region{ range.offset, dst_offset, range.size };
-    vkCmdCopyBuffer(cmd, src.buffer, dst.buffer, 1, &region);
+    vkCmdCopyBuffer(cmd, VkBufferMetadata::get(src).buffer, VkBufferMetadata::get(dst).buffer, 1, &region);
 }
 
 void CommandBuffer::copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
 {
-    const auto info = Vks(VkCopyBufferToImageInfo2{
-        .srcBuffer = src.buffer, .dstImage = dst.image, .dstImageLayout = dst.current_layout, .regionCount = count, .pRegions = regions });
+    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = VkBufferMetadata::get(src).buffer,
+                                                    .dstImage = VkImageMetadata::get(dst).image,
+                                                    .dstImageLayout = to_vk(dst.current_layout),
+                                                    .regionCount = count,
+                                                    .pRegions = regions });
     vkCmdCopyBufferToImage2(cmd, &info);
 }
 
-void CommandBuffer::clear_color(Image& image, VkImageLayout layout, Range mips, Range layers, float color)
+void CommandBuffer::clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color)
 {
     if(image.current_layout != layout)
     {
@@ -56,12 +62,12 @@ void CommandBuffer::clear_color(Image& image, VkImageLayout layout, Range mips, 
                 VK_ACCESS_TRANSFER_WRITE_BIT, image.current_layout, layout);
     }
     const auto clear = VkClearColorValue{ .float32 = color };
-    const auto range = VkImageSubresourceRange{ image.deduce_aspect(), (uint32_t)mips.offset, (uint32_t)mips.size,
-                                                (uint32_t)layers.offset, (uint32_t)layers.size };
-    vkCmdClearColorImage(cmd, image.image, layout, &clear, 1, &range);
+    const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
+                                                (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
+    vkCmdClearColorImage(cmd, VkImageMetadata::get(image).image, to_vk(layout), &clear, 1, &range);
 }
 
-void CommandBuffer::clear_depth_stencil(Image& image, VkImageLayout layout, Range mips, Range layers, float clear_depth, uint32_t clear_stencil)
+void CommandBuffer::clear_depth_stencil(Image& image, ImageLayout layout, Range mips, Range layers, float clear_depth, uint32_t clear_stencil)
 {
     if(image.current_layout != layout)
     {
@@ -69,32 +75,33 @@ void CommandBuffer::clear_depth_stencil(Image& image, VkImageLayout layout, Rang
                 VK_ACCESS_TRANSFER_WRITE_BIT, image.current_layout, layout);
     }
     const auto clear = VkClearDepthStencilValue{ .depth = 0.0f, .stencil = 0 };
-    const auto range = VkImageSubresourceRange{ image.deduce_aspect(), (uint32_t)mips.offset, (uint32_t)mips.size,
-                                                (uint32_t)layers.offset, (uint32_t)layers.size };
-    vkCmdClearDepthStencilImage(cmd, image.image, layout, &clear, 1, &range);
+    const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
+                                                (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
+    vkCmdClearDepthStencilImage(cmd, VkImageMetadata::get(image).image, to_vk(layout), &clear, 1, &range);
 }
 
 void CommandBuffer::bind_index(Buffer& index, uint32_t offset, VkIndexType type)
 {
-    vkCmdBindIndexBuffer(cmd, index.buffer, offset, type);
+    vkCmdBindIndexBuffer(cmd, VkBufferMetadata::get(index).buffer, offset, type);
 }
 
 void CommandBuffer::bind_pipeline(const Pipeline& pipeline)
 {
-    const auto* md = pipeline.vkmetadata;
-    vkCmdBindPipeline(cmd, md->bind_point, md->pipeline);
+    const auto& md = VkPipelineMetadata::get(pipeline);
+    vkCmdBindPipeline(cmd, md.bind_point, md.pipeline);
     current_pipeline = &pipeline;
 }
 
 void CommandBuffer::bind_descriptors(VkDescriptorSet* sets, Range range)
 {
-    vkCmdBindDescriptorSets(cmd, current_pipeline->vkmetadata->bind_point, current_pipeline->vkmetadata->layout,
-                            (uint32_t)range.offset, (uint32_t)range.size, sets, 0, nullptr);
+    const auto& md = VkPipelineMetadata::get(*current_pipeline);
+    vkCmdBindDescriptorSets(cmd, md.bind_point, md.layout, (uint32_t)range.offset, (uint32_t)range.size, sets, 0, nullptr);
 }
 
 void CommandBuffer::push_constants(VkShaderStageFlags stages, const void* const values, Range range)
 {
-    vkCmdPushConstants(cmd, current_pipeline->vkmetadata->layout, stages, (uint32_t)range.offset, (uint32_t)range.size, values);
+    const auto& md = VkPipelineMetadata::get(*current_pipeline);
+    vkCmdPushConstants(cmd, md.layout, stages, (uint32_t)range.offset, (uint32_t)range.size, values);
 }
 
 void CommandBuffer::set_viewports(const VkViewport* viewports, uint32_t count)
@@ -120,7 +127,8 @@ void CommandBuffer::draw_indexed(uint32_t index_count, uint32_t instance_count, 
 void CommandBuffer::draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count,
                                                 size_t count_offset, uint32_t max_draw_count, uint32_t stride)
 {
-    vkCmdDrawIndexedIndirectCount(cmd, indirect.buffer, indirect_offset, count.buffer, count_offset, max_draw_count, stride);
+    vkCmdDrawIndexedIndirectCount(cmd, VkBufferMetadata::get(indirect).buffer, indirect_offset,
+                                  VkBufferMetadata::get(count).buffer, count_offset, max_draw_count, stride);
 }
 
 void CommandBuffer::dispatch(uint32_t x, uint32_t y, uint32_t z) { vkCmdDispatch(cmd, x, y, z); }
@@ -277,7 +285,7 @@ CommandPool* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
     return &command_pools.emplace_back(dev, family_idx, flags);
 }
 
-SubmitQueue& SubmitQueue::wait_sync(Sync* sync, VkPipelineStageFlags2 stages, uint64_t value)
+SubmitQueue& SubmitQueue::wait_sync(Sync* sync, PipelineStageFlags stages, uint64_t value)
 {
     if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
     {
@@ -288,7 +296,7 @@ SubmitQueue& SubmitQueue::wait_sync(Sync* sync, VkPipelineStageFlags2 stages, ui
     return *this;
 }
 
-SubmitQueue& SubmitQueue::signal_sync(Sync* sync, VkPipelineStageFlags2 stages, uint64_t value)
+SubmitQueue& SubmitQueue::signal_sync(Sync* sync, PipelineStageFlags stages, uint64_t value)
 {
     if(sync->type == SyncType::FENCE)
     {
@@ -320,13 +328,13 @@ VkResult SubmitQueue::submit()
     {
         wait_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.wait_sems[i]->semaphore,
                                                   .value = submission.wait_values[i],
-                                                  .stageMask = submission.wait_stages[i] });
+                                                  .stageMask = to_vk(submission.wait_stages[i]) });
     }
     for(auto i = 0u; i < sig_sems.size(); ++i)
     {
         sig_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.signal_sems[i]->semaphore,
                                                  .value = submission.signal_values[i],
-                                                 .stageMask = submission.signal_stages[i] });
+                                                 .stageMask = to_vk(submission.signal_stages[i]) });
     }
     for(auto i = 0u; i < cmds.size(); ++i)
     {

@@ -10,6 +10,7 @@
 #include <eng/common/components.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/paths.hpp>
+#include <eng/renderer/renderer.hpp>
 
 static Handle<gfx::Geometry> load_geometry(const fastgltf::Asset& asset, const fastgltf::Mesh& mesh,
                                            uint32_t primitive_index, scene::LoadedNode& ctx)
@@ -88,7 +89,7 @@ static Handle<gfx::Geometry> load_geometry(const fastgltf::Asset& asset, const f
         fastgltf::copyFromAccessor<uint32_t>(asset, acc, indices.data());
     }
 
-    const auto geom = Engine::get().renderer->batch_geometry(gfx::GeometryDescriptor{ .vertices = vertices, .indices = indices });
+    const auto geom = Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{ .vertices = vertices, .indices = indices });
     ctx.geometries.push_back(geom);
     return geom;
 }
@@ -128,10 +129,11 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
         return {};
     }
 
+    imgd.usage = gfx::ImageUsage::SAMPLED_BIT;
     imgd.data = { imgdata, imgdata + x * y * ch };
     imgd.width = (uint32_t)x;
     imgd.height = (uint32_t)y;
-    const auto img = Engine::get().renderer->batch_image(imgd);
+    const auto img = Engine::get().renderer->make_image(imgd);
     stbi_image_free(imgdata);
     ctx.images.at(index) = img;
     return img;
@@ -139,7 +141,7 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
 
 static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t index, scene::LoadedNode& ctx)
 {
-    if(index == ~0ull) { return Engine::get().renderer->batch_sampler(gfx::SamplerDescriptor{}); }
+    if(index == ~0ull) { return Engine::get().renderer->make_sampler(gfx::SamplerDescriptor{}); }
     if(ctx.samplers.size() <= index) { ctx.samplers.resize(asset.samplers.size()); }
     if(ctx.samplers.at(index)) { return ctx.samplers.at(index); }
 
@@ -165,7 +167,7 @@ static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t in
         if(*fsamp.magFilter == fastgltf::Filter::Nearest) { sampd.filtering[1] = gfx::ImageFilter::NEAREST; }
         else if(*fsamp.magFilter == fastgltf::Filter::Linear) { sampd.filtering[1] = gfx::ImageFilter::LINEAR; }
     }
-    const auto sampler = Engine::get().renderer->batch_sampler(sampd);
+    const auto sampler = Engine::get().renderer->make_sampler(sampd);
     ctx.samplers.at(index) = sampler;
     return sampler;
 }
@@ -177,8 +179,10 @@ static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::Imag
     if(ctx.textures.at(index)) { return ctx.textures.at(index); }
 
     const auto& ftex = asset.textures.at(index);
-    const auto tex = Engine::get().renderer->batch_texture(gfx::TextureDescriptor{
-        .image = load_image(asset, format, ftex.imageIndex ? *ftex.imageIndex : ~0ull, ctx),
+    const auto tex = Engine::get().renderer->make_texture(gfx::TextureDescriptor{
+        .view = Engine::get()
+                    .renderer->get_image(load_image(asset, format, ftex.imageIndex ? *ftex.imageIndex : ~0ull, ctx))
+                    .default_view,
         .sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, ctx) });
     ctx.textures.at(index) = tex;
     return tex;
@@ -191,7 +195,7 @@ static Handle<gfx::Material> load_material(const fastgltf::Asset& asset, const f
     if(ctx.materials.at(*primitive.materialIndex)) { return ctx.materials.at(*primitive.materialIndex); }
 
     const auto& fmat = asset.materials.at(*primitive.materialIndex);
-    const auto mat = Engine::get().renderer->batch_material(gfx::MaterialDescriptor{
+    const auto mat = Engine::get().renderer->make_material(gfx::MaterialDescriptor{
         .base_color_texture = load_texture(asset, gfx::ImageFormat::R8G8B8A8_SRGB,
                                            fmat.pbrData.baseColorTexture ? fmat.pbrData.baseColorTexture->textureIndex : ~0ull, ctx),
         .normal_texture = load_texture(asset, gfx::ImageFormat::R8G8B8A8_UNORM,
@@ -224,7 +228,7 @@ static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastglt
     {
         const auto geom = load_geometry(asset, fm, i, ctx);
         const auto mat = load_material(asset, fm.primitives.at(i), ctx);
-        m.meshes.at(i) = Engine::get().renderer->batch_mesh(gfx::MeshDescriptor{ .geometry = geom, .material = mat });
+        m.meshes.at(i) = Engine::get().renderer->make_mesh(gfx::MeshDescriptor{ .geometry = geom, .material = mat });
     }
     ecsr->emplace<ecs::comp::MeshRenderer>(e, m);
 }

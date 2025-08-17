@@ -3,18 +3,10 @@
 #include <filesystem>
 #include <vulkan/vulkan.h>
 #include <eng/renderer/renderer.hpp>
+#include <eng/common/handle.hpp>
 
-namespace gfx {
-
-struct VkPipelineMetadata;
-
-enum class ShaderStage
+namespace gfx
 {
-    NONE,
-    VERTEX,
-    PIXEL,
-    COMPUTE
-};
 
 struct Shader
 {
@@ -175,7 +167,7 @@ struct PipelineCreateInfo
         ImageFormat stencil_format{};
     };
 
-    bool operator==(const PipelineCreateInfo&) const = default;
+    bool operator==(const PipelineCreateInfo& a) const = default;
 
     std::vector<Handle<Shader>> shaders;
     std::vector<VertexBinding> bindings;
@@ -197,11 +189,9 @@ struct PipelineCreateInfo
 
 struct Pipeline
 {
-    auto operator==(const Pipeline& o) const { return info == o.info; }
+    bool operator==(const Pipeline& a) const { return info == a.info; }
     PipelineCreateInfo info;
-    union {
-        VkPipelineMetadata* vkmetadata;
-    };
+    void* metadata{};
 };
 
 } // namespace gfx
@@ -235,3 +225,5 @@ DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
 }());
 DEFINE_STD_HASH(gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
 DEFINE_STD_HASH(gfx::Shader, eng::hash::combine_fnv1a(t.path));
+
+ENG_DEFINE_HANDLE_DISPATCHER(gfx::Shader);

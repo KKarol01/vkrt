@@ -33,6 +33,7 @@ std::string to_string(const gfx::ImageViewType& a)
 { 
     switch(a) 
     {
+        case gfx::ImageViewType::NONE:    { return "NONE"; }
         case gfx::ImageViewType::TYPE_1D: { return "TYPE_1D"; }
         case gfx::ImageViewType::TYPE_2D: { return "TYPE_2D"; }
         case gfx::ImageViewType::TYPE_3D: { return "TYPE_3D"; }

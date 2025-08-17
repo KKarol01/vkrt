@@ -2,8 +2,7 @@
 
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/common/handle.hpp>
-#include <eng/renderer/resources/resources.hpp>
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.h> // todo: remove this from here
 #include <span>
 #include <vector>
 #include <thread>
@@ -43,7 +42,7 @@ class GPUStagingManager
     {
         copy(dst, vec.data(), dst_offset, { 0, vec.size() * sizeof(T) });
     }
-    void copy(Handle<Image> dst, const void* const src, VkImageLayout final_layout);
+    void copy(Handle<Image> dst, const void* const src, ImageLayout final_layout);
     Sync* flush();
     void reset();
 
@@ -51,7 +50,7 @@ class GPUStagingManager
     Sync* flush_pending();
     void begin_new_cmd_buffer();
     std::pair<void*, size_t> allocate(size_t size);
-    size_t get_offset(const void* const alloc) { return (uintptr_t)alloc - (uintptr_t)buffer.memory; }
+    size_t get_offset(const void* const alloc) const { return (uintptr_t)alloc - (uintptr_t)buffer.memory; }
     uint32_t get_cmd_index() const;
     CmdBufWrapper& get_wrapped_cmd();
     CommandBuffer* get_cmd();

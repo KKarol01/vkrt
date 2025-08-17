@@ -54,10 +54,419 @@ static float halton(int i, int b)
 namespace gfx
 {
 
+void VkPipelineMetadata::init(Pipeline& a)
+{
+    if(a.metadata) { return; }
+    auto* md = new VkPipelineMetadata{};
+    a.metadata = md;
+    {
+        const auto stage = a.info.shaders[0]->stage;
+        if(stage == ShaderStage::VERTEX_BIT) { md->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
+        else if(stage == ShaderStage::COMPUTE_BIT) { md->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+        else
+        {
+            assert(false);
+            delete md;
+            a.metadata = nullptr;
+            return;
+        }
+    }
+
+    auto* r = RendererVulkan::get_instance();
+    md->layout = r->bindless_pool->get_pipeline_layout();
+
+    std::vector<VkPipelineShaderStageCreateInfo> stages;
+    stages.reserve(a.info.shaders.size());
+    for(const auto& e : a.info.shaders)
+    {
+        stages.push_back(Vks(VkPipelineShaderStageCreateInfo{
+            .stage = gfx::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
+    }
+
+    if(md->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
+    {
+        const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = md->layout });
+        VK_CHECK(vkCreateComputePipelines(r->dev, {}, 1, &vkinfo, {}, &md->pipeline));
+        return;
+    }
+
+    std::vector<VkVertexInputBindingDescription> vkbindings(a.info.bindings.size());
+    for(auto i = 0u; i < a.info.bindings.size(); ++i)
+    {
+        vkbindings.at(i) = { a.info.bindings.at(i).binding, a.info.bindings.at(i).stride,
+                             a.info.bindings.at(i).instanced ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX };
+    }
+    std::vector<VkVertexInputAttributeDescription> vkattributes(a.info.attributes.size());
+    for(auto i = 0u; i < a.info.attributes.size(); ++i)
+    {
+        vkattributes.at(i) = { a.info.attributes.at(i).location, a.info.attributes.at(i).binding,
+                               gfx::to_vk(a.info.attributes.at(i).format), a.info.attributes.at(i).offset };
+    }
+    auto pVertexInputState =
+        Vks(VkPipelineVertexInputStateCreateInfo{ .vertexBindingDescriptionCount = (uint32_t)a.info.bindings.size(),
+                                                  .pVertexBindingDescriptions = vkbindings.data(),
+                                                  .vertexAttributeDescriptionCount = (uint32_t)a.info.attributes.size(),
+                                                  .pVertexAttributeDescriptions = vkattributes.data() });
+
+    auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST });
+
+    auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
+
+    auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
+
+    auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
+        .polygonMode = gfx::to_vk(a.info.polygon_mode),
+        .cullMode = gfx::to_vk(a.info.culling),
+        .frontFace = a.info.front_is_ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE,
+        .lineWidth = a.info.line_width,
+    });
+
+    auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    });
+
+    // vkstencil
+    auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
+            .depthTestEnable = a.info.depth_test,
+            .depthWriteEnable = a.info.depth_write,
+            .depthCompareOp = gfx::to_vk(a.info.depth_compare),
+            .depthBoundsTestEnable = false,
+            .stencilTestEnable = a.info.stencil_test,
+            .front = {
+                gfx::to_vk(a.info.stencil_front.fail),
+                gfx::to_vk(a.info.stencil_front.pass),
+                gfx::to_vk(a.info.stencil_front.depth_fail),
+                gfx::to_vk(a.info.stencil_front.compare),
+                a.info.stencil_front.compare_mask,
+                a.info.stencil_front.write_mask,
+                a.info.stencil_front.ref,
+            },
+            .back = {
+                gfx::to_vk(a.info.stencil_back.fail),
+                gfx::to_vk(a.info.stencil_back.pass),
+                gfx::to_vk(a.info.stencil_back.depth_fail),
+                gfx::to_vk(a.info.stencil_back.compare),
+                a.info.stencil_back.compare_mask,
+                a.info.stencil_back.write_mask,
+                a.info.stencil_back.ref,
+            },
+        });
+
+    std::array<VkPipelineColorBlendAttachmentState, 8> vkblends;
+    std::array<VkFormat, 8> vkcol_formats;
+    for(uint32_t i = 0; i < a.info.attachments.count; ++i)
+    {
+        vkblends.at(i) = { a.info.attachments.blend_states.at(i).enable,
+                           gfx::to_vk(a.info.attachments.blend_states.at(i).src_color_factor),
+                           gfx::to_vk(a.info.attachments.blend_states.at(i).dst_color_factor),
+                           gfx::to_vk(a.info.attachments.blend_states.at(i).color_op),
+                           gfx::to_vk(a.info.attachments.blend_states.at(i).src_alpha_factor),
+                           gfx::to_vk(a.info.attachments.blend_states.at(i).dst_alpha_factor),
+                           gfx::to_vk(a.info.attachments.blend_states.at(i).alpha_op),
+                           VkColorComponentFlags{ ((uint32_t)a.info.attachments.blend_states.at(i).r) << 0 |
+                                                  ((uint32_t)a.info.attachments.blend_states.at(i).g) << 1 |
+                                                  ((uint32_t)a.info.attachments.blend_states.at(i).b) << 2 |
+                                                  ((uint32_t)a.info.attachments.blend_states.at(i).a) << 3 } };
+        vkcol_formats.at(i) = gfx::to_vk(a.info.attachments.color_formats.at(i));
+    }
+    auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
+        .attachmentCount = a.info.attachments.count,
+        .pAttachments = vkblends.data(),
+    });
+
+    VkDynamicState dynstates[]{
+        VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+        VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+    };
+    auto pDynamicState = Vks(VkPipelineDynamicStateCreateInfo{
+        .dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]),
+        .pDynamicStates = dynstates,
+    });
+
+    auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
+        .colorAttachmentCount = a.info.attachments.count,
+        .pColorAttachmentFormats = vkcol_formats.data(),
+        .depthAttachmentFormat = gfx::to_vk(a.info.attachments.depth_format),
+        .stencilAttachmentFormat = gfx::to_vk(a.info.attachments.stencil_format),
+    });
+
+    auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
+        .pNext = &pDynamicRendering,
+        .stageCount = (uint32_t)stages.size(),
+        .pStages = stages.data(),
+        .pVertexInputState = &pVertexInputState,
+        .pInputAssemblyState = &pInputAssemblyState,
+        .pTessellationState = &pTessellationState,
+        .pViewportState = &pViewportState,
+        .pRasterizationState = &pRasterizationState,
+        .pMultisampleState = &pMultisampleState,
+        .pDepthStencilState = &pDepthStencilState,
+        .pColorBlendState = &pColorBlendState,
+        .pDynamicState = &pDynamicState,
+        .layout = RendererVulkan::get_instance()->bindless_pool->get_pipeline_layout(),
+    });
+    VK_CHECK(vkCreateGraphicsPipelines(r->dev, nullptr, 1, &vk_info, nullptr, &md->pipeline));
+}
+
+void VkPipelineMetadata::destroy(Pipeline& a)
+{
+    if(!a.metadata) { return; }
+    auto* md = (VkPipelineMetadata*)a.metadata;
+    assert(md->pipeline);
+    vkDestroyPipeline(RendererVulkan::get_instance()->dev, md->pipeline, nullptr);
+    delete a.metadata;
+    a.metadata = nullptr;
+}
+
+VkPipelineMetadata& VkPipelineMetadata::get(Pipeline& a)
+{
+    assert(a.metadata);
+    return *(VkPipelineMetadata*)a.metadata;
+}
+
+const VkPipelineMetadata& VkPipelineMetadata::get(const Pipeline& a)
+{
+    assert(a.metadata);
+    return *(const VkPipelineMetadata*)a.metadata;
+}
+
+void VkBufferMetadata::init(Buffer& a)
+{
+    if(a.metadata)
+    {
+        ENG_ERROR("Trying to init already init buffer");
+        return;
+    }
+
+    auto* md = new VkBufferMetadata{};
+    a.metadata = md;
+    const auto cpu_map = a.usage.test(gfx::BufferUsage::CPU_ACCESS);
+    if(a.capacity == 0)
+    {
+        ENG_WARN("Capacity cannot be 0");
+        return;
+    }
+    if(!cpu_map) { a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT; }
+
+    auto* r = RendererVulkan::get_instance();
+    const auto vkinfo = Vks(VkBufferCreateInfo{ .size = a.capacity, .usage = to_vk(a.usage) });
+    const auto vmainfo = VmaAllocationCreateInfo{
+        .flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u,
+        .usage = VMA_MEMORY_USAGE_AUTO,
+        .requiredFlags = cpu_map ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0u
+    };
+
+    VmaAllocationInfo vmaai{};
+    VK_CHECK(vmaCreateBuffer(r->vma, &vkinfo, &vmainfo, &md->buffer, &md->vmaa, &vmaai));
+    if(md->buffer) { set_debug_name(md->buffer, a.name); }
+    else
+    {
+        ENG_WARN("Could not create buffer {}", a.name);
+        return;
+    }
+    a.memory = vmaai.pMappedData;
+    if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+    {
+        const auto vkbdai = Vks(VkBufferDeviceAddressInfo{ .buffer = md->buffer });
+        md->bda = vkGetBufferDeviceAddress(r->dev, &vkbdai);
+    }
+}
+
+void VkBufferMetadata::destroy(Buffer& a)
+{
+    if(!a.metadata)
+    {
+        assert(a.capacity == 0);
+        return;
+    }
+    auto* r = RendererVulkan::get_instance();
+    auto* md = (VkBufferMetadata*)a.metadata;
+    if(!md->buffer || !md->vmaa) { return; }
+    vmaDestroyBuffer(r->vma, md->buffer, md->vmaa);
+    delete md;
+    a.metadata = nullptr;
+}
+
+VkBufferMetadata& VkBufferMetadata::get(Buffer& a)
+{
+    assert(a.metadata);
+    return *(VkBufferMetadata*)a.metadata;
+}
+
+const VkBufferMetadata& VkBufferMetadata::get(const Buffer& a)
+{
+    assert(a.metadata);
+    return *(const VkBufferMetadata*)a.metadata;
+}
+
+void VkImageMetadata::init(Image& a, VkImage img)
+{
+    if(a.metadata)
+    {
+        ENG_ERROR("Trying to init already init image");
+        return;
+    }
+
+    auto* r = RendererVulkan::get_instance();
+    auto* md = new VkImageMetadata{};
+    a.metadata = md;
+
+    if(a.width + a.height + a.depth == 0)
+    {
+        ENG_WARN("Trying to create 0-sized image");
+        return;
+    }
+
+    VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
+    const auto info = Vks(VkImageCreateInfo{ .imageType = to_vk(a.type),
+                                             .format = to_vk(a.format),
+                                             .extent = { a.width, a.height, a.depth },
+                                             .mipLevels = a.mips,
+                                             .arrayLayers = a.layers,
+                                             .samples = VK_SAMPLE_COUNT_1_BIT,
+                                             .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                             .usage = to_vk(a.usage),
+                                             .initialLayout = to_vk(a.current_layout) });
+    if(img) { md->image = img; }
+    else { VK_CHECK(vmaCreateImage(r->vma, &info, &vma_info, &md->image, &md->vmaa, nullptr)); }
+    if(md->image) { set_debug_name(md->image, a.name); }
+    else { ENG_ERROR("Could not create image {}", a.name); }
+}
+
+void VkImageMetadata::destroy(Image& a)
+{
+    if(!a.metadata) { return; }
+    auto* r = RendererVulkan::get_instance();
+    auto& md = VkImageMetadata::get(a);
+    for(auto& e : md.views)
+    {
+        r->destroy_view(e);
+    }
+    vmaDestroyImage(r->vma, md.image, md.vmaa);
+    delete a.metadata;
+    a.metadata = nullptr;
+}
+
+VkImageMetadata& VkImageMetadata::get(Image& a)
+{
+    assert(a.metadata);
+    return *(VkImageMetadata*)a.metadata;
+}
+
+void VkImageViewMetadata::init(ImageView& a, Handle<ImageView> handle, Image* img)
+{
+    if(a.metadata)
+    {
+        ENG_ERROR("Trying to init already init image view");
+        return;
+    }
+    assert(a.image);
+    auto* r = RendererVulkan::get_instance();
+    if(!img) { img = &a.image.get(); }
+    assert(img->metadata);
+    const auto vkinfo = Vks(VkImageViewCreateInfo{
+        .image = ((VkImageMetadata*)img->metadata)->image,
+        .viewType = to_vk(a.type),
+        .format = to_vk(a.format),
+        .subresourceRange = { to_vk(a.aspect), a.mips.offset, a.mips.size, a.layers.offset, a.layers.size } });
+
+    auto* md = new VkImageViewMetadata{};
+    a.metadata = md;
+    VK_CHECK(vkCreateImageView(r->dev, &vkinfo, {}, &md->view));
+    if(!md->view) { ENG_ERROR("Could not create image view for image {}", img->name); }
+    else
+    {
+        set_debug_name(md->view, a.name);
+        VkImageMetadata::get(*img).views.push_back(handle);
+    }
+}
+
+void VkImageViewMetadata::destroy(ImageView& a)
+{
+    if(!a.metadata) { return; }
+    auto* md = (VkImageViewMetadata*)a.metadata;
+    assert(md->view);
+    auto* r = RendererVulkan::get_instance();
+    vkDestroyImageView(r->dev, md->view, nullptr);
+    delete md;
+    a.metadata = nullptr;
+}
+
+VkImageViewMetadata& VkImageViewMetadata::get(ImageView& a)
+{
+    assert(a.metadata);
+    return *(VkImageViewMetadata*)a.metadata;
+}
+
+// const VkImageViewMetadata& VkImageViewMetadata::get(const ImageView& a)
+//{
+//     assert(a.metadata);
+//     return *(VkImageViewMetadata*)a.metadata;
+// }
+
+void VkSamplerMetadata::init(Sampler& a)
+{
+    if(a.metadata) { return; }
+    auto vkinfo = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(a.info.filtering[1]),
+                                           .minFilter = gfx::to_vk(a.info.filtering[0]),
+                                           .mipmapMode = gfx::to_vk(a.info.mipmap_mode),
+                                           .addressModeU = gfx::to_vk(a.info.addressing[0]),
+                                           .addressModeV = gfx::to_vk(a.info.addressing[1]),
+                                           .addressModeW = gfx::to_vk(a.info.addressing[2]),
+                                           .mipLodBias = a.info.mip_lod[2],
+                                           .minLod = a.info.mip_lod[0],
+                                           .maxLod = a.info.mip_lod[1] });
+    auto vkreduction = Vks(VkSamplerReductionModeCreateInfo{});
+    if(a.info.reduction_mode)
+    {
+        vkreduction.reductionMode = gfx::to_vk(*a.info.reduction_mode);
+        vkinfo.pNext = &vkreduction;
+    }
+    auto* md = new VkSamplerMetadata{};
+    a.metadata = md;
+    VK_CHECK(vkCreateSampler(RendererVulkan::get_instance()->dev, &vkinfo, {}, &md->sampler));
+}
+
+void VkSamplerMetadata::destroy(Sampler& a)
+{
+    if(!a.metadata)
+    {
+        ENG_ERROR("Trying to init already init sampler.");
+        return;
+    }
+    auto* md = (VkSamplerMetadata*)a.metadata;
+    vkDestroySampler(RendererVulkan::get_instance()->dev, md->sampler, nullptr);
+    delete md;
+    a.metadata = nullptr;
+}
+
+VkSamplerMetadata& VkSamplerMetadata::get(Sampler& a)
+{
+    assert(a.metadata);
+    return *(VkSamplerMetadata*)a.metadata;
+}
+
+// const VkSamplerMetadata& VkSamplerMetadata::get(const Sampler& a)
+//{
+//     assert(a.metadata);
+//     return *(const VkSamplerMetadata*)a.metadata;
+// }
+
 RendererVulkan* RendererVulkan::get_instance() { return static_cast<RendererVulkan*>(Engine::get().renderer); }
 
 void RendererVulkan::init()
 {
+    ENG_SET_HANDLE_DISPATCHER(gfx::Buffer, { return &gfx::RendererVulkan::get_instance()->buffers.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Image, { return &gfx::RendererVulkan::get_instance()->images.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::ImageView, { return &gfx::RendererVulkan::get_instance()->image_views.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Geometry, { return &gfx::RendererVulkan::get_instance()->geometries.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Mesh, { return &gfx::RendererVulkan::get_instance()->meshes.at(*handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Texture, { return &gfx::RendererVulkan::get_instance()->textures.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Material, { return &gfx::RendererVulkan::get_instance()->materials.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Shader, { return &gfx::RendererVulkan::get_instance()->shaders.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::Sampler, { return &gfx::RendererVulkan::get_instance()->samplers.at(handle); });
+
     initialize_vulkan();
     initialize_resources();
     initialize_mesh_passes();
@@ -267,18 +676,16 @@ void RendererVulkan::initialize_resources()
     // meshlets_mli_id_buf =
     //     make_buffer(BufferCreateInfo{ "meshlets_meshlest_instance_to_id_buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
 
-    geom_main_bufs.buf_vpos = make_buffer(BufferCreateInfo{ "vertex positions", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
-    geom_main_bufs.buf_vattrs = make_buffer(BufferCreateInfo{ "vertex attributes", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+    geom_main_bufs.buf_vpos = make_buffer(BufferDescriptor{ "vertex positions", 1024, BufferUsage::STORAGE_BIT });
+    geom_main_bufs.buf_vattrs = make_buffer(BufferDescriptor{ "vertex attributes", 1024, BufferUsage::STORAGE_BIT });
     geom_main_bufs.buf_indices =
-        make_buffer(BufferCreateInfo{ "vertex indices", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT });
-    geom_main_bufs.buf_draw_cmds = make_buffer(BufferCreateInfo{
-        "meshlets draw cmds", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true });
-    geom_main_bufs.buf_draw_ids =
-        make_buffer(BufferCreateInfo{ "meshlets instance id", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+        make_buffer(BufferDescriptor{ "vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT });
+    geom_main_bufs.buf_draw_cmds = make_buffer(BufferDescriptor{
+        "meshlets draw cmds", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT | BufferUsage::CPU_ACCESS });
+    geom_main_bufs.buf_draw_ids = make_buffer(BufferDescriptor{ "meshlets instance id", 1024, BufferUsage::STORAGE_BIT });
     geom_main_bufs.buf_final_draw_ids =
-        make_buffer(BufferCreateInfo{ "meshlets final instance id", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
-    geom_main_bufs.buf_draw_bs =
-        make_buffer(BufferCreateInfo{ "meshlets instance bbs", 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+        make_buffer(BufferDescriptor{ "meshlets final instance id", 1024, BufferUsage::STORAGE_BIT });
+    geom_main_bufs.buf_draw_bs = make_buffer(BufferDescriptor{ "meshlets instance bbs", 1024, BufferUsage::STORAGE_BIT });
 
     // auto samp_ne = samplers.get_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     // auto samp_ll = samplers.get_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -286,23 +693,23 @@ void RendererVulkan::initialize_resources()
 
     // ddgi.radiance_texture = make_image(Image{ "ddgi radiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
     //                                           VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
-    //                                    VK_IMAGE_LAYOUT_GENERAL);
-    // make_image(ddgi.radiance_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+    //                                    ImageLayout::GENERAL);
+    // make_image(ddgi.radiance_texture, ImageLayout::GENERAL, samp_ll);
 
     // ddgi.irradiance_texture = make_image(Image{ "ddgi irradiance", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
     //                                             VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
-    //                                      VK_IMAGE_LAYOUT_GENERAL);
-    // make_image(ddgi.irradiance_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+    //                                      ImageLayout::GENERAL);
+    // make_image(ddgi.irradiance_texture, ImageLayout::GENERAL, samp_ll);
 
     // ddgi.visibility_texture = make_image(Image{ "ddgi visibility", 1, 1, 1, 1, 1, VK_FORMAT_R16G16_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
     //                                             VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
-    //                                      VK_IMAGE_LAYOUT_GENERAL);
-    // make_image(ddgi.visibility_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+    //                                      ImageLayout::GENERAL);
+    // make_image(ddgi.visibility_texture, ImageLayout::GENERAL, samp_ll);
 
     // ddgi.probe_offsets_texture = make_image(Image{ "ddgi probe offsets", 1, 1, 1, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT,
     //                                                VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT },
-    //                                         VK_IMAGE_LAYOUT_GENERAL);
-    // make_image(ddgi.probe_offsets_texture, VK_IMAGE_LAYOUT_GENERAL, samp_ll);
+    //                                         ImageLayout::GENERAL);
+    // make_image(ddgi.probe_offsets_texture, ImageLayout::GENERAL, samp_ll);
 
     for(uint32_t i = 0; i < frame_datas.size(); ++i)
     {
@@ -311,7 +718,7 @@ void RendererVulkan::initialize_resources()
         fd.acquire_semaphore = make_sync({ SyncType::BINARY_SEMAPHORE, 0, "acquire semaphore" });
         fd.rendering_semaphore = make_sync({ SyncType::BINARY_SEMAPHORE, 0, "rendering semaphore" });
         fd.rendering_fence = make_sync({ SyncType::FENCE, 1, "rendering fence" });
-        fd.constants = make_buffer(BufferCreateInfo{ fmt::format("constants_{}", i), 1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
+        fd.constants = make_buffer(BufferDescriptor{ fmt::format("constants_{}", i), 1024, BufferUsage::STORAGE_BIT });
     }
 
     // vsm.constants_buffer = make_buffer(BufferCreateInfo{ "vms buffer", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT });
@@ -357,19 +764,18 @@ void RendererVulkan::initialize_resources()
 void RendererVulkan::initialize_mesh_passes()
 {
     cull_pipeline = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader(ShaderStage::COMPUTE, "culling/culling.comp.glsl") } });
-    hiz_pipeline =
-        make_pipeline(PipelineCreateInfo{ .shaders = { make_shader(ShaderStage::COMPUTE, "culling/hiz.comp.glsl") } });
-    hiz_sampler = batch_sampler(SamplerDescriptor{ .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-                                                   .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
-                                                                   ImageAddressing::CLAMP_EDGE },
-                                                   .mipmap_mode = SamplerMipmapMode::NEAREST,
-                                                   .reduction_mode = SamplerReductionMode::MIN })
-                      ->sampler;
+        .shaders = { make_shader(ShaderStage::COMPUTE_BIT, "culling/culling.comp.glsl") } });
+    hiz_pipeline = make_pipeline(PipelineCreateInfo{
+        .shaders = { make_shader(ShaderStage::COMPUTE_BIT, "culling/hiz.comp.glsl") } });
+    hiz_sampler = make_sampler(SamplerDescriptor{
+        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
+        .mipmap_mode = SamplerMipmapMode::NEAREST,
+        .reduction_mode = SamplerReductionMode::MIN });
 
     const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader(ShaderStage::VERTEX, "default_unlit/unlit.vert.glsl"),
-                     make_shader(ShaderStage::PIXEL, "default_unlit/unlit.frag.glsl") },
+        .shaders = { make_shader(ShaderStage::VERTEX_BIT, "default_unlit/unlit.vert.glsl"),
+                     make_shader(ShaderStage::PIXEL_BIT, "default_unlit/unlit.frag.glsl") },
         .attachments = { .count = 1, .color_formats = { ImageFormat::R8G8B8A8_SRGB }, .depth_format = ImageFormat::D32_SFLOAT },
         .depth_test = true,
         .depth_write = true,
@@ -390,35 +796,32 @@ void RendererVulkan::create_window_sized_resources()
     {
         auto& fd = frame_datas.at(i);
 
-        fd.hiz_pyramid = make_image(ImageCreateInfo{
+        fd.hiz_pyramid = make_image(ImageDescriptor{
             .name = fmt::format("hiz_pyramid_{}", i),
-            .type = VK_IMAGE_TYPE_2D,
-            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-            .format = VK_FORMAT_D32_SFLOAT,
-            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-            .mips = (uint32_t)std::log2f(std::max(Engine::get().window->width, Engine::get().window->height)) + 1 });
-        fd.hiz_debug_output = make_image(ImageCreateInfo{
-            .name = fmt::format("hiz_debug_output_{}", i),
-            .type = VK_IMAGE_TYPE_2D,
-            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-            .mips = 1 });
+            .width = (uint32_t)Engine::get().window->width,
+            .height = (uint32_t)Engine::get().window->height,
+            .mips = (uint32_t)std::log2f(std::max(Engine::get().window->width, Engine::get().window->height)) + 1,
+            .format = ImageFormat::D32_SFLOAT,
+            .usage = ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT });
+        fd.hiz_debug_output =
+            make_image(ImageDescriptor{ .name = fmt::format("hiz_debug_output_{}", i),
+                                        .width = (uint32_t)Engine::get().window->width,
+                                        .height = (uint32_t)Engine::get().window->height,
+                                        .format = ImageFormat::R32FG32FB32FA32F,
+                                        .usage = ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 
-        fd.gbuffer.color_image = make_image(ImageCreateInfo{
-            .name = fmt::format("g_color_{}", i),
-            .type = VK_IMAGE_TYPE_2D,
-            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-            .format = VK_FORMAT_R8G8B8A8_SRGB,
-            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
-        fd.gbuffer.depth_buffer_image = make_image(ImageCreateInfo{
+        fd.gbuffer.color_image = make_image(ImageDescriptor{ .name = fmt::format("g_color_{}", i),
+                                                             .width = (uint32_t)Engine::get().window->width,
+                                                             .height = (uint32_t)Engine::get().window->height,
+                                                             .format = ImageFormat::R8G8B8A8_SRGB,
+                                                             .usage = ImageUsage::COLOR_ATTACHMENT_BIT |
+                                                                      ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
+        fd.gbuffer.depth_buffer_image = make_image(ImageDescriptor{
             .name = fmt::format("g_depth_{}", i),
-            .type = VK_IMAGE_TYPE_2D,
-            .extent = { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height, 1 },
-            .format = VK_FORMAT_D32_SFLOAT,
-            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
+            .width = (uint32_t)Engine::get().window->width,
+            .height = (uint32_t)Engine::get().window->height,
+            .format = ImageFormat::D32_SFLOAT,
+            .usage = ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 
         /*make_image(&fd.gbuffer.color_image,
                      Image{ fmt::format("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
@@ -446,20 +849,16 @@ void RendererVulkan::create_window_sized_resources()
     auto cmd = frame_datas[0].cmdpool->begin();
     for(auto i = 0ull; i < frame_datas.size(); ++i)
     {
-        cmd->barrier(frame_datas[i].hiz_pyramid.get(), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-        cmd->barrier(frame_datas[i].hiz_debug_output.get(), VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        cmd->barrier(frame_datas[i].hiz_pyramid.get(), PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::ALL,
+                     PipelineAccess::NONE, ImageLayout::UNDEFINED, ImageLayout::GENERAL);
+        cmd->barrier(frame_datas[i].hiz_debug_output.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
+                     PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW, ImageLayout::UNDEFINED, ImageLayout::GENERAL);
         auto& img = frame_datas[i].gbuffer.depth_buffer_image.get();
-        cmd->clear_depth_stencil(img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, { 0, 1 }, { 0, 1 }, 0.0f, 0);
-        cmd->barrier(img, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        geom_main_bufs.transform_bufs[i] = make_buffer(BufferCreateInfo{
-            fmt::format("transform_buffer_{}", i), 1024,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false });
+        cmd->clear_depth_stencil(img, ImageLayout::TRANSFER_DST, { 0, 1 }, { 0, 1 }, 0.0f, 0);
+        cmd->barrier(img, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::EARLY_Z_BIT,
+                     PipelineAccess::DS_RW, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY);
+        geom_main_bufs.transform_bufs[i] =
+            make_buffer(BufferDescriptor{ fmt::format("transform_buffer_{}", i), 1024, BufferUsage::STORAGE_BIT });
     }
     frame_datas[0].cmdpool->end(cmd);
     submit_queue->with_cmd_buf(cmd).submit_wait(~0ull);
@@ -540,7 +939,7 @@ void RendererVulkan::update()
             ENG_WARN("Acquire image failed with: {}", static_cast<uint32_t>(acquire_ret));
             return;
         }
-        swapchain_image = &swapchain.images[swapchain_index];
+        swapchain_image = &swapchain.images[swapchain_index].get();
     }
 
     fd.rendering_fence->reset();
@@ -640,92 +1039,82 @@ void RendererVulkan::update()
         cmd->bind_pipeline(hiz_pipeline.get());
         if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
         {
-            cmd->clear_depth_stencil(hiz_image, VK_IMAGE_LAYOUT_GENERAL, { 0, VK_REMAINING_MIP_LEVELS }, { 0, 1 }, 0.0f, 0);
-            cmd->barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
-            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            cmd->clear_depth_stencil(hiz_image, ImageLayout::GENERAL, { 0, VK_REMAINING_MIP_LEVELS }, { 0, 1 }, 0.0f, 0);
+            cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
+                         PipelineAccess::SHADER_RW);
+            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), PipelineStage::ALL, PipelineAccess::NONE,
+                         PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::ATTACHMENT, ImageLayout::READ_ONLY);
 
-            push_constants_culling.hiz_width = hiz_image.extent.width;
-            push_constants_culling.hiz_height = hiz_image.extent.height;
+            push_constants_culling.hiz_width = hiz_image.width;
+            push_constants_culling.hiz_height = hiz_image.height;
 
             bindless_pool->bind(cmd);
             for(auto i = 0u; i < hiz_image.mips; ++i)
             {
                 if(i == 0)
                 {
-                    push_constants_culling.hiz_source =
-                        bindless_pool->get_index(make_texture(fd.gbuffer.depth_buffer_image,
-                                                              dep_image.create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_DEPTH_BIT }),
-                                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, hiz_sampler));
+                    push_constants_culling.hiz_source = bindless_pool->get_index(make_texture(TextureDescriptor{
+                        make_view(ImageViewDescriptor{ .image = fd.gbuffer.depth_buffer_image, .aspect = ImageAspect::DEPTH }),
+                        hiz_sampler, ImageLayout::READ_ONLY }));
                 }
                 else
                 {
-                    push_constants_culling.hiz_source =
-                        bindless_pool->get_index(make_texture(fd.hiz_pyramid,
-                                                              hiz_image.create_image_view(ImageViewDescriptor{
-                                                                  .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i - 1, 1 } }),
-                                                              VK_IMAGE_LAYOUT_GENERAL, hiz_sampler));
+                    push_constants_culling.hiz_source = bindless_pool->get_index(make_texture(TextureDescriptor{
+                        make_view(ImageViewDescriptor{ .image = fd.hiz_pyramid, .aspect = ImageAspect::DEPTH, .mips = { i - 1, 1 } }),
+                        hiz_sampler, ImageLayout::GENERAL }));
                 }
-                push_constants_culling.hiz_dest =
-                    bindless_pool->get_index(make_texture(fd.hiz_pyramid,
-                                                          hiz_image.create_image_view(ImageViewDescriptor{
-                                                              .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { i, 1 } }),
-                                                          VK_IMAGE_LAYOUT_GENERAL, nullptr));
-                push_constants_culling.hiz_width = std::max(hiz_image.extent.width >> i, 1u);
-                push_constants_culling.hiz_height = std::max(hiz_image.extent.height >> i, 1u);
+                push_constants_culling.hiz_source = bindless_pool->get_index(make_texture(TextureDescriptor{
+                    make_view(ImageViewDescriptor{ .image = fd.hiz_pyramid, .aspect = ImageAspect::DEPTH, .mips = { i, 1 } }),
+                    {},
+                    ImageLayout::GENERAL }));
+                push_constants_culling.hiz_width = std::max(hiz_image.width >> i, 1u);
+                push_constants_culling.hiz_height = std::max(hiz_image.height >> i, 1u);
                 cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
                 cmd->dispatch((push_constants_culling.hiz_width + 31) / 32, (push_constants_culling.hiz_height + 31) / 32, 1);
-                cmd->barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                cmd->barrier(PipelineStage::COMPUTE_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR, PipelineStage::COMPUTE_BIT,
                              VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
             }
         }
         else
         {
             bindless_pool->bind(cmd);
-            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            cmd->barrier(fd.gbuffer.depth_buffer_image.get(), PipelineStage::ALL, PipelineAccess::NONE,
+                         PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::ATTACHMENT, ImageLayout::READ_ONLY);
         }
-        push_constants_culling.hiz_source =
-            bindless_pool->get_index(make_texture(fd.hiz_pyramid,
-                                                  hiz_image.create_image_view(ImageViewDescriptor{
-                                                      .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .mips = { 0u, hiz_image.mips } }),
-                                                  VK_IMAGE_LAYOUT_GENERAL, hiz_sampler));
-        push_constants_culling.hiz_dest =
-            bindless_pool->get_index(make_texture(fd.hiz_debug_output,
-                                                  fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
-                                                  VK_IMAGE_LAYOUT_GENERAL, nullptr));
-        cmd->clear_color(fd.hiz_debug_output.get(), VK_IMAGE_LAYOUT_GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
-        cmd->barrier(VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+        push_constants_culling.hiz_source = bindless_pool->get_index(make_texture(TextureDescriptor{
+            make_view(ImageViewDescriptor{
+                .image = fd.hiz_pyramid, .aspect = ImageAspect::DEPTH, .mips = { 0u, hiz_image.mips } }),
+            hiz_sampler, ImageLayout::GENERAL }));
+        push_constants_culling.hiz_dest = bindless_pool->get_index(make_texture(TextureDescriptor{
+            make_view(ImageViewDescriptor{ .image = fd.hiz_debug_output, .aspect = ImageAspect::COLOR }), {}, ImageLayout::GENERAL }));
+        cmd->clear_color(fd.hiz_debug_output.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
+        cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_RW);
         cmd->bind_pipeline(cull_pipeline.get());
         cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
         cmd->dispatch((meshlet_instances.size() + 63) / 64, 1, 1);
-        cmd->barrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+        cmd->barrier(PipelineStage::COMPUTE_BIT, VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                     VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
     }
 
     VkRenderingAttachmentInfo rainfos[]{
-        Vks(VkRenderingAttachmentInfo{ .imageView = swapchain_image->get_image_view(),
-                                       .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        Vks(VkRenderingAttachmentInfo{ .imageView = VkImageViewMetadata::get(swapchain_image->default_view.get()).view,
+                                       .imageLayout = to_vk(ImageLayout::ATTACHMENT),
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                                        .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } } }),
-        Vks(VkRenderingAttachmentInfo{ .imageView = fd.gbuffer.depth_buffer_image->get_image_view(),
-                                       .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        Vks(VkRenderingAttachmentInfo{ .imageView =
+                                           VkImageViewMetadata::get(fd.gbuffer.depth_buffer_image->default_view.get()).view,
+                                       .imageLayout = to_vk(ImageLayout::ATTACHMENT),
                                        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                                        .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0 } } })
     };
-    const auto rinfo =
-        Vks(VkRenderingInfo{ .renderArea = { { 0, 0 }, { swapchain_image->extent.width, swapchain_image->extent.height } },
-                             .layerCount = 1,
-                             .colorAttachmentCount = 1,
-                             .pColorAttachments = rainfos,
-                             .pDepthAttachment = &rainfos[1] });
+    const auto rinfo = Vks(VkRenderingInfo{ .renderArea = { { 0, 0 }, { swapchain_image->width, swapchain_image->height } },
+                                            .layerCount = 1,
+                                            .colorAttachmentCount = 1,
+                                            .pColorAttachments = rainfos,
+                                            .pDepthAttachment = &rainfos[1] });
     struct push_constants_1
     {
         uint32_t indices_index;
@@ -749,18 +1138,18 @@ void RendererVulkan::update()
         .meshlet_ids_index = bindless_pool->get_index(geom_main_bufs.buf_final_draw_ids),
         .meshlet_bs_index = bindless_pool->get_index(geom_main_bufs.buf_draw_bs),
         .hiz_pyramid_index = push_constants_culling.hiz_source,
-        .hiz_debug_index = bindless_pool->get_index(make_texture(
-            fd.hiz_debug_output, fd.hiz_debug_output->create_image_view(ImageViewDescriptor{ .aspect = VK_IMAGE_ASPECT_COLOR_BIT }),
-            VK_IMAGE_LAYOUT_GENERAL, batch_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } })->sampler)),
+        .hiz_debug_index = bindless_pool->get_index(make_texture(TextureDescriptor{
+            make_view(ImageViewDescriptor{ .image = fd.hiz_debug_output
+
+            }),
+            make_sampler(SamplerDescriptor{ .mip_lod = { 0.0f, 1.0f, 0.0 } }), ImageLayout::READ_ONLY })),
     };
 
     cmd->bind_index(geom_main_bufs.buf_indices.get(), 0, VK_INDEX_TYPE_UINT16);
-    cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
-    cmd->barrier(fd.gbuffer.depth_buffer_image.get(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL);
+    cmd->barrier(*swapchain_image, PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::COLOR_OUT_BIT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
+    cmd->barrier(fd.gbuffer.depth_buffer_image.get(), PipelineStage::ALL, PipelineAccess::NONE,
+                 PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
     cmd->begin_rendering(rinfo);
 
     VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
@@ -781,19 +1170,18 @@ void RendererVulkan::update()
 
     imgui_renderer->render(cmd);
 
-    cmd->barrier(*swapchain_image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
-                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    cmd->barrier(*swapchain_image, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, PipelineStage::ALL,
+                 PipelineAccess::NONE, ImageLayout::ATTACHMENT, ImageLayout::PRESENT);
 
     fd.cmdpool->end(cmd);
     submit_queue->with_cmd_buf(cmd)
-        .wait_sync(staging_manager->flush(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
-        .wait_sync(fd.acquire_semaphore, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
-        .signal_sync(fd.rendering_semaphore, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
+        .wait_sync(staging_manager->flush(), PipelineStage::ALL)
+        .wait_sync(fd.acquire_semaphore, PipelineStage::COLOR_OUT_BIT)
+        .signal_sync(fd.rendering_semaphore, PipelineStage::ALL)
         .signal_sync(fd.rendering_fence)
         .submit();
 
-    submit_queue->wait_sync(fd.rendering_semaphore, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT).present(&swapchain);
+    submit_queue->wait_sync(fd.rendering_semaphore, PipelineStage::ALL).present(&swapchain);
     if(!flags.empty()) { ENG_WARN("render flags not empty at the end of the frame: {:b}", flags.flags); }
 
     flags.clear();
@@ -810,68 +1198,58 @@ void RendererVulkan::on_window_resize()
     // set_screen(ScreenRect{ .w = Engine::get().window->width, .h = Engine::get().window->height });
 }
 
-// void RendererVulkan::set_screen(ScreenRect screen) {
-//     assert(false);
-//     // screen_rect = screen;
-//     //  ENG_WARN("TODO: Resize resources on new set_screen()");
-// }
-
-Handle<Image> RendererVulkan::batch_image(const ImageDescriptor& desc)
+Handle<Buffer> RendererVulkan::make_buffer(const BufferDescriptor& info)
 {
-    const auto handle = make_image(ImageCreateInfo{ .name = desc.name,
-                                                    .type = gfx::to_vk(desc.type),
-                                                    .extent = { desc.width, desc.height, 1 },
-                                                    .format = gfx::to_vk(desc.format),
-                                                    .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                             VK_IMAGE_USAGE_TRANSFER_DST_BIT });
-    staging_manager->copy(handle, desc.data.data(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL);
+    auto handle = buffers.emplace(info);
+    VkBufferMetadata::init(handle.get());
     return handle;
 }
 
-Handle<Sampler> RendererVulkan::batch_sampler(const SamplerDescriptor& batch)
+Handle<Image> RendererVulkan::make_image(const ImageDescriptor& info)
 {
-    auto it = samplers.insert(Sampler{ batch, nullptr });
-    if(it.success)
-    {
-        auto info = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(batch.filtering[1]),
-                                             .minFilter = gfx::to_vk(batch.filtering[0]),
-                                             .mipmapMode = gfx::to_vk(batch.mipmap_mode),
-                                             .addressModeU = gfx::to_vk(batch.addressing[0]),
-                                             .addressModeV = gfx::to_vk(batch.addressing[1]),
-                                             .addressModeW = gfx::to_vk(batch.addressing[2]),
-                                             .mipLodBias = batch.mip_lod[2],
-                                             .minLod = batch.mip_lod[0],
-                                             .maxLod = batch.mip_lod[1] });
+    auto handle = images.emplace(info);
+    auto& img = handle.get();
+    VkImageMetadata::init(img);
+    img.default_view = make_view(ImageViewDescriptor{ .name = fmt::format("{}_default", info.name), .image = handle });
+    if(info.data.size_bytes()) { staging_manager->copy(handle, info.data.data(), ImageLayout::READ_ONLY); }
+    return handle;
+}
 
-        auto reduction = Vks(VkSamplerReductionModeCreateInfo{});
-        if(batch.reduction_mode)
-        {
-            reduction.reductionMode = gfx::to_vk(*batch.reduction_mode);
-            info.pNext = &reduction;
-        }
-        VK_CHECK(vkCreateSampler(dev, &info, {}, &samplers.at(it.handle).sampler));
-    }
+Handle<ImageView> RendererVulkan::make_view(const ImageViewDescriptor& info)
+{
+    assert(info.image);
+    auto& img = Handle{ info.image }.get();
+    auto it = image_views.insert(ImageView{ .name = info.name,
+                                            .image = info.image,
+                                            .type = info.view_type ? *info.view_type : img.deduce_view_type(),
+                                            .format = info.format ? *info.format : img.format,
+                                            .aspect = info.aspect ? *info.aspect : img.deduce_aspect(),
+                                            .mips = info.mips,
+                                            .layers = info.layers });
+    if(it.success) { VkImageViewMetadata::init(it.handle.get(), it.handle); }
     return it.handle;
 }
 
-Handle<Texture> RendererVulkan::batch_texture(const TextureDescriptor& batch)
+Handle<Sampler> RendererVulkan::make_sampler(const SamplerDescriptor& info)
 {
-    if(!batch.image) { return {}; }
-    const auto view = batch.image->get_image_view();
-    const auto layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-    const auto sampler = batch.sampler ? samplers.at(batch.sampler).sampler : nullptr;
-    assert(view);
-    return make_texture(batch.image, view, layout, sampler);
+    auto it = samplers.insert(Sampler{ info, nullptr });
+    if(it.success) { VkSamplerMetadata::init(it.handle.get()); }
+    return it.handle;
 }
 
-Handle<Material> RendererVulkan::batch_material(const MaterialDescriptor& desc)
+Handle<Texture> RendererVulkan::make_texture(const TextureDescriptor& batch)
+{
+    return textures.insert(Texture{ batch.view, batch.sampler, batch.layout }).handle;
+}
+
+Handle<Material> RendererVulkan::make_material(const MaterialDescriptor& desc)
 {
     auto meshpass = mesh_passes.find(MeshPass{ .name = desc.mesh_pass });
     if(!meshpass) { meshpass = default_meshpass; }
     return materials.insert(Material{ .mesh_pass = meshpass, .base_color_texture = desc.base_color_texture }).handle;
 }
 
-Handle<Geometry> RendererVulkan::batch_geometry(const GeometryDescriptor& batch)
+Handle<Geometry> RendererVulkan::make_geometry(const GeometryDescriptor& batch)
 {
     std::vector<Vertex> out_vertices;
     std::vector<uint16_t> out_indices;
@@ -969,12 +1347,14 @@ void RendererVulkan::meshletize_geometry(const GeometryDescriptor& batch, std::v
     }
 }
 
-Handle<Mesh> RendererVulkan::batch_mesh(const MeshDescriptor& batch)
+Handle<Mesh> RendererVulkan::make_mesh(const MeshDescriptor& batch)
 {
     auto& bm = meshes.emplace_back(Mesh{ .geometry = batch.geometry, .material = batch.material });
     if(!bm.material) { bm.material = default_material; }
     return Handle<Mesh>{ (uint32_t)meshes.size() - 1 };
 }
+
+Image& RendererVulkan::get_image(Handle<Image> image) { return image.get(); }
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
@@ -1092,12 +1472,12 @@ void RendererVulkan::compile_shaders()
         };
 
         const auto shckind = [stage = shader.stage] {
-            if(stage == ShaderStage::VERTEX) { return shaderc_vertex_shader; }
-            if(stage == ShaderStage::PIXEL) { return shaderc_fragment_shader; }
+            if(stage == ShaderStage::VERTEX_BIT) { return shaderc_vertex_shader; }
+            if(stage == ShaderStage::PIXEL_BIT) { return shaderc_fragment_shader; }
             // if(stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) { return shaderc_raygen_shader; }
             // if(stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) { return shaderc_closesthit_shader; }
             // if(stage == VK_SHADER_STAGE_MISS_BIT_KHR) { return shaderc_miss_shader; }
-            if(stage == ShaderStage::COMPUTE) { return shaderc_compute_shader; }
+            if(stage == ShaderStage::COMPUTE_BIT) { return shaderc_compute_shader; }
             ENG_ERROR("Unrecognized shader type");
             return shaderc_vertex_shader;
         }();
@@ -1179,152 +1559,7 @@ void RendererVulkan::compile_pipelines()
     {
         auto& p = e.get();
         const auto& info = p.info;
-        p.vkmetadata = new VkPipelineMetadata{};
-
-        {
-            const auto stage = info.shaders[0]->stage;
-            if(stage == ShaderStage::VERTEX) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
-            else if(stage == ShaderStage::COMPUTE) { p.vkmetadata->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
-            else
-            {
-                assert(false);
-                continue;
-            }
-        }
-
-        p.vkmetadata->layout = bindless_pool->get_pipeline_layout();
-
-        std::vector<VkPipelineShaderStageCreateInfo> stages;
-        stages.reserve(info.shaders.size());
-        for(const auto& e : info.shaders)
-        {
-            stages.push_back(Vks(VkPipelineShaderStageCreateInfo{
-                .stage = gfx::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
-        }
-
-        if(p.vkmetadata->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
-        {
-            const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = p.vkmetadata->layout });
-            VK_CHECK(vkCreateComputePipelines(dev, {}, 1, &vkinfo, {}, &p.vkmetadata->pipeline));
-            continue;
-        }
-
-        std::vector<VkVertexInputBindingDescription> vkbindings(info.bindings.size());
-        for(auto i = 0u; i < info.bindings.size(); ++i)
-        {
-            vkbindings.at(i) = { info.bindings.at(i).binding, info.bindings.at(i).stride,
-                                 info.bindings.at(i).instanced ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX };
-        }
-        std::vector<VkVertexInputAttributeDescription> vkattributes(info.attributes.size());
-        for(auto i = 0u; i < info.attributes.size(); ++i)
-        {
-            vkattributes.at(i) = { info.attributes.at(i).location, info.attributes.at(i).binding,
-                                   gfx::to_vk(info.attributes.at(i).format), info.attributes.at(i).offset };
-        }
-        auto pVertexInputState =
-            Vks(VkPipelineVertexInputStateCreateInfo{ .vertexBindingDescriptionCount = (uint32_t)info.bindings.size(),
-                                                      .pVertexBindingDescriptions = vkbindings.data(),
-                                                      .vertexAttributeDescriptionCount = (uint32_t)info.attributes.size(),
-                                                      .pVertexAttributeDescriptions = vkattributes.data() });
-
-        auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST });
-
-        auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
-
-        auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
-
-        auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
-            .polygonMode = gfx::to_vk(info.polygon_mode),
-            .cullMode = gfx::to_vk(info.culling),
-            .frontFace = info.front_is_ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE,
-            .lineWidth = info.line_width,
-        });
-
-        auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
-            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-        });
-
-        // vkstencil
-        auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
-            .depthTestEnable = info.depth_test,
-            .depthWriteEnable = info.depth_write,
-            .depthCompareOp = gfx::to_vk(info.depth_compare),
-            .depthBoundsTestEnable = false,
-            .stencilTestEnable = info.stencil_test,
-            .front = {
-                gfx::to_vk(info.stencil_front.fail),
-                gfx::to_vk(info.stencil_front.pass),
-                gfx::to_vk(info.stencil_front.depth_fail),
-                gfx::to_vk(info.stencil_front.compare),
-                info.stencil_front.compare_mask,
-                info.stencil_front.write_mask,
-                info.stencil_front.ref,
-            },
-            .back = {
-                gfx::to_vk(info.stencil_back.fail),
-                gfx::to_vk(info.stencil_back.pass),
-                gfx::to_vk(info.stencil_back.depth_fail),
-                gfx::to_vk(info.stencil_back.compare),
-                info.stencil_back.compare_mask,
-                info.stencil_back.write_mask,
-                info.stencil_back.ref,
-            },
-        });
-
-        std::array<VkPipelineColorBlendAttachmentState, 8> vkblends;
-        std::array<VkFormat, 8> vkcol_formats;
-        for(uint32_t i = 0; i < info.attachments.count; ++i)
-        {
-            vkblends.at(i) = { info.attachments.blend_states.at(i).enable,
-                               gfx::to_vk(info.attachments.blend_states.at(i).src_color_factor),
-                               gfx::to_vk(info.attachments.blend_states.at(i).dst_color_factor),
-                               gfx::to_vk(info.attachments.blend_states.at(i).color_op),
-                               gfx::to_vk(info.attachments.blend_states.at(i).src_alpha_factor),
-                               gfx::to_vk(info.attachments.blend_states.at(i).dst_alpha_factor),
-                               gfx::to_vk(info.attachments.blend_states.at(i).alpha_op),
-                               VkColorComponentFlags{ ((uint32_t)info.attachments.blend_states.at(i).r) << 0 |
-                                                      ((uint32_t)info.attachments.blend_states.at(i).g) << 1 |
-                                                      ((uint32_t)info.attachments.blend_states.at(i).b) << 2 |
-                                                      ((uint32_t)info.attachments.blend_states.at(i).a) << 3 } };
-            vkcol_formats.at(i) = gfx::to_vk(info.attachments.color_formats.at(i));
-        }
-        auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
-            .attachmentCount = info.attachments.count,
-            .pAttachments = vkblends.data(),
-        });
-
-        VkDynamicState dynstates[]{
-            VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
-            VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
-        };
-        auto pDynamicState = Vks(VkPipelineDynamicStateCreateInfo{
-            .dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]),
-            .pDynamicStates = dynstates,
-        });
-
-        auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
-            .colorAttachmentCount = info.attachments.count,
-            .pColorAttachmentFormats = vkcol_formats.data(),
-            .depthAttachmentFormat = gfx::to_vk(info.attachments.depth_format),
-            .stencilAttachmentFormat = gfx::to_vk(info.attachments.stencil_format),
-        });
-
-        auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
-            .pNext = &pDynamicRendering,
-            .stageCount = (uint32_t)stages.size(),
-            .pStages = stages.data(),
-            .pVertexInputState = &pVertexInputState,
-            .pInputAssemblyState = &pInputAssemblyState,
-            .pTessellationState = &pTessellationState,
-            .pViewportState = &pViewportState,
-            .pRasterizationState = &pRasterizationState,
-            .pMultisampleState = &pMultisampleState,
-            .pDepthStencilState = &pDepthStencilState,
-            .pColorBlendState = &pColorBlendState,
-            .pDynamicState = &pDynamicState,
-            .layout = RendererVulkan::get_instance()->bindless_pool->get_pipeline_layout(),
-        });
-        VK_CHECK(vkCreateGraphicsPipelines(dev, nullptr, 1, &vk_info, nullptr, &p.vkmetadata->pipeline));
+        VkPipelineMetadata::init(p);
     }
 
     pipelines_to_compile.clear();
@@ -1709,18 +1944,18 @@ void RendererVulkan::update_ddgi()
                                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
 
     auto cmd = get_frame_data().cmdpool->begin_onetime();
-    ddgi.radiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+    ddgi.radiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, PipelineAccess::NONE,
                                              VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
-    ddgi.irradiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, ImageLayout::GENERAL);
+    ddgi.irradiance_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, PipelineAccess::NONE,
                                                VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
-    ddgi.visibility_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, ImageLayout::GENERAL);
+    ddgi.visibility_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, PipelineAccess::NONE,
                                                VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
-    ddgi.probe_offsets_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_ACCESS_2_NONE,
+                                               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, ImageLayout::GENERAL);
+    ddgi.probe_offsets_texture->transition_layout(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, PipelineAccess::NONE,
                                                   VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
+                                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, ImageLayout::GENERAL);
     get_frame_data().cmdpool->end(cmd);
     gq.submit(cmd);
 
@@ -1787,31 +2022,6 @@ Handle<MeshPass> RendererVulkan::make_mesh_pass(const MeshPassCreateInfo& info)
     return it.handle;
 }
 
-Handle<Buffer> RendererVulkan::make_buffer(const BufferCreateInfo& info)
-{
-    auto handle = buffers.emplace(info);
-    handle->init();
-    return handle;
-}
-
-Handle<Image> RendererVulkan::make_image(const ImageCreateInfo& info)
-{
-    auto handle = images.emplace(info);
-    handle->init();
-    return handle;
-}
-
-Handle<Texture> RendererVulkan::make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler)
-{
-    return textures.insert(Texture{ .image = image, .view = view, .layout = layout, .sampler = sampler }).handle;
-}
-
-Handle<Texture> gfx::RendererVulkan::make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler)
-{
-    const auto view = image->create_image_view();
-    return make_texture(image, view, layout, sampler);
-}
-
 Sync* RendererVulkan::make_sync(const SyncCreateInfo& info)
 {
     auto* s = syncs.emplace_back(new Sync{});
@@ -1821,14 +2031,20 @@ Sync* RendererVulkan::make_sync(const SyncCreateInfo& info)
 
 void RendererVulkan::destroy_buffer(Handle<Buffer> buffer)
 {
-    buffer->destroy();
+    VkBufferMetadata::destroy(buffer.get());
     buffers.erase(buffer);
 }
 
 void gfx::RendererVulkan::destroy_image(Handle<Image> image)
 {
-    image->destroy();
+    VkImageMetadata::destroy(image.get());
     images.erase(image);
+}
+
+void RendererVulkan::destroy_view(Handle<ImageView> view)
+{
+    VkImageViewMetadata::destroy(view.get());
+    image_views.erase(view);
 }
 
 uint32_t RendererVulkan::get_bindless(Handle<Buffer> buffer) { return bindless_pool->get_index(buffer); }
@@ -1847,16 +2063,19 @@ const FrameData& RendererVulkan::get_frame_data(uint32_t offset) const
 
 void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height)
 {
+    const auto image_usage_flags = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT;
+    const auto image_format = ImageFormat::R8G8B8A8_SRGB;
+    auto* r = RendererVulkan::get_instance();
     auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         // sinfo.flags = VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
         // sinfo.pNext = &format_list_info;
-        .surface = RendererVulkan::get_instance()->window_surface,
+        .surface = r->window_surface,
         .minImageCount = image_count,
-        .imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
+        .imageFormat = to_vk(image_format),
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent = VkExtent2D{ width, height },
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .imageUsage = to_vk(image_usage_flags),
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -1865,24 +2084,24 @@ void Swapchain::create(VkDevice dev, uint32_t image_count, uint32_t width, uint3
 
     if(swapchain) { vkDestroySwapchainKHR(dev, swapchain, nullptr); }
     VK_CHECK(vkCreateSwapchainKHR(dev, &sinfo, nullptr, &swapchain));
-    std::vector<VkImage> vk_images(image_count);
+    std::vector<VkImage> vkimgs(image_count);
     images.resize(image_count);
     views.resize(image_count);
 
-    VK_CHECK(vkGetSwapchainImagesKHR(dev, swapchain, &image_count, vk_images.data()));
+    VK_CHECK(vkGetSwapchainImagesKHR(dev, swapchain, &image_count, vkimgs.data()));
 
     for(uint32_t i = 0; i < image_count; ++i)
     {
-        images[i] = Image{};
-        images[i].name = fmt::format("swapchain_image_{}", i);
-        images[i].type = VK_IMAGE_TYPE_2D;
-        images[i].image = vk_images.at(i);
-        images[i].extent = VkExtent3D{ sinfo.imageExtent.width, sinfo.imageExtent.height, 0u };
-        images[i].format = sinfo.imageFormat;
-        images[i].mips = 1;
-        images[i].layers = 1;
-        images[i].usage = sinfo.imageUsage;
-        views[i] = images[i].create_image_view();
+        Image img{};
+        img.name = fmt::format("swapchain_image_{}", i);
+        img.format = image_format;
+        img.width = sinfo.imageExtent.width;
+        img.height = sinfo.imageExtent.height;
+        img.usage = image_usage_flags;
+        VkImageMetadata::init(img, vkimgs.at(i));
+        images[i] = r->images.insert(std::move(img));
+        views[i] = r->make_view(ImageViewDescriptor{ .name = fmt::format("swapchain_view_{}", i), .image = images[i] });
+        images[i]->default_view = views[i];
     }
 }
 
@@ -1915,8 +2134,8 @@ uint32_t Swapchain::acquire(VkResult* res, uint64_t timeout, Sync* semaphore, Sy
     return idx;
 }
 
-Image& Swapchain::get_current_image() { return images.at(current_index); }
+Image& Swapchain::get_current_image() { return images.at(current_index).get(); }
 
-VkImageView& Swapchain::get_current_view() { return views.at(current_index); }
+VkImageView& Swapchain::get_current_view() { return VkImageViewMetadata::get(views.at(current_index).get()).view; }
 
 } // namespace gfx

@@ -8,11 +8,11 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/pipeline.hpp>
 #include <eng/renderer/passes/rendergraph.hpp>
-#include <eng/renderer/resources/resources.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/handlemap.hpp>
 #include <eng/common/handleflatset.hpp>
+#include <eng/common/handlesparsevec.hpp>
 
 namespace gfx
 {
@@ -22,26 +22,7 @@ class BindlessPool;
 class ImGuiRenderer;
 struct Sync;
 struct SyncCreateInfo;
-
-struct Sampler
-{
-    bool operator==(const Sampler& o) const { return info == o.info; }
-    SamplerDescriptor info;
-    VkSampler sampler;
-};
-
-struct Texture
-{
-    auto operator<=>(const Texture& t) const = default;
-    Handle<Image> image;
-    VkImageView view;
-    VkImageLayout layout;
-    VkSampler sampler;
-};
 } // namespace gfx
-
-DEFINE_STD_HASH(gfx::Sampler, eng::hash::combine_fnv1a(t.info));
-DEFINE_STD_HASH(gfx::Texture, eng::hash::combine_fnv1a(t.image, t.view, t.layout, t.sampler));
 
 namespace gfx
 {
@@ -127,8 +108,8 @@ struct Swapchain
     Image& get_current_image();
     VkImageView& get_current_view();
     VkSwapchainKHR swapchain{};
-    std::vector<Image> images;
-    std::vector<VkImageView> views;
+    std::vector<Handle<Image>> images;
+    std::vector<Handle<ImageView>> views;
     uint32_t current_index{ 0ul };
 };
 
@@ -200,9 +181,52 @@ struct ShaderMetadata
 
 struct VkPipelineMetadata
 {
+    static void init(Pipeline& a);
+    static void destroy(Pipeline& a);
+    static VkPipelineMetadata& get(Pipeline& a);
+    static const VkPipelineMetadata& get(const Pipeline& a);
     VkPipeline pipeline{};
     VkPipelineLayout layout{};
     VkPipelineBindPoint bind_point{};
+};
+
+struct VkBufferMetadata
+{
+    static void init(Buffer& a);
+    static void destroy(Buffer& a);
+    static VkBufferMetadata& get(Buffer& a);
+    static const VkBufferMetadata& get(const Buffer& a);
+    VkBuffer buffer{};
+    VmaAllocation vmaa{};
+    VkDeviceAddress bda{};
+};
+
+struct VkImageMetadata
+{
+    static void init(Image& a, VkImage img = {});
+    static void destroy(Image& a);
+    static VkImageMetadata& get(Image& a);
+    VkImage image{};
+    VmaAllocation vmaa{};
+    std::vector<Handle<ImageView>> views;
+};
+
+struct VkImageViewMetadata
+{
+    static void init(ImageView& a, Handle<ImageView> handle, Image* img = nullptr);
+    static void destroy(ImageView& a);
+    static VkImageViewMetadata& get(ImageView& a);
+    // static const VkImageViewMetadata& get(const ImageView& a);
+    VkImageView view{};
+};
+
+struct VkSamplerMetadata
+{
+    static void init(Sampler& a);
+    static void destroy(Sampler& a);
+    static VkSamplerMetadata& get(Sampler& a);
+    // static const VkSamplerMetadata& get(const Sampler& a);
+    VkSampler sampler{};
 };
 
 struct MeshletInstance
@@ -241,14 +265,17 @@ class RendererVulkan : public Renderer
     void update() final;
     void on_window_resize() final;
 
-    Handle<Image> batch_image(const ImageDescriptor& desc) final;
-    Handle<Sampler> batch_sampler(const SamplerDescriptor& batch) final;
-    Handle<Texture> batch_texture(const TextureDescriptor& batch) final;
-    Handle<Material> batch_material(const MaterialDescriptor& desc) final;
-    Handle<Geometry> batch_geometry(const GeometryDescriptor& batch) final;
-    static void meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
+    Handle<Buffer> make_buffer(const BufferDescriptor& info) final;
+    Handle<Image> make_image(const ImageDescriptor& info) final;
+    Handle<ImageView> make_view(const ImageViewDescriptor& info) final;
+    Handle<Sampler> make_sampler(const SamplerDescriptor& info) final;
+    Handle<Texture> make_texture(const TextureDescriptor& info) final;
+    Handle<Material> make_material(const MaterialDescriptor& desc) final;
+    Handle<Geometry> make_geometry(const GeometryDescriptor& info) final;
+    static void meshletize_geometry(const GeometryDescriptor& info, std::vector<gfx::Vertex>& out_vertices,
                                     std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
-    Handle<Mesh> batch_mesh(const MeshDescriptor& batch) final;
+    Handle<Mesh> make_mesh(const MeshDescriptor& info) final;
+    Image& get_image(Handle<Image> image) final;
     Handle<Mesh> instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(ecs::Entity entity) final;
@@ -267,15 +294,12 @@ class RendererVulkan : public Renderer
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
     Handle<MeshPass> make_mesh_pass(const MeshPassCreateInfo& info);
-    Handle<Buffer> make_buffer(const BufferCreateInfo& info);
-    Handle<Image> make_image(const ImageCreateInfo& info);
-    Handle<Texture> make_texture(Handle<Image> image, VkImageView view, VkImageLayout layout, VkSampler sampler);
-    Handle<Texture> make_texture(Handle<Image> image, VkImageLayout layout, VkSampler sampler);
     Sync* make_sync(const SyncCreateInfo& info);
 
     void resize_buffer(Handle<Buffer> buffer, size_t newsize);
     void destroy_buffer(Handle<Buffer> buffer);
     void destroy_image(Handle<Image> image);
+    void destroy_view(Handle<ImageView> view);
     uint32_t get_bindless(Handle<Buffer> buffer);
     void update_resource(Handle<Buffer> dst);
 
@@ -298,8 +322,9 @@ class RendererVulkan : public Renderer
     BindlessPool* bindless_pool{};
     // RenderGraph rendergraph;
 
-    HandleMap<Buffer> buffers;
-    HandleMap<Image> images;
+    HandleSparseVec<Buffer> buffers;
+    HandleSparseVec<Image> images;
+    HandleFlatSet<ImageView> image_views;
     HandleFlatSet<Texture> textures;
     HandleFlatSet<Geometry> geometries;
     HandleFlatSet<Material> materials;
@@ -318,7 +343,7 @@ class RendererVulkan : public Renderer
     std::vector<MultiBatch> multibatches;
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> hiz_pipeline;
-    VkSampler hiz_sampler;
+    Handle<Sampler> hiz_sampler;
 
     GeometryBuffers geom_main_bufs;
 
@@ -352,13 +377,3 @@ class RendererVulkan : public Renderer
     std::vector<MeshletInstance> meshlets_to_instance;
 };
 } // namespace gfx
-
-DEFINE_HANDLE_DISPATCHER(gfx::Buffer, { return &gfx::RendererVulkan::get_instance()->buffers.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Image, { return &gfx::RendererVulkan::get_instance()->images.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Geometry, { return &gfx::RendererVulkan::get_instance()->geometries.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Mesh, { return &gfx::RendererVulkan::get_instance()->meshes.at(*handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Texture, { return &gfx::RendererVulkan::get_instance()->textures.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Material, { return &gfx::RendererVulkan::get_instance()->materials.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Shader, { return &gfx::RendererVulkan::get_instance()->shaders.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(handle); });
-DEFINE_HANDLE_DISPATCHER(gfx::Sampler, { return &gfx::RendererVulkan::get_instance()->samplers.at(handle); });

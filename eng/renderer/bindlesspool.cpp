@@ -1,8 +1,8 @@
 #include "./bindlesspool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/renderer/resources/resources.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
 #include <eng/renderer/submit_queue.hpp>
+#include <eng/common/to_vk.hpp>
 
 namespace gfx
 {
@@ -125,8 +125,8 @@ void BindlessPool::update_index(Handle<Buffer> handle)
 {
     if(!buffer_indices.contains(handle)) { return; }
     const auto index = buffer_indices.at(handle);
-    const auto& update =
-        buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{ .buffer = handle->buffer, .range = VK_WHOLE_SIZE }));
+    const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{
+        .buffer = VkBufferMetadata::get(handle.get()).buffer, .range = VK_WHOLE_SIZE }));
     const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
                                                  .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
                                                  .dstArrayElement = index,
@@ -141,7 +141,9 @@ void BindlessPool::update_index(Handle<Texture> handle)
     const auto index = texture_indices.at(handle);
     const auto& txt = handle.get();
     const auto& update = texture_updates.emplace_back(Vks(VkDescriptorImageInfo{
-        .sampler = txt.sampler, .imageView = txt.view, .imageLayout = txt.layout }));
+        .sampler = txt.sampler ? VkSamplerMetadata::get(txt.sampler.get()).sampler : nullptr,
+        .imageView = VkImageViewMetadata::get(txt.view.get()).view,
+        .imageLayout = to_vk(txt.layout) }));
     const auto write = Vks(VkWriteDescriptorSet{
         .dstSet = set,
         .dstBinding = (uint32_t)(txt.sampler ? BINDLESS_COMBINED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
