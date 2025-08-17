@@ -106,12 +106,12 @@ VkImageLayout to_vk(const ImageLayout& a)
 VkImageUsageFlags to_vk(const Flags<ImageUsage>& a)
 {
     VkImageUsageFlags flags{};
-    if(a.test(gfx::ImageUsage::STORAGE_BIT))                 { flags |= VK_IMAGE_USAGE_STORAGE_BIT; }
-    if(a.test(gfx::ImageUsage::SAMPLED_BIT))                 { flags |= VK_IMAGE_USAGE_SAMPLED_BIT; }
-    if(a.test(gfx::ImageUsage::TRANSFER_SRC_BIT))                { flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; }
-    if(a.test(gfx::ImageUsage::TRANSFER_DST_BIT))                { flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; }
-    if(a.test(gfx::ImageUsage::COLOR_ATTACHMENT_BIT))            { flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; }
-    if(a.test(gfx::ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT))    { flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; }
+    if(a.test(gfx::ImageUsage::STORAGE_BIT))                    { flags |= VK_IMAGE_USAGE_STORAGE_BIT; }
+    if(a.test(gfx::ImageUsage::SAMPLED_BIT))                    { flags |= VK_IMAGE_USAGE_SAMPLED_BIT; }
+    if(a.test(gfx::ImageUsage::TRANSFER_SRC_BIT))               { flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; }
+    if(a.test(gfx::ImageUsage::TRANSFER_DST_BIT))               { flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; }
+    if(a.test(gfx::ImageUsage::COLOR_ATTACHMENT_BIT))           { flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; }
+    if(a.test(gfx::ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT))   { flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; }
     return flags;
 }
 
@@ -271,6 +271,9 @@ VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a)
     if(a.test(gfx::PipelineStage::TRANSFER_BIT))    { flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT; }
     if(a.test(gfx::PipelineStage::EARLY_Z_BIT))     { flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT; }
     if(a.test(gfx::PipelineStage::LATE_Z_BIT))      { flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT; }
+    if(a.test(gfx::PipelineStage::COLOR_OUT_BIT))   { flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT; }
+    if(a.test(gfx::PipelineStage::COMPUTE_BIT))     { flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; }
+    if(a.test(gfx::PipelineStage::INDIRECT_BIT))    { flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT; }
     return flags;
 }
 

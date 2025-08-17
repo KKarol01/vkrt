@@ -129,7 +129,7 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
         return {};
     }
 
-    imgd.usage = gfx::ImageUsage::SAMPLED_BIT;
+    imgd.usage = gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT;
     imgd.data = { imgdata, imgdata + x * y * ch };
     imgd.width = (uint32_t)x;
     imgd.height = (uint32_t)y;

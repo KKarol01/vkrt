@@ -1071,8 +1071,8 @@ void RendererVulkan::update()
                 push_constants_culling.hiz_height = std::max(hiz_image.height >> i, 1u);
                 cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
                 cmd->dispatch((push_constants_culling.hiz_width + 31) / 32, (push_constants_culling.hiz_height + 31) / 32, 1);
-                cmd->barrier(PipelineStage::COMPUTE_BIT, VK_ACCESS_2_SHADER_WRITE_BIT_KHR, PipelineStage::COMPUTE_BIT,
-                             VK_ACCESS_2_SHADER_READ_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT_KHR);
+                cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
+                             PipelineAccess::SHADER_RW);
             }
         }
         else
@@ -1093,8 +1093,8 @@ void RendererVulkan::update()
         cmd->bind_pipeline(cull_pipeline.get());
         cmd->push_constants(VK_SHADER_STAGE_ALL, &push_constants_culling, { 0, sizeof(push_constants_culling) });
         cmd->dispatch((meshlet_instances.size() + 63) / 64, 1, 1);
-        cmd->barrier(PipelineStage::COMPUTE_BIT, VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-                     VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+        cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_WRITE_BIT, PipelineStage::INDIRECT_BIT,
+                     PipelineAccess::INDIRECT_READ_BIT);
     }
 
     VkRenderingAttachmentInfo rainfos[]{
@@ -1147,7 +1147,7 @@ void RendererVulkan::update()
 
     cmd->bind_index(geom_main_bufs.buf_indices.get(), 0, VK_INDEX_TYPE_UINT16);
     cmd->barrier(*swapchain_image, PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::COLOR_OUT_BIT,
-                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
+                 PipelineAccess::COLOR_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
     cmd->barrier(fd.gbuffer.depth_buffer_image.get(), PipelineStage::ALL, PipelineAccess::NONE,
                  PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
     cmd->begin_rendering(rinfo);

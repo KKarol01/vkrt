@@ -120,6 +120,7 @@ enum class PipelineStage : uint32_t
     LATE_Z_BIT = 0x4,
     COLOR_OUT_BIT = 0x8,
     COMPUTE_BIT = 0x10,
+    INDIRECT_BIT = 0x20,
 };
 using PipelineStageFlags = Flags<PipelineStage>;
 ENG_ENABLE_FLAGS_OPERATORS(PipelineStage);
