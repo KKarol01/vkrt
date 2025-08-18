@@ -6,8 +6,11 @@
 
 struct ImTextureData;
 
+namespace eng
+{
 namespace gfx
 {
+
 class CommandPool;
 class CommandBuffer;
 struct Buffer;
@@ -38,4 +41,6 @@ class ImGuiRenderer
     std::vector<std::function<void()>> ui_callbacks;
     std::deque<uint32_t> free_ui_callbacks;
 };
+
 } // namespace gfx
+} // namespace eng

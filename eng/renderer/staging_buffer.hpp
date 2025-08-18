@@ -14,6 +14,8 @@
 #include <functional>
 #include <eng/common/types.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 struct Buffer;
@@ -67,3 +69,4 @@ class GPUStagingManager
 };
 
 } // namespace gfx
+} // namespace eng

@@ -5,6 +5,8 @@
 #include <deque>
 #include <eng/common/handle.hpp>
 
+namespace eng
+{
 template <typename T, typename Storage = Handle<T>::Storage_T> class HandleSparseVec
 {
     using handle_t = Handle<T, Storage>;
@@ -66,3 +68,4 @@ template <typename T, typename Storage = Handle<T>::Storage_T> class HandleSpars
     std::vector<T> data;
     std::deque<handle_t> free_list;
 };
+} // namespace eng

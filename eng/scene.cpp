@@ -12,8 +12,10 @@
 #include <eng/common/paths.hpp>
 #include <eng/renderer/renderer.hpp>
 
+namespace eng
+{
 static Handle<gfx::Geometry> load_geometry(const fastgltf::Asset& asset, const fastgltf::Mesh& mesh,
-                                           uint32_t primitive_index, scene::LoadedNode& ctx)
+                                           uint32_t primitive_index, eng::LoadedNode& ctx)
 {
     const auto& primitive = mesh.primitives.at(primitive_index);
     std::vector<gfx::Vertex> vertices;
@@ -94,7 +96,7 @@ static Handle<gfx::Geometry> load_geometry(const fastgltf::Asset& asset, const f
     return geom;
 }
 
-static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFormat format, size_t index, scene::LoadedNode& ctx)
+static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFormat format, size_t index, eng::LoadedNode& ctx)
 {
     if(index == ~0ull) { return {}; }
     if(ctx.images.size() <= index) { ctx.images.resize(asset.images.size()); }
@@ -139,7 +141,7 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
     return img;
 }
 
-static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t index, scene::LoadedNode& ctx)
+static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t index, eng::LoadedNode& ctx)
 {
     if(index == ~0ull) { return Engine::get().renderer->make_sampler(gfx::SamplerDescriptor{}); }
     if(ctx.samplers.size() <= index) { ctx.samplers.resize(asset.samplers.size()); }
@@ -172,7 +174,7 @@ static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t in
     return sampler;
 }
 
-static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::ImageFormat format, size_t index, scene::LoadedNode& ctx)
+static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::ImageFormat format, size_t index, eng::LoadedNode& ctx)
 {
     if(index == ~0ull) { return {}; }
     if(ctx.textures.size() <= index) { ctx.textures.resize(asset.textures.size()); }
@@ -188,7 +190,7 @@ static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::Imag
     return tex;
 }
 
-static Handle<gfx::Material> load_material(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive, scene::LoadedNode& ctx)
+static Handle<gfx::Material> load_material(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive, eng::LoadedNode& ctx)
 {
     if(!primitive.materialIndex) { return {}; }
     if(ctx.materials.size() <= *primitive.materialIndex) { ctx.materials.resize(asset.materials.size()); }
@@ -208,7 +210,7 @@ static Handle<gfx::Material> load_material(const fastgltf::Asset& asset, const f
     return mat;
 }
 
-static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastgltf::Node& node, scene::LoadedNode& ctx)
+static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastgltf::Node& node, eng::LoadedNode& ctx)
 {
     auto* ecsr = Engine::get().ecs;
     if(!node.meshIndex) { return; }
@@ -217,7 +219,7 @@ static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastglt
     if(ctx.meshes.size() <= *node.meshIndex) { ctx.meshes.resize(asset.meshes.size()); }
     if(ctx.meshes.at(*node.meshIndex).meshes.size())
     {
-        ecsr->emplace<ecs::comp::MeshRenderer>(e, ctx.meshes.at(*node.meshIndex));
+        ecsr->emplace<ecs::MeshRenderer>(e, ctx.meshes.at(*node.meshIndex));
         return;
     }
 
@@ -230,16 +232,16 @@ static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastglt
         const auto mat = load_material(asset, fm.primitives.at(i), ctx);
         m.meshes.at(i) = Engine::get().renderer->make_mesh(gfx::MeshDescriptor{ .geometry = geom, .material = mat });
     }
-    ecsr->emplace<ecs::comp::MeshRenderer>(e, m);
+    ecsr->emplace<ecs::MeshRenderer>(e, m);
 }
 
 static ecs::Entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset& asset, const fastgltf::Node& node,
-                             scene::LoadedNode& ctx, glm::mat4 transform = { 1.0f })
+                             eng::LoadedNode& ctx, glm::mat4 transform = { 1.0f })
 {
     auto* ecsr = Engine::get().ecs;
     auto entity = ecsr->create();
 
-    ecsr->emplace<ecs::comp::Node>(entity, ecs::comp::Node{ node.name.c_str() });
+    ecsr->emplace<ecs::Node>(entity, ecs::Node{ node.name.c_str() });
 
     const auto& trs = std::get<fastgltf::TRS>(node.transform);
     const auto glm_local =
@@ -247,7 +249,7 @@ static ecs::Entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
         glm::mat4_cast(glm::quat{ trs.rotation.w(), trs.rotation.x(), trs.rotation.y(), trs.rotation.z() }) *
         glm::scale(glm::mat4{ 1.0f }, glm::vec3{ trs.scale.x(), trs.scale.y(), trs.scale.z() });
     const auto glm_global = glm_local * transform;
-    ecsr->emplace<ecs::comp::Transform>(entity, ecs::comp::Transform{ .local = glm_local, .global = glm_global });
+    ecsr->emplace<ecs::Transform>(entity, ecs::Transform{ .local = glm_local, .global = glm_global });
 
     load_mesh(entity, asset, node, ctx);
 
@@ -258,9 +260,6 @@ static ecs::Entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
 
     return entity;
 }
-
-namespace scene
-{
 
 ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
 {
@@ -307,7 +306,7 @@ ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
     auto& fscene = fasset.scenes.at(0);
     auto* r = Engine::get().renderer;
     auto* ecsr = Engine::get().ecs;
-    scene::LoadedNode ctx;
+    eng::LoadedNode ctx;
 
     auto root = ecsr->create();
     for(const auto fsni : fscene.nodeIndices)
@@ -325,10 +324,10 @@ ecs::Entity Scene::instance_entity(ecs::Entity node)
     auto* r = Engine::get().renderer;
     auto root = ecs->clone(node);
     ecs->traverse_hierarchy(root, [ecs, r](auto p, auto e) {
-        if(ecs->has<ecs::comp::MeshRenderer>(e)) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
+        if(ecs->has<ecs::MeshRenderer>(e)) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
     });
     scene.push_back(root);
     return root;
 }
 
-} // namespace scene
+} // namespace eng

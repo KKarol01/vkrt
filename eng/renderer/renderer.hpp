@@ -12,6 +12,8 @@
 #include <eng/ecs/ecs.hpp>
 #include <eng/common/hash.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -456,26 +458,27 @@ class Renderer
 };
 
 } // namespace gfx
+} // namespace eng
 
 // DEFINE_STD_HASH(gfx::ImageViewDescriptor, eng::hash::combine_fnv1a(t.view_type, t.format, t.aspect, t.layers, t.mips));
-DEFINE_STD_HASH(gfx::Geometry, eng::hash::combine_fnv1a(t.vertex_range, t.index_range, t.meshlet_range));
-DEFINE_STD_HASH(gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.base_color_texture));
-DEFINE_STD_HASH(gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
-DEFINE_STD_HASH(gfx::MeshPass, eng::hash::combine_fnv1a(t.name));
-DEFINE_STD_HASH(gfx::ShaderEffect, eng::hash::combine_fnv1a(t.pipeline));
-DEFINE_STD_HASH(gfx::SamplerDescriptor,
+DEFINE_STD_HASH(eng::gfx::Geometry, eng::hash::combine_fnv1a(t.vertex_range, t.index_range, t.meshlet_range));
+DEFINE_STD_HASH(eng::gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.base_color_texture));
+DEFINE_STD_HASH(eng::gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
+DEFINE_STD_HASH(eng::gfx::MeshPass, eng::hash::combine_fnv1a(t.name));
+DEFINE_STD_HASH(eng::gfx::ShaderEffect, eng::hash::combine_fnv1a(t.pipeline));
+DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
                 eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],
                                          t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
-DEFINE_STD_HASH(gfx::Sampler, eng::hash::combine_fnv1a(t.info));
-DEFINE_STD_HASH(gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.sampler));
-DEFINE_STD_HASH(gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect, t.mips, t.layers));
+DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
+DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.sampler));
+DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect, t.mips, t.layers));
 
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Buffer);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Image);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::ImageView);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Sampler);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Texture);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Material);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Geometry);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Mesh);
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Pipeline);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Buffer);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Image);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::ImageView);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Sampler);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Texture);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Material);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Geometry);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Mesh);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Pipeline);

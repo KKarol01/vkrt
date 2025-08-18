@@ -7,17 +7,20 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/camera.hpp>
 
-static void on_mouse_move(GLFWwindow* window, double px, double py) { Engine::get().camera->on_mouse_move(px, py); }
+static void on_mouse_move(GLFWwindow* window, double px, double py)
+{
+    eng::Engine::get().camera->on_mouse_move(px, py);
+}
 static void on_window_resize(GLFWwindow* window, int w, int h)
 {
-    Engine::get().window->width = (float)w;
-    Engine::get().window->height = (float)h;
-    Engine::get().notify_on_window_resize();
+    eng::Engine::get().window->width = (float)w;
+    eng::Engine::get().window->height = (float)h;
+    eng::Engine::get().notify_on_window_resize();
 }
 static void on_window_focus(GLFWwindow* window, int focus)
 {
     if(!focus) { return; }
-    Engine::get().notify_on_window_focus();
+    eng::Engine::get().notify_on_window_focus();
 }
 
 static void eng_ui_reload_dll(HMODULE hnew)
@@ -47,21 +50,28 @@ static void eng_ui_reload_dll(HMODULE hnew)
 //     Engine::get().ui = _ui;
 // }
 
-static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free)
-{
-    if(!std::filesystem::exists(path_dll)) { return; }
-}
+// static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free)
+//{
+//     if(!std::filesystem::exists(path_dll)) { return; }
+// }
 
-Window::Window(float width, float height) : width(width), height(height)
+namespace eng
 {
-    window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
-    if(!window) { ENG_WARN("Could not create glfw window"); }
-}
+
+Window::Window(float width, float height) : width(width), height(height) {}
 
 Window::~Window()
 {
     if(window) { glfwDestroyWindow(window); }
 }
+
+void Window::init()
+{
+    window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
+    if(!window) { ENG_ERROR("Could not create glfw window"); }
+}
+
+void Window::update() { resized = false; }
 
 bool Window::should_close() const { return glfwWindowShouldClose(window); }
 
@@ -81,7 +91,7 @@ void Engine::init()
     if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
     renderer = new gfx::RendererVulkan{};
-    scene = new scene::Scene{};
+    scene = new eng::Scene{};
     ui = new eng::UI{};
     ui->init();
     renderer->init();
@@ -98,6 +108,7 @@ void Engine::start()
             const float now = get_time_secs();
             if(_on_update_callback) { _on_update_callback(); }
             camera->update();
+            ui->update();
             renderer->update();
             ++frame_num;
             last_frame_time = now;
@@ -156,3 +167,5 @@ void FrameTime::update()
     measures[index] = dt;
     index = (index + 1) % 100;
 }
+
+} // namespace eng

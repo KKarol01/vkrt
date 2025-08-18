@@ -4,6 +4,8 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/common/to_vk.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -164,3 +166,4 @@ void BindlessPool::update()
 }
 
 } // namespace gfx
+} // namespace eng

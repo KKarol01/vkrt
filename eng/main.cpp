@@ -9,6 +9,7 @@
 
 int main()
 {
+    using namespace eng;
     Engine::get().init();
 
     const auto scene_bunny = Engine::get().scene->load_from_file("occlusion_culling1.glb");

@@ -5,6 +5,9 @@
 #include <concepts>
 #include "handle.hpp"
 
+namespace eng
+{
+
 template <typename T>
 concept FlatSetCompatible = requires(const T& a, const T& b) {
     { a == b } -> std::convertible_to<bool>;
@@ -240,3 +243,5 @@ class HandleFlatSet
   private:
     set_t set;
 };
+
+} // namespace eng

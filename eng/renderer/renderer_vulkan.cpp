@@ -51,6 +51,9 @@ static float halton(int i, int b)
     return r;
 }
 
+namespace eng
+{
+
 namespace gfx
 {
 
@@ -1358,8 +1361,8 @@ Image& RendererVulkan::get_image(Handle<Image> image) { return image.get(); }
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
-    const auto* transform = Engine::get().ecs->get<ecs::comp::Transform>(settings.entity);
-    const auto* mr = Engine::get().ecs->get<ecs::comp::MeshRenderer>(settings.entity);
+    const auto* transform = Engine::get().ecs->get<ecs::Transform>(settings.entity);
+    const auto* mr = Engine::get().ecs->get<ecs::MeshRenderer>(settings.entity);
     if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
     if(!mr) { return {}; }
     for(const auto& e : mr->meshes)
@@ -2139,3 +2142,5 @@ Image& Swapchain::get_current_image() { return images.at(current_index).get(); }
 VkImageView& Swapchain::get_current_view() { return VkImageViewMetadata::get(views.at(current_index).get()).view; }
 
 } // namespace gfx
+
+} // namespace eng

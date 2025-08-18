@@ -5,6 +5,8 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/common/handle.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -195,15 +197,16 @@ struct Pipeline
 };
 
 } // namespace gfx
+} // namespace eng
 
-DEFINE_STD_HASH(gfx::PipelineCreateInfo::VertexBinding, eng::hash::combine_fnv1a(t.binding, t.stride, t.instanced));
-DEFINE_STD_HASH(gfx::PipelineCreateInfo::VertexAttribute, eng::hash::combine_fnv1a(t.location, t.binding, t.format, t.offset));
-DEFINE_STD_HASH(gfx::PipelineCreateInfo::StencilState,
+DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexBinding, eng::hash::combine_fnv1a(t.binding, t.stride, t.instanced));
+DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexAttribute, eng::hash::combine_fnv1a(t.location, t.binding, t.format, t.offset));
+DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::StencilState,
                 eng::hash::combine_fnv1a(t.fail, t.pass, t.depth_fail, t.compare, t.compare_mask, t.write_mask, t.ref));
-DEFINE_STD_HASH(gfx::PipelineCreateInfo::BlendState,
+DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::BlendState,
                 eng::hash::combine_fnv1a(t.enable, t.src_color_factor, t.dst_color_factor, t.color_op,
                                          t.src_alpha_factor, t.dst_alpha_factor, t.alpha_op, t.r, t.g, t.b, t.a));
-DEFINE_STD_HASH(gfx::PipelineCreateInfo::AttachmentState, [&t] {
+DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::AttachmentState, [&t] {
     uint64_t hash = 0;
     // clang-format off
     for(auto i=0u; i<t.count; ++i) { hash = eng::hash::combine_fnv1a(hash, t.color_formats.at(i)); }
@@ -212,7 +215,7 @@ DEFINE_STD_HASH(gfx::PipelineCreateInfo::AttachmentState, [&t] {
     hash = eng::hash::combine_fnv1a(hash, t.count, t.depth_format, t.stencil_format);
     return hash;
 }());
-DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
+DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo, [&t] {
     uint64_t hash = 0;
     // clang-format off
     for(const auto& e : t.shaders) { hash = eng::hash::combine_fnv1a(hash, e); }
@@ -223,7 +226,7 @@ DEFINE_STD_HASH(gfx::PipelineCreateInfo, [&t] {
                                     t.stencil_front, t.stencil_back, t.polygon_mode, t.culling, t.front_is_ccw, t.line_width);
     return hash;
 }());
-DEFINE_STD_HASH(gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
-DEFINE_STD_HASH(gfx::Shader, eng::hash::combine_fnv1a(t.path));
+DEFINE_STD_HASH(eng::gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
+DEFINE_STD_HASH(eng::gfx::Shader, eng::hash::combine_fnv1a(t.path));
 
-ENG_DEFINE_HANDLE_DISPATCHER(gfx::Shader);
+ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Shader);

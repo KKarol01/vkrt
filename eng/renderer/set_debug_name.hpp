@@ -6,6 +6,11 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #endif
 
+namespace eng
+{
+namespace gfx
+{
+
 // clang-format off
 template<typename VkStruct> struct VkObject {};
 template<> struct VkObject<VkImage> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_IMAGE; };
@@ -25,6 +30,9 @@ template <typename VkStruct> inline void set_debug_name(VkStruct object, const s
         .objectHandle = reinterpret_cast<uint64_t>(object),
         .pObjectName = name.c_str(),
     };
-    vkSetDebugUtilsObjectNameEXT(gfx::RendererVulkan::get_instance()->dev, &obj_name);
+    vkSetDebugUtilsObjectNameEXT(RendererVulkan::get_instance()->dev, &obj_name);
 #endif
 }
+
+} // namespace gfx
+} // namespace eng

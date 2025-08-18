@@ -3,8 +3,11 @@
 #include <eng/renderer/renderer.hpp>
 
 // clang-format off
+namespace eng
+{
 namespace gfx
 {
+
 VkFilter to_vk(const ImageFilter& a) 
 { 
 	switch(a) 
@@ -295,5 +298,6 @@ VkAccessFlags2 to_vk(const PipelineAccessFlags& a)
     return flags;
 }
 
+}
 }
 // clang-format on

@@ -7,6 +7,8 @@
 #include <eng/common/to_vk.hpp>
 #include <deque>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -181,3 +183,4 @@ CommandBuffer* GPUStagingManager::get_cmd()
 }
 
 } // namespace gfx
+} // namespace eng

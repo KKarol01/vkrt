@@ -2,6 +2,9 @@
 #include <glm/vec3.hpp>
 #include <glm/mat4x4.hpp>
 
+namespace eng
+{
+
 class Camera
 {
   public:
@@ -16,6 +19,7 @@ class Camera
     glm::vec3 pos{ 0.24723034, 0.3212749, 2.013261 };
 
     glm::mat4 prev_view{ 1.0f };
+
   private:
     glm::mat4 projection{ 1.0f };
     glm::mat4 view{ 1.0f };
@@ -24,3 +28,5 @@ class Camera
     float last_press_time{ 0.0f };
     bool enabled{ false };
 };
+
+} // namespace eng

@@ -13,7 +13,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/common/handlemap.hpp>
 
-namespace scene
+namespace eng
 {
 
 struct LoadedNode
@@ -24,7 +24,7 @@ struct LoadedNode
     std::vector<Handle<gfx::Sampler>> samplers;
     std::vector<Handle<gfx::Texture>> textures;
     std::vector<Handle<gfx::Material>> materials;
-    std::vector<ecs::comp::MeshRenderer> meshes;
+    std::vector<ecs::MeshRenderer> meshes;
 };
 
 class Scene
@@ -45,4 +45,5 @@ class Scene
     std::vector<Handle<gfx::Material>> materials;
     std::vector<std::vector<Handle<gfx::Mesh>>> meshes;
 };
-} // namespace scene
+
+} // namespace eng

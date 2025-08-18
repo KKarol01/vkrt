@@ -8,6 +8,8 @@
 #include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 #include <eng/common/slotallocator.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -53,3 +55,4 @@ class BindlessPool
 };
 
 } // namespace gfx
+} // namespace eng

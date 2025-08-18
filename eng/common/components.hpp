@@ -4,18 +4,20 @@
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 struct Mesh;
 struct Geometry;
 struct Material;
 } // namespace gfx
+} // namespace eng
 
+namespace eng
+{
 namespace ecs
 {
-namespace comp
-{
-
 struct Transform
 {
     glm::mat4 local{ 1.0f };
@@ -33,5 +35,5 @@ struct MeshRenderer
     std::vector<Handle<gfx::Mesh>> meshes;
 };
 
-} // namespace comp
 } // namespace ecs
+} // namespace eng

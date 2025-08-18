@@ -16,6 +16,8 @@
 #include <eng/common/sparseset.hpp>
 #include <eng/common/logger.hpp>
 
+namespace eng
+{
 namespace ecs
 {
 using Entity = uint32_t;
@@ -295,3 +297,4 @@ class Registry
     SparseSet entities;
 };
 } // namespace ecs
+} // namespace eng

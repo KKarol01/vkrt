@@ -1,4 +1,5 @@
 #pragma once
+#pragma once
 
 #include <memory>
 #include <cstdint>
@@ -12,16 +13,22 @@
 
 struct GLFWwindow;
 
+namespace eng
+{
+
 struct Window
 {
     Window(float width, float height);
     ~Window();
 
+    void init();
+    void update();
     bool should_close() const;
 
-    float width;
-    float height;
+    float width{};
+    float height{};
     GLFWwindow* window{ nullptr };
+    bool resized{};
 };
 
 struct FrameTime
@@ -54,7 +61,7 @@ class Engine
     ecs::Registry* ecs{};
     gfx::Renderer* renderer{};
     eng::UI* ui{};
-    scene::Scene* scene{};
+    eng::Scene* scene{};
     double get_time_secs();
     double last_frame_time{};
     double delta_time{};
@@ -68,3 +75,5 @@ class Engine
     std::vector<std::function<bool()>> _on_window_resize_callbacks;
     std::vector<std::function<void()>> m_on_window_focus_callbacks;
 };
+
+} // namespace eng

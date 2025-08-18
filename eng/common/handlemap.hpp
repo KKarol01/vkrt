@@ -6,6 +6,8 @@
 #include "slotallocator.hpp"
 #include "handle.hpp"
 
+namespace eng
+{
 template <typename T, typename Hash = std::hash<T>, typename Storage = Handle<T>::Storage_T> class HandleMap
 {
     using handle_t = Handle<T, Storage>;
@@ -43,3 +45,4 @@ template <typename T, typename Hash = std::hash<T>, typename Storage = Handle<T>
     SlotAllocator set;
     std::unordered_map<handle_t, T> data;
 };
+} // namespace eng

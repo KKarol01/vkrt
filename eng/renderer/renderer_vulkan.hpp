@@ -14,18 +14,18 @@
 #include <eng/common/handleflatset.hpp>
 #include <eng/common/handlesparsevec.hpp>
 
+namespace eng
+{
+
 namespace gfx
 {
+
 class SubmitQueue;
 class GPUStagingManager;
 class BindlessPool;
 class ImGuiRenderer;
 struct Sync;
 struct SyncCreateInfo;
-} // namespace gfx
-
-namespace gfx
-{
 
 /* Controls renderer's behavior */
 enum class RenderFlags : uint32_t
@@ -377,3 +377,5 @@ class RendererVulkan : public Renderer
     std::vector<MeshletInstance> meshlets_to_instance;
 };
 } // namespace gfx
+
+} // namespace eng

@@ -9,8 +9,11 @@
 #include <third_party/imgui/backends/imgui_impl_glfw.h>
 #include <third_party/imgui/backends/imgui_impl_vulkan.h>
 
+namespace eng
+{
 namespace gfx
 {
+
 void ImGuiRenderer::initialize()
 {
     auto* r = RendererVulkan::get_instance();
@@ -253,3 +256,4 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
 }
 
 } // namespace gfx
+} // namespace eng

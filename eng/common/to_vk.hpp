@@ -3,6 +3,8 @@
 #include <eng/common/flags.hpp>
 #include <eng/renderer/renderer.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -52,3 +54,4 @@ VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a);
 VkAccessFlags2 to_vk(const PipelineAccessFlags& a);
 
 } // namespace gfx
+} // namespace eng

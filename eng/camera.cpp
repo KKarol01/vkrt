@@ -5,8 +5,11 @@
 #include <eng/engine.hpp>
 #include <eng/common/logger.hpp>
 
+namespace eng
+{
 
-static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, float height, float zNear) {
+static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, float height, float zNear)
+{
     const float h = 1.0f / glm::tan(0.5f * fov);
     const float w = h * height / width;
     glm::mat4 result = glm::zero<glm::mat4>();
@@ -22,7 +25,7 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
     : projection{ glm::perspectiveFov(glm::radians(80.0f), static_cast<float>(1280.0f), static_cast<float>(768.0f), min_dist, max_dist) }
 {
     GLFWwindow* window = Engine::get().window->window;
-    projection= infinitePerspectiveFovReverseZRH_ZO(glm::radians(75.0f), 1280.0f, 768.0f, 0.1f);
+    projection = infinitePerspectiveFovReverseZRH_ZO(glm::radians(75.0f), 1280.0f, 768.0f, 0.1f);
     projection[1][1] *= -1.0f;
 
     double pos[2];
@@ -75,3 +78,5 @@ void Camera::on_mouse_move(float px, float py)
     lpx = px;
     lpy = py;
 }
+
+} // namespace eng

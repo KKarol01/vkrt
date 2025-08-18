@@ -8,6 +8,8 @@
 #include <vector>
 #include <deque>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -143,5 +145,5 @@ class SubmitQueue
     std::deque<CommandPool> command_pools;
     Submission submission;
 };
-
 } // namespace gfx
+} // namespace eng

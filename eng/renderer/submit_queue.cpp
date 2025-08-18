@@ -7,6 +7,8 @@
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/engine.hpp>
 
+namespace eng
+{
 namespace gfx
 {
 
@@ -393,3 +395,4 @@ void SubmitQueue::present(Swapchain* swapchain)
 void SubmitQueue::wait_idle() { vkQueueWaitIdle(queue); }
 
 } // namespace gfx
+} // namespace eng
