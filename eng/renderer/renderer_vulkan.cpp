@@ -16,11 +16,14 @@
 #include <GLFW/glfw3native.h>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
-#include <imgui/imgui.h>
-#include <imgui/backends/imgui_impl_glfw.h>
-#include <imgui/backends/imgui_impl_vulkan.h>
+#include <eng/ecs/ecs.hpp>
+#include <eng/ecs/components.hpp>
+// #include <imgui/imgui.h>
+// #include <imgui/backends/imgui_impl_glfw.h>
+// #include <imgui/backends/imgui_impl_vulkan.h>
 #include <eng/engine.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/utils.hpp>
 #include <assets/shaders/bindless_structures.inc.glsl>
@@ -28,10 +31,10 @@
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/passes/passes.hpp>
-#include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/common/to_vk.hpp>
 #include <eng/common/paths.hpp>
 #include <eng/common/to_string.hpp>
+#include <eng/camera.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 static float halton(int i, int b)
@@ -474,8 +477,7 @@ void RendererVulkan::init()
     initialize_resources();
     initialize_mesh_passes();
     create_window_sized_resources();
-    initialize_imgui();
-    Engine::get().add_on_window_resize_callback([this] {
+    Engine::get().window->add_on_resize([this](float w, float h) {
         on_window_resize();
         return true;
     });
@@ -652,12 +654,6 @@ void RendererVulkan::initialize_vulkan()
         .vulkanApiVersion = VK_API_VERSION_1_3,
     };
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
-}
-
-void RendererVulkan::initialize_imgui()
-{
-    imgui_renderer = new ImGuiRenderer{};
-    imgui_renderer->initialize();
 }
 
 void RendererVulkan::initialize_resources()
@@ -1171,7 +1167,7 @@ void RendererVulkan::update()
     }
     cmd->end_rendering();
 
-    imgui_renderer->render(cmd);
+    Engine::get().imgui_renderer->render(cmd);
 
     cmd->barrier(*swapchain_image, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, PipelineStage::ALL,
                  PipelineAccess::NONE, ImageLayout::ATTACHMENT, ImageLayout::PRESENT);
@@ -1362,7 +1358,7 @@ Image& RendererVulkan::get_image(Handle<Image> image) { return image.get(); }
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
     const auto* transform = Engine::get().ecs->get<ecs::Transform>(settings.entity);
-    const auto* mr = Engine::get().ecs->get<ecs::MeshRenderer>(settings.entity);
+    const auto* mr = Engine::get().ecs->get<eng::ecs::MeshRenderer>(settings.entity);
     if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
     if(!mr) { return {}; }
     for(const auto& e : mr->meshes)
@@ -1404,50 +1400,6 @@ void RendererVulkan::update_transform(ecs::Entity entity)
     // update_positions.push_back(entity);
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 }
-
-size_t RendererVulkan::get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer)
-{
-    return ~0ull;
-    // struct ImguiTextureId
-    //{
-    //     ImTextureID id;
-    //     VkImage image;
-    //     ImageFilter filter;
-    //     ImageAddressing addressing;
-    //     uint32_t layer;
-    // };
-    // static std::unordered_multimap<Handle<Image>, ImguiTextureId> tex_ids;
-    // auto range = tex_ids.equal_range(handle);
-    // auto delete_it = tex_ids.end();
-    // for(auto it = range.first; it != range.second; ++it)
-    //{
-    //     if(it->second.filter == filter && it->second.addressing == addressing && it->second.layer == layer)
-    //     {
-    //         if(it->second.image != handle->image)
-    //         {
-    //             ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(it->second.id));
-    //             delete_it = it;
-    //             break;
-    //         }
-    //         return it->second.id;
-    //     }
-    // }
-    // if(delete_it != tex_ids.end()) { tex_ids.erase(delete_it); }
-    // ImguiTextureId id{
-    //     .id = reinterpret_cast<ImTextureID>(ImGui_ImplVulkan_AddTexture(
-    //         samplers.get_sampler(filter, addressing),
-    //         handle->get_image_view(ImageViewDescriptor{ .name = "imgui_view", .mips = { 0, 1 }, .layers = { 0, 1 }
-    //         }), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL)),
-    //     .image = handle->image,
-    //     .filter = filter,
-    //     .addressing = addressing,
-    //     .layer = layer,
-    // };
-    // tex_ids.emplace(handle, id);
-    // return id.id;
-}
-
-Handle<Image> RendererVulkan::get_color_output_texture() const { return get_frame_data().gbuffer.color_image; }
 
 void RendererVulkan::compile_shaders()
 {

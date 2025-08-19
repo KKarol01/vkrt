@@ -14,7 +14,7 @@ namespace eng
 namespace gfx
 {
 
-void ImGuiRenderer::initialize()
+void ImGuiRenderer::init()
 {
     auto* r = RendererVulkan::get_instance();
 
@@ -79,7 +79,11 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     ImGui::NewFrame();
     for(auto& e : ui_callbacks)
     {
-        if(e) { e(); }
+        if(e)
+        {
+            const auto ret = e();
+            assert(ret && "Implement unsubscribing.");
+        }
     }
     ImGui::Render();
 
@@ -197,33 +201,7 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     cmd->end_rendering();
 }
 
-uint32_t ImGuiRenderer::add_ui_callback(const callback_t& cb)
-{
-    uint32_t idx;
-    if(free_ui_callbacks.size())
-    {
-        idx = free_ui_callbacks.front();
-        free_ui_callbacks.pop_front();
-    }
-    else
-    {
-        idx = ui_callbacks.size();
-        ui_callbacks.push_back(cb);
-        return idx;
-    }
-    ui_callbacks.at(idx) = cb;
-    return idx;
-}
-
-void ImGuiRenderer::remove_ui_callback(uint32_t idx)
-{
-    assert(idx < ui_callbacks.size());
-    if(ui_callbacks.at(idx))
-    {
-        free_ui_callbacks.push_back(idx);
-        ui_callbacks.at(idx) = nullptr;
-    }
-}
+void ImGuiRenderer::add_ui_callback(const callback_t& cb) { ui_callbacks.push_back(cb); }
 
 void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
 {

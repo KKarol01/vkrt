@@ -42,6 +42,7 @@ class UI
   public:
     void init();
     void update();
+    void render();
     void add_tab(const std::string& name, const std::function<void()>& cb) { tabs.emplace_back(name, cb); }
     std::vector<Tab> tabs;
 };

@@ -5,9 +5,9 @@
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
-#include "./common/types.hpp"
-#include "./common/spatial.hpp"
-#include <eng/common/components.hpp>
+#include <eng/common/types.hpp>
+#include <eng/common/spatial.hpp>
+#include <eng/ecs/components.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/renderer/renderer.hpp>

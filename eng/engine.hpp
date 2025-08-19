@@ -4,31 +4,57 @@
 #include <memory>
 #include <cstdint>
 #include <deque>
+#include <string>
 #include <functional>
-#include <eng/renderer/renderer.hpp>
-#include <eng/camera.hpp>
-#include <eng/scene.hpp>
-#include <eng/ui.hpp>
-#include <eng/ecs/ecs.hpp>
 
 struct GLFWwindow;
 
 namespace eng
 {
 
+struct Window;
+class Camera;
+class UI;
+class Scene;
+
+namespace ecs
+{
+class Registry;
+}
+
+namespace gfx
+{
+class Renderer;
+class ImGuiRenderer;
+} // namespace gfx
+
 struct Window
 {
+    using on_focus_cb_t = std::function<bool(bool)>;
+    using on_resize_cb_t = std::function<bool(float, float)>;
+    using on_mouse_move_cb_t = std::function<bool(float, float)>;
+
     Window(float width, float height);
     ~Window();
 
     void init();
-    void update();
     bool should_close() const;
+
+    void on_focus(bool focus);
+    void on_resize(float w, float h);
+    void on_mouse_move(float x, float y);
+
+    void add_on_focus(const on_focus_cb_t& a);
+    void add_on_resize(const on_resize_cb_t& a);
+    void add_on_mouse_move(const on_mouse_move_cb_t& a);
 
     float width{};
     float height{};
+    bool focused{};
     GLFWwindow* window{ nullptr };
-    bool resized{};
+    std::vector<on_focus_cb_t> on_focus_callbacks;
+    std::vector<on_resize_cb_t> on_resize_callbacks;
+    std::vector<on_mouse_move_cb_t> on_mouse_move_callbacks;
 };
 
 struct FrameTime
@@ -45,23 +71,20 @@ struct FrameTime
 class Engine
 {
   public:
+    static Engine& get();
+
     void init();
     void destroy();
     void start();
 
-    void set_on_update_callback(const std::function<void()>& on_update_callback);
-    void add_on_window_resize_callback(const std::function<bool()>& on_update_callback);
-    void add_on_window_focus_callback(const std::function<void()>& on_focus);
-    void notify_on_window_resize();
-    void notify_on_window_focus();
-
-    static Engine& get();
     Window* window{};
     Camera* camera{};
     ecs::Registry* ecs{};
     gfx::Renderer* renderer{};
-    eng::UI* ui{};
-    eng::Scene* scene{};
+    gfx::ImGuiRenderer* imgui_renderer{};
+    UI* ui{};
+    Scene* scene{};
+
     double get_time_secs();
     double last_frame_time{};
     double delta_time{};
@@ -69,11 +92,6 @@ class Engine
     float refresh_rate{ 1.0f / 60.0f };
 
     std::deque<std::string> msg_log;
-
-  private:
-    std::function<void()> _on_update_callback;
-    std::vector<std::function<bool()>> _on_window_resize_callbacks;
-    std::vector<std::function<void()>> m_on_window_focus_callbacks;
 };
 
 } // namespace eng

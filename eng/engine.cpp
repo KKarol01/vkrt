@@ -3,25 +3,25 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <eng/engine.hpp>
+#include <eng/camera.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
-#include <eng/camera.hpp>
+#include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/scene.hpp>
+#include <eng/ui.hpp>
+#include <eng/ecs/ecs.hpp>
 
 static void on_mouse_move(GLFWwindow* window, double px, double py)
 {
-    eng::Engine::get().camera->on_mouse_move(px, py);
+    eng::Engine::get().window->on_mouse_move(static_cast<float>(px), static_cast<float>(py));
 }
+
 static void on_window_resize(GLFWwindow* window, int w, int h)
 {
-    eng::Engine::get().window->width = (float)w;
-    eng::Engine::get().window->height = (float)h;
-    eng::Engine::get().notify_on_window_resize();
+    eng::Engine::get().window->on_resize(static_cast<float>(w), static_cast<float>(h));
 }
-static void on_window_focus(GLFWwindow* window, int focus)
-{
-    if(!focus) { return; }
-    eng::Engine::get().notify_on_window_focus();
-}
+
+static void on_window_focus(GLFWwindow* window, int focus) { eng::Engine::get().window->on_focus(focus > 0); }
 
 static void eng_ui_reload_dll(HMODULE hnew)
 {
@@ -71,9 +71,49 @@ void Window::init()
     if(!window) { ENG_ERROR("Could not create glfw window"); }
 }
 
-void Window::update() { resized = false; }
-
 bool Window::should_close() const { return glfwWindowShouldClose(window); }
+
+void Window::on_focus(bool focus)
+{
+    for(auto& e : on_focus_callbacks)
+    {
+        const auto ret = e(focus);
+        assert(ret && "Implement unsubscribing.");
+    }
+    focused = focus;
+}
+
+void Window::on_resize(float w, float h)
+{
+    for(auto& e : on_resize_callbacks)
+    {
+        const auto ret = e(w, h);
+        assert(ret && "Implement unsubscribing.");
+    }
+    width = w;
+    height = h;
+}
+
+void Window::on_mouse_move(float x, float y)
+{
+    for(auto& e : on_mouse_move_callbacks)
+    {
+        const auto ret = e(x, y);
+        assert(ret && "Implement unsubscribing.");
+    }
+}
+
+void Window::add_on_focus(const on_focus_cb_t& a) { on_focus_callbacks.push_back(a); }
+
+void Window::add_on_resize(const on_resize_cb_t& a) { on_resize_callbacks.push_back(a); }
+
+void Window::add_on_mouse_move(const on_mouse_move_cb_t& a) { on_mouse_move_callbacks.push_back(a); }
+
+Engine& Engine::get()
+{
+    static Engine _engine;
+    return _engine;
+}
 
 void Engine::init()
 {
@@ -81,20 +121,22 @@ void Engine::init()
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     window = new Window{ 1280.0f, 768.0f };
-    camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
     ecs = new ecs::Registry{};
+    renderer = new gfx::RendererVulkan{};
+    imgui_renderer = new gfx::ImGuiRenderer{};
+    ui = new eng::UI{};
+    scene = new eng::Scene{};
 
+    window->init();
     glfwSetCursorPosCallback(window->window, on_mouse_move);
     glfwSetFramebufferSizeCallback(window->window, on_window_resize);
     glfwSetWindowFocusCallback(window->window, on_window_focus);
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
-
-    renderer = new gfx::RendererVulkan{};
-    scene = new eng::Scene{};
-    ui = new eng::UI{};
+    camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
     ui->init();
     renderer->init();
+    imgui_renderer->init();
 }
 
 void Engine::destroy() { this->~Engine(); }
@@ -106,7 +148,6 @@ void Engine::start()
         if(get_time_secs() - last_frame_time >= refresh_rate)
         {
             const float now = get_time_secs();
-            if(_on_update_callback) { _on_update_callback(); }
             camera->update();
             ui->update();
             renderer->update();
@@ -116,43 +157,6 @@ void Engine::start()
         delta_time = get_time_secs() - last_frame_time;
         glfwPollEvents();
     }
-}
-
-void Engine::set_on_update_callback(const std::function<void()>& on_update_callback)
-{
-    _on_update_callback = on_update_callback;
-}
-
-void Engine::add_on_window_resize_callback(const std::function<bool()>& on_update_callback)
-{
-    _on_window_resize_callbacks.push_back(on_update_callback);
-}
-
-void Engine::add_on_window_focus_callback(const std::function<void()>& on_focus)
-{
-    m_on_window_focus_callbacks.push_back(on_focus);
-}
-
-void Engine::notify_on_window_resize()
-{
-    for(const auto& e : _on_window_resize_callbacks)
-    {
-        e();
-    }
-}
-
-void Engine::notify_on_window_focus()
-{
-    for(auto& e : m_on_window_focus_callbacks)
-    {
-        e();
-    }
-}
-
-Engine& Engine::get()
-{
-    static Engine _engine;
-    return _engine;
 }
 
 double Engine::get_time_secs() { return glfwGetTime(); }

@@ -368,7 +368,7 @@ struct SamplerDescriptor
     auto operator<=>(const SamplerDescriptor& a) const = default;
     std::array<ImageFilter, 2> filtering{ ImageFilter::LINEAR, ImageFilter::LINEAR }; // [min, mag]
     std::array<ImageAddressing, 3> addressing{ ImageAddressing::REPEAT, ImageAddressing::REPEAT, ImageAddressing::REPEAT }; // u, v, w
-    std::array<float, 3> mip_lod{ 0.0f, VK_LOD_CLAMP_NONE, 0.0f }; // min, max, bias
+    std::array<float, 3> mip_lod{ 0.0f, 1000.0f, 0.0f }; // min, max, bias
     SamplerMipmapMode mipmap_mode{ SamplerMipmapMode::LINEAR };
     std::optional<SamplerReductionMode> reduction_mode{};
 };
@@ -453,8 +453,6 @@ class Renderer
     virtual Handle<Mesh> instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
     virtual void update_transform(ecs::Entity entity) = 0;
-    virtual size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) = 0;
-    virtual Handle<Image> get_color_output_texture() const = 0;
 };
 
 } // namespace gfx

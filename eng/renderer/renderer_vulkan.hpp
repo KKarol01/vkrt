@@ -23,7 +23,6 @@ namespace gfx
 class SubmitQueue;
 class GPUStagingManager;
 class BindlessPool;
-class ImGuiRenderer;
 struct Sync;
 struct SyncCreateInfo;
 
@@ -255,10 +254,8 @@ class RendererVulkan : public Renderer
 
     void init() final;
     void initialize_vulkan();
-    void initialize_imgui();
     void initialize_resources();
     void initialize_mesh_passes();
-    void initialize_materials();
     void create_window_sized_resources();
     void build_render_graph();
 
@@ -279,8 +276,6 @@ class RendererVulkan : public Renderer
     Handle<Mesh> instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
     void update_transform(ecs::Entity entity) final;
-    size_t get_imgui_texture_id(Handle<Image> handle, ImageFilter filter, ImageAddressing addressing, uint32_t layer) final;
-    Handle<Image> get_color_output_texture() const final;
 
     void compile_shaders();
     void compile_pipelines();
@@ -363,7 +358,6 @@ class RendererVulkan : public Renderer
 
     Swapchain swapchain;
     std::array<FrameData, 2> frame_datas{};
-    ImGuiRenderer* imgui_renderer{};
 
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;

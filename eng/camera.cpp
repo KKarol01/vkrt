@@ -32,6 +32,11 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
     glfwGetCursorPos(window, &pos[0], &pos[1]);
     lpx = (float)pos[0];
     lpy = (float)pos[1];
+
+    Engine::get().window->add_on_mouse_move([this](float x, float y) {
+        on_mouse_move(x, y);
+        return true;
+    });
 }
 
 void Camera::update()

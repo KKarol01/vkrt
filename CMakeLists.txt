@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.29)
-project(vkrt)
+project(eng)
 
 find_package(Vulkan REQUIRED)
 
@@ -109,46 +109,45 @@ add_subdirectory(third_party/fmt)
 set(MESHOPT_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/meshoptimizer)
 
-add_executable(vkrt 
-    "eng/main.cpp"
+add_executable(eng
+    "main.cpp"
+    "app/app.cpp"
+
     "eng/engine.cpp"  
     "eng/camera.cpp"
     "eng/scene.cpp"
     "eng/renderer/renderer_vulkan.cpp" 
-    
     "eng/renderer/bindlesspool.cpp"
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
-    "eng/renderer/passes/rendergraph.cpp" 
-    "eng/renderer/passes/passes.cpp" 
     "eng/renderer/pipeline.cpp"
     "eng/ui.cpp"
     "eng/to_string.cpp" 
-    
     "eng/renderer/imgui/imgui_renderer.cpp"
     "eng/renderer/to_vk.cpp"
-)
+ )
 
-target_include_directories(vkrt PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
-target_compile_features(vkrt PRIVATE cxx_std_23)
-target_link_directories(vkrt PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
-#target_compile_options(vkrt PRIVATE -Wall)
-target_link_libraries(vkrt
+target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
+target_compile_features(eng PRIVATE cxx_std_23)
+target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
+#target_compile_options(eng PRIVATE -Wall)
+target_link_libraries(eng
+    PUBLIC
+        glm 
+        imgui
+        imguizmo
+        fmt::fmt
     PRIVATE
-    build_header_only
-    vk-bootstrap
-    glm 
-    imgui
-    imguizmo
-    glfw
-    fmt::fmt
-    $<$<CONFIG:Debug>:shaderc_combinedd>
-    $<$<CONFIG:Release>:shaderc_combined>
-    fastgltf
-    meshoptimizer
+        build_header_only
+        vk-bootstrap
+        glfw
+        $<$<CONFIG:Debug>:shaderc_combinedd>
+        $<$<CONFIG:Release>:shaderc_combined>
+        fastgltf
+        meshoptimizer
 )
-target_compile_definitions(vkrt
-    PRIVATE
+target_compile_definitions(eng
+    PUBLIC
         _CRT_SECURE_NO_WARNINGS
         VC_EXTRALEAN
         NOMINMAX
@@ -156,7 +155,7 @@ target_compile_definitions(vkrt
         IMGUI_DEFINE_MATH_OPERATORS
 )
 
-target_precompile_headers(vkrt
+target_precompile_headers(eng
     PRIVATE
         <atomic>
         <cstddef>

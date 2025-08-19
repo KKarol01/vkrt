@@ -7,7 +7,7 @@
 #include <stb/stb_image.h>
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
-#include <eng/common/components.hpp>
+#include <eng/ecs/components.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/paths.hpp>
 #include <eng/renderer/renderer.hpp>
