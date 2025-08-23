@@ -69,8 +69,10 @@ void CommandBuffer::clear_color(Image& image, ImageLayout layout, Range mips, Ra
     vkCmdClearColorImage(cmd, VkImageMetadata::get(image).image, to_vk(layout), &clear, 1, &range);
 }
 
-void CommandBuffer::clear_depth_stencil(Image& image, ImageLayout layout, Range mips, Range layers, float clear_depth, uint32_t clear_stencil)
+void CommandBuffer::clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil, ImageLayout layout,
+                                        Range mips, Range layers)
 {
+    if(layout == ImageLayout::UNDEFINED) { layout = image.current_layout; }
     if(image.current_layout != layout)
     {
         barrier(image, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,

@@ -32,7 +32,8 @@ class CommandBuffer
     void copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count);
 
     void clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color);
-    void clear_depth_stencil(Image& image, ImageLayout layout, Range mips, Range layers, float clear_depth, uint32_t clear_stencil);
+    void clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil,
+                             ImageLayout layout = ImageLayout::UNDEFINED, Range mips = { 0, ~0u }, Range layers = { 0, ~0u });
 
     void bind_index(Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);

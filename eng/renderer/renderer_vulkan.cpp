@@ -853,7 +853,7 @@ void RendererVulkan::create_window_sized_resources()
         cmd->barrier(frame_datas[i].hiz_debug_output.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
                      PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW, ImageLayout::UNDEFINED, ImageLayout::GENERAL);
         auto& img = frame_datas[i].gbuffer.depth_buffer_image.get();
-        cmd->clear_depth_stencil(img, ImageLayout::TRANSFER_DST, { 0, 1 }, { 0, 1 }, 0.0f, 0);
+        cmd->clear_depth_stencil(img, 0.0f, 0);
         cmd->barrier(img, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::EARLY_Z_BIT,
                      PipelineAccess::DS_RW, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY);
         geom_main_bufs.transform_bufs[i] =
@@ -1039,7 +1039,7 @@ void RendererVulkan::update()
         bindless_pool->bind(cmd);
         if(true || (glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
         {
-            cmd->clear_depth_stencil(hiz_image, ImageLayout::GENERAL, { 0, VK_REMAINING_MIP_LEVELS }, { 0, 1 }, 0.0f, 0);
+            cmd->clear_depth_stencil(hiz_image, 0.0f, 0);
             cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
                          PipelineAccess::SHADER_RW);
             cmd->barrier(fd.gbuffer.depth_buffer_image.get(), PipelineStage::ALL, PipelineAccess::NONE,
