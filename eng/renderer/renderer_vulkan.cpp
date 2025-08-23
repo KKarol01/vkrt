@@ -67,8 +67,8 @@ void VkPipelineMetadata::init(Pipeline& a)
     a.metadata = md;
     {
         const auto stage = a.info.shaders[0]->stage;
-        if(stage == ShaderStage::VERTEX_BIT) { md->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS; }
-        else if(stage == ShaderStage::COMPUTE_BIT) { md->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE; }
+        if(stage == ShaderStage::VERTEX_BIT) { a.info.type = PipelineType::GRAPHICS; }
+        else if(stage == ShaderStage::COMPUTE_BIT) { a.info.type = PipelineType::COMPUTE; }
         else
         {
             assert(false);
@@ -89,7 +89,7 @@ void VkPipelineMetadata::init(Pipeline& a)
             .stage = gfx::to_vk(e->stage), .module = ((ShaderMetadata*)e->metadata)->shader, .pName = "main" }));
     }
 
-    if(md->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE)
+    if(a.info.type == PipelineType::COMPUTE)
     {
         const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = md->layout });
         VK_CHECK(vkCreateComputePipelines(r->dev, {}, 1, &vkinfo, {}, &md->pipeline));
@@ -944,7 +944,7 @@ void RendererVulkan::update()
     fd.rendering_fence->reset();
 
     static glm::mat4 s_view = Engine::get().camera->prev_view;
-    if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
+    if(true || (glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
     {
         s_view = Engine::get().camera->prev_view;
     }
@@ -1007,7 +1007,7 @@ void RendererVulkan::update()
 
     uint32_t old_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 1);
     bake_indirect_commands();
-
+    staging_manager->flush();
     const auto cmd = fd.cmdpool->begin();
     // rendergraph.render(cmd);
 
@@ -1036,7 +1036,8 @@ void RendererVulkan::update()
         auto& dep_image = fd.gbuffer.depth_buffer_image.get();
         auto& hiz_image = fd.hiz_pyramid.get();
         cmd->bind_pipeline(hiz_pipeline.get());
-        if((glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
+        bindless_pool->bind(cmd);
+        if(true || (glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
         {
             cmd->clear_depth_stencil(hiz_image, ImageLayout::GENERAL, { 0, VK_REMAINING_MIP_LEVELS }, { 0, 1 }, 0.0f, 0);
             cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
@@ -1047,7 +1048,6 @@ void RendererVulkan::update()
             push_constants_culling.hiz_width = hiz_image.width;
             push_constants_culling.hiz_height = hiz_image.height;
 
-            bindless_pool->bind(cmd);
             for(auto i = 0u; i < hiz_image.mips; ++i)
             {
                 if(i == 0)
@@ -1062,7 +1062,7 @@ void RendererVulkan::update()
                         make_view(ImageViewDescriptor{ .image = fd.hiz_pyramid, .aspect = ImageAspect::DEPTH, .mips = { i - 1, 1 } }),
                         hiz_sampler, ImageLayout::GENERAL }));
                 }
-                push_constants_culling.hiz_source = bindless_pool->get_index(make_texture(TextureDescriptor{
+                push_constants_culling.hiz_dest = bindless_pool->get_index(make_texture(TextureDescriptor{
                     make_view(ImageViewDescriptor{ .image = fd.hiz_pyramid, .aspect = ImageAspect::DEPTH, .mips = { i, 1 } }),
                     {},
                     ImageLayout::GENERAL }));
@@ -1076,7 +1076,6 @@ void RendererVulkan::update()
         }
         else
         {
-            bindless_pool->bind(cmd);
             cmd->barrier(fd.gbuffer.depth_buffer_image.get(), PipelineStage::ALL, PipelineAccess::NONE,
                          PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::ATTACHMENT, ImageLayout::READ_ONLY);
         }

@@ -283,19 +283,30 @@ VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a)
 VkAccessFlags2 to_vk(const PipelineAccessFlags& a)
 {
     VkAccessFlags2 flags{};
-    if(a == gfx::PipelineAccess::NONE)                  {flags |= VK_ACCESS_2_NONE; }
-    if(a.test(gfx::PipelineAccess::SHADER_READ_BIT))    {flags |= VK_ACCESS_2_SHADER_READ_BIT; }
-    if(a.test(gfx::PipelineAccess::SHADER_WRITE_BIT))   {flags |= VK_ACCESS_2_SHADER_WRITE_BIT; }
-    if(a.test(gfx::PipelineAccess::COLOR_READ_BIT))     {flags |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT; }
-    if(a.test(gfx::PipelineAccess::COLOR_WRITE_BIT))    {flags |= VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT; }
-    if(a.test(gfx::PipelineAccess::DS_READ_BIT))        {flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT; }
-    if(a.test(gfx::PipelineAccess::DS_WRITE_BIT))       {flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT; }
-    if(a.test(gfx::PipelineAccess::STORAGE_READ_BIT))   {flags |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT; }
-    if(a.test(gfx::PipelineAccess::STORAGE_WRITE_BIT))  {flags |= VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT; }
-    if(a.test(gfx::PipelineAccess::INDIRECT_READ_BIT))  {flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT; }
-    if(a.test(gfx::PipelineAccess::TRANSFER_READ_BIT))  {flags |= VK_ACCESS_2_TRANSFER_READ_BIT; }
-    if(a.test(gfx::PipelineAccess::TRANSFER_WRITE_BIT)) {flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT; }
+    if(a == gfx::PipelineAccess::NONE)                  { flags |= VK_ACCESS_2_NONE; }
+    if(a.test(gfx::PipelineAccess::SHADER_READ_BIT))    { flags |= VK_ACCESS_2_SHADER_READ_BIT; }
+    if(a.test(gfx::PipelineAccess::SHADER_WRITE_BIT))   { flags |= VK_ACCESS_2_SHADER_WRITE_BIT; }
+    if(a.test(gfx::PipelineAccess::COLOR_READ_BIT))     { flags |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT; }
+    if(a.test(gfx::PipelineAccess::COLOR_WRITE_BIT))    { flags |= VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT; }
+    if(a.test(gfx::PipelineAccess::DS_READ_BIT))        { flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT; }
+    if(a.test(gfx::PipelineAccess::DS_WRITE_BIT))       { flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT; }
+    if(a.test(gfx::PipelineAccess::STORAGE_READ_BIT))   { flags |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT; }
+    if(a.test(gfx::PipelineAccess::STORAGE_WRITE_BIT))  { flags |= VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT; }
+    if(a.test(gfx::PipelineAccess::INDIRECT_READ_BIT))  { flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT; }
+    if(a.test(gfx::PipelineAccess::TRANSFER_READ_BIT))  { flags |= VK_ACCESS_2_TRANSFER_READ_BIT; }
+    if(a.test(gfx::PipelineAccess::TRANSFER_WRITE_BIT)) { flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT; }
     return flags;
+}
+
+VkPipelineBindPoint to_vk(const PipelineType & a)
+{
+    switch(a) 
+    {
+        case PipelineType::GRAPHICS:    { return VK_PIPELINE_BIND_POINT_GRAPHICS; }
+        case PipelineType::COMPUTE:     { return VK_PIPELINE_BIND_POINT_COMPUTE; }
+        case PipelineType::RAYTRACING:  { return VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR; }
+        default: { ENG_ERROR("Unhandled case."); return {}; }
+    }
 }
 
 }

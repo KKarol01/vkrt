@@ -27,6 +27,7 @@ void UI::update() {}
 
 void UI::render()
 {
+    return;
     // ImGui::SetCurrentContext(g_ctx->imgui_ctx);
     // ImGui::SetAllocatorFunctions(alloc_callbacks.imgui_alloc, alloc_callbacks.imgui_free);
 

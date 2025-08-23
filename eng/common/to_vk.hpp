@@ -29,6 +29,7 @@ enum class SamplerMipmapMode;
 enum class BufferUsage;
 enum class PipelineStage : uint32_t;
 enum class PipelineAccess : uint32_t;
+enum class PipelineType;
 
 VkFilter to_vk(const ImageFilter& a);
 VkSamplerAddressMode to_vk(const ImageAddressing& a);
@@ -52,6 +53,7 @@ VkBlendOp to_vk(const BlendOp& a);
 VkBufferUsageFlags to_vk(const Flags<BufferUsage>& a);
 VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a);
 VkAccessFlags2 to_vk(const PipelineAccessFlags& a);
+VkPipelineBindPoint to_vk(const PipelineType& a);
 
 } // namespace gfx
 } // namespace eng

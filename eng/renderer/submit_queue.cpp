@@ -76,7 +76,7 @@ void CommandBuffer::clear_depth_stencil(Image& image, ImageLayout layout, Range 
         barrier(image, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_ACCESS_TRANSFER_WRITE_BIT, image.current_layout, layout);
     }
-    const auto clear = VkClearDepthStencilValue{ .depth = 0.0f, .stencil = 0 };
+    const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil };
     const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
                                                 (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
     vkCmdClearDepthStencilImage(cmd, VkImageMetadata::get(image).image, to_vk(layout), &clear, 1, &range);
@@ -90,14 +90,26 @@ void CommandBuffer::bind_index(Buffer& index, uint32_t offset, VkIndexType type)
 void CommandBuffer::bind_pipeline(const Pipeline& pipeline)
 {
     const auto& md = VkPipelineMetadata::get(pipeline);
-    vkCmdBindPipeline(cmd, md.bind_point, md.pipeline);
+    vkCmdBindPipeline(cmd, to_vk(pipeline.info.type), md.pipeline);
     current_pipeline = &pipeline;
 }
 
-void CommandBuffer::bind_descriptors(VkDescriptorSet* sets, Range range)
+void CommandBuffer::bind_descriptors(VkDescriptorSet* sets, Range32 range)
 {
     const auto& md = VkPipelineMetadata::get(*current_pipeline);
-    vkCmdBindDescriptorSets(cmd, md.bind_point, md.layout, (uint32_t)range.offset, (uint32_t)range.size, sets, 0, nullptr);
+    auto& arr = desc_sets.at((uint32_t)current_pipeline->info.type);
+    auto update = false;
+    for(auto i = 0u; i < range.size; ++i)
+    {
+        update = true;
+        break;
+        if(arr.at(range.offset + i) != sets[i]) { update = true; }
+        arr.at(range.offset + i) = sets[i];
+    }
+    if(update)
+    {
+        vkCmdBindDescriptorSets(cmd, to_vk(current_pipeline->info.type), md.layout, range.offset, range.size, sets, 0, nullptr);
+    }
 }
 
 void CommandBuffer::push_constants(VkShaderStageFlags stages, const void* const values, Range range)

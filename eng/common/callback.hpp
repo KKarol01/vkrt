@@ -18,7 +18,7 @@ template <typename Func> class Signal
         subscribe(std::forward<decltype(f)>(f));
         return *this;
     }
-    void send(auto&&... args)
+    void signal(auto&&... args)
     {
         for(const auto& e : callbacks)
         {

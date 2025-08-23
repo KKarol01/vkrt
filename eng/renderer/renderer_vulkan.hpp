@@ -186,7 +186,6 @@ struct VkPipelineMetadata
     static const VkPipelineMetadata& get(const Pipeline& a);
     VkPipeline pipeline{};
     VkPipelineLayout layout{};
-    VkPipelineBindPoint bind_point{};
 };
 
 struct VkBufferMetadata

@@ -19,8 +19,8 @@ struct CommandBuffer;
 class BindlessPool
 {
   public:
-    using bindless_index_t = uint32_t;
-    static inline constexpr auto INVALID_INDEX = ~bindless_index_t{};
+    using index_t = uint32_t;
+    static inline constexpr auto INVALID_INDEX = ~index_t{};
 
     BindlessPool() noexcept = default;
     BindlessPool(VkDevice dev) noexcept;
@@ -46,12 +46,14 @@ class BindlessPool
     VkDescriptorSet set{};
 
     SlotAllocator buffer_slots;
+    SlotAllocator image_slots;
     SlotAllocator texture_slots;
-    std::unordered_map<Handle<Buffer>, bindless_index_t> buffer_indices;
-    std::unordered_map<Handle<Texture>, bindless_index_t> texture_indices;
+    std::unordered_map<Handle<Buffer>, index_t> buffer_indices;
+    std::unordered_map<Handle<Texture>, index_t> image_indices;
+    std::unordered_map<Handle<Texture>, index_t> texture_indices;
     std::vector<VkWriteDescriptorSet> updates;
     std::deque<VkDescriptorBufferInfo> buffer_updates;
-    std::deque<VkDescriptorImageInfo> texture_updates;
+    std::deque<VkDescriptorImageInfo> image_updates;
 };
 
 } // namespace gfx

@@ -99,6 +99,14 @@ enum class BlendOp
     MAX,
 };
 
+enum class PipelineType
+{
+    NONE,
+    GRAPHICS,
+    COMPUTE,
+    RAYTRACING,
+};
+
 struct PipelineCreateInfo
 {
     struct VertexBinding
@@ -171,6 +179,8 @@ struct PipelineCreateInfo
 
     bool operator==(const PipelineCreateInfo& a) const = default;
 
+    PipelineType type{}; // filled automatically
+
     std::vector<Handle<Shader>> shaders;
     std::vector<VertexBinding> bindings;
     std::vector<VertexAttribute> attributes;
@@ -222,7 +232,7 @@ DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo, [&t] {
     for(const auto& e : t.bindings) { hash = eng::hash::combine_fnv1a(hash, e); }
     for(const auto& e : t.attributes) { hash = eng::hash::combine_fnv1a(hash, e); }
     // clang-format on
-    hash = eng::hash::combine_fnv1a(hash, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
+    hash = eng::hash::combine_fnv1a(hash, t.type, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
                                     t.stencil_front, t.stencil_back, t.polygon_mode, t.culling, t.front_is_ccw, t.line_width);
     return hash;
 }());

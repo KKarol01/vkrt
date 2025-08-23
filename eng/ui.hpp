@@ -33,6 +33,13 @@ namespace eng
 
 class UI
 {
+    enum class Location
+    {
+        LEFT_PANE,
+        RIGHT_PANE,
+        BOTTOM_PANE,
+    };
+
     struct Tab
     {
         std::string name;

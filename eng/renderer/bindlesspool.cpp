@@ -93,15 +93,25 @@ void BindlessPool::bind(CommandBuffer* cmd)
 
 uint32_t BindlessPool::get_index(Handle<Buffer> handle)
 {
-    const auto ret = buffer_indices.emplace(handle, buffer_slots.allocate_slot());
-    if(ret.second) { update_index(handle); }
+    const auto ret = buffer_indices.emplace(handle, ~index_t{});
+    if(ret.second)
+    {
+        ret.first->second = buffer_slots.allocate_slot();
+        update_index(handle);
+    }
     return ret.first->second;
 }
 
 uint32_t BindlessPool::get_index(Handle<Texture> handle)
 {
-    const auto ret = texture_indices.emplace(handle, texture_slots.allocate_slot());
-    if(ret.second) { update_index(handle); }
+    const auto has_sampler = (bool)(handle->sampler);
+    const auto ret = has_sampler ? texture_indices.emplace(handle, ~index_t{}) : image_indices.emplace(handle, ~index_t{});
+    if(ret.second)
+    {
+        if(has_sampler) { ret.first->second = texture_slots.allocate_slot(); }
+        else { ret.first->second = image_slots.allocate_slot(); }
+        update_index(handle);
+    }
     return ret.first->second;
 }
 
@@ -116,10 +126,22 @@ void BindlessPool::free_index(Handle<Buffer> handle)
 
 void BindlessPool::free_index(Handle<Texture> handle)
 {
-    if(auto it = texture_indices.find(handle); it != texture_indices.end())
+    const auto has_sampler = (bool)(handle->sampler);
+    if(has_sampler)
     {
-        texture_slots.free_slot(it->second);
-        texture_indices.erase(it);
+        if(auto it = texture_indices.find(handle); it != texture_indices.end())
+        {
+            texture_slots.free_slot(it->second);
+            texture_indices.erase(it);
+        }
+    }
+    else
+    {
+        if(auto it = image_indices.find(handle); it != image_indices.end())
+        {
+            image_slots.free_slot(it->second);
+            image_indices.erase(it);
+        }
     }
 }
 
@@ -140,9 +162,9 @@ void BindlessPool::update_index(Handle<Buffer> handle)
 
 void BindlessPool::update_index(Handle<Texture> handle)
 {
-    const auto index = texture_indices.at(handle);
     const auto& txt = handle.get();
-    const auto& update = texture_updates.emplace_back(Vks(VkDescriptorImageInfo{
+    const auto index = txt.sampler ? texture_indices.at(handle) : image_indices.at(handle);
+    const auto& update = image_updates.emplace_back(Vks(VkDescriptorImageInfo{
         .sampler = txt.sampler ? VkSamplerMetadata::get(txt.sampler.get()).sampler : nullptr,
         .imageView = VkImageViewMetadata::get(txt.view.get()).view,
         .imageLayout = to_vk(txt.layout) }));
@@ -161,7 +183,7 @@ void BindlessPool::update()
     if(updates.empty()) { return; }
     vkUpdateDescriptorSets(dev, updates.size(), updates.data(), 0, nullptr);
     updates.clear();
-    texture_updates.clear();
+    image_updates.clear();
     buffer_updates.clear();
 }
 

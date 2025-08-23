@@ -143,11 +143,13 @@ void Engine::destroy() { this->~Engine(); }
 
 void Engine::start()
 {
+    on_init.signal();
     while(!window->should_close())
     {
         if(get_time_secs() - last_frame_time >= refresh_rate)
         {
             const float now = get_time_secs();
+            on_update.signal();
             camera->update();
             ui->update();
             renderer->update();

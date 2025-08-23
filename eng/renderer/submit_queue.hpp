@@ -36,7 +36,7 @@ class CommandBuffer
 
     void bind_index(Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);
-    void bind_descriptors(VkDescriptorSet* sets, Range range);
+    void bind_descriptors(VkDescriptorSet* sets, Range32 range);
 
     void push_constants(VkShaderStageFlags stages, const void* const values, Range range);
 
@@ -53,6 +53,7 @@ class CommandBuffer
 
     VkCommandBuffer cmd{};
     const Pipeline* current_pipeline{};
+    std::array<std::array<VkDescriptorSet, 4>, 4> desc_sets{};
 };
 
 class CommandPool

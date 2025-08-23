@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
-#include <functional>
+#include <eng/common/callback.hpp>
 
 struct GLFWwindow;
 
@@ -90,6 +90,9 @@ class Engine
     double delta_time{};
     uint64_t frame_num{};
     float refresh_rate{ 1.0f / 60.0f };
+
+    Signal<void()> on_init;
+    Signal<void()> on_update;
 
     std::deque<std::string> msg_log;
 };
