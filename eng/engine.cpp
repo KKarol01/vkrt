@@ -134,9 +134,20 @@ void Engine::init()
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
     camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
+    scene->init();
     ui->init();
     renderer->init();
     imgui_renderer->init();
+
+    ui->add_tab(UI::Tab{ .name = "Inspector", .location = UI::Location::RIGHT_PANE, .cb_func = [] {
+                            if(ImGui::Begin("Inspector")) { ImGui::Text("Text"); }
+                            ImGui::End();
+                        } });
+    ui->add_tab(UI::Tab{ .name = "Output", .location = UI::Location::BOTTOM_PANE, .cb_func = [] {
+                            ImGui::Begin("Output");
+                            ImGui::Text("Text");
+                            ImGui::End();
+                        } });
 }
 
 void Engine::destroy() { this->~Engine(); }

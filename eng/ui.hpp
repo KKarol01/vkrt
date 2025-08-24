@@ -6,35 +6,17 @@
 #include <cstdint>
 #include "./common/dll_hot_reload.hpp"
 
-// struct AllocatorCallbacks {
-//     void* (*alloc)(size_t size);
-//     void (*free)(void* data);
-//     void* (*imgui_alloc)(size_t size, void* user_data);
-//     void (*imgui_free)(void* data, void* user_data);
-// };
-//
-// class Engine;
-// struct ImGuiContext;
-//
-// struct UIContext {
-//     Engine* engine{};
-//     ImGuiContext* imgui_ctx{};
-//     AllocatorCallbacks* alloc_callbacks{};
-// };
-//
-// struct UIInitData {
-//     Engine* engine{};
-//     AllocatorCallbacks callbacks{};
-//     UIContext** context{};
-// };
-
 namespace eng
 {
 
 class UI
 {
+    using cb_func_t = Callback<void()>;
+
+  public:
     enum class Location
     {
+        NEW_PANE,
         LEFT_PANE,
         RIGHT_PANE,
         BOTTOM_PANE,
@@ -43,19 +25,21 @@ class UI
     struct Tab
     {
         std::string name;
-        std::function<void()> cb;
+        Location location{ Location::NEW_PANE };
+        cb_func_t cb_func{};
     };
 
-  public:
+    inline static bool use_default_layout = false;
+
     void init();
     void update();
     void render();
-    void add_tab(const std::string& name, const std::function<void()>& cb) { tabs.emplace_back(name, cb); }
+    void add_tab(const Tab& t) { tabs.emplace_back(t); }
     std::vector<Tab> tabs;
+    uint32_t viewport_imid;
+    uint32_t left_imid;
+    uint32_t right_imid;
+    uint32_t bottom_imid;
 };
 
 } // namespace eng
-// ENG_API_CALL void eng_ui_init(UIInitData* init_context);
-// ENG_API_CALL void eng_ui_update();
-// ENG_API_CALL UIContext* eng_ui_get_context();
-// UIContext* eng_ui_get_context();

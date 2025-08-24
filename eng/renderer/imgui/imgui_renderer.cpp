@@ -78,81 +78,8 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     auto* r = RendererVulkan::get_instance();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-    for(auto& e : ui_callbacks)
-    {
-        if(e)
-        {
-            const auto ret = e();
-            assert(ret && "Implement unsubscribing.");
-        }
-    }
 
-    auto d0 = ImGui::GetID("d0");
-    ImGui::DockSpaceOverViewport(d0, 0, ImGuiDockNodeFlags_PassthruCentralNode);
-
-    {
-        static auto first_time = true;
-        if(first_time)
-        {
-            first_time = false;
-            //ImGui::DockBuilderRemoveNode(d0);
-
-            auto d0l = ImGui::DockBuilderSplitNode(d0, ImGuiDir_Left, 0.2f, nullptr, &d0);
-            auto d0r = ImGui::DockBuilderSplitNode(d0, ImGuiDir_Right, 0.25f, nullptr, &d0);
-            auto d0b = ImGui::DockBuilderSplitNode(d0, ImGuiDir_Down, 0.3f, nullptr, &d0);
-
-            ImGui::DockBuilderDockWindow("w2", d0l);
-            ImGui::DockBuilderDockWindow("w3", d0b);
-            ImGui::DockBuilderDockWindow("w4", d0r);
-            ImGui::DockBuilderFinish(d0);
-        }
-    }
-
-    const auto d1f = ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
-                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoCollapse;
-    static auto d1s = ImGui::GetMainViewport()->Size * ImVec2{ 0.2f, 1.0f };
-    /*ImGui::SetNextWindowPos({}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(d1s, ImGuiCond_Once);
-    ImGui::SetNextWindowSizeConstraints(d1s, { FLT_MAX, d1s.y });
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);*/
-    // if(ImGui::Begin("my dockspace", 0, d1f))
-    //{
-    //     auto d1 = ImGui::GetID("d1");
-    //     ImGui::DockSpace(d1, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode |
-    //     ImGuiDockNodeFlags_NoResize); static auto first_time = true; if(first_time)
-    //     {
-    //         first_time = false;
-    //         ImGui::DockBuilderRemoveNode(d1);
-    //         ImGui::DockBuilderAddNode(d1, ImGuiDockNodeFlags_DockSpace );
-    //         ImGui::DockBuilderDockWindow("w2", d1);
-    //         ImGui::DockBuilderDockWindow("w3", d1);
-    //         ImGui::DockBuilderFinish(d1);
-    //     }
-
-    //    // if(ImGui::BeginChild("cresize",{}))
-
-    //    // ImGui::EndChild();
-    //}
-    // ImGui::End();
-    // ImGui::PopStyleVar(2);
-
-    // ImGui::SetNextWindowPos({ d1s.x - 10.0f, 0.0f });
-    // ImGui::SetNextWindowSize({ 20.0f, d1s.y });
-    /*ImGui::Begin("w1hresize", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground);
-
-    {
-        ImGui::SetCursorScreenPos({ d1s.x - 10.0f, 0.0f });
-        ImGui::Button("hresize", { 20.0f, d1s.y });
-    }
-    ImGui::End();*/
-
-    ImGui::Begin("w2", 0);
-    ImGui::End();
-    ImGui::Begin("w3", 0);
-    ImGui::End();
-    ImGui::Begin("w4", 0);
-    ImGui::End();
+    ui_callbacks.signal();
 
     ImGui::Render();
 
@@ -270,7 +197,7 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     cmd->end_rendering();
 }
 
-void ImGuiRenderer::add_ui_callback(const callback_t& cb) { ui_callbacks.push_back(cb); }
+void ImGuiRenderer::add_ui_callback(const Callback<void()>& cb) { ui_callbacks += cb; }
 
 void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
 {

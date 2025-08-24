@@ -30,12 +30,16 @@ struct LoadedNode
 class Scene
 {
   public:
+    void init();
+
     ecs::Entity load_from_file(const std::filesystem::path& path);
     ecs::Entity instance_entity(ecs::Entity node);
 
     void update_transform(ecs::Entity entity, glm::mat4 transform);
 
   public:
+    void ui_draw_scene();
+
     std::unordered_map<std::filesystem::path, LoadedNode> nodes;
     std::vector<ecs::Entity> scene;
 

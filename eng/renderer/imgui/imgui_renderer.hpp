@@ -3,6 +3,7 @@
 #include <vector>
 #include <functional>
 #include <eng/common/handle.hpp>
+#include <eng/common/callback.hpp>
 
 struct ImTextureData;
 
@@ -22,11 +23,9 @@ struct Image;
 class ImGuiRenderer
 {
   public:
-    using callback_t = std::function<bool()>;
-
     void init();
     void render(CommandBuffer* cmd);
-    void add_ui_callback(const callback_t& cb);
+    void add_ui_callback(const Callback<void()>& cb);
 
   private:
     void handle_imtexture(ImTextureData* imtex);
@@ -37,7 +36,7 @@ class ImGuiRenderer
     Handle<Buffer> index_buffer;
     std::vector<Handle<Image>> images;
     std::vector<Handle<Texture>> textures;
-    std::vector<callback_t> ui_callbacks;
+    Signal<void()> ui_callbacks;
 };
 
 } // namespace gfx

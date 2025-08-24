@@ -7,6 +7,7 @@
 #include <stb/stb_image.h>
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
+#include <eng/ui.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/paths.hpp>
@@ -261,6 +262,12 @@ static ecs::Entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
     return entity;
 }
 
+void Scene::init()
+{
+    Engine::get().ui->add_tab(UI::Tab{
+        .name = "Scene hierarchy", .location = UI::Location::LEFT_PANE, .cb_func = [this] { ui_draw_scene(); } });
+}
+
 ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
 {
     const auto filepath = eng::paths::canonize_path(eng::paths::MODELS_DIR / _path);
@@ -308,11 +315,26 @@ ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
     auto* ecsr = Engine::get().ecs;
     eng::LoadedNode ctx;
 
-    auto root = ecsr->create();
-    for(const auto fsni : fscene.nodeIndices)
+    auto root = ecs::INVALID_ENTITY;
+    if(fscene.nodeIndices.size() == 1)
     {
-        ecsr->make_child(root, load_node(fscene, fasset, fasset.nodes.at(fsni), ctx));
+        root = load_node(fscene, fasset, fasset.nodes.at(fscene.nodeIndices.front()), ctx);
     }
+    else if(fscene.nodeIndices.size() > 1)
+    {
+        root = ecsr->create();
+        ecsr->emplace<ecs::Node>(root, ecs::Node{ .name = fmt::format("{}_root", _path.filename().string()) });
+        for(const auto& fsni : fscene.nodeIndices)
+        {
+            ecsr->make_child(root, load_node(fscene, fasset, fasset.nodes.at(fsni), ctx));
+        }
+    }
+    else
+    {
+        ENG_WARN("Loaded model {} has no nodes.", filepath.string());
+        return root;
+    }
+
     ctx.root = root;
     nodes[filepath] = std::move(ctx);
     return root;
@@ -328,6 +350,31 @@ ecs::Entity Scene::instance_entity(ecs::Entity node)
     });
     scene.push_back(root);
     return root;
+}
+
+void Scene::ui_draw_scene()
+{
+    if(ImGui::Begin("Scene hierarchy"))
+    {
+        static constexpr auto draw_hierarchy = [](ecs::Registry* reg, ecs::Entity e, const auto& self) -> void {
+            const auto enode = reg->get<ecs::Node>(e);
+            const auto& echildren = reg->get_children(e);
+            if(echildren.size() && ImGui::TreeNode(enode->name.c_str()))
+            {
+                for(const auto& ec : echildren)
+                {
+                    self(reg, ec, self);
+                }
+                ImGui::TreePop();
+            }
+            else if(echildren.empty()) { ImGui::Text(enode->name.c_str()); }
+        };
+        for(const auto& e : scene)
+        {
+            draw_hierarchy(Engine::get().ecs, e, draw_hierarchy);
+        }
+    }
+    ImGui::End();
 }
 
 } // namespace eng
