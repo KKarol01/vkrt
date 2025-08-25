@@ -274,7 +274,7 @@ class RendererVulkan : public Renderer
     Image& get_image(Handle<Image> image) final;
     Handle<Mesh> instance_mesh(const InstanceSettings& settings) final;
     void instance_blas(const BLASInstanceSettings& settings) final;
-    void update_transform(ecs::Entity entity) final;
+    void update_transform(ecs::entity entity) final;
 
     void compile_shaders();
     void compile_pipelines();
@@ -333,7 +333,7 @@ class RendererVulkan : public Renderer
 
     uint32_t mesh_instance_index{}; // todo: reuse slots
     std::vector<MeshletInstance> meshlet_instances;
-    std::vector<ecs::Entity> entities;
+    std::vector<ecs::entity> entities;
     std::vector<MultiBatch> multibatches;
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> hiz_pipeline;
@@ -342,7 +342,7 @@ class RendererVulkan : public Renderer
     GeometryBuffers geom_main_bufs;
 
     // std::vector<MeshletInstance> meshlet_instances;
-    std::vector<ecs::Entity> blas_instances;
+    std::vector<ecs::entity> blas_instances;
 
     VkAccelerationStructureKHR tlas{};
     Handle<Buffer> tlas_buffer;

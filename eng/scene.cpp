@@ -211,7 +211,7 @@ static Handle<gfx::Material> load_material(const fastgltf::Asset& asset, const f
     return mat;
 }
 
-static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastgltf::Node& node, eng::LoadedNode& ctx)
+static void load_mesh(ecs::entity e, const fastgltf::Asset& asset, const fastgltf::Node& node, eng::LoadedNode& ctx)
 {
     auto* ecsr = Engine::get().ecs;
     if(!node.meshIndex) { return; }
@@ -236,7 +236,7 @@ static void load_mesh(ecs::Entity e, const fastgltf::Asset& asset, const fastglt
     ecsr->emplace<ecs::MeshRenderer>(e, m);
 }
 
-static ecs::Entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset& asset, const fastgltf::Node& node,
+static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset& asset, const fastgltf::Node& node,
                              eng::LoadedNode& ctx, glm::mat4 transform = { 1.0f })
 {
     auto* ecsr = Engine::get().ecs;
@@ -268,7 +268,7 @@ void Scene::init()
         .name = "Scene hierarchy", .location = UI::Location::LEFT_PANE, .cb_func = [this] { ui_draw_scene(); } });
 }
 
-ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
+ecs::entity Scene::load_from_file(const std::filesystem::path& _path)
 {
     const auto filepath = eng::paths::canonize_path(eng::paths::MODELS_DIR / _path);
 
@@ -323,7 +323,7 @@ ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
     else if(fscene.nodeIndices.size() > 1)
     {
         root = ecsr->create();
-        ecsr->emplace<ecs::Node>(root, ecs::Node{ .name = fmt::format("{}_root", _path.filename().string()) });
+        ecsr->emplace<ecs::Node>(root, ecs::Node{ .name = filepath.stem().string() });
         for(const auto& fsni : fscene.nodeIndices)
         {
             ecsr->make_child(root, load_node(fscene, fasset, fasset.nodes.at(fsni), ctx));
@@ -340,7 +340,7 @@ ecs::Entity Scene::load_from_file(const std::filesystem::path& _path)
     return root;
 }
 
-ecs::Entity Scene::instance_entity(ecs::Entity node)
+ecs::entity Scene::instance_entity(ecs::entity node)
 {
     auto* ecs = Engine::get().ecs;
     auto* r = Engine::get().renderer;
@@ -356,18 +356,45 @@ void Scene::ui_draw_scene()
 {
     if(ImGui::Begin("Scene hierarchy"))
     {
-        static constexpr auto draw_hierarchy = [](ecs::Registry* reg, ecs::Entity e, const auto& self) -> void {
+        const auto draw_hierarchy = [this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
             const auto enode = reg->get<ecs::Node>(e);
             const auto& echildren = reg->get_children(e);
-            if(echildren.size() && ImGui::TreeNode(enode->name.c_str()))
+            auto idd = ImGui::GetID(enode->name.c_str());
+            ImGui::PushID(enode->name.c_str());
+            const auto imhid = ImGui::GetItemID();
+            assert(idd != imhid);
+            auto& ui_node = ui.scene.nodes[imhid];
+            if(echildren.size())
             {
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().ItemSpacing * 0.5f);
+                if(ImGui::ArrowButton("expand_btn", ui_node.expanded ? ImGuiDir_Down : ImGuiDir_Right))
+                {
+                    ui_node.expanded = !ui_node.expanded;
+                }
+                ImGui::PopStyleVar(1);
+                ImGui::SameLine();
+            }
+            {
+                bool is_sel = imhid == ui.scene.sel_id;
+                auto cpos = ImGui::GetCursorScreenPos();
+                ImGui::SetCursorScreenPos(cpos + ImVec2{ -ImGui::GetStyle().ItemSpacing.x * 0.5f, 0.0f });
+                ImGui::GetItemRectSize();
+                if(ImGui::Selectable(enode->name.c_str(), &is_sel))
+                {
+                    ui.scene.sel_id = imhid;
+                    ui.scene.sel_entity = e;
+                }
+            }
+            if(ui_node.expanded)
+            {
+                ImGui::Indent();
                 for(const auto& ec : echildren)
                 {
                     self(reg, ec, self);
                 }
-                ImGui::TreePop();
+                ImGui::Unindent();
             }
-            else if(echildren.empty()) { ImGui::Text(enode->name.c_str()); }
+            ImGui::PopID();
         };
         for(const auto& e : scene)
         {

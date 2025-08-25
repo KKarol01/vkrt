@@ -1394,7 +1394,7 @@ void RendererVulkan::instance_blas(const BLASInstanceSettings& settings)
     // }
 }
 
-void RendererVulkan::update_transform(ecs::Entity entity)
+void RendererVulkan::update_transform(ecs::entity entity)
 {
     // update_positions.push_back(entity);
     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);

@@ -411,12 +411,12 @@ struct MeshDescriptor
 
 struct InstanceSettings
 {
-    ecs::Entity entity;
+    ecs::entity entity;
 };
 
 struct BLASInstanceSettings
 {
-    ecs::Entity entity;
+    ecs::entity entity;
 };
 
 struct VsmData
@@ -452,7 +452,7 @@ class Renderer
 
     virtual Handle<Mesh> instance_mesh(const InstanceSettings& settings) = 0;
     virtual void instance_blas(const BLASInstanceSettings& settings) = 0;
-    virtual void update_transform(ecs::Entity entity) = 0;
+    virtual void update_transform(ecs::entity entity) = 0;
 };
 
 } // namespace gfx

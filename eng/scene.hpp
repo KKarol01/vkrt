@@ -18,7 +18,7 @@ namespace eng
 
 struct LoadedNode
 {
-    ecs::Entity root;
+    ecs::entity root;
     std::vector<Handle<gfx::Geometry>> geometries;
     std::vector<Handle<gfx::Image>> images;
     std::vector<Handle<gfx::Sampler>> samplers;
@@ -29,25 +29,44 @@ struct LoadedNode
 
 class Scene
 {
+    struct UIState
+    {
+        struct Scene
+        {
+            struct Node
+            {
+                bool expanded{};
+                // bool selected{};
+            };
+            ecs::entity sel_entity{ ecs::INVALID_ENTITY };
+            uint32_t sel_id{ ~0u };
+            std::unordered_map<uint32_t, Node> nodes;
+        };
+
+        Scene scene;
+    };
+
   public:
     void init();
 
-    ecs::Entity load_from_file(const std::filesystem::path& path);
-    ecs::Entity instance_entity(ecs::Entity node);
+    ecs::entity load_from_file(const std::filesystem::path& path);
+    ecs::entity instance_entity(ecs::entity node);
 
-    void update_transform(ecs::Entity entity, glm::mat4 transform);
+    void update_transform(ecs::entity entity, glm::mat4 transform);
 
   public:
     void ui_draw_scene();
 
     std::unordered_map<std::filesystem::path, LoadedNode> nodes;
-    std::vector<ecs::Entity> scene;
+    std::vector<ecs::entity> scene;
 
     std::vector<Handle<gfx::Geometry>> geometries;
     std::vector<Handle<gfx::Image>> images;
     std::vector<Handle<gfx::Texture>> textures;
     std::vector<Handle<gfx::Material>> materials;
     std::vector<std::vector<Handle<gfx::Mesh>>> meshes;
+
+    UIState ui;
 };
 
 } // namespace eng

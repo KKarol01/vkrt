@@ -20,10 +20,10 @@ namespace eng
 {
 namespace ecs
 {
-using Entity = uint32_t;
+using entity = uint32_t;
 using component_id_t = uint32_t;
-inline static constexpr Entity INVALID_ENTITY = ~Entity{};
-inline static constexpr Entity MAX_COMPONENTS = sizeof(component_id_t) * 8;
+inline static constexpr entity INVALID_ENTITY = ~entity{};
+inline static constexpr entity MAX_COMPONENTS = sizeof(component_id_t) * 8;
 
 struct ComponentIdGenerator
 {
@@ -40,9 +40,9 @@ class IComponentPool
 {
   public:
     virtual ~IComponentPool() = default;
-    virtual void* get(Entity e) = 0;
-    virtual void erase(Entity e) = 0;
-    virtual void clone(Entity src, Entity dst) = 0;
+    virtual void* get(entity e) = 0;
+    virtual void erase(entity e) = 0;
+    virtual void clone(entity src, entity dst) = 0;
 };
 
 template <typename T> class ComponentPool : public IComponentPool
@@ -51,7 +51,7 @@ template <typename T> class ComponentPool : public IComponentPool
     auto begin() { return components.begin(); }
     auto end() { return components.begin() + size(); }
 
-    void* get(Entity e) final
+    void* get(entity e) final
     {
         const auto it = entities.get(e);
         if(!it)
@@ -63,7 +63,7 @@ template <typename T> class ComponentPool : public IComponentPool
     }
 
     template <typename... Args>
-    T& emplace(Entity e, Args&&... args)
+    T& emplace(entity e, Args&&... args)
         requires std::constructible_from<T, Args...>
     {
         const auto it = entities.insert(e);
@@ -79,14 +79,14 @@ template <typename T> class ComponentPool : public IComponentPool
         return *static_cast<T*>(get(e));
     }
 
-    void erase(Entity e) final
+    void erase(entity e) final
     {
         const auto it = entities.erase(e);
         if(!it) { return; }
         components.at(it.index) = std::move(components.at(entities.size()));
     }
 
-    void clone(Entity src, Entity dst) final
+    void clone(entity src, entity dst) final
     {
         const auto srcit = entities.get(src);
         auto dstit = entities.get(dst);
@@ -111,8 +111,8 @@ class Registry
     struct EntityMetadata
     {
         std::bitset<MAX_COMPONENTS> components;
-        Entity parent{ INVALID_ENTITY };
-        std::vector<Entity> children;
+        entity parent{ INVALID_ENTITY };
+        std::vector<entity> children;
     };
 
   public:
@@ -122,7 +122,7 @@ class Registry
         return std::span{ arr.begin(), arr.end() };
     }
 
-    Entity create()
+    entity create()
     {
         const auto e = entities.get(entities.insert());
         if(e == INVALID_ENTITY)
@@ -135,9 +135,9 @@ class Registry
         return e;
     }
 
-    bool has(Entity e) const { return entities.has(e); }
+    bool has(entity e) const { return entities.has(e); }
 
-    template <typename Component> bool has(Entity e) const
+    template <typename Component> bool has(entity e) const
     {
         if(is_valid(e))
         {
@@ -147,16 +147,16 @@ class Registry
         return false;
     }
 
-    template <typename Component> Component* get(Entity e)
+    template <typename Component> Component* get(entity e)
     {
         if(!is_valid(e) || !has<Component>(e)) { return nullptr; }
         const auto idx = ComponentIdGenerator::generate<Component>();
         return static_cast<Component*>(component_arrays.at(idx)->get(e));
     }
 
-    template <typename Component> const Component* get(Entity e) const { return const_cast<Registry*>(this)->get(e); }
+    template <typename Component> const Component* get(entity e) const { return const_cast<Registry*>(this)->get(e); }
 
-    template <typename Component, typename... Args> Component* emplace(Entity e, Args&&... args)
+    template <typename Component, typename... Args> Component* emplace(entity e, Args&&... args)
     {
         if(!is_valid(e)) { return nullptr; }
         const auto cidx = ComponentIdGenerator::generate<Component>();
@@ -165,7 +165,7 @@ class Registry
         return &comp_arr.emplace(e, std::forward<Args>(args)...);
     }
 
-    void erase(Entity e)
+    void erase(entity e)
     {
         if(!is_valid(e)) { return; }
         auto& md = metadatas.at(e);
@@ -182,7 +182,7 @@ class Registry
         entities.erase(e);
     }
 
-    template <typename Component> void erase(Entity e)
+    template <typename Component> void erase(entity e)
     {
         if(!is_valid(e)) { return; }
         auto& md = metadatas.at(e);
@@ -194,13 +194,13 @@ class Registry
         }
     }
 
-    const std::vector<Entity>& get_children(Entity e) const
+    const std::vector<entity>& get_children(entity e) const
     {
         if(is_valid(e)) { return metadatas.at(e).children; }
         return {};
     }
 
-    void make_child(Entity p, Entity c)
+    void make_child(entity p, entity c)
     {
         if(is_valid(p) && is_valid(c))
         {
@@ -220,7 +220,7 @@ class Registry
         }
     }
 
-    void remove_child(Entity p, Entity c)
+    void remove_child(entity p, entity c)
     {
         if(is_valid(p) && is_valid(c))
         {
@@ -231,10 +231,10 @@ class Registry
         }
     }
 
-    void traverse_hierarchy(Entity e, const auto& callback)
+    void traverse_hierarchy(entity e, const auto& callback)
     {
         if(!is_valid(e)) { return; }
-        const auto dfs = [this, callback](Entity p, Entity e, const auto& self) -> void {
+        const auto dfs = [this, callback](entity p, entity e, const auto& self) -> void {
             callback(p, e);
             auto& ch = metadatas.at(e).children;
             for(auto c : ch)
@@ -245,11 +245,11 @@ class Registry
         dfs(INVALID_ENTITY, e, dfs);
     }
 
-    Entity clone(Entity src)
+    entity clone(entity src)
     {
         if(!is_valid(src)) { return INVALID_ENTITY; }
-        std::stack<Entity> cparents;
-        Entity ret = INVALID_ENTITY;
+        std::stack<entity> cparents;
+        entity ret = INVALID_ENTITY;
         traverse_hierarchy(src, [this, &cparents, &ret](auto p, auto e) {
             auto clone = create();
             if(ret == INVALID_ENTITY) { ret = clone; }
@@ -278,7 +278,7 @@ class Registry
     }
 
   private:
-    bool is_valid(Entity e) const
+    bool is_valid(entity e) const
     {
         const auto res = e != INVALID_ENTITY && has(e);
         if(!res) { ENG_ERROR("Entity {} is invalid.", e); }
@@ -293,7 +293,7 @@ class Registry
     }
 
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
-    std::unordered_map<Entity, EntityMetadata> metadatas;
+    std::unordered_map<entity, EntityMetadata> metadatas;
     SparseSet entities;
 };
 } // namespace ecs
