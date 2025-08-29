@@ -55,17 +55,19 @@ class Scene
     void update_transform(ecs::entity entity, glm::mat4 transform);
 
   public:
+    void update();
     void ui_draw_scene();
+    void ui_draw_inspector();
 
     std::unordered_map<std::filesystem::path, LoadedNode> nodes;
     std::vector<ecs::entity> scene;
+    std::vector<ecs::entity> pending_transforms;
 
     std::vector<Handle<gfx::Geometry>> geometries;
     std::vector<Handle<gfx::Image>> images;
     std::vector<Handle<gfx::Texture>> textures;
     std::vector<Handle<gfx::Material>> materials;
     std::vector<std::vector<Handle<gfx::Mesh>>> meshes;
-
     UIState ui;
 };
 

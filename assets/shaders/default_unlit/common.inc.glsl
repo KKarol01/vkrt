@@ -24,6 +24,7 @@ layout(scalar, push_constant) uniform PushConstants
 #define meshlet_ids     storageBuffers_GPUMeshletIdsBuffer[meshlet_instance_index].ids_us
 #define culled_ids      storageBuffers_GPUPostCullIdsBuffer[meshlet_ids_index].ids_us
 #define meshlets_bs     storageBuffers_GPUMeshletBoundingSpheresBuffer[meshlet_bs_index].bounding_spheres_us
+#define transforms     storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
 #define hiz_pyramid     combinedImages_2d[hiz_pyramid_index]
 #define hiz_debug       combinedImages_2d[hiz_debug_index]
 #endif

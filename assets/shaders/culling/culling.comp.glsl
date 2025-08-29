@@ -96,7 +96,7 @@ void main()
     if(instance_ids.count <= x) { return; }
 
     GPUInstanceId id = instance_ids.ids_us[x];
-    vec4 bs = instance_bs[x];
+    vec4 bs = vec4(vec3(transforms[id.resource_id] * vec4(instance_bs[x].xyz, 1.0)), instance_bs[x].w);
 
     if(frustum_cull(bs) && occlusion_cull(bs, constants.proj[0][0], constants.proj[1][1]))
     {

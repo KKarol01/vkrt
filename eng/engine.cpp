@@ -138,16 +138,6 @@ void Engine::init()
     ui->init();
     renderer->init();
     imgui_renderer->init();
-
-    ui->add_tab(UI::Tab{ .name = "Inspector", .location = UI::Location::RIGHT_PANE, .cb_func = [] {
-                            if(ImGui::Begin("Inspector")) { ImGui::Text("Text"); }
-                            ImGui::End();
-                        } });
-    ui->add_tab(UI::Tab{ .name = "Output", .location = UI::Location::BOTTOM_PANE, .cb_func = [] {
-                            ImGui::Begin("Output");
-                            ImGui::Text("Text");
-                            ImGui::End();
-                        } });
 }
 
 void Engine::destroy() { this->~Engine(); }
@@ -163,6 +153,7 @@ void Engine::start()
             on_update.signal();
             camera->update();
             ui->update();
+            scene->update();
             renderer->update();
             ++frame_num;
             last_frame_time = now;

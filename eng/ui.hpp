@@ -33,7 +33,6 @@ class UI
 
     void init();
     void update();
-    void render();
     void add_tab(const Tab& t) { tabs.emplace_back(t); }
     std::vector<Tab> tabs;
     uint32_t viewport_imid;

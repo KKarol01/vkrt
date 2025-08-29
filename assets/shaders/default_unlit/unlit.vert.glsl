@@ -14,14 +14,19 @@ layout(location = 0) out VsOut {
 vsout;
 
 void main() {
+    
+    vsout.instance_index = uint(culled_ids[gl_InstanceIndex]);
+    GPUInstanceId gpuid = meshlet_ids[vsout.instance_index];
+    vsout.instance_index *= 0x6F7DEF7;
+
     vec3 pos = vertex_pos_arr[gl_VertexIndex];
-    vec4 vpos = constants.proj_view * vec4(pos, 1.0);
-
-//    GPUInstanceId id = meshlet_ids[culled_ids[gl_InstanceIndex]];
-//    vec4 bs = meshlets_bs[culled_ids[gl_InstanceIndex]];
+    vec4 vpos = constants.proj_view * transforms[gpuid.resource_id] * vec4(pos, 1.0);
 
 
-    vsout.instance_index = uint(culled_ids[gl_InstanceIndex] * 0x6F7DEF7);
+    // GPUInstanceId id = meshlet_ids[culled_ids[gl_InstanceIndex]];
+    // vec4 bs = meshlets_bs[culled_ids[gl_InstanceIndex]];
+
+     
     gl_Position = vpos;
 
     // vsout.position = vec3(transforms_arr[gl_InstanceIndex] * vec4(vertex_pos_arr[gl_VertexIndex], 1.0));

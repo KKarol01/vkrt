@@ -66,9 +66,9 @@
 
 struct GPUInstanceId
 {
-    uint32_t batch_id;  // index to indirect draw command for culling
-    uint32_t transform; // index to transform
-    uint32_t material;  // index to material
+    uint32_t batch_id;      // index to indirect draw command for culling
+    uint32_t resource_id;   // index to any per instance resource
+    uint32_t material;      // index to material
 };
 
 struct DrawIndirectCommand

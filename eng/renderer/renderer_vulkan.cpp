@@ -472,6 +472,7 @@ void RendererVulkan::init()
     ENG_SET_HANDLE_DISPATCHER(gfx::Shader, { return &gfx::RendererVulkan::get_instance()->shaders.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(gfx::Pipeline, { return &gfx::RendererVulkan::get_instance()->pipelines.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(gfx::Sampler, { return &gfx::RendererVulkan::get_instance()->samplers.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(gfx::MeshPass, { return &gfx::RendererVulkan::get_instance()->mesh_passes.at(handle); });
 
     initialize_vulkan();
     initialize_resources();
@@ -1000,10 +1001,7 @@ void RendererVulkan::update()
         // staging_buffer->stage(vsm.constants_buffer, vsmconsts, 0ull);
     }
 
-    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT))
-    {
-        std::swap(geom_main_bufs.transform_bufs[0], geom_main_bufs.transform_bufs[1]);
-    }
+    if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { build_transforms_buffer(); }
 
     uint32_t old_triangles = *((uint32_t*)geom_main_bufs.buf_draw_cmds->memory + 1);
     bake_indirect_commands();
@@ -1356,26 +1354,17 @@ Image& RendererVulkan::get_image(Handle<Image> image) { return image.get(); }
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
-    const auto* transform = Engine::get().ecs->get<ecs::Transform>(settings.entity);
     const auto* mr = Engine::get().ecs->get<eng::ecs::MeshRenderer>(settings.entity);
-    if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
+    const auto* transform = Engine::get().ecs->get<ecs::Transform>(settings.entity);
     if(!mr) { return {}; }
+    if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
     for(const auto& e : mr->meshes)
     {
         meshlets_to_instance.push_back(MeshletInstance{ .geometry = e->geometry, .material = e->material, .index = mesh_instance_index });
     }
     assert(entities.size() == mesh_instance_index);
     entities.push_back(settings.entity);
-    if(!flags.test(RenderFlags::DIRTY_TRANSFORMS_BIT))
-    {
-        flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
-        // staging_manager->copy(geom_main_bufs.transform_bufs[1], geom_main_bufs.transform_bufs[0], 0,
-        //                       { 0, geom_main_bufs.transform_bufs[0]->size });
-        // staging_manager->flush();
-        // staging_manager->wait_for_sync();
-    }
-    // staging_manager->copy(geom_main_bufs.transform_bufs[1], &transform->global, mesh_instance_index * sizeof(glm::mat4),
-    //                       { 0, sizeof(glm::mat4) });
+    flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
     return Handle<Mesh>{ mesh_instance_index++ };
 }
 
@@ -1467,10 +1456,12 @@ void RendererVulkan::compile_shaders()
                 out_spv.resize((pc_spv_file_size - sizeof(pc_spv_hash)) / sizeof(out_spv[0]));
                 pc_spv_file.read(reinterpret_cast<char*>(out_spv.data()), pc_spv_file_size - 8);
             }
+            pc_spv_file.close();
         }
 
         if(out_spv.empty())
         {
+            ENG_LOG("Compiling shader {}", shader.path.string());
             shaderc::Compiler shccomp;
             t1 = std::chrono::high_resolution_clock::now();
             const auto res = shccomp.CompileGlslToSpv(shader_str, shckind, shader.path.filename().string().c_str(), shcopts);
@@ -1521,7 +1512,7 @@ void RendererVulkan::compile_pipelines()
 
 void RendererVulkan::bake_indirect_commands()
 {
-    if(!meshlets_to_instance.empty())
+    if(meshlets_to_instance.size())
     {
         for(const auto& e : meshlets_to_instance)
         {
@@ -1586,7 +1577,7 @@ void RendererVulkan::bake_indirect_commands()
         }
 
         ++multibatches.at(pp_off).count;
-        gpu_ids.at(i) = { (uint32_t)cmd_off, ~0ul, ~0ul };
+        gpu_ids.at(i) = { (uint32_t)cmd_off, mi.index, ~0ul };
     }
     gpu_cmds.resize(cmd_off + 1);
     multibatches.resize(pp_off + 1);
@@ -1595,9 +1586,8 @@ void RendererVulkan::bake_indirect_commands()
     std::vector<glm::vec4> gpu_bbs(meshlet_instances.size());
     for(auto i = 0u; i < meshlet_instances.size(); ++i)
     {
-        // todo: use transform
         const auto& e = meshlet_instances.at(i);
-        gpu_bbs.at(i) = meshlets.at(e.global_meshlet).bounding_sphere;
+        gpu_bbs.at(i) = meshlets.at(e.global_meshlet).bounding_sphere; // multiplied with transform mat on the gpu for now
     }
 
     const auto gpu_cmd_count = (uint32_t)gpu_cmds.size();
@@ -1610,6 +1600,19 @@ void RendererVulkan::bake_indirect_commands()
     staging_manager->copy(geom_main_bufs.buf_draw_ids, gpu_ids, 8);
     staging_manager->resize(geom_main_bufs.buf_final_draw_ids, meshlet_instances.size() * 4);
     staging_manager->copy(geom_main_bufs.buf_draw_bs, gpu_bbs, 0);
+}
+
+void RendererVulkan::build_transforms_buffer()
+{
+    std::vector<glm::mat4> ts(entities.size());
+    size_t off = 0;
+    for(auto e : entities)
+    {
+        auto* t = Engine::get().ecs->get<ecs::Transform>(e);
+        ts.at(off++) = t->global;
+    }
+    std::swap(geom_main_bufs.transform_bufs[0], geom_main_bufs.transform_bufs[1]);
+    staging_manager->copy(geom_main_bufs.transform_bufs[0], ts, 0ull);
 }
 
 void RendererVulkan::build_blas()

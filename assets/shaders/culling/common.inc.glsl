@@ -25,6 +25,7 @@ layout(scalar, push_constant) uniform PushConstants
 #define post_cull_instance_ids      storageBuffers_GPUPostCullIdsBuffer[post_cull_ids_index].ids_us
 #define instance_bs                 storageBuffers_GPUMeshletBoundingSpheresBuffer[bs_index].bounding_spheres_us
 #define indirect_cmds               storageBuffers_GPUDrawIndirectCommandsBuffer[indirect_commands_index]
+#define transforms                  storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
 #define hiz_source                  combinedImages_2d[hiz_source_index]
 #define hiz_dest                    storageImages_2dr16f[hiz_dest_index]
 #define hiz_debug                   storageImages_2drgba32f[hiz_dest_index]

@@ -265,7 +265,9 @@ static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
 void Scene::init()
 {
     Engine::get().ui->add_tab(UI::Tab{
-        .name = "Scene hierarchy", .location = UI::Location::LEFT_PANE, .cb_func = [this] { ui_draw_scene(); } });
+        .name = "Scene", .location = UI::Location::LEFT_PANE, .cb_func = [this] { ui_draw_scene(); } });
+    Engine::get().ui->add_tab(UI::Tab{
+        .name = "Inspector", .location = UI::Location::RIGHT_PANE, .cb_func = [this] { ui_draw_inspector(); } });
 }
 
 ecs::entity Scene::load_from_file(const std::filesystem::path& _path)
@@ -324,6 +326,8 @@ ecs::entity Scene::load_from_file(const std::filesystem::path& _path)
     {
         root = ecsr->create();
         ecsr->emplace<ecs::Node>(root, ecs::Node{ .name = filepath.stem().string() });
+        ecsr->emplace<ecs::Transform>(root, ecs::Transform{ .local = glm::identity<glm::mat4>(),
+                                                            .global = glm::identity<glm::mat4>() });
         for(const auto& fsni : fscene.nodeIndices)
         {
             ecsr->make_child(root, load_node(fscene, fasset, fasset.nodes.at(fsni), ctx));
@@ -352,9 +356,72 @@ ecs::entity Scene::instance_entity(ecs::entity node)
     return root;
 }
 
+void Scene::update_transform(ecs::entity entity, glm::mat4 transform)
+{
+    if(entity == ecs::INVALID_ENTITY) { return; }
+    auto* et = Engine::get().ecs->get<ecs::Transform>(entity);
+    if(!et)
+    {
+        ENG_WARN("Entity does not have transform component.");
+        return;
+    }
+    et->local = transform;
+
+    Engine::get().ecs->traverse_hierarchy(entity, [this](auto e, auto p) {
+        auto it = std::lower_bound(pending_transforms.begin(), pending_transforms.end(), e);
+        if(it != pending_transforms.end() && *it == e) { pending_transforms.erase(it); }
+    });
+
+    auto it = std::lower_bound(pending_transforms.begin(), pending_transforms.end(), entity);
+    pending_transforms.insert(it, entity);
+}
+
+void Scene::update()
+{
+    // Relies on pending transforms not having child nodes of other nodes (no two nodes from the same hierarchy)
+    if(pending_transforms.size())
+    {
+        while(pending_transforms.size())
+        {
+            const auto entity = pending_transforms.back();
+            pending_transforms.pop_back();
+            const auto parent = Engine::get().ecs->get_parent(entity);
+
+            std::stack<ecs::entity> echs;
+            std::stack<glm::mat4> ts;
+            echs.push(entity);
+            if(parent != ecs::INVALID_ENTITY)
+            {
+                auto* pt = Engine::get().ecs->get<ecs::Transform>(parent);
+                ts.push(pt->global);
+            }
+            else { ts.push(glm::identity<glm::mat4>()); }
+
+            while(echs.size())
+            {
+                assert(ts.size() == echs.size());
+                auto e = echs.top();
+                auto pt = ts.top();
+                echs.pop();
+                ts.pop();
+                auto* t = Engine::get().ecs->get<ecs::Transform>(e);
+                t->global = t->local * pt;
+                Engine::get().renderer->update_transform(e);
+                const auto& ech = Engine::get().ecs->get_children(e);
+                for(auto i = 0u; i < ech.size(); ++i)
+                {
+                    ts.push(t->global);
+                    echs.push(ech.at(i));
+                }
+            }
+        }
+        pending_transforms.clear();
+    }
+}
+
 void Scene::ui_draw_scene()
 {
-    if(ImGui::Begin("Scene hierarchy"))
+    if(ImGui::Begin("Scene"))
     {
         const auto draw_hierarchy = [this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
             const auto enode = reg->get<ecs::Node>(e);
@@ -399,6 +466,44 @@ void Scene::ui_draw_scene()
         for(const auto& e : scene)
         {
             draw_hierarchy(Engine::get().ecs, e, draw_hierarchy);
+        }
+    }
+    ImGui::End();
+}
+
+void Scene::ui_draw_inspector()
+{
+    if(ImGui::Begin("Inspector") && ui.scene.sel_entity != ecs::INVALID_ENTITY)
+    {
+        auto* ecs = Engine::get().ecs;
+        auto& entity = ui.scene.sel_entity;
+        auto* cnode = ecs->get<ecs::Node>(entity);
+        auto* ctransform = ecs->get<ecs::Transform>(entity);
+        auto* cmeshr = ecs->get<ecs::MeshRenderer>(entity);
+        assert(cnode && ctransform);
+        ImGui::SeparatorText("Node");
+        ImGui::Text("%s", cnode->name.c_str());
+        ImGui::SeparatorText("Transform");
+        if(ImGui::DragFloat3("Position", &ctransform->local[3].x)) { update_transform(entity, ctransform->local); }
+
+        if(cmeshr)
+        {
+            ImGui::SeparatorText("MeshRenderer");
+            ImGui::Text("%s", cmeshr->name.c_str());
+            if(cmeshr->meshes.size())
+            {
+                ImGui::Indent();
+                for(auto& e : cmeshr->meshes)
+                {
+                    auto& material = e->material.get();
+                    ImGui::Text(material.mesh_pass->name.c_str());
+                    if(material.base_color_texture)
+                    {
+                        ImGui::Image(*material.base_color_texture + 1, { 128.0f, 128.0f });
+                    }
+                }
+                ImGui::Unindent();
+            }
         }
     }
     ImGui::End();

@@ -51,7 +51,7 @@ struct GeometryBuffers
     Handle<Buffer> buf_final_draw_ids; // post cull instance ids
     Handle<Buffer> buf_draw_bs;        // bouding spheres
     Handle<Buffer> buf_draw_settings;  // draw settings (for cullling)
-    Handle<Buffer> transform_bufs[2];
+    Handle<Buffer> transform_bufs[2]{};
 
     VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
     size_t vertex_count{};
@@ -279,6 +279,7 @@ class RendererVulkan : public Renderer
     void compile_shaders();
     void compile_pipelines();
     void bake_indirect_commands();
+    void build_transforms_buffer();
 
     void build_blas();
     void build_tlas();
@@ -333,7 +334,7 @@ class RendererVulkan : public Renderer
 
     uint32_t mesh_instance_index{}; // todo: reuse slots
     std::vector<MeshletInstance> meshlet_instances;
-    std::vector<ecs::entity> entities;
+    std::vector<ecs::entity> entities; // indexed via meshlet_intsances[0].index
     std::vector<MultiBatch> multibatches;
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> hiz_pipeline;

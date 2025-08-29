@@ -194,6 +194,12 @@ class Registry
         }
     }
 
+    entity get_parent(entity e) const
+    {
+        if(!is_valid(e)) { return INVALID_ENTITY; }
+        return metadatas.at(e).parent;
+    }
+
     const std::vector<entity>& get_children(entity e) const
     {
         if(is_valid(e)) { return metadatas.at(e).children; }
