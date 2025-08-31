@@ -28,6 +28,7 @@ void UI::init()
             left_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Left, 0.2f, nullptr, &viewport_imid);
             right_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Right, 0.25f, nullptr, &viewport_imid);
             bottom_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Down, 0.3f, nullptr, &viewport_imid);
+            viewport_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Down, 0.0f, nullptr, &viewport_imid);
 
             for(const auto& e : tabs)
             {
@@ -48,8 +49,18 @@ void UI::init()
                     ImGui::DockBuilderDockWindow(e.name.c_str(), bottom_imid);
                     break;
                 }
+                case Location::CENTER_PANE:
+                {
+                    ImGui::DockBuilderDockWindow(e.name.c_str(), viewport_imid);
+                    break;
+                }
+                case Location::NEW_PANE:
+                {
+                    break;
+                }
                 default:
                 {
+                    ENG_ERROR("Unrecognized case");
                     break;
                 }
                 }

@@ -29,7 +29,7 @@ struct Node
     std::string name;
 };
 
-struct MeshRenderer
+struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> meshes;

@@ -4,6 +4,7 @@
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <stb/stb_image.h>
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
@@ -12,6 +13,11 @@
 #include <eng/common/logger.hpp>
 #include <eng/common/paths.hpp>
 #include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/camera.hpp>
+#include <third_party/imgui/imgui.h>
+#include <third_party/imgui/imgui_internal.h>
+#include <third_party/ImGuizmo/ImGuizmo.h>
 
 namespace eng
 {
@@ -220,7 +226,7 @@ static void load_mesh(ecs::entity e, const fastgltf::Asset& asset, const fastglt
     if(ctx.meshes.size() <= *node.meshIndex) { ctx.meshes.resize(asset.meshes.size()); }
     if(ctx.meshes.at(*node.meshIndex).meshes.size())
     {
-        ecsr->emplace<ecs::MeshRenderer>(e, ctx.meshes.at(*node.meshIndex));
+        ecsr->emplace<ecs::Mesh>(e, ctx.meshes.at(*node.meshIndex));
         return;
     }
 
@@ -233,7 +239,7 @@ static void load_mesh(ecs::entity e, const fastgltf::Asset& asset, const fastglt
         const auto mat = load_material(asset, fm.primitives.at(i), ctx);
         m.meshes.at(i) = Engine::get().renderer->make_mesh(gfx::MeshDescriptor{ .geometry = geom, .material = mat });
     }
-    ecsr->emplace<ecs::MeshRenderer>(e, m);
+    ecsr->emplace<ecs::Mesh>(e, m);
 }
 
 static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset& asset, const fastgltf::Node& node,
@@ -268,6 +274,8 @@ void Scene::init()
         .name = "Scene", .location = UI::Location::LEFT_PANE, .cb_func = [this] { ui_draw_scene(); } });
     Engine::get().ui->add_tab(UI::Tab{
         .name = "Inspector", .location = UI::Location::RIGHT_PANE, .cb_func = [this] { ui_draw_inspector(); } });
+    Engine::get().ui->add_tab(UI::Tab{
+        .name = "Manipulate", .location = UI::Location::CENTER_PANE, .cb_func = [this] { ui_draw_manipulate(); } });
 }
 
 ecs::entity Scene::load_from_file(const std::filesystem::path& _path)
@@ -350,13 +358,13 @@ ecs::entity Scene::instance_entity(ecs::entity node)
     auto* r = Engine::get().renderer;
     auto root = ecs->clone(node);
     ecs->traverse_hierarchy(root, [ecs, r](auto p, auto e) {
-        if(ecs->has<ecs::MeshRenderer>(e)) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
+        if(ecs->has<ecs::Mesh>(e)) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
     });
     scene.push_back(root);
     return root;
 }
 
-void Scene::update_transform(ecs::entity entity, glm::mat4 transform)
+void Scene::update_transform(ecs::entity entity)
 {
     if(entity == ecs::INVALID_ENTITY) { return; }
     auto* et = Engine::get().ecs->get<ecs::Transform>(entity);
@@ -365,7 +373,6 @@ void Scene::update_transform(ecs::entity entity, glm::mat4 transform)
         ENG_WARN("Entity does not have transform component.");
         return;
     }
-    et->local = transform;
 
     Engine::get().ecs->traverse_hierarchy(entity, [this](auto e, auto p) {
         auto it = std::lower_bound(pending_transforms.begin(), pending_transforms.end(), e);
@@ -442,15 +449,11 @@ void Scene::ui_draw_scene()
                 ImGui::SameLine();
             }
             {
-                bool is_sel = imhid == ui.scene.sel_id;
+                bool is_sel = e == ui.scene.sel_entity;
                 auto cpos = ImGui::GetCursorScreenPos();
                 ImGui::SetCursorScreenPos(cpos + ImVec2{ -ImGui::GetStyle().ItemSpacing.x * 0.5f, 0.0f });
                 ImGui::GetItemRectSize();
-                if(ImGui::Selectable(enode->name.c_str(), &is_sel))
-                {
-                    ui.scene.sel_id = imhid;
-                    ui.scene.sel_entity = e;
-                }
+                if(ImGui::Selectable(enode->name.c_str(), &is_sel)) { ui.scene.sel_entity = e; }
             }
             if(ui_node.expanded)
             {
@@ -473,39 +476,75 @@ void Scene::ui_draw_scene()
 
 void Scene::ui_draw_inspector()
 {
-    if(ImGui::Begin("Inspector") && ui.scene.sel_entity != ecs::INVALID_ENTITY)
+    if(ui.scene.sel_entity == ecs::INVALID_ENTITY) { return; }
+
+    auto* ecs = Engine::get().ecs;
+    auto& entity = ui.scene.sel_entity;
+    auto* ctransform = ecs->get<ecs::Transform>(entity);
+    auto* cnode = ecs->get<ecs::Node>(entity);
+    auto* cmesh = ecs->get<ecs::Mesh>(entity);
+
+    if(ImGui::Begin("Inspector"))
     {
-        auto* ecs = Engine::get().ecs;
-        auto& entity = ui.scene.sel_entity;
-        auto* cnode = ecs->get<ecs::Node>(entity);
-        auto* ctransform = ecs->get<ecs::Transform>(entity);
-        auto* cmeshr = ecs->get<ecs::MeshRenderer>(entity);
         assert(cnode && ctransform);
         ImGui::SeparatorText("Node");
-        ImGui::Text("%s", cnode->name.c_str());
         ImGui::SeparatorText("Transform");
-        if(ImGui::DragFloat3("Position", &ctransform->local[3].x)) { update_transform(entity, ctransform->local); }
-
-        if(cmeshr)
+        if(ImGui::DragFloat3("Position", &ctransform->local[3].x)) { update_transform(entity); }
+        if(cmesh)
         {
-            ImGui::SeparatorText("MeshRenderer");
-            ImGui::Text("%s", cmeshr->name.c_str());
-            if(cmeshr->meshes.size())
+            ImGui::SeparatorText("Mesh renderer");
+            ImGui::Text(cmesh->name.c_str());
+            if(cmesh->meshes.size())
             {
-                ImGui::Indent();
-                for(auto& e : cmeshr->meshes)
+                // ImGui::Indent();
+                for(auto& e : cmesh->meshes)
                 {
                     auto& material = e->material.get();
-                    ImGui::Text(material.mesh_pass->name.c_str());
+                    ImGui::Text("Pass: %s", material.mesh_pass->name.c_str());
                     if(material.base_color_texture)
                     {
                         ImGui::Image(*material.base_color_texture + 1, { 128.0f, 128.0f });
                     }
                 }
-                ImGui::Unindent();
+                // ImGui::Unindent();
             }
         }
     }
+    ImGui::End();
+}
+
+void Scene::ui_draw_manipulate()
+{
+    if(ui.scene.sel_entity == ecs::INVALID_ENTITY) { return; }
+
+    auto* ecs = Engine::get().ecs;
+    auto& entity = ui.scene.sel_entity;
+    auto* ctransform = ecs->get<ecs::Transform>(entity);
+    auto* cnode = ecs->get<ecs::Node>(entity);
+    auto* cmesh = ecs->get<ecs::Mesh>(entity);
+
+    auto& io = ImGui::GetIO();
+    auto* imnode = ImGui::DockBuilderGetNode(Engine::get().ui->viewport_imid);
+
+    ImGui::Begin("Manipulate", 0, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+    // ImGuizmo::SetDrawlist();
+
+    // const auto view = Engine::get().camera->get_view();
+    // auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
+    // proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
+    // const auto window_width = ImGui::GetWindowWidth();
+    // const auto window_height = ImGui::GetWindowHeight();
+    // const auto window_pos = ImGui::GetWindowPos();
+    // glm::mat4 tr{ 1.0f };
+    // ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+    // auto translation = ctransform->global;
+    // glm::mat4 delta;
+    // if(ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::OPERATION::TRANSLATE, ImGuizmo::MODE::LOCAL,
+    //                         &ctransform->local[0][0]))
+    //{
+    //     update_transform(entity);
+    // }
+
     ImGui::End();
 }
 

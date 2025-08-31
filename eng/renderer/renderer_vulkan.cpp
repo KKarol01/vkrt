@@ -1354,7 +1354,7 @@ Image& RendererVulkan::get_image(Handle<Image> image) { return image.get(); }
 
 Handle<Mesh> RendererVulkan::instance_mesh(const InstanceSettings& settings)
 {
-    const auto* mr = Engine::get().ecs->get<eng::ecs::MeshRenderer>(settings.entity);
+    const auto* mr = Engine::get().ecs->get<eng::ecs::Mesh>(settings.entity);
     const auto* transform = Engine::get().ecs->get<ecs::Transform>(settings.entity);
     if(!mr) { return {}; }
     if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }

@@ -72,9 +72,10 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
 
 bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
     vec3 center = vec3(constants.debug_view * vec4(bounding_sphere.xyz, 1.0));
-    center.y *= -1.0;
+    center.y *= -1.0; // -y because projection matrix does that
     float radius = max(bounding_sphere.w, 0.4) * 1.2;
 	vec4 aabb;
+    // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.
 	if (project_sphere_bounds(vec3(center.xy, -center.z), radius, 0.1, P00, P11, aabb))
 	{
 		float width = (aabb.z - aabb.x) * float(textureSize(hiz_source, 0).x);

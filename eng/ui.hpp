@@ -20,6 +20,7 @@ class UI
         LEFT_PANE,
         RIGHT_PANE,
         BOTTOM_PANE,
+        CENTER_PANE,
     };
 
     struct Tab

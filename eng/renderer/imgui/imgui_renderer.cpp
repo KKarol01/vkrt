@@ -9,6 +9,7 @@
 #include <third_party/imgui/imgui_internal.h>
 #include <third_party/imgui/backends/imgui_impl_glfw.h>
 #include <third_party/imgui/backends/imgui_impl_vulkan.h>
+#include <third_party/ImGuizmo/ImGuizmo.h>
 
 namespace eng
 {
@@ -55,20 +56,6 @@ void ImGuiRenderer::init()
         .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
         .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE } });
 
-    // cmdpool = r->submit_queue->make_command_pool();
-
-    // font_image = r->batch_image(ImageDescriptor{
-    //     .name = "imgui font",
-    //     .width = (uint32_t)width,
-    //     .height = (uint32_t)height,
-    //     .depth = 1,
-    //     .format = ImageFormat::R8G8B8A8_UNORM,
-    //     .type = ImageType::TYPE_2D,
-    //     .data = std::as_bytes(std::span{ pixels, upload_size }),
-    // });
-
-    // font_texture = r->batch_texture(TextureDescriptor{ font_image, sampler });
-
     vertex_buffer = r->make_buffer(BufferDescriptor{ "imgui vertex buffer", 1024 * 1024, BufferUsage::STORAGE_BIT });
     index_buffer = r->make_buffer(BufferDescriptor{ "imgui index buffer", 1024 * 1024, BufferUsage::INDEX_BIT });
 }
@@ -78,6 +65,7 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     auto* r = RendererVulkan::get_instance();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 
     ui_callbacks.signal();
 

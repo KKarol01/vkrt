@@ -22,7 +22,6 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
 };
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
-    : projection{ glm::perspectiveFov(glm::radians(80.0f), static_cast<float>(1280.0f), static_cast<float>(768.0f), min_dist, max_dist) }
 {
     GLFWwindow* window = Engine::get().window->window;
     projection = infinitePerspectiveFovReverseZRH_ZO(glm::radians(75.0f), 1280.0f, 768.0f, 0.1f);

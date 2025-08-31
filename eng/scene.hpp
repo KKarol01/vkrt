@@ -24,7 +24,7 @@ struct LoadedNode
     std::vector<Handle<gfx::Sampler>> samplers;
     std::vector<Handle<gfx::Texture>> textures;
     std::vector<Handle<gfx::Material>> materials;
-    std::vector<ecs::MeshRenderer> meshes;
+    std::vector<ecs::Mesh> meshes;
 };
 
 class Scene
@@ -39,7 +39,6 @@ class Scene
                 // bool selected{};
             };
             ecs::entity sel_entity{ ecs::INVALID_ENTITY };
-            uint32_t sel_id{ ~0u };
             std::unordered_map<uint32_t, Node> nodes;
         };
 
@@ -52,12 +51,13 @@ class Scene
     ecs::entity load_from_file(const std::filesystem::path& path);
     ecs::entity instance_entity(ecs::entity node);
 
-    void update_transform(ecs::entity entity, glm::mat4 transform);
+    void update_transform(ecs::entity entity);
 
   public:
     void update();
     void ui_draw_scene();
     void ui_draw_inspector();
+    void ui_draw_manipulate();
 
     std::unordered_map<std::filesystem::path, LoadedNode> nodes;
     std::vector<ecs::entity> scene;
