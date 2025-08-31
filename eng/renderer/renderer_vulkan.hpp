@@ -100,18 +100,6 @@ struct DDGI
     Handle<Image> probe_offsets_texture;
 };
 
-struct Swapchain
-{
-    void create(VkDevice dev, uint32_t image_count, uint32_t width, uint32_t height);
-    uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* = nullptr);
-    Image& get_current_image();
-    VkImageView& get_current_view();
-    VkSwapchainKHR swapchain{};
-    std::vector<Handle<Image>> images;
-    std::vector<Handle<ImageView>> views;
-    uint32_t current_index{ 0ul };
-};
-
 struct GBuffer
 {
     Handle<Image> color_image{};
@@ -225,6 +213,14 @@ struct VkSamplerMetadata
     static VkSamplerMetadata& get(Sampler& a);
     // static const VkSamplerMetadata& get(const Sampler& a);
     VkSampler sampler{};
+};
+
+struct VkSwapchainMetadata
+{
+    static void init(Swapchain& a);
+    static void destroy(Swapchain& a);
+    static VkSwapchainMetadata& get(Swapchain& a);
+    VkSwapchainKHR swapchain{};
 };
 
 struct MeshletInstance

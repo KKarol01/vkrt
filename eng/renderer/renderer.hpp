@@ -431,6 +431,18 @@ struct VsmData
     // VkImageView view_dir_light_page_table_rgb8_general{};
 };
 
+struct Swapchain
+{
+    explicit Swapchain(uint32_t num_images);
+    uint32_t acquire(VkResult* res, uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* = nullptr);
+    Handle<Image> get_current_image();
+    Handle<ImageView> get_current_view();
+    void* metadata{};
+    std::vector<Handle<Image>> images;
+    std::vector<Handle<ImageView>> views;
+    uint32_t current_index{ 0ul };
+};
+
 class Renderer
 {
   public:
