@@ -5,7 +5,7 @@
 #define NUM_SAMPLES 512
 
 #ifndef NO_BINDLESS_STRUCTS_INCLUDE
-#include "./bindless_structures.inc.glsl"
+#include "./bindless_structures.glsli"
 #endif
 
 #ifndef NO_PUSH_CONSTANTS

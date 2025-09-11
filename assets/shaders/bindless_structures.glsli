@@ -30,7 +30,7 @@
 #define ENG_TYPE_UINT4 uvec4
 
 #define ENG_TYPE_FLOAT2 vec2
-#define ENG_TYPE_FLOAT3 vec3
+#define ENT_TYPE_VEC3 vec3
 #define ENG_TYPE_FLOAT4 vec4
 
 #define ENG_TYPE_MAT3 mat3
@@ -52,7 +52,7 @@
 #define ENG_TYPE_UINT4 glm::uvec4
 
 #define ENG_TYPE_FLOAT2 glm::vec2
-#define ENG_TYPE_FLOAT3 glm::vec3
+#define ENT_TYPE_VEC3 glm::vec3
 #define ENG_TYPE_FLOAT4 glm::vec4
 
 #define ENG_TYPE_MAT3 glm::mat3
@@ -64,13 +64,6 @@
 #define ENG_DECLARE_BINDLESS(type)
 #endif
 
-struct GPUInstanceId
-{
-    uint32_t batch_id;      // index to indirect draw command for culling
-    uint32_t resource_id;   // index to any per instance resource
-    uint32_t material;      // index to material
-};
-
 struct DrawIndirectCommand
 {
     ENG_TYPE_UINT indexCount;
@@ -80,34 +73,20 @@ struct DrawIndirectCommand
     ENG_TYPE_UINT firstInstance;
 };
 ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndirectCommandsBuffer) {
-    ENG_TYPE_UINT max_draw_count;
-    ENG_TYPE_UINT post_cull_triangle_count;
     ENG_TYPE_UNSIZED(DrawIndirectCommand, commands);
 } ENG_DECLARE_BINDLESS(GPUDrawIndirectCommandsBuffer);
-
-ENG_DECLARE_STORAGE_BUFFER(GPUConstantsBuffer) {
-    ENG_TYPE_MAT4 debug_view;
-    ENG_TYPE_MAT4 view;
-    ENG_TYPE_MAT4 proj;
-    ENG_TYPE_MAT4 proj_view;
-    ENG_TYPE_MAT4 inv_view;
-    ENG_TYPE_MAT4 inv_proj;
-    ENG_TYPE_MAT4 inv_proj_view;
-    ENG_TYPE_MAT3 rand_mat;
-    ENG_TYPE_FLOAT3 cam_pos;
-} ENG_DECLARE_BINDLESS(GPUConstantsBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUIndicesBuffer) { 
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, indices); 
 } ENG_DECLARE_BINDLESS(GPUIndicesBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUVertexPositionsBuffer) { 
-    ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT3, positions); 
+    ENG_TYPE_UNSIZED(ENT_TYPE_VEC3, positions); 
 } ENG_DECLARE_BINDLESS(GPUVertexPositionsBuffer);
 
 struct GPUVertexAttribute
 {
-    ENG_TYPE_FLOAT3 normal;
+    ENT_TYPE_VEC3 normal;
     ENG_TYPE_FLOAT2 uv;
     ENG_TYPE_FLOAT4 tangent;
 };
@@ -144,9 +123,14 @@ ENG_DECLARE_STORAGE_BUFFER(GPUMeshletBoundingSpheresBuffer) {
     ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT4, bounding_spheres); 
 } ENG_DECLARE_BINDLESS(GPUMeshletBoundingSpheresBuffer);
 
+struct GPUInstanceId
+{
+    uint32_t batch_id;      // index to indirect draw command for culling
+    uint32_t resource_id;   // index to any per instance resource
+    uint32_t material;      // index to material
+};
 ENG_DECLARE_STORAGE_BUFFER(GPUMeshletIdsBuffer) {
     ENG_TYPE_UINT count;
-    ENG_TYPE_UINT padding0;
     ENG_TYPE_UNSIZED(GPUInstanceId, ids);
 } ENG_DECLARE_BINDLESS(GPUMeshletIdsBuffer);
 
@@ -163,7 +147,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUPostCullIdsBuffer) {
 ENG_DECLARE_STORAGE_BUFFER(GPUVsmConstantsBuffer) {
     ENG_TYPE_MAT4 dir_light_view;
     ENG_TYPE_MAT4 dir_light_proj_view[VSM_NUM_CLIPMAPS];
-    ENG_TYPE_FLOAT3 dir_light_dir;
+    ENT_TYPE_VEC3 dir_light_dir;
     ENG_TYPE_UINT num_pages_xy;
     ENG_TYPE_UINT max_clipmap_index;
     ENG_TYPE_FLOAT texel_resolution; // todo: rename; reconsider
@@ -186,6 +170,23 @@ struct FFTOceanSettings
     ENG_TYPE_FLOAT small_l;
 };
 
+ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) { 
+    ENG_TYPE_UINT vposb; // vertex positions buffer index
+    ENG_TYPE_UINT vatrb; // vertex attributes buffer index
+    ENG_TYPE_UINT vidxb; // index buffer index
+    ENG_TYPE_UINT rmbsb; // per-resource mesh bounding sphere buffer index
+    ENG_TYPE_UINT itrsb; // per-instance transform buffer index
+
+    ENG_TYPE_MAT4 view;
+    ENG_TYPE_MAT4 proj;
+    ENG_TYPE_MAT4 proj_view;
+    ENG_TYPE_MAT4 inv_view;
+    ENG_TYPE_MAT4 inv_proj;
+    ENG_TYPE_MAT4 inv_proj_view;
+    ENG_TYPE_MAT3 rand_mat;
+    ENT_TYPE_VEC3 cam_pos;
+} ENG_DECLARE_BINDLESS(GPUEngConstantsBuffer);
+
 #ifndef __cplusplus
 
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform usampler2D combinedImages_2du[];
@@ -203,14 +204,6 @@ layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rg32f) restrict unifor
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2DArray storageImages_2drgba8Array[];
 layout(set = 0, binding = BINDLESS_SAMPLED_IMAGE_BINDING) uniform texture2D textures_2d[];
 layout(set = 0, binding = BINDLESS_SAMPLER_BINDING) uniform sampler samplers[];
-
-#define constants storageBuffers_GPUConstantsBuffer[constants_index]
-#define vertex_pos_arr storageBuffers_GPUVertexPositionsBuffer[vertex_positions_index].positions_us
-#define attrib_pos_arr storageBuffers_GPUVertexAttributesBuffer[vertex_attributes_index].attributes_us
-#define transforms_arr storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
-#define meshes_arr storageBuffers_GPUMeshInstancesBuffer[meshes_index].mesh_instances_us
-#define meshlets_verts storageBuffers_GPUMeshletVerticesBuffer[meshlets_vertices_index].vertices_us
-#define meshlets_tris storageBuffers_GPUMeshletTrianglesBuffer[meshlets_triangles_index].triangles_us
 
 #endif
 

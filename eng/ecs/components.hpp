@@ -33,6 +33,7 @@ struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> meshes;
+    uint32_t gpu_resource{ ~0u };
 };
 
 } // namespace ecs

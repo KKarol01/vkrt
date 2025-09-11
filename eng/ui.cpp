@@ -20,7 +20,7 @@ void UI::init()
 {
     use_default_layout = !std::filesystem::exists("imgui.ini");
 
-    eng::Engine::get().imgui_renderer->add_ui_callback([this] {
+    eng::Engine::get().renderer->imgui_renderer->add_ui_callback([this] {
         viewport_imid = ImGui::GetID("viewport_dockspace");
         ImGui::DockSpaceOverViewport(viewport_imid, 0, ImGuiDockNodeFlags_PassthruCentralNode);
         if(use_default_layout)

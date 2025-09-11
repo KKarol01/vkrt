@@ -4,14 +4,8 @@
 
 layout(location = 0) in VsOut {
     vec3 position;
-    vec3 normal;
-    vec2 uv;
-    vec3 tangent;
     flat uint32_t instance_index;
-    vec3 water_normal;
-    flat vec2 aabb_center;
-}
-fsin;
+} fsin;
 
 layout(location = 0) out vec4 OUT_COLOR;
 // Constants (tweak these values as needed)
@@ -25,7 +19,7 @@ const float TRANSMISSION_INTENSITY = 0.5;
 const float REFRACT_IOR = 1.33; // approximate water IOR
 
 void main() {
-        const vec3 colors[10] = vec3[](
+    const vec3 colors[10] = vec3[](
         vec3(1.0, 0.0, 0.0),  // red
         vec3(0.0, 1.0, 0.0),  // green
         vec3(0.0, 0.0, 1.0),  // blue
@@ -39,7 +33,6 @@ void main() {
     );
 
     OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
-    //OUT_COLOR = vec4(1.0);
 
 #if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;

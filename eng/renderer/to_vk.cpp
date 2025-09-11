@@ -1,5 +1,4 @@
 #include <eng/common/to_vk.hpp>
-#include <eng/renderer/pipeline.hpp>
 #include <eng/renderer/renderer.hpp>
 
 // clang-format off
@@ -266,7 +265,7 @@ VkBufferUsageFlags to_vk(const Flags<BufferUsage>& a)
     return flags;
 }
 
-VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a)
+VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
 {
     VkPipelineStageFlags2 flags{};
     if(a == gfx::PipelineStage::NONE)               { flags |= VK_PIPELINE_STAGE_2_NONE; }
@@ -280,7 +279,7 @@ VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a)
     return flags;
 }
 
-VkAccessFlags2 to_vk(const PipelineAccessFlags& a)
+VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a)
 {
     VkAccessFlags2 flags{};
     if(a == gfx::PipelineAccess::NONE)                  { flags |= VK_ACCESS_2_NONE; }
@@ -307,6 +306,21 @@ VkPipelineBindPoint to_vk(const PipelineType & a)
         case PipelineType::RAYTRACING:  { return VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR; }
         default: { ENG_ERROR("Unhandled case."); return {}; }
     }
+}
+
+VkShaderStageFlags to_vk(const Flags<ShaderStage>& a)
+{
+    VkShaderStageFlags flags{};
+    if(a.test(ShaderStage::ALL))                { flags |= VK_SHADER_STAGE_ALL; }
+    if(a.test(ShaderStage::VERTEX_BIT))         { flags |= VK_SHADER_STAGE_VERTEX_BIT; }
+    if(a.test(ShaderStage::PIXEL_BIT))          { flags |= VK_SHADER_STAGE_FRAGMENT_BIT; }
+    if(a.test(ShaderStage::COMPUTE_BIT))        { flags |= VK_SHADER_STAGE_COMPUTE_BIT; }
+    if(a.test(ShaderStage::RAYGEN_BIT))         { flags |= VK_SHADER_STAGE_RAYGEN_BIT_KHR; }
+    if(a.test(ShaderStage::ANY_HIT_BIT))        { flags |= VK_SHADER_STAGE_ANY_HIT_BIT_KHR; }
+    if(a.test(ShaderStage::CLOSEST_HIT_BIT))    { flags |= VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR; }
+    if(a.test(ShaderStage::MISS_BIT))           { flags |= VK_SHADER_STAGE_MISS_BIT_KHR; }
+    if(a.test(ShaderStage::INTERSECTION_BIT))   { flags |= VK_SHADER_STAGE_INTERSECTION_BIT_KHR; }
+    return flags;
 }
 
 }

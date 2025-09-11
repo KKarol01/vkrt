@@ -1,6 +1,6 @@
 #include "./bindlesspool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
-#include <assets/shaders/bindless_structures.inc.glsl>
+#include <assets/shaders/bindless_structures.glsli>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/common/to_vk.hpp>
 
@@ -26,7 +26,7 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_SETS * MAX_SAMPLED_IMAGES },
         { VK_DESCRIPTOR_TYPE_SAMPLER, MAX_SETS * MAX_SAMPLERS },
     };
-    if(RendererVulkan::get_instance()->supports_raytracing)
+    if(RendererBackendVulkan::get_instance()->supports_raytracing)
     {
         sizes.push_back({ VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, MAX_AS });
     }
@@ -49,7 +49,7 @@ BindlessPool::BindlessPool(VkDevice dev) noexcept : dev(dev)
 
     const auto binding_flag = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
                               VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-    if(RendererVulkan::get_instance()->supports_raytracing)
+    if(RendererBackendVulkan::get_instance()->supports_raytracing)
     {
         bindings.push_back({ BINDLESS_ACCELERATION_STRUCT_BINDING, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
                              MAX_SETS * MAX_AS, VK_SHADER_STAGE_ALL });

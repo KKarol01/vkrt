@@ -7,6 +7,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/renderer/staging_buffer.hpp>
 #include <eng/scene.hpp>
 #include <eng/ui.hpp>
 #include <eng/ecs/ecs.hpp>
@@ -122,8 +123,7 @@ void Engine::init()
 
     window = new Window{ 1280.0f, 768.0f };
     ecs = new ecs::Registry{};
-    renderer = new gfx::RendererVulkan{};
-    imgui_renderer = new gfx::ImGuiRenderer{};
+    renderer = new gfx::Renderer{};
     ui = new eng::UI{};
     scene = new eng::Scene{};
 
@@ -134,10 +134,9 @@ void Engine::init()
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
     camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
+    renderer->init(new gfx::RendererBackendVulkan{});
     scene->init();
     ui->init();
-    renderer->init();
-    imgui_renderer->init();
 }
 
 void Engine::destroy() { this->~Engine(); }

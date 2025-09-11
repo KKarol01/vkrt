@@ -1,7 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <eng/common/flags.hpp>
-#include <eng/renderer/renderer.hpp>
 
 namespace eng
 {
@@ -30,6 +29,7 @@ enum class BufferUsage;
 enum class PipelineStage : uint32_t;
 enum class PipelineAccess : uint32_t;
 enum class PipelineType;
+enum class ShaderStage : uint32_t;
 
 VkFilter to_vk(const ImageFilter& a);
 VkSamplerAddressMode to_vk(const ImageAddressing& a);
@@ -51,9 +51,10 @@ VkCompareOp to_vk(const CompareOp& a);
 VkBlendFactor to_vk(const BlendFactor& a);
 VkBlendOp to_vk(const BlendOp& a);
 VkBufferUsageFlags to_vk(const Flags<BufferUsage>& a);
-VkPipelineStageFlags2 to_vk(const PipelineStageFlags& a);
-VkAccessFlags2 to_vk(const PipelineAccessFlags& a);
+VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a);
+VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a);
 VkPipelineBindPoint to_vk(const PipelineType& a);
+VkShaderStageFlags to_vk(const Flags<ShaderStage>& a);
 
 } // namespace gfx
 } // namespace eng

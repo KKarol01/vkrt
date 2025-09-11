@@ -1,9 +1,10 @@
 #version 460
 
-#include "./culling/common.inc.glsl"
+#include "./culling/common.glsli"
 
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
+#if 0
 bool frustum_cull(vec4 bounding_sphere)
 {
     // clang-format off
@@ -98,6 +99,7 @@ void main()
 
     GPUInstanceId id = instance_ids.ids_us[x];
     vec4 bs = vec4(vec3(transforms[id.resource_id] * vec4(instance_bs[x].xyz, 1.0)), instance_bs[x].w);
+    // bs.w = max(bs.w, 0.5);
 
     if(frustum_cull(bs) && occlusion_cull(bs, constants.proj[0][0], constants.proj[1][1]))
     {
@@ -105,4 +107,10 @@ void main()
         atomicAdd(indirect_cmds.post_cull_triangle_count, indirect_cmds.commands_us[id.batch_id].indexCount / 3);
         post_cull_instance_ids[indirect_cmds.commands_us[id.batch_id].firstInstance + off] = x;
     }
+}
+
+#endif
+
+void main()
+{
 }

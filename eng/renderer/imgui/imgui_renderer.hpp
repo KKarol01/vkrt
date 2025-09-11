@@ -19,12 +19,13 @@ struct Pipeline;
 struct Sampler;
 struct Texture;
 struct Image;
+struct ImageView;
 
 class ImGuiRenderer
 {
   public:
     void init();
-    void render(CommandBuffer* cmd);
+    void update(CommandBuffer* cmd, Handle<ImageView> output);
     void add_ui_callback(const Callback<void()>& cb);
 
   private:

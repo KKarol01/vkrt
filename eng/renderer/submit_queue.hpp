@@ -30,6 +30,7 @@ class CommandBuffer
 
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range);
     void copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count);
+    void copy(Image& dst, const Image& src);
 
     void clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color);
     void clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil,
@@ -39,7 +40,7 @@ class CommandBuffer
     void bind_pipeline(const Pipeline& pipeline);
     void bind_descriptors(VkDescriptorSet* sets, Range32 range);
 
-    void push_constants(VkShaderStageFlags stages, const void* const values, Range range);
+    void push_constants(Flags<ShaderStage> stages, const void* const values, Range range);
 
     void set_viewports(const VkViewport* viewports, uint32_t count);
     void set_scissors(const VkRect2D* scissors, uint32_t count);

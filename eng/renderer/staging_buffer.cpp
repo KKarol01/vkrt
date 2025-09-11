@@ -12,9 +12,9 @@ namespace eng
 namespace gfx
 {
 
-void GPUStagingManager::init(SubmitQueue* queue, const std::function<void(Handle<Buffer>)>& on_buffer_resize)
+void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)>& on_buffer_resize)
 {
-    auto* r = RendererVulkan::get_instance();
+    auto* r = Engine::get().renderer;
     buffer = Buffer{ BufferDescriptor{ "staging buffer", CAPACITY,
                                        BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS } };
     VkBufferMetadata::init(buffer);
@@ -23,18 +23,18 @@ void GPUStagingManager::init(SubmitQueue* queue, const std::function<void(Handle
     cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     for(auto i = 0u; i < CMD_COUNT; ++i)
     {
-        cmds[i] = { cmdpool->allocate(), r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, fmt::format("staging_sem_{}", i) }) };
+        cmds[i] = { cmdpool->allocate(), r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("staging_sem_{}", i) }) };
     }
+    dummy_sem = r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 1, "staging_dummy_sem" });
     begin_new_cmd_buffer();
 }
 
-void GPUStagingManager::resize(Handle<Buffer> buffer, size_t newsize)
+void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
 {
     auto& old = buffer.get();
     if(newsize <= old.capacity)
     {
-        old.capacity = newsize;
-        old.size = newsize;
+        old.size = std::min(old.size, newsize);
         return;
     }
     const auto info = BufferDescriptor{ old.name, newsize, old.usage };
@@ -52,7 +52,7 @@ void GPUStagingManager::resize(Handle<Buffer> buffer, size_t newsize)
     if(on_buffer_resize) { on_buffer_resize(buffer); }
 }
 
-void GPUStagingManager::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range range)
+void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range range)
 {
     if(range.size == 0) { return; }
     if(dst_offset == STAGING_APPEND) { dst_offset = dst->size; }
@@ -64,27 +64,27 @@ void GPUStagingManager::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_
     dst->size = std::max(dst->size, dst_offset + range.size);
 }
 
-void GPUStagingManager::copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, Range range)
+void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size)
 {
-    if(range.size == 0) { return; }
+    if(src_size == 0) { return; }
     if(dst_offset == STAGING_APPEND) { dst_offset = dst->size; }
-    if(dst->capacity < dst_offset + range.size) { resize(dst, dst_offset + range.size); }
-    if(dst->memory) { memcpy((std::byte*)dst->memory + dst_offset, (const std::byte*)src + range.offset, range.size); }
+    if(dst->capacity < dst_offset + src_size) { resize(dst, dst_offset + src_size); }
+    if(dst->memory) { memcpy((std::byte*)dst->memory + dst_offset, src, src_size); }
     else
     {
         size_t uploaded = 0;
-        while(uploaded < range.size)
+        while(uploaded < src_size)
         {
-            auto [mem, size] = allocate(range.size - uploaded);
-            memcpy(mem, (const std::byte*)src + range.offset + uploaded, size);
+            auto [mem, size] = allocate(src_size - uploaded);
+            memcpy(mem, (const std::byte*)src + uploaded, size);
             get_cmd()->copy(dst.get(), buffer, dst_offset + uploaded, { get_offset(mem), size });
             uploaded += size;
         }
     }
-    dst->size = std::max(dst->size, dst_offset + range.size);
+    dst->size = std::max(dst->size, dst_offset + src_size);
 }
 
-void GPUStagingManager::copy(Handle<Image> dst, const void* const src, ImageLayout final_layout)
+void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout final_layout)
 {
     auto& img = dst.get();
     const auto total_size = img.width * img.height * 4;
@@ -101,14 +101,20 @@ void GPUStagingManager::copy(Handle<Image> dst, const void* const src, ImageLayo
                        PipelineAccess::NONE, ImageLayout::TRANSFER_DST, final_layout);
 }
 
-Sync* GPUStagingManager::flush()
+void StagingBuffer::insert_barrier()
+{
+    get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_WRITE_BIT);
+}
+
+Sync* StagingBuffer::flush()
 {
     auto* sync = flush_pending();
     begin_new_cmd_buffer();
     return sync;
 }
 
-void GPUStagingManager::reset()
+void StagingBuffer::reset()
 {
     flush_pending();
     for(auto i = 0u; i < CMD_COUNT; ++i)
@@ -121,9 +127,9 @@ void GPUStagingManager::reset()
     cmdcount = 0;
 }
 
-Sync* GPUStagingManager::flush_pending()
+Sync* StagingBuffer::flush_pending()
 {
-    if(cmdcount == 0) { return get_wrapped_cmd().sem; /*whatever...*/ }
+    if(cmdcount == 0) { return dummy_sem; }
     for(auto i = 0u; i < cmdcount; ++i)
     {
         const auto idx = (cmdstart + i) % CMD_COUNT;
@@ -139,7 +145,7 @@ Sync* GPUStagingManager::flush_pending()
     return sync;
 }
 
-void GPUStagingManager::begin_new_cmd_buffer()
+void StagingBuffer::begin_new_cmd_buffer()
 {
     if(cmdcount == CMD_COUNT) { reset(); }
     auto& cmdbuf = cmds[cmdstart];
@@ -148,7 +154,7 @@ void GPUStagingManager::begin_new_cmd_buffer()
     ++cmdcount;
 }
 
-std::pair<void*, size_t> GPUStagingManager::allocate(size_t size)
+std::pair<void*, size_t> StagingBuffer::allocate(size_t size)
 {
     auto free_space = CAPACITY - head;
     if(free_space == 0)
@@ -164,19 +170,19 @@ std::pair<void*, size_t> GPUStagingManager::allocate(size_t size)
     return { mem, std::min(size, aligned_size) };
 }
 
-uint32_t GPUStagingManager::get_cmd_index() const
+uint32_t StagingBuffer::get_cmd_index() const
 {
     assert(cmdcount > 0);
     return (cmdstart + cmdcount - 1) % CMD_COUNT;
 }
 
-GPUStagingManager::CmdBufWrapper& GPUStagingManager::get_wrapped_cmd()
+StagingBuffer::CmdBufWrapper& StagingBuffer::get_wrapped_cmd()
 {
     assert(cmdcount > 0);
     return cmds[get_cmd_index()];
 }
 
-CommandBuffer* GPUStagingManager::get_cmd()
+CommandBuffer* StagingBuffer::get_cmd()
 {
     if(cmdcount == 0) { begin_new_cmd_buffer(); }
     return get_wrapped_cmd().cmd;

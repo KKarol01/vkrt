@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <bitset>
+#include <span>
 #include <algorithm>
 #include <unordered_map>
 #include <eng/common/sparseset.hpp>
@@ -200,7 +201,7 @@ class Registry
         return metadatas.at(e).parent;
     }
 
-    const std::vector<entity>& get_children(entity e) const
+    std::span<const entity> get_children(entity e) const
     {
         if(is_valid(e)) { return metadatas.at(e).children; }
         return {};

@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 
 #include <memory>
 #include <cstdint>
@@ -25,7 +24,6 @@ class Registry;
 namespace gfx
 {
 class Renderer;
-class ImGuiRenderer;
 } // namespace gfx
 
 struct Window
@@ -81,7 +79,7 @@ class Engine
     Camera* camera{};
     ecs::Registry* ecs{};
     gfx::Renderer* renderer{};
-    gfx::ImGuiRenderer* imgui_renderer{};
+
     UI* ui{};
     Scene* scene{};
 

@@ -2,7 +2,7 @@
 // #include <eng/renderer/passes/rendergraph.hpp>
 // #include <eng/renderer/bindlesspool.hpp>
 // #include <eng/renderer/staging_buffer.hpp>
-// #include <assets/shaders/bindless_structures.inc.glsl>
+// #include <assets/shaders/bindless_structures.glsli>
 // #include <ImGuizmo/ImGuizmo.h>
 // #include <random>
 // #include <array>

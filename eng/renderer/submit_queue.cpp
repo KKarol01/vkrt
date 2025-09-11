@@ -56,6 +56,16 @@ void CommandBuffer::copy(Image& dst, const Buffer& src, const VkBufferImageCopy2
     vkCmdCopyBufferToImage2(cmd, &info);
 }
 
+void CommandBuffer::copy(Image& dst, const Image& src)
+{
+    auto& dstmd = VkImageMetadata::get(dst);
+    const auto& srcmd = VkImageMetadata::get(src);
+    const auto vkr = VkImageCopy{ .srcSubresource = { to_vk(src.deduce_aspect()), 0, 0, std::min(dst.layers, src.layers) },
+                                  .dstSubresource = { to_vk(dst.deduce_aspect()), 0, 0, std::min(dst.layers, src.layers) },
+                                  .extent = { dst.width, dst.height, dst.depth } };
+    vkCmdCopyImage(cmd, srcmd.image, to_vk(src.current_layout), dstmd.image, to_vk(dst.current_layout), 1, &vkr);
+}
+
 void CommandBuffer::clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color)
 {
     if(image.current_layout != layout)
@@ -114,10 +124,10 @@ void CommandBuffer::bind_descriptors(VkDescriptorSet* sets, Range32 range)
     }
 }
 
-void CommandBuffer::push_constants(VkShaderStageFlags stages, const void* const values, Range range)
+void CommandBuffer::push_constants(Flags<ShaderStage> stages, const void* const values, Range range)
 {
     const auto& md = VkPipelineMetadata::get(*current_pipeline);
-    vkCmdPushConstants(cmd, md.layout, stages, (uint32_t)range.offset, (uint32_t)range.size, values);
+    vkCmdPushConstants(cmd, md.layout, to_vk(stages), (uint32_t)range.offset, (uint32_t)range.size, values);
 }
 
 void CommandBuffer::set_viewports(const VkViewport* viewports, uint32_t count)
@@ -207,7 +217,7 @@ void Sync::init(const SyncCreateInfo& info)
     if(type == FENCE)
     {
         const auto vkinfo = Vks(VkFenceCreateInfo{ .flags = value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
-        VK_CHECK(vkCreateFence(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &fence));
+        VK_CHECK(vkCreateFence(RendererBackendVulkan::get_instance()->dev, &vkinfo, nullptr, &fence));
         if(name.size()) { set_debug_name(fence, name); }
     }
     else
@@ -216,7 +226,7 @@ void Sync::init(const SyncCreateInfo& info)
         const auto timeline_info =
             Vks(VkSemaphoreTypeCreateInfo{ .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = value });
         if(type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeline_info; }
-        VK_CHECK(vkCreateSemaphore(RendererVulkan::get_instance()->dev, &vkinfo, nullptr, &semaphore));
+        VK_CHECK(vkCreateSemaphore(RendererBackendVulkan::get_instance()->dev, &vkinfo, nullptr, &semaphore));
         if(name.size()) { set_debug_name(semaphore, name); }
     }
 }
@@ -224,8 +234,8 @@ void Sync::init(const SyncCreateInfo& info)
 void Sync::destroy()
 {
     if(type == UNKNOWN) { return; }
-    if(type == FENCE) { vkDestroyFence(RendererVulkan::get_instance()->dev, fence, nullptr); }
-    else { vkDestroySemaphore(RendererVulkan::get_instance()->dev, semaphore, nullptr); }
+    if(type == FENCE) { vkDestroyFence(RendererBackendVulkan::get_instance()->dev, fence, nullptr); }
+    else { vkDestroySemaphore(RendererBackendVulkan::get_instance()->dev, semaphore, nullptr); }
     type = UNKNOWN;
     value = 0u;
     name.clear();
@@ -237,7 +247,7 @@ void Sync::signal_cpu(uint64_t value)
     if(type == TIMELINE_SEMAPHORE)
     {
         const auto info = Vks(VkSemaphoreSignalInfo{ .semaphore = semaphore, .value = value });
-        vkSignalSemaphore(RendererVulkan::get_instance()->dev, &info);
+        vkSignalSemaphore(RendererBackendVulkan::get_instance()->dev, &info);
     }
     else
     {
@@ -255,11 +265,11 @@ VkResult Sync::wait_cpu(size_t timeout, uint64_t value)
         return VK_ERROR_UNKNOWN;
     }
     if(value == ~0ull) { value = this->value; }
-    if(type == FENCE) { return vkWaitForFences(RendererVulkan::get_instance()->dev, 1, &fence, true, timeout); }
+    if(type == FENCE) { return vkWaitForFences(RendererBackendVulkan::get_instance()->dev, 1, &fence, true, timeout); }
     else if(type == TIMELINE_SEMAPHORE)
     {
         const auto info = Vks(VkSemaphoreWaitInfo{ .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &value });
-        return vkWaitSemaphores(RendererVulkan::get_instance()->dev, &info, timeout);
+        return vkWaitSemaphores(RendererBackendVulkan::get_instance()->dev, &info, timeout);
     }
     ENG_ERROR("Sync object of type {} cannot be waited on.", eng::to_string(type));
     return VK_ERROR_UNKNOWN;
@@ -281,7 +291,7 @@ uint64_t Sync::wait_gpu(uint64_t value)
 void Sync::reset(uint64_t value)
 {
     if(type == UNKNOWN) { return; }
-    if(type == FENCE) { vkResetFences(RendererVulkan::get_instance()->dev, 1, &fence); }
+    if(type == FENCE) { vkResetFences(RendererBackendVulkan::get_instance()->dev, 1, &fence); }
     else
     {
         auto type = this->type;
@@ -292,7 +302,8 @@ void Sync::reset(uint64_t value)
 }
 
 SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
-    : dev(dev), queue(queue), family_idx(family_idx), fence(RendererVulkan::get_instance()->make_sync({ SyncType::FENCE }))
+    : dev(dev), queue(queue), family_idx(family_idx),
+      fence(RendererBackendVulkan::get_instance()->make_sync({ SyncType::FENCE }))
 {
 }
 
@@ -400,7 +411,7 @@ void SubmitQueue::present(Swapchain* swapchain)
     const auto pinfo = Vks(VkPresentInfoKHR{ .waitSemaphoreCount = (uint32_t)wait_sems.size(),
                                              .pWaitSemaphores = wait_sems.data(),
                                              .swapchainCount = 1,
-                                             .pSwapchains = &swapchain->swapchain,
+                                             .pSwapchains = &VkSwapchainMetadata::get(*swapchain).swapchain,
                                              .pImageIndices = &swapchain->current_index });
     vkQueuePresentKHR(queue, &pinfo);
     submission = {};

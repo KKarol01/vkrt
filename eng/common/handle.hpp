@@ -67,13 +67,11 @@ template <typename T, typename Storage> struct Handle
         requires handle_has_dispatcher<T>
     {
         return *HandleDispatcher<T>::get_pfunc(self);
-        // return std::forward_like<std::add_lvalue_reference_t<decltype(self)>>(*HandleDispatcher<T>::get_pfunc(self));
     }
     auto* operator->(this auto&& self)
         requires handle_has_dispatcher<T>
     {
         return HandleDispatcher<T>::get_pfunc(self);
-        // return std::forward_like<std::remove_reference_t<decltype(self)>>(HandleDispatcher<T>::get_pfunc(self));
     }
 
     Storage handle{ ~Storage{} };

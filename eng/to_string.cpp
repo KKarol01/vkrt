@@ -43,7 +43,7 @@ std::string to_string(const gfx::ImageViewType& a)
 
 std::string to_string(const gfx::ImageViewDescriptor& a)
 {
-    return fmt::format("{}_{}_{}_{}_{}_{}", a.format ? to_string(*a.format) : "EMPTY",
+    return ENG_FMT("{}_{}_{}_{}_{}_{}", a.format ? to_string(*a.format) : "EMPTY",
                        a.view_type ? to_string(*a.view_type) : "EMPTY", a.mips.offset, a.mips.size, a.layers.offset,
                        a.layers.size);
 }
@@ -56,6 +56,16 @@ std::string to_string(const gfx::SyncType& a)
         case gfx::SyncType::FENCE: { return "FENCE"; }
         case gfx::SyncType::BINARY_SEMAPHORE: { return "BINARY_SEMAPHORE"; }
         case gfx::SyncType::TIMELINE_SEMAPHORE: { return "TIMELINE_SEMAPHORE"; }
+        default: { ENG_ERROR("Unhandled case"); return ""; }
+    }
+}
+
+std::string to_string(const gfx::MeshPassType& a)
+{
+    switch(a)
+    {
+        case gfx::MeshPassType::FORWARD: { return "FORWARD"; }
+        case gfx::MeshPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }

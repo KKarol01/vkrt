@@ -1,5 +1,4 @@
 #include "imgui_renderer.hpp"
-#include <eng/renderer/pipeline.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/staging_buffer.hpp>
@@ -18,7 +17,7 @@ namespace gfx
 
 void ImGuiRenderer::init()
 {
-    auto* r = RendererVulkan::get_instance();
+    auto* r = Engine::get().renderer;
 
     IMGUI_CHECKVERSION();
     void* user_data;
@@ -60,9 +59,9 @@ void ImGuiRenderer::init()
     index_buffer = r->make_buffer(BufferDescriptor{ "imgui index buffer", 1024 * 1024, BufferUsage::INDEX_BIT });
 }
 
-void ImGuiRenderer::render(CommandBuffer* cmd)
+void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
 {
-    auto* r = RendererVulkan::get_instance();
+    auto* r = Engine::get().renderer;
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
@@ -88,19 +87,19 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
     uint64_t idx_off = 0;
     int global_vtx_offset = 0;
     int global_idx_offset = 0;
-    auto* smgr = r->staging_manager;
+    auto* sbuf = r->sbuf;
     for(int n = 0; n < draw_data->CmdListsCount; n++)
     {
         const ImDrawList* draw_list = draw_data->CmdLists[n];
-        smgr->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, { 0ull, draw_list->VtxBuffer.Size * sizeof(ImDrawVert) });
-        smgr->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, { 0ull, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx) });
+        sbuf->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
+        sbuf->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
         vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
         idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
     }
 
     VkRenderingAttachmentInfo r_col_atts[]{
         Vks(VkRenderingAttachmentInfo{
-            .imageView = r->swapchain.get_current_view(),
+            .imageView = VkImageViewMetadata::get(output.get()).view,
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -116,7 +115,7 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
 
     cmd->bind_index(index_buffer.get(), 0, VK_INDEX_TYPE_UINT16);
     cmd->bind_pipeline(pipeline.get());
-    r->bindless_pool->bind(cmd);
+    r->bindless->bind(cmd);
     {
         float scale[2];
         scale[0] = 2.0f / draw_data->DisplaySize.x;
@@ -124,13 +123,13 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
         float translate[2];
         translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
         translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
-        cmd->push_constants(VK_SHADER_STAGE_ALL, scale, { 0, 8 });
-        cmd->push_constants(VK_SHADER_STAGE_ALL, translate, { 8, 8 });
+        cmd->push_constants(ShaderStage::ALL, scale, { 0, 8 });
+        cmd->push_constants(ShaderStage::ALL, translate, { 8, 8 });
     }
 
     {
-        const auto vertex_idx = r->bindless_pool->get_index(vertex_buffer);
-        cmd->push_constants(VK_SHADER_STAGE_ALL, &vertex_idx, { 16, 4 });
+        const auto vertex_idx = r->bindless->get_index(vertex_buffer);
+        cmd->push_constants(ShaderStage::ALL, &vertex_idx, { 16, 4 });
     }
 
     cmd->begin_rendering(rendering_info);
@@ -175,8 +174,8 @@ void ImGuiRenderer::render(CommandBuffer* cmd)
             scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
             cmd->set_scissors(&scissor, 1);
 
-            const auto texid = r->bindless_pool->get_index(Handle<Texture>{ (uint32_t)imcmd->GetTexID() - 1 });
-            cmd->push_constants(VK_SHADER_STAGE_ALL, &texid, { 20, 4 });
+            const auto texid = r->bindless->get_index(Handle<Texture>{ (uint32_t)imcmd->GetTexID() - 1 });
+            cmd->push_constants(ShaderStage::ALL, &texid, { 20, 4 });
             cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset, imcmd->VtxOffset + global_vtx_offset, 0);
         }
         global_idx_offset += draw_list->IdxBuffer.Size;
@@ -191,7 +190,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
 {
     if(imtex->Status == ImTextureStatus_OK) { return; }
 
-    auto* r = RendererVulkan::get_instance();
+    auto* r = Engine::get().renderer;
     Handle<Image> image;
     if(imtex->Status == ImTextureStatus_WantCreate)
     {
@@ -212,7 +211,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
         assert(image);
         assert(upload_w == imtex->Width && upload_h == imtex->Height);
-        r->staging_manager->copy(image, imtex->Pixels, ImageLayout::READ_ONLY);
+        r->sbuf->copy(image, imtex->Pixels, ImageLayout::READ_ONLY);
         imtex->SetStatus(ImTextureStatus_OK);
     }
 }

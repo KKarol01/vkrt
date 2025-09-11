@@ -189,9 +189,7 @@ static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::Imag
 
     const auto& ftex = asset.textures.at(index);
     const auto tex = Engine::get().renderer->make_texture(gfx::TextureDescriptor{
-        .view = Engine::get()
-                    .renderer->get_image(load_image(asset, format, ftex.imageIndex ? *ftex.imageIndex : ~0ull, ctx))
-                    .default_view,
+        .view = load_image(asset, format, ftex.imageIndex ? *ftex.imageIndex : ~0ull, ctx)->default_view,
         .sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, ctx) });
     ctx.textures.at(index) = tex;
     return tex;
@@ -357,9 +355,6 @@ ecs::entity Scene::instance_entity(ecs::entity node)
     auto* ecs = Engine::get().ecs;
     auto* r = Engine::get().renderer;
     auto root = ecs->clone(node);
-    ecs->traverse_hierarchy(root, [ecs, r](auto p, auto e) {
-        if(ecs->has<ecs::Mesh>(e)) { r->instance_mesh(gfx::InstanceSettings{ .entity = e }); }
-    });
     scene.push_back(root);
     return root;
 }
@@ -418,7 +413,7 @@ void Scene::update()
                 for(auto i = 0u; i < ech.size(); ++i)
                 {
                     ts.push(t->global);
-                    echs.push(ech.at(i));
+                    echs.push(ech[i]);
                 }
             }
         }

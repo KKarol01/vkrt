@@ -22,7 +22,6 @@ class BindlessPool
     using index_t = uint32_t;
     static inline constexpr auto INVALID_INDEX = ~index_t{};
 
-    BindlessPool() noexcept = default;
     BindlessPool(VkDevice dev) noexcept;
 
     void bind(CommandBuffer* cmd);
