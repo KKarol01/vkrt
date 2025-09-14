@@ -1281,20 +1281,7 @@ Image RendererBackendVulkan::make_image(const ImageDescriptor& info)
     return i;
 }
 
-ImageView RendererBackendVulkan::make_view(const ImageViewDescriptor& info)
-{
-    assert(info.image);
-    auto& img = Handle{ info.image }.get();
-    auto view = ImageView{ .name = info.name,
-                           .image = info.image,
-                           .type = info.view_type ? *info.view_type : img.deduce_view_type(),
-                           .format = info.format ? *info.format : img.format,
-                           .aspect = info.aspect ? *info.aspect : img.deduce_aspect(true),
-                           .mips = info.mips,
-                           .layers = info.layers };
-    VkImageViewMetadata::init(view);
-    return view;
-}
+void RendererBackendVulkan::make_view(ImageView& view) { VkImageViewMetadata::init(view); }
 
 Sampler RendererBackendVulkan::make_sampler(const SamplerDescriptor& info)
 {

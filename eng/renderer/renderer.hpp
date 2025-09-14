@@ -36,6 +36,7 @@ class CommandBuffer;
 class CommandPool;
 class StagingBuffer;
 class SubmitQueue;
+class RenderGraph;
 
 enum class CullFace
 {
@@ -663,7 +664,7 @@ class RendererBackend
 
     virtual Buffer make_buffer(const BufferDescriptor& info) = 0;
     virtual Image make_image(const ImageDescriptor& info) = 0;
-    virtual ImageView make_view(const ImageViewDescriptor& info) = 0;
+    virtual void make_view(ImageView& view) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
     virtual bool compile_shader(Shader& shader) = 0;
     virtual bool compile_pipeline(Pipeline& pipeline) = 0;
@@ -747,6 +748,12 @@ struct SubmitInfo
     ecs::entity entity;
     MeshPassType type;
 };
+
+namespace RenderOrder
+{
+inline constexpr uint32_t DEFAULT_UNLIT = 50;
+inline constexpr uint32_t PRESENT = 100;
+} // namespace RenderOrder
 
 class Renderer
 {
@@ -860,11 +867,12 @@ class Renderer
     RendererBackend* backend{};
     StagingBuffer* sbuf{};
     BindlessPool* bindless{};
+    RenderGraph* rgraph{};
 
     HandleSparseVec<Buffer> buffers;
     HandleSparseVec<Image> images;
     HandleSparseVec<Sampler> samplers;
-    HandleSparseVec<ImageView> image_views;
+    HandleFlatSet<ImageView> image_views;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> compile_shaders;
     HandleFlatSet<Pipeline> pipelines;

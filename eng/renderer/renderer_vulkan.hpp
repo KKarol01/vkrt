@@ -6,7 +6,6 @@
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/renderer/passes/rendergraph.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/handlemap.hpp>
@@ -182,7 +181,7 @@ class RendererBackendVulkan : public RendererBackend
 
     Buffer make_buffer(const BufferDescriptor& info) final;
     Image make_image(const ImageDescriptor& info) final;
-    ImageView make_view(const ImageViewDescriptor& info) final;
+    void make_view(ImageView& view) final;
     Sampler make_sampler(const SamplerDescriptor& info) final;
     bool compile_shader(Shader& shader) final;
     bool compile_pipeline(Pipeline& pipeline) final;
@@ -190,19 +189,18 @@ class RendererBackendVulkan : public RendererBackend
     Swapchain* make_swapchain() final;
     SubmitQueue* get_queue(QueueType type) final;
 
+    // void bake_indirect_commands();
+    // void build_transforms_buffer();
 
-    //void bake_indirect_commands();
-    //void build_transforms_buffer();
+    // void build_blas();
+    // void build_tlas();
+    // void update_ddgi();
 
-    //void build_blas();
-    //void build_tlas();
-    //void update_ddgi();
-
-    //void destroy_buffer(Handle<Buffer> buffer);
-    //void destroy_image(Handle<Image> image);
-    //void destroy_view(Handle<ImageView> view);
-    //uint32_t get_bindless(Handle<Buffer> buffer);
-    //void update_resource(Handle<Buffer> dst);
+    // void destroy_buffer(Handle<Buffer> buffer);
+    // void destroy_image(Handle<Image> image);
+    // void destroy_view(Handle<ImageView> view);
+    // uint32_t get_bindless(Handle<Buffer> buffer);
+    // void update_resource(Handle<Buffer> dst);
 
     VkInstance instance;
     VkDevice dev;
@@ -210,7 +208,7 @@ class RendererBackendVulkan : public RendererBackend
     SubmitQueue* gq;
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
-    //Flags<RenderFlags> flags;
+    // Flags<RenderFlags> flags;
     bool supports_raytracing{ false };
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
@@ -233,9 +231,9 @@ class RendererBackendVulkan : public RendererBackend
     // gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
     // FFTOcean fftocean;
 
-    //std::vector<Handle<Shader>> shaders_to_compile;
-    //std::vector<Handle<Pipeline>> pipelines_to_compile;
-    //std::vector<MeshletInstance> meshlets_to_instance;
+    // std::vector<Handle<Shader>> shaders_to_compile;
+    // std::vector<Handle<Pipeline>> pipelines_to_compile;
+    // std::vector<MeshletInstance> meshlets_to_instance;
 };
 } // namespace gfx
 

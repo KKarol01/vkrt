@@ -7,6 +7,7 @@
 #include <eng/camera.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
+#include <eng/renderer/rendergraph.hpp>
 #include <eng/common/to_vk.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
@@ -47,6 +48,8 @@ void Renderer::init(RendererBackend* backend)
     sbuf = new StagingBuffer{};
     sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
     perframe.resize(frame_count);
+    rgraph = new RenderGraph{};
+    rgraph->init(this);
     for(auto i = 0u; i < frame_count; ++i)
     {
         auto& pf = perframe[i];
@@ -174,28 +177,40 @@ void Renderer::update()
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
     gq->wait_sync(sbuf->flush(), PipelineStage::ALL);
 
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::ALL,
+                     PipelineAccess::NONE, ImageLayout::ATTACHMENT, true);
+            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
+                     PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
+        },
+        [this](SubmitQueue* q, CommandBuffer* cmd) { render(MeshPassType::FORWARD, q, cmd); });
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "present copy", RenderOrder::PRESENT },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT,
+                     PipelineAccess::TRANSFER_READ_BIT, ImageLayout::TRANSFER_SRC);
+            b.access(swapchain->get_view(), RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                     PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::TRANSFER_DST);
+        },
+        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+            cmd->copy(swapchain->get_image().get(), pf.gbuffer.color.get());
+        });
+
+    rgraph->compile();
+    rgraph->render();
+    // imgui_renderer->update(cmd, pf.gbuffer.color->default_view);
+
     auto* cmd = pf.cmdpool->begin();
-    for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
-    {
-        render((MeshPassType)i, gq, cmd);
-    }
-    cmd->barrier(pf.gbuffer.color.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::COLOR_OUT_BIT,
-                 PipelineAccess::COLOR_READ_BIT, pf.gbuffer.color->current_layout, ImageLayout::ATTACHMENT);
-    imgui_renderer->update(cmd, pf.gbuffer.color->default_view);
-    cmd->barrier(pf.gbuffer.color.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-                 PipelineAccess::TRANSFER_READ_BIT, pf.gbuffer.color->current_layout, ImageLayout::TRANSFER_SRC);
-    cmd->barrier(swapchain->get_image().get(), PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::NONE,
-                 PipelineAccess::NONE, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
-    cmd->copy(swapchain->get_image().get(), pf.gbuffer.color.get());
-    cmd->barrier(swapchain->get_image().get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                 PipelineStage::NONE, PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
+    cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL,
+                 PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
     pf.cmdpool->end(cmd);
 
     gq->wait_sync(sbuf->flush())
-        .wait_sync(pf.acq_sem, gfx::PipelineStage::TRANSFER_BIT)
-        //.wait_sync(pf.ren_sem, gfx::PipelineStage::TRANSFER_BIT)
+        .wait_sync(pf.acq_sem, gfx::PipelineStage::ALL)
         .with_cmd_buf(cmd)
-        .signal_sync(pf.swp_sem, gfx::PipelineStage::ALL)
+        .signal_sync(pf.swp_sem, gfx::PipelineStage::NONE)
         .signal_sync(pf.ren_fen)
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
@@ -210,11 +225,6 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
     Sync* gpures_sync;
     process_meshpass(pass, &gpures_sync);
     if(gpures_sync) { queue->wait_sync(gpures_sync, PipelineStage::ALL); }
-
-    cmd->barrier(pf.gbuffer.color.get(), PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::COLOR_OUT_BIT,
-                 PipelineAccess::COLOR_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
-    cmd->barrier(pf.gbuffer.depth.get(), PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::EARLY_Z_BIT,
-                 PipelineAccess::DS_RW, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
 
     cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
     auto& rp = render_passes.at((uint32_t)pass);
@@ -390,9 +400,18 @@ Handle<Image> Renderer::make_image(const ImageDescriptor& info)
 
 Handle<ImageView> Renderer::make_view(const ImageViewDescriptor& info)
 {
-    const auto view = image_views.insert(backend->make_view(info));
-    info.image->views.push_back(view);
-    return view;
+    auto& img = Handle{ info.image }.get();
+    auto view = ImageView{ .name = info.name,
+                           .image = info.image,
+                           .type = info.view_type ? *info.view_type : img.deduce_view_type(),
+                           .format = info.format ? *info.format : img.format,
+                           .aspect = info.aspect ? *info.aspect : img.deduce_aspect(true),
+                           .mips = info.mips,
+                           .layers = info.layers };
+    auto it = image_views.insert(view);
+    if(it.success) { backend->make_view(it.handle.get()); }
+    info.image->views.push_back(it.handle);
+    return it.handle;
 }
 
 Handle<Sampler> Renderer::make_sampler(const SamplerDescriptor& info)

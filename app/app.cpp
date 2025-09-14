@@ -5,6 +5,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
+#include <eng/renderer/rendergraph.hpp>
 #include <assets/shaders/bindless_structures.glsli>
 #include <eng/utils.hpp>
 
@@ -32,6 +33,14 @@ void Renderer::update()
             };
         });
     }
+
+    // Engine::get().renderer->rgraph->add_pass(
+    //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::PRESENT - 1 },
+    //     [](gfx::RenderGraph::PassResourceBuilder& b) {
+    //         b.access(Engine::get().renderer->swapchain->get_view(), gfx::RenderGraph::AccessType::READ_BIT,
+    //                  gfx::PipelineStage::ALL, gfx::PipelineAccess::NONE, gfx::ImageLayout::GENERAL);
+    //     },
+    //     [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) { std::cout << "asd"; });
 }
 
 void App::start()
