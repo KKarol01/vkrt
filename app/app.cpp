@@ -56,7 +56,7 @@ void App::start()
 void App::on_init()
 {
     renderer.init();
-    const auto e = Engine::get().scene->load_from_file("occlusion_culling.glb");
+    const auto e = Engine::get().scene->load_from_file("bunny.glb");
     Engine::get().scene->instance_entity(e);
 }
 

@@ -31,6 +31,7 @@ void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)
 
 void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
 {
+    flush()->wait_cpu(~0ull);
     auto& old = buffer.get();
     if(newsize <= old.capacity)
     {

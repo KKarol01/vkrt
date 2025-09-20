@@ -100,11 +100,11 @@ void main()
     vec4 bs = vec4(vec3(transforms[id.instidx] * vec4(boundingspheres[id.residx].xyz, 1.0)), boundingspheres[id.residx].w);
     // bs.w = max(bs.w, 0.5);
 
-    if(true || frustum_cull(bs) && occlusion_cull(bs, engconsts.proj[0][0], engconsts.proj[1][1]))
+    if(frustum_cull(bs) && occlusion_cull(bs, engconsts.proj[0][0], engconsts.proj[1][1]))
     {
         const uint off = atomicAdd(dstcmds[id.batch_id].instanceCount, 1);
-        // atomicAdd(dstids.count, 1);
+        atomicAdd(dstids.count, 1);
         // atomicAdd(dstcmds.count, indirect_cmds.commands_us[id.batch_id].indexCount / 3);
-        // dstids.ids_us[dstcmds[id.batch_id].firstInstance + off] = id;
+        dstids.ids_us[dstcmds[id.batch_id].firstInstance + off] = id;
     }
 }

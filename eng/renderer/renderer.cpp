@@ -257,8 +257,11 @@ void Renderer::update()
             auto cmdoffacc = 0u;
             const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
 
+            const auto dstidscount = 0u;
             sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
-            sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 0, { 0, rp.ids_buf->size });
+            sbuf->copy(pf.culling.ids_buf, &dstidscount, 0, 4u);
+            sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 4u, { 4u, rp.ids_buf->size - 4u });
+
             q->wait_sync(sbuf->flush());
 
             cmd->begin_rendering(vkreninfo);
@@ -348,7 +351,6 @@ void Renderer::update()
             {
                 uint32_t engconstsb;
                 uint32_t imidb;
-
                 uint32_t hizsampler;
                 uint32_t hizsrct2d;
                 uint32_t hizdsti;
@@ -420,7 +422,7 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
         if(i == 0)
         {
             bindless->bind(cmd);
-            uint32_t pcids[]{ bindless->get_index(pf.constants), bindless->get_index(rp.ids_buf) };
+            uint32_t pcids[]{ bindless->get_index(pf.constants), bindless->get_index(pf.culling.ids_buf) };
             cmd->push_constants(ShaderStage::ALL, &pcids, { 0, 8 });
 
             VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
@@ -446,8 +448,10 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
         }
         const auto cntoff = sizeof(uint32_t) * i;
         const auto cmdoff = sizeof(DrawIndirectCommand) * cmdoffacc + rp.cmd_start;
-        cmd->draw_indexed_indirect_count(rp.cmd_buf.get(), cmdoff, rp.cmd_buf.get(), cntoff, mb.instcount,
-                                         sizeof(DrawIndirectCommand));
+        // cmd->draw_indexed_indirect_count(rp.cmd_buf.get(), cmdoff, rp.cmd_buf.get(), cntoff, mb.instcount,
+        //                                  sizeof(DrawIndirectCommand));
+        cmd->draw_indexed_indirect_count(pf.culling.cmd_buf.get(), cmdoff, pf.culling.cmd_buf.get(), cntoff,
+                                         mb.instcount, sizeof(DrawIndirectCommand));
         cmdoffacc += mb.instcount;
     }
     if(rp.mbatches.size()) { cmd->end_rendering(); }
@@ -556,8 +560,8 @@ void Renderer::process_meshpass(MeshPassType pass)
     rp.cmd_start = cmdoff;
     sbuf->copy(rp.cmd_buf, cmdcnts, 0);
     sbuf->copy(rp.cmd_buf, cmds, cmdoff);
-    sbuf->copy(rp.ids_buf, &rp.id_count, 0, 4);
-    sbuf->copy(rp.ids_buf, gpuids, 4);
+    sbuf->copy(rp.ids_buf, &rp.id_count, 0, sizeof(rp.id_count));
+    sbuf->copy(rp.ids_buf, gpuids, sizeof(rp.id_count));
 }
 
 void Renderer::submit_mesh(const SubmitInfo& info)
