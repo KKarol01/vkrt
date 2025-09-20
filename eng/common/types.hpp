@@ -8,7 +8,7 @@ template <class... Ts> struct Visitor : Ts...
 
 template <typename Storage = size_t> struct Range_T
 {
-    auto operator==(const Range_T& o) const { return offset == o.offset && size == o.size; }
+    auto operator<=>(const Range_T&) const = default;
     Storage offset{};
     Storage size{};
 };

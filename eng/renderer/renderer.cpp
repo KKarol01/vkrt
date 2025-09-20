@@ -24,25 +24,25 @@ namespace gfx
 void Renderer::init(RendererBackend* backend)
 {
     // clang-format off
-    ENG_SET_HANDLE_DISPATCHER(gfx::Buffer, { return &::eng::Engine::get().renderer->buffers.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Image, { return &::eng::Engine::get().renderer->images.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::ImageView, { return &::eng::Engine::get().renderer->image_views.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Geometry, { return &::eng::Engine::get().renderer->geometries.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Mesh, { return &::eng::Engine::get().renderer->meshes.at(*handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Texture, { return &::eng::Engine::get().renderer->textures.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Material, { return &::eng::Engine::get().renderer->materials.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Shader, { return &::eng::Engine::get().renderer->shaders.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Pipeline, { return &::eng::Engine::get().renderer->pipelines.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::Sampler, { return &::eng::Engine::get().renderer->samplers.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::MeshPass, { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(gfx::ShaderEffect, { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Buffer, { return &::eng::Engine::get().renderer->buffers.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Image, { return &::eng::Engine::get().renderer->images.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(ImageView, { return &::eng::Engine::get().renderer->image_views.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Geometry, { return &::eng::Engine::get().renderer->geometries.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Mesh, { return &::eng::Engine::get().renderer->meshes.at(*handle); });
+    ENG_SET_HANDLE_DISPATCHER(Texture, { return &::eng::Engine::get().renderer->textures.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Material, { return &::eng::Engine::get().renderer->materials.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Shader, { return &::eng::Engine::get().renderer->shaders.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Pipeline, { return &::eng::Engine::get().renderer->pipelines.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Sampler, { return &::eng::Engine::get().renderer->samplers.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(MeshPass, { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(ShaderEffect, { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
     // clang-format on
 
     this->backend = backend;
     backend->init();
 
     auto* ew = Engine::get().window;
-    gq = backend->get_queue(gfx::QueueType::GRAPHICS);
+    gq = backend->get_queue(QueueType::GRAPHICS);
     swapchain = backend->make_swapchain();
     bindless = new BindlessPool{ ((RendererBackendVulkan*)backend)->dev };
     sbuf = new StagingBuffer{};
@@ -54,32 +54,63 @@ void Renderer::init(RendererBackend* backend)
     {
         auto& pf = perframe[i];
         auto& gb = pf.gbuffer;
-        gb.color = make_image(gfx::ImageDescriptor{
+        gb.color = make_image(ImageDescriptor{
             .name = ENG_FMT("gcolor{}", i),
             .width = (uint32_t)ew->width,
             .height = (uint32_t)ew->height,
-            .format = gfx::ImageFormat::R8G8B8A8_SRGB,
-            .usage = gfx::ImageUsage::COLOR_ATTACHMENT_BIT | gfx::ImageUsage::TRANSFER_RW | gfx::ImageUsage::SAMPLED_BIT,
+            .format = ImageFormat::R8G8B8A8_SRGB,
+            .usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT,
         });
-        gb.depth = make_image(gfx::ImageDescriptor{
+        gb.depth = make_image(ImageDescriptor{
             .name = ENG_FMT("gdepth{}", i),
             .width = (uint32_t)ew->width,
             .height = (uint32_t)ew->height,
-            .format = gfx::ImageFormat::D24_S8_UNORM,
-            .usage = gfx::ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT | gfx::ImageUsage::TRANSFER_RW | gfx::ImageUsage::SAMPLED_BIT,
+            .format = ImageFormat::D32_SFLOAT,
+            .usage = ImageUsage::DEPTH_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT,
         });
         pf.cmdpool = gq->make_command_pool();
-        pf.acq_sem = make_sync({ gfx::SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
-        pf.ren_sem = make_sync({ gfx::SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
-        pf.ren_fen = make_sync({ gfx::SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
-        pf.swp_sem = make_sync({ gfx::SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
+        pf.acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
+        pf.ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
+        pf.ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
+        pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         pf.constants = make_buffer(BufferDescriptor{ ENG_FMT("constants_{}", i), 1024, BufferUsage::STORAGE_BIT });
+
+        const auto hizpmips = (uint32_t)(std::log2f(std::max(ew->width, ew->height)) + 1);
+        pf.culling.hizpyramid = make_image(ImageDescriptor{
+            .name = ENG_FMT("hizpyramid{}", i),
+            .width = (uint32_t)ew->width,
+            .height = (uint32_t)ew->height,
+            .mips = (uint32_t)(hizpmips),
+            .format = ImageFormat::R32F,
+            .usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT,
+        });
+        pf.culling.hizptex =
+            make_texture(TextureDescriptor{ pf.culling.hizpyramid->default_view, hiz_sampler, ImageLayout::GENERAL });
+        pf.culling.hizpmiptexs.resize(hizpmips);
+        for(auto i = 0u; i < hizpmips; ++i)
+        {
+            pf.culling.hizpmiptexs.at(i) =
+                make_texture(TextureDescriptor{ make_view(ImageViewDescriptor{ ENG_FMT("hizpmip{}", i),
+                                                                               pf.culling.hizpyramid,
+                                                                               ImageViewType::TYPE_2D,
+                                                                               pf.culling.hizpyramid->format,
+                                                                               ImageAspect::COLOR,
+                                                                               { i, 1 },
+                                                                               { 0, 1 } }),
+                                                {},
+                                                ImageLayout::GENERAL });
+        }
+
+        pf.culling.cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("cull cmds {}", i), 1024,
+                                                           BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
+        pf.culling.ids_buf =
+            make_buffer(BufferDescriptor{ ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
     }
 
     bufs.vpos_buf = make_buffer(BufferDescriptor{ "vertex positions", 1024, BufferUsage::STORAGE_BIT });
     bufs.vattr_buf = make_buffer(BufferDescriptor{ "vertex attributes", 1024, BufferUsage::STORAGE_BIT });
     bufs.idx_buf = make_buffer(BufferDescriptor{ "vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT });
-    bufs.cull_bs_buf = make_buffer(BufferDescriptor{ "meshlets instance bbs", 1024, BufferUsage::STORAGE_BIT });
+    bufs.bsphere_buf = make_buffer(BufferDescriptor{ "bounding spheres", 1024, BufferUsage::STORAGE_BIT });
     for(uint32_t i = 0; i < 2; ++i)
     {
         bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
@@ -91,27 +122,14 @@ void Renderer::init(RendererBackend* backend)
                                                                     BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
         render_passes.at(i).ids_buf =
             make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
-        render_passes.at(i).bs_buf =
-            make_buffer(BufferDescriptor{ ENG_FMT("{}_bs", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
     }
 
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    /*cull_pipeline = compile_pipeline(PipelineCreateInfo{
-        .shaders = { compile_shader(ShaderStage::COMPUTE_BIT, "culling/culling.comp.glsl") } });
-    hiz_pipeline = compile_pipeline(PipelineCreateInfo{
-        .shaders = { compile_shader(ShaderStage::COMPUTE_BIT, "culling/hiz.comp.glsl") } });
-    hiz_sampler = make_sampler(SamplerDescriptor{
-        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
-        .mipmap_mode = SamplerMipmapMode::NEAREST,
-        .reduction_mode = SamplerReductionMode::MIN });*/
-
     const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader(ShaderStage::VERTEX_BIT, "default_unlit/unlit.vert.glsl"),
-                     make_shader(ShaderStage::PIXEL_BIT, "default_unlit/unlit.frag.glsl") },
-        .attachments = { .count = 1, .color_formats = { ImageFormat::R8G8B8A8_SRGB }, .depth_format = ImageFormat::D24_S8_UNORM },
+        .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
+        .attachments = { .count = 1, .color_formats = { ImageFormat::R8G8B8A8_SRGB }, .depth_format = ImageFormat::D32_SFLOAT },
         .depth_test = true,
         .depth_write = true,
         .depth_compare = DepthCompare::GREATER,
@@ -121,13 +139,33 @@ void Renderer::init(RendererBackend* backend)
     info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
     default_meshpass = make_mesh_pass(info);
     default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
+
+    hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") } });
+    hiz_sampler = make_sampler(SamplerDescriptor{
+        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
+        .mipmap_mode = SamplerMipmapMode::NEAREST,
+        .reduction_mode = SamplerReductionMode::MIN });
+    cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") } });
+    cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
+                     Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
+        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
+        .depth_test = true,
+        .depth_write = true,
+        .depth_compare = DepthCompare::GREATER,
+        .culling = CullFace::BACK,
+    });
 }
 
 void Renderer::update()
 {
     auto* ew = Engine::get().window;
-    const auto pfi = Engine::get().frame_num % gfx::Renderer::frame_count;
-    auto& pf = perframe.at(pfi);
+    const auto pfi = Engine::get().frame_num % Renderer::frame_count;
+    auto& pf = get_perframe();
+    const auto& ppf = perframe.at((Engine::get().frame_num + perframe.size() - 1) % perframe.size()); // get previous frame res
 
     if(compile_shaders.size())
     {
@@ -163,7 +201,7 @@ void Renderer::update()
         .vposb = get_bindless(bufs.vpos_buf),
         .vatrb = get_bindless(bufs.vattr_buf),
         .vidxb = get_bindless(bufs.idx_buf),
-        .rmbsb = get_bindless(bufs.cull_bs_buf),
+        .rmbsb = get_bindless(bufs.bsphere_buf),
         .itrsb = get_bindless(bufs.trs_bufs[0]),
         .view = view,
         .proj = proj,
@@ -175,11 +213,161 @@ void Renderer::update()
         .cam_pos = Engine::get().camera->pos,
     };
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
+
+    for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
+    {
+        process_meshpass((MeshPassType)i);
+    }
+    if(pf.culling.ids_buf->capacity < render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size)
+    {
+        sbuf->resize(pf.culling.ids_buf, render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size);
+    }
+
     gq->wait_sync(sbuf->flush(), PipelineStage::ALL);
 
     rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::CULLING },
+        [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            b.access(ppf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
+                     PipelineAccess::DS_RW, ImageLayout::GENERAL, true);
+            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
+                     PipelineAccess::DS_RW, ImageLayout::GENERAL);
+        },
+        [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            auto& hizp = pf.culling.hizpyramid.get();
+            pf.culling.mbatches = rp.mbatches;
+            cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
+            cmd->bind_pipeline(cullzout_pipeline.get());
+            uint32_t pcids[]{ bindless->get_index(pf.constants), bindless->get_index(ppf.culling.ids_buf) };
+            cmd->push_constants(ShaderStage::ALL, &pcids, { 0, sizeof(pcids) });
+            bindless->bind(cmd);
+            VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+            VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+            cmd->set_scissors(&vksciss, 1);
+            cmd->set_viewports(&vkview, 1);
+            const auto vkdep = Vks(VkRenderingAttachmentInfo{
+                .imageView = VkImageViewMetadata::get(pf.gbuffer.depth->default_view.get()).view,
+                .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
+            auto cmdoffacc = 0u;
+            const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
+
+            sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
+            sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 0, { 0, rp.ids_buf->size });
+            q->wait_sync(sbuf->flush());
+
+            cmd->begin_rendering(vkreninfo);
+            for(auto i = 0u; i < ppf.culling.mbatches.size(); ++i)
+            {
+                const auto& mb = ppf.culling.mbatches.at(i);
+                const auto cntoff = sizeof(uint32_t) * i;
+                const auto cmdoff = sizeof(DrawIndirectCommand) * cmdoffacc + rp.cmd_start;
+                cmd->draw_indexed_indirect_count(ppf.culling.cmd_buf.get(), cmdoff, ppf.culling.cmd_buf.get(), cntoff,
+                                                 mb.instcount, sizeof(DrawIndirectCommand));
+                cmdoffacc += mb.instcount;
+            }
+            cmd->end_rendering();
+            cmd->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL, PipelineAccess::NONE);
+        });
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::CULLING },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                     PipelineAccess::TRANSFER_WRITE_BIT);
+
+            b.access(pf.culling.ids_buf, RenderGraph::AccessType::RW, PipelineStage::VERTEX_BIT, PipelineAccess::STORAGE_READ_BIT);
+            b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_RW, ImageLayout::GENERAL, true);
+            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
+        },
+        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            auto& hizp = pf.culling.hizpyramid.get();
+
+            struct PC
+            {
+                uint32_t engconstsb;
+                uint32_t imidb;
+
+                uint32_t hizsampler;
+                uint32_t hizsrct2d;
+                uint32_t hizdsti;
+                uint32_t dstcmdb;
+                uint32_t dstimidb;
+            } pc;
+
+            cmd->bind_pipeline(hiz_pipeline.get());
+            pc.hizsrct2d = bindless->get_index(make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view,
+                                                                               hiz_sampler, ImageLayout::GENERAL }));
+            pc.hizdsti = bindless->get_index(make_texture(TextureDescriptor{
+                make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { 0, 1 } }), {}, ImageLayout::GENERAL }));
+            bindless->update();
+            bindless->bind(cmd);
+            cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
+            cmd->dispatch((hizp.width + 31) / 32, (hizp.height + 31) / 32, 1);
+            cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            for(auto i = 1u; i < hizp.mips; ++i)
+            {
+                pc.hizsrct2d = bindless->get_index(make_texture(TextureDescriptor{
+                    make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i - 1, 1 } }), hiz_sampler,
+                    ImageLayout::GENERAL }));
+                pc.hizdsti = bindless->get_index(make_texture(TextureDescriptor{
+                    make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i, 1 } }), {}, ImageLayout::GENERAL }));
+                cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
+                bindless->update();
+                const auto sx = ((hizp.width >> i) + 31) / 32;
+                const auto sy = ((hizp.height >> i) + 31) / 32;
+                cmd->dispatch(sx, sy, 1);
+                cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT,
+                             PipelineAccess::SHADER_RW);
+            }
+        });
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::ALL,
+                     PipelineAccess::NONE, ImageLayout::ATTACHMENT, true);
+            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
+                     PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
+        },
+        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            cmd->bind_pipeline(cull_pipeline.get());
+
+            struct PC
+            {
+                uint32_t engconstsb;
+                uint32_t imidb;
+
+                uint32_t hizsampler;
+                uint32_t hizsrct2d;
+                uint32_t hizdsti;
+                uint32_t dstcmdb;
+                uint32_t dstimidb;
+            } pc;
+            pc.engconstsb = bindless->get_index(pf.constants);
+            pc.imidb = bindless->get_index(rp.ids_buf);
+            pc.dstcmdb = bindless->get_index(pf.culling.cmd_buf, { rp.cmd_start, ~0ull });
+            pc.dstimidb = bindless->get_index(pf.culling.ids_buf);
+            cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
+            bindless->bind(cmd);
+            cmd->dispatch((rp.id_count + 31) / 32, 1, 1);
+        });
+    rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
             b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::ALL,
                      PipelineAccess::NONE, ImageLayout::ATTACHMENT, true);
             b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
@@ -208,9 +396,9 @@ void Renderer::update()
     pf.cmdpool->end(cmd);
 
     gq->wait_sync(sbuf->flush())
-        .wait_sync(pf.acq_sem, gfx::PipelineStage::ALL)
+        .wait_sync(pf.acq_sem, PipelineStage::ALL)
         .with_cmd_buf(cmd)
-        .signal_sync(pf.swp_sem, gfx::PipelineStage::NONE)
+        .signal_sync(pf.swp_sem, PipelineStage::NONE)
         .signal_sync(pf.ren_fen)
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
@@ -220,11 +408,7 @@ void Renderer::update()
 void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
 {
     auto* ew = Engine::get().window;
-    const auto pfi = Engine::get().frame_num % gfx::Renderer::frame_count;
-    auto& pf = perframe.at(pfi);
-    Sync* gpures_sync;
-    process_meshpass(pass, &gpures_sync);
-    if(gpures_sync) { queue->wait_sync(gpures_sync, PipelineStage::ALL); }
+    auto& pf = get_perframe();
 
     cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
     auto& rp = render_passes.at((uint32_t)pass);
@@ -261,19 +445,19 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
             cmd->begin_rendering(vkreninfo);
         }
         const auto cntoff = sizeof(uint32_t) * i;
-        const auto cmdoff = sizeof(DrawIndirectCommand) * cmdoffacc + align_up2(rp.mbatches.size() * sizeof(uint32_t), 8ull);
-        cmd->draw_indexed_indirect_count(rp.cmd_buf.get(), cmdoff, rp.cmd_buf.get(), cntoff, mb.count, sizeof(DrawIndirectCommand));
-        cmdoffacc += mb.count;
+        const auto cmdoff = sizeof(DrawIndirectCommand) * cmdoffacc + rp.cmd_start;
+        cmd->draw_indexed_indirect_count(rp.cmd_buf.get(), cmdoff, rp.cmd_buf.get(), cntoff, mb.instcount,
+                                         sizeof(DrawIndirectCommand));
+        cmdoffacc += mb.instcount;
     }
     if(rp.mbatches.size()) { cmd->end_rendering(); }
     rp.entities.clear();
 }
 
-void Renderer::process_meshpass(MeshPassType pass, Sync** gpures_sync)
+void Renderer::process_meshpass(MeshPassType pass)
 {
     // todo: maybe sort entities before actually deeming the batch as to-be-sorted; or make the scene order.
     auto& rp = render_passes.at((uint32_t)pass);
-    *gpures_sync = nullptr;
     if(!rp.redo) { return; }
     rp.entity_cache = rp.entities;
 
@@ -351,29 +535,29 @@ void Renderer::process_meshpass(MeshPassType pass, Sync** gpures_sync)
                                                  .vertexOffset = (int32_t)(geo.vertex_range.offset + mlt.vertex_offset),
                                                  .firstInstance = i };
         }
-        gpuids.at(i) = GPUInstanceId{ .batch_id = cmdi, .resource_id = inst.gpu_resource, .material = ~0u };
+        gpuids.at(i) = GPUInstanceId{ .batch_id = cmdi, .residx = inst.meshlet, .instidx = inst.gpu_resource };
         gpubbs.at(i) = mlt.bounding_sphere; // fix bbs to be per meshlet and indexable by gpuinstance id - or not...
-        ++rp.mbatches.at(batchi).count;
-        ++cmds.at(cmdi).instanceCount;
-        ++cmdcnts.at(cmdi);
+        ++rp.mbatches.at(batchi).instcount;
+        rp.mbatches.at(batchi).cmdcount = cmdi + 1; // todo: use it
+        ++cmdcnts.at(batchi);
+        //++cmds.at(cmdi).instanceCount;
     }
     ++cmdi;
     ++batchi;
     cmds.resize(cmdi);
-    cmdcnts.resize(cmdi);
+    cmdcnts.resize(batchi);
     rp.mbatches.resize(batchi);
-    rp.cmd_count = cmdi;
-    rp.redo = false;
     const auto post_cull_tri_count = 0u;
     const auto mltcount = (uint32_t)instances.size();
-    const auto cmdoff = align_up2(batchi * sizeof(uint32_t), 8ull);
+    const auto cmdoff = align_up2(batchi * sizeof(uint32_t), 16ull);
+    rp.cmd_count = cmdi;
+    rp.id_count = gpuids.size();
+    rp.redo = false;
+    rp.cmd_start = cmdoff;
     sbuf->copy(rp.cmd_buf, cmdcnts, 0);
     sbuf->copy(rp.cmd_buf, cmds, cmdoff);
-    sbuf->copy(rp.ids_buf, &mltcount, 0, 4);
+    sbuf->copy(rp.ids_buf, &rp.id_count, 0, 4);
     sbuf->copy(rp.ids_buf, gpuids, 4);
-    sbuf->copy(rp.bs_buf, gpubbs, 0);
-    sbuf->copy(rp.bs_buf, gpubbs, 0);
-    *gpures_sync = sbuf->flush();
 }
 
 void Renderer::submit_mesh(const SubmitInfo& info)
@@ -405,7 +589,7 @@ Handle<ImageView> Renderer::make_view(const ImageViewDescriptor& info)
                            .image = info.image,
                            .type = info.view_type ? *info.view_type : img.deduce_view_type(),
                            .format = info.format ? *info.format : img.format,
-                           .aspect = info.aspect ? *info.aspect : img.deduce_aspect(true),
+                           .aspect = info.aspect ? *info.aspect : img.deduce_aspect(),
                            .mips = info.mips,
                            .layers = info.layers };
     auto it = image_views.insert(view);
@@ -419,8 +603,19 @@ Handle<Sampler> Renderer::make_sampler(const SamplerDescriptor& info)
     return samplers.insert(backend->make_sampler(info));
 }
 
-Handle<Shader> Renderer::make_shader(ShaderStage stage, const std::filesystem::path& path)
+Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
 {
+    const auto ext = std::filesystem::path{ path }.replace_extension().extension();
+    ShaderStage stage;
+    if(ext == ".vert") { stage = ShaderStage::VERTEX_BIT; }
+    else if(ext == ".frag") { stage = ShaderStage::PIXEL_BIT; }
+    else if(ext == ".comp") { stage = ShaderStage::COMPUTE_BIT; }
+    else
+    {
+        ENG_ERROR("Unrecognized shader extension: {}", ext.string());
+        return {};
+    }
+
     auto it = shaders.insert(Shader{ eng::paths::canonize_path(eng::paths::SHADERS_DIR / path), stage });
     if(it.success) { compile_shaders.push_back(it.handle); }
     return it.handle;
@@ -460,20 +655,24 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
                        .meshlet_range = { meshlets.size(), out_meshlets.size() } };
 
     static constexpr auto VXATTRSIZE = sizeof(Vertex) - sizeof(Vertex::position);
-    std::vector<glm::vec3> positions;
-    std::vector<std::byte> attributes;
-    positions.resize(out_vertices.size());
-    attributes.resize(out_vertices.size() * VXATTRSIZE);
+    std::vector<glm::vec3> positions(out_vertices.size());
+    std::vector<std::byte> attributes(out_vertices.size() * VXATTRSIZE);
     for(auto i = 0ull; i < out_vertices.size(); ++i)
     {
         auto& v = out_vertices.at(i);
         positions[i] = v.position;
         memcpy(&attributes[i * VXATTRSIZE], reinterpret_cast<const std::byte*>(&v) + sizeof(Vertex::position), VXATTRSIZE);
     }
+    std::vector<glm::vec4> bounding_spheres(out_meshlets.size());
+    for(auto i = 0u; i < out_meshlets.size(); ++i)
+    {
+        bounding_spheres.at(i) = out_meshlets.at(i).bounding_sphere;
+    }
 
     sbuf->copy(bufs.vpos_buf, positions, STAGING_APPEND);
     sbuf->copy(bufs.vattr_buf, attributes, STAGING_APPEND);
     sbuf->copy(bufs.idx_buf, out_indices, STAGING_APPEND);
+    sbuf->copy(bufs.bsphere_buf, bounding_spheres, STAGING_APPEND);
 
     bufs.vertex_count += positions.size();
     bufs.index_count += out_indices.size();
@@ -487,7 +686,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     return handle;
 }
 
-void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<gfx::Vertex>& out_vertices,
+void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<Vertex>& out_vertices,
                                    std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets)
 {
     static constexpr auto max_verts = 64u;
@@ -534,11 +733,11 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     {
         const auto& m = meshlets.at(i);
         const auto& mb = meshlets_bounds.at(i);
-        out_meshlets.at(i) = gfx::Meshlet{ .vertex_offset = m.vertex_offset,
-                                           .vertex_count = m.vertex_count,
-                                           .index_offset = m.triangle_offset,
-                                           .index_count = m.triangle_count * 3,
-                                           .bounding_sphere = glm::vec4{ mb.center[0], mb.center[1], mb.center[2], mb.radius } };
+        out_meshlets.at(i) = Meshlet{ .vertex_offset = m.vertex_offset,
+                                      .vertex_count = m.vertex_count,
+                                      .index_offset = m.triangle_offset,
+                                      .index_count = m.triangle_count * 3,
+                                      .bounding_sphere = glm::vec4{ mb.center[0], mb.center[1], mb.center[2], mb.radius } };
     }
 }
 
@@ -565,6 +764,8 @@ void Renderer::update_transform(ecs::entity entity) { ENG_TODO(); }
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
 uint32_t Renderer::get_bindless(Handle<Buffer> buffer) { return bindless->get_index(buffer); }
+
+Renderer::PerFrame& Renderer::get_perframe() { return perframe.at(Engine::get().frame_num % perframe.size()); }
 
 } // namespace gfx
 } // namespace eng

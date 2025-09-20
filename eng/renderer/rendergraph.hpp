@@ -52,12 +52,13 @@ class RenderGraph
     {
         struct Resource
         {
-            Resource(Handle<Buffer> buffer, uint32_t rg_res_idx, AccessType type, PipelineStage stage, PipelineAccess access)
+            Resource(Handle<Buffer> buffer, uint32_t rg_res_idx, AccessType type, Flags<PipelineStage> stage,
+                     Flags<PipelineAccess> access)
                 : buffer(buffer), rg_res_idx(rg_res_idx), type(type), stage(stage), access(access), is_buffer(true)
             {
             }
-            Resource(Handle<ImageView> imgview, uint32_t rg_res_idx, AccessType type, PipelineStage stage,
-                     PipelineAccess access, ImageLayout layout, bool from_undefined = false)
+            Resource(Handle<ImageView> imgview, uint32_t rg_res_idx, AccessType type, Flags<PipelineStage> stage,
+                     Flags<PipelineAccess> access, ImageLayout layout, bool from_undefined = false)
                 : imgview(imgview), rg_res_idx(rg_res_idx), type(type), stage(stage), access(access), is_buffer(false),
                   layout(layout), from_undefined(from_undefined)
             {
@@ -76,29 +77,14 @@ class RenderGraph
                 from_undefined = r.from_undefined;
                 return *this;
             }
-            Resource(Resource&& r) noexcept { *this = std::move(r); }
-            Resource& operator=(Resource&& r) noexcept
-            {
-                if(r.is_buffer) { buffer = r.buffer; }
-                else { imgview = r.imgview; }
-                rg_res_idx = r.rg_res_idx;
-                type = r.type;
-                stage = r.stage;
-                access = r.access;
-                layout = r.layout;
-                is_buffer = r.is_buffer;
-                from_undefined = r.from_undefined;
-                return *this;
-            }
-
             union {
                 Handle<Buffer> buffer{};
                 Handle<ImageView> imgview;
             };
             uint32_t rg_res_idx;
             AccessType type;
-            PipelineStage stage;
-            PipelineAccess access;
+            Flags<PipelineStage> stage;
+            Flags<PipelineAccess> access;
             ImageLayout layout{ ImageLayout::UNDEFINED };
             bool is_buffer;
             bool from_undefined{ false };
@@ -111,7 +97,7 @@ class RenderGraph
 
     struct PassResourceBuilder
     {
-        Handle<Buffer> access(Handle<Buffer> r, AccessType type, PipelineStage stage, PipelineAccess access)
+        Handle<Buffer> access(Handle<Buffer> r, AccessType type, Flags<PipelineStage> stage, Flags<PipelineAccess> access)
         {
             auto* res = graph->find_resource(r);
             if(!res) { res = &graph->resources.emplace_back(RenderGraph::Resource{ r }); }
@@ -119,8 +105,8 @@ class RenderGraph
             pass->resources.push_back(pr);
             return r;
         }
-        Handle<ImageView> access(Handle<ImageView> r, AccessType type, PipelineStage stage, PipelineAccess access,
-                                 ImageLayout layout, bool from_undefined = false)
+        Handle<ImageView> access(Handle<ImageView> r, AccessType type, Flags<PipelineStage> stage,
+                                 Flags<PipelineAccess> access, ImageLayout layout, bool from_undefined = false)
         {
             auto img = r->image;
             auto* res = graph->find_resource(img);
@@ -149,8 +135,8 @@ class RenderGraph
 
     auto add_pass(const PassCreateInfo& info, const auto& builder_cb, const auto& render_cb)
     {
-        auto it = std::lower_bound(passes.begin(), passes.end(), info.value,
-                                   [](const Pass& p, uint32_t v) { return p.value < v; });
+        auto it = std::upper_bound(passes.begin(), passes.end(), info.value,
+                                   [](uint32_t v, const Pass& p) { return v < p.value; });
         it = passes.emplace(it, info.name, info.value, render_cb);
         PassResourceBuilder builder{ this, &*it };
         return builder_cb(builder);
@@ -205,7 +191,9 @@ class RenderGraph
         for(auto& p : passes)
         {
             // sort so images are at the end
-            std::sort(p.resources.begin(), p.resources.end(), [](const auto& a, const auto& b) { return a.is_buffer; });
+            std::sort(p.resources.begin(), p.resources.end(), [](const auto& a, const auto& b) {
+                return (a.is_buffer && b.is_buffer) ? a.rg_res_idx < b.rg_res_idx : a.is_buffer ? true : false;
+            });
             const auto pstage = [&p, &get_res_stage] {
                 auto stage = 0u;
                 for(auto& e : p.resources)
@@ -244,8 +232,8 @@ class RenderGraph
                 for(auto& r : p->resources)
                 {
                     auto& rhist = rhists[r.rg_res_idx];
-                    PipelineStage srcs = PipelineStage::ALL;
-                    PipelineAccess srca = PipelineAccess::NONE;
+                    Flags<PipelineStage> srcs = PipelineStage::ALL;
+                    Flags<PipelineAccess> srca = PipelineAccess::NONE;
                     ImageLayout srcl = ImageLayout::UNDEFINED;
                     if(rhist.res)
                     {

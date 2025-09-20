@@ -56,6 +56,7 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
 {
     if(range.size == 0) { return; }
     if(dst_offset == STAGING_APPEND) { dst_offset = dst->size; }
+    if(dst->capacity < dst_offset + range.size) { resize(dst, dst_offset + range.size); }
     if(dst->memory && src->memory)
     {
         memcpy((std::byte*)dst->memory + dst_offset, (const std::byte*)src->memory + range.offset, range.size);

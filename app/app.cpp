@@ -20,7 +20,9 @@ using namespace eng;
 namespace app
 {
 
-void Renderer::init() {}
+void Renderer::init()
+{
+}
 
 void Renderer::update()
 {
@@ -34,13 +36,15 @@ void Renderer::update()
         });
     }
 
-    // Engine::get().renderer->rgraph->add_pass(
-    //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::PRESENT - 1 },
-    //     [](gfx::RenderGraph::PassResourceBuilder& b) {
-    //         b.access(Engine::get().renderer->swapchain->get_view(), gfx::RenderGraph::AccessType::READ_BIT,
-    //                  gfx::PipelineStage::ALL, gfx::PipelineAccess::NONE, gfx::ImageLayout::GENERAL);
-    //     },
-    //     [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) { std::cout << "asd"; });
+    Engine::get().renderer->rgraph->add_pass(
+        gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::DEFAULT_UNLIT - 1 },
+        [](gfx::RenderGraph::PassResourceBuilder& b) {
+            b.access(Engine::get().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
+                     gfx::RenderGraph::AccessType::RW, gfx::PipelineStage::COMPUTE_BIT, gfx::PipelineAccess::SHADER_RW);
+        },
+        [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) {
+
+        });
 }
 
 void App::start()

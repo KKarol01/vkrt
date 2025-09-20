@@ -30,7 +30,7 @@
 #define ENG_TYPE_UINT4 uvec4
 
 #define ENG_TYPE_FLOAT2 vec2
-#define ENT_TYPE_VEC3 vec3
+#define ENG_TYPE_FLOAT3 vec3
 #define ENG_TYPE_FLOAT4 vec4
 
 #define ENG_TYPE_MAT3 mat3
@@ -52,7 +52,7 @@
 #define ENG_TYPE_UINT4 glm::uvec4
 
 #define ENG_TYPE_FLOAT2 glm::vec2
-#define ENT_TYPE_VEC3 glm::vec3
+#define ENG_TYPE_FLOAT3 glm::vec3
 #define ENG_TYPE_FLOAT4 glm::vec4
 
 #define ENG_TYPE_MAT3 glm::mat3
@@ -81,12 +81,12 @@ ENG_DECLARE_STORAGE_BUFFER(GPUIndicesBuffer) {
 } ENG_DECLARE_BINDLESS(GPUIndicesBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUVertexPositionsBuffer) { 
-    ENG_TYPE_UNSIZED(ENT_TYPE_VEC3, positions); 
+    ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT3, positions); 
 } ENG_DECLARE_BINDLESS(GPUVertexPositionsBuffer);
 
 struct GPUVertexAttribute
 {
-    ENT_TYPE_VEC3 normal;
+    ENG_TYPE_FLOAT3 normal;
     ENG_TYPE_FLOAT2 uv;
     ENG_TYPE_FLOAT4 tangent;
 };
@@ -94,49 +94,24 @@ ENG_DECLARE_STORAGE_BUFFER(GPUVertexAttributesBuffer) {
     ENG_TYPE_UNSIZED(GPUVertexAttribute, attributes); 
 } ENG_DECLARE_BINDLESS(GPUVertexAttributesBuffer);
 
-/* unpacked mesh instance for gpu consumption */
-struct GPUMeshInstance
-{
-    ENG_TYPE_UINT vertex_offset;
-    ENG_TYPE_UINT index_offset;
-    ENG_TYPE_UINT color_texture_idx;
-    ENG_TYPE_UINT normal_texture_idx;
-    ENG_TYPE_UINT metallic_roughness_idx;
-};
-ENG_DECLARE_STORAGE_BUFFER(GPUMeshInstancesBuffer) { 
-    ENG_TYPE_UNSIZED(GPUMeshInstance, mesh_instances);
-} ENG_DECLARE_BINDLESS(GPUMeshInstancesBuffer);
-
-ENG_DECLARE_STORAGE_BUFFER(GPUMeshletVerticesBuffer) { 
-    ENG_TYPE_UNSIZED(ENG_TYPE_UINT, vertices);
-} ENG_DECLARE_BINDLESS(GPUMeshletVerticesBuffer);
-
-ENG_DECLARE_STORAGE_BUFFER(GPUMeshletTrianglesBuffer) {
-    ENG_TYPE_UNSIZED(ENG_TYPE_UINT, triangles); 
-} ENG_DECLARE_BINDLESS(GPUMeshletTrianglesBuffer);
-
 ENG_DECLARE_STORAGE_BUFFER(GPUTransformsBuffer) {
     ENG_TYPE_UNSIZED(ENG_TYPE_MAT4, transforms);
 } ENG_DECLARE_BINDLESS(GPUTransformsBuffer);
 
-ENG_DECLARE_STORAGE_BUFFER(GPUMeshletBoundingSpheresBuffer) {
+ENG_DECLARE_STORAGE_BUFFER(GPUBoundingSpheresBuffer) {
     ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT4, bounding_spheres); 
-} ENG_DECLARE_BINDLESS(GPUMeshletBoundingSpheresBuffer);
+} ENG_DECLARE_BINDLESS(GPUBoundingSpheresBuffer);
 
 struct GPUInstanceId
 {
     uint32_t batch_id;      // index to indirect draw command for culling
-    uint32_t resource_id;   // index to any per instance resource
-    uint32_t material;      // index to material
+    uint32_t residx;        // index to any per resource resource (shared by all the instances of)
+    uint32_t instidx;       // index to any per instance of resource
 };
 ENG_DECLARE_STORAGE_BUFFER(GPUMeshletIdsBuffer) {
     ENG_TYPE_UINT count;
     ENG_TYPE_UNSIZED(GPUInstanceId, ids);
 } ENG_DECLARE_BINDLESS(GPUMeshletIdsBuffer);
-
-ENG_DECLARE_STORAGE_BUFFER(GPUPostCullIdsBuffer) {
-    ENG_TYPE_UNSIZED(ENG_TYPE_UINT, ids); 
-} ENG_DECLARE_BINDLESS(GPUPostCullIdsBuffer);
 
 #define VSM_PHYSICAL_PAGE_RESOLUTION 4096
 #define VSM_VIRTUAL_PAGE_RESOLUTION 64
@@ -147,7 +122,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUPostCullIdsBuffer) {
 ENG_DECLARE_STORAGE_BUFFER(GPUVsmConstantsBuffer) {
     ENG_TYPE_MAT4 dir_light_view;
     ENG_TYPE_MAT4 dir_light_proj_view[VSM_NUM_CLIPMAPS];
-    ENT_TYPE_VEC3 dir_light_dir;
+    ENG_TYPE_FLOAT3 dir_light_dir;
     ENG_TYPE_UINT num_pages_xy;
     ENG_TYPE_UINT max_clipmap_index;
     ENG_TYPE_FLOAT texel_resolution; // todo: rename; reconsider
@@ -184,8 +159,10 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_MAT4 inv_proj;
     ENG_TYPE_MAT4 inv_proj_view;
     ENG_TYPE_MAT3 rand_mat;
-    ENT_TYPE_VEC3 cam_pos;
+    ENG_TYPE_FLOAT3 cam_pos;
 } ENG_DECLARE_BINDLESS(GPUEngConstantsBuffer);
+
+
 
 #ifndef __cplusplus
 

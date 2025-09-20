@@ -4,35 +4,34 @@
 
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
-#if 0
 bool frustum_cull(vec4 bounding_sphere)
 {
     // clang-format off
-    const vec4 pos = constants.debug_view * vec4(bounding_sphere.xyz, 1.0);
-    vec4 L = vec4(constants.proj[0][3] + constants.proj[0][0],
-                  constants.proj[1][3] + constants.proj[1][0],
-                  constants.proj[2][3] + constants.proj[2][0],
-                  constants.proj[3][3] + constants.proj[3][0]);
-    vec4 R = vec4(constants.proj[0][3] - constants.proj[0][0],
-                  constants.proj[1][3] - constants.proj[1][0],
-                  constants.proj[2][3] - constants.proj[2][0],
-                  constants.proj[3][3] - constants.proj[3][0]);
-    vec4 B = vec4(constants.proj[0][3] + constants.proj[0][1],
-                  constants.proj[1][3] + constants.proj[1][1],
-                  constants.proj[2][3] + constants.proj[2][1],
-                  constants.proj[3][3] + constants.proj[3][1]);
-    vec4 T = vec4(constants.proj[0][3] - constants.proj[0][1],
-                  constants.proj[1][3] - constants.proj[1][1],
-                  constants.proj[2][3] - constants.proj[2][1],
-                  constants.proj[3][3] - constants.proj[3][1]);
-//    vec4 N = vec4(constants.proj[0][2],
-//                  constants.proj[1][2],
-//                  constants.proj[2][2],
-//                  constants.proj[3][2]);
-//    vec4 F = vec4(constants.proj[0][3] - constants.proj[0][2],
-//                  constants.proj[1][3] - constants.proj[1][2],
-//                  constants.proj[2][3] - constants.proj[2][2],
-//                  constants.proj[3][3] - constants.proj[3][2]);
+    const vec4 pos = engconsts.view * vec4(bounding_sphere.xyz, 1.0);
+    vec4 L = vec4(engconsts.proj[0][3] + engconsts.proj[0][0],
+                  engconsts.proj[1][3] + engconsts.proj[1][0],
+                  engconsts.proj[2][3] + engconsts.proj[2][0],
+                  engconsts.proj[3][3] + engconsts.proj[3][0]);
+    vec4 R = vec4(engconsts.proj[0][3] - engconsts.proj[0][0],
+                  engconsts.proj[1][3] - engconsts.proj[1][0],
+                  engconsts.proj[2][3] - engconsts.proj[2][0],
+                  engconsts.proj[3][3] - engconsts.proj[3][0]);
+    vec4 B = vec4(engconsts.proj[0][3] + engconsts.proj[0][1],
+                  engconsts.proj[1][3] + engconsts.proj[1][1],
+                  engconsts.proj[2][3] + engconsts.proj[2][1],
+                  engconsts.proj[3][3] + engconsts.proj[3][1]);
+    vec4 T = vec4(engconsts.proj[0][3] - engconsts.proj[0][1],
+                  engconsts.proj[1][3] - engconsts.proj[1][1],
+                  engconsts.proj[2][3] - engconsts.proj[2][1],
+                  engconsts.proj[3][3] - engconsts.proj[3][1]);
+//    vec4 N = vec4(engconsts.proj[0][2],
+//                  engconsts.proj[1][2],
+//                  engconsts.proj[2][2],
+//                  engconsts.proj[3][2]);
+//    vec4 F = vec4(engconsts.proj[0][3] - engconsts.proj[0][2],
+//                  engconsts.proj[1][3] - engconsts.proj[1][2],
+//                  engconsts.proj[2][3] - engconsts.proj[2][2],
+//                  engconsts.proj[3][3] - engconsts.proj[3][2]);
 
     L /= length(L.xyz);
     R /= length(R.xyz);
@@ -72,19 +71,19 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
 }
 
 bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
-    vec3 center = vec3(constants.debug_view * vec4(bounding_sphere.xyz, 1.0));
+    vec3 center = vec3(engconsts.view * vec4(bounding_sphere.xyz, 1.0));
     center.y *= -1.0; // -y because projection matrix does that
     float radius = max(bounding_sphere.w, 0.4) * 1.2;
 	vec4 aabb;
     // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.
 	if (project_sphere_bounds(vec3(center.xy, -center.z), radius, 0.1, P00, P11, aabb))
 	{
-		float width = (aabb.z - aabb.x) * float(textureSize(hiz_source, 0).x);
-		float height = (aabb.w - aabb.y) * float(textureSize(hiz_source, 0).y);
+		float width = (aabb.z - aabb.x) * float(textureSize(hizsrc, 0).x);
+		float height = (aabb.w - aabb.y) * float(textureSize(hizsrc, 0).y);
 
 		float level = floor(log2(max(width, height)));
 
-		float depth = textureLod(hiz_source, (aabb.xy + aabb.zw) * 0.5, level).x;
+		float depth = textureLod(hizsrc, (aabb.xy + aabb.zw) * 0.5, level).x;
 
 		float depthSphere = 0.1 / (-center.z - radius);
 		return depthSphere >= depth;
@@ -95,22 +94,17 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
 void main()
 {
     const uint x = uint(gl_GlobalInvocationID.x);
-    if(instance_ids.count <= x) { return; }
+    if(srcids.count <= x) { return; }
 
-    GPUInstanceId id = instance_ids.ids_us[x];
-    vec4 bs = vec4(vec3(transforms[id.resource_id] * vec4(instance_bs[x].xyz, 1.0)), instance_bs[x].w);
+    GPUInstanceId id = srcids.ids_us[x];
+    vec4 bs = vec4(vec3(transforms[id.instidx] * vec4(boundingspheres[id.residx].xyz, 1.0)), boundingspheres[id.residx].w);
     // bs.w = max(bs.w, 0.5);
 
-    if(frustum_cull(bs) && occlusion_cull(bs, constants.proj[0][0], constants.proj[1][1]))
+    if(true || frustum_cull(bs) && occlusion_cull(bs, engconsts.proj[0][0], engconsts.proj[1][1]))
     {
-        const uint off = atomicAdd(indirect_cmds.commands_us[id.batch_id].instanceCount, 1);
-        atomicAdd(indirect_cmds.post_cull_triangle_count, indirect_cmds.commands_us[id.batch_id].indexCount / 3);
-        post_cull_instance_ids[indirect_cmds.commands_us[id.batch_id].firstInstance + off] = x;
+        const uint off = atomicAdd(dstcmds[id.batch_id].instanceCount, 1);
+        // atomicAdd(dstids.count, 1);
+        // atomicAdd(dstcmds.count, indirect_cmds.commands_us[id.batch_id].indexCount / 3);
+        // dstids.ids_us[dstcmds[id.batch_id].firstInstance + off] = id;
     }
-}
-
-#endif
-
-void main()
-{
 }

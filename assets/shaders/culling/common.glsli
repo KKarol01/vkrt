@@ -8,26 +8,25 @@
 #ifndef NO_PUSH_CONSTANTS
 layout(scalar, push_constant) uniform PushConstants
 {
-    uint32_t constants_index;
-    uint32_t ids_index;
-    uint32_t post_cull_ids_index;
-    uint32_t bs_index;
-    uint32_t transforms_index;
-    uint32_t indirect_commands_index;
-    uint32_t hiz_source_index;
-    uint32_t hiz_dest_index;
-    uint32_t hiz_width;
-    uint32_t hiz_height;
+    uint32_t engconstsb;
+    uint32_t imidb;
+
+    uint32_t hizsampler;
+    uint32_t hizsrct2d;
+    uint32_t hizdsti;
+    uint32_t dstcmdb;
+    uint32_t dstimidb;
 };
 #endif
 
-#define instance_ids                storageBuffers_GPUMeshletIdsBuffer[ids_index]
-#define post_cull_instance_ids      storageBuffers_GPUPostCullIdsBuffer[post_cull_ids_index].ids_us
-#define instance_bs                 storageBuffers_GPUMeshletBoundingSpheresBuffer[bs_index].bounding_spheres_us
-#define indirect_cmds               storageBuffers_GPUDrawIndirectCommandsBuffer[indirect_commands_index]
-#define transforms                  storageBuffers_GPUTransformsBuffer[transforms_index].transforms_us
-#define hiz_source                  combinedImages_2d[hiz_source_index]
-#define hiz_dest                    storageImages_2dr16f[hiz_dest_index]
-#define hiz_debug                   storageImages_2drgba32f[hiz_dest_index]
+#define engconsts          storageBuffers_GPUEngConstantsBuffer[engconstsb]
+#define transforms         storageBuffers_GPUTransformsBuffer[engconsts.itrsb].transforms_us
+#define boundingspheres    storageBuffers_GPUBoundingSpheresBuffer[engconsts.rmbsb].bounding_spheres_us
+#define srcids             storageBuffers_GPUMeshletIdsBuffer[imidb]
+#define dstids             storageBuffers_GPUMeshletIdsBuffer[dstimidb]
+#define dstcmds            storageBuffers_GPUDrawIndirectCommandsBuffer[dstcmdb].commands_us
+//#define hizsrc             sampler2D(textures_2d[hizsrct2d], samplers[hizsampler])
+#define hizsrc             combinedImages_2d[hizsrct2d]
+#define hizdst             storageImages_2dr32f[hizdsti]
 
 #endif

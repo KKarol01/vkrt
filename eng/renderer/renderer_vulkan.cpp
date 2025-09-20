@@ -443,6 +443,12 @@ VkSamplerMetadata& VkSamplerMetadata::get(Sampler& a)
     return *(VkSamplerMetadata*)a.metadata;
 }
 
+const VkSamplerMetadata& VkSamplerMetadata::get(const Sampler& a)
+{
+    assert(a.metadata);
+    return *(VkSamplerMetadata*)a.metadata;
+}
+
 void VkSwapchainMetadata::init(Swapchain& a)
 {
     if(a.metadata)
@@ -1523,7 +1529,7 @@ Handle<ImageView> Swapchain::get_view() { return views.at(current_index); }
 //             }
 //             ++rp.mbatches.at(pp_off).count;
 //             ++cnts.at(pp_off);
-//             gpu_ids.at(j) = GPUInstanceId{ .batch_id = cmd_off, .resource_id = mi.mesh_idx, .material = ~0u };
+//             gpu_ids.at(j) = GPUInstanceId{ .batch_id = cmd_off, .instidx = mi.mesh_idx, .material = ~0u };
 //             gpu_bbs.at(j) = ml.bounding_sphere;
 //         }
 //         ++pp_off;

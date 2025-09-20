@@ -38,6 +38,7 @@ VkFormat to_vk(const ImageFormat& a)
         case ImageFormat::D24_S8_UNORM: { return VK_FORMAT_D24_UNORM_S8_UINT; }
         case ImageFormat::D32_SFLOAT: { return VK_FORMAT_D32_SFLOAT; }
         case ImageFormat::R16F: { return VK_FORMAT_R16_SFLOAT; }
+        case ImageFormat::R32F: { return VK_FORMAT_R32_SFLOAT; }
         case ImageFormat::R32FG32FB32FA32F: { return VK_FORMAT_R32G32B32A32_SFLOAT; }
         default: { ENG_ERROR("Unhandled case."); return {}; }
     }
@@ -77,17 +78,13 @@ VkImageViewType to_vk(const ImageViewType& a)
     }
 }
 
-VkImageAspectFlags to_vk(const ImageAspect& a)
+VkImageAspectFlags to_vk(const Flags<ImageAspect>& a)
 {
-    switch(a)
-    {
-        case gfx::ImageAspect::NONE:            { return VK_IMAGE_ASPECT_NONE; }
-        case gfx::ImageAspect::COLOR:           { return VK_IMAGE_ASPECT_COLOR_BIT; }
-        case gfx::ImageAspect::DEPTH:           { return VK_IMAGE_ASPECT_DEPTH_BIT; }
-        case gfx::ImageAspect::STENCIL:         { return VK_IMAGE_ASPECT_STENCIL_BIT; }
-        case gfx::ImageAspect::DEPTH_STENCIL:   { return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; }
-        default: { ENG_ERROR("Unhandled case."); return {}; }
-    }
+    VkImageAspectFlags flags{};
+    if(a.test(gfx::ImageAspect::COLOR))     { flags |= VK_IMAGE_ASPECT_COLOR_BIT; }
+    if(a.test(gfx::ImageAspect::DEPTH))     { flags |= VK_IMAGE_ASPECT_DEPTH_BIT; }
+    if(a.test(gfx::ImageAspect::STENCIL))   { flags |= VK_IMAGE_ASPECT_STENCIL_BIT; }
+    return flags;
 }
 
 VkImageLayout to_vk(const ImageLayout& a)
@@ -113,7 +110,7 @@ VkImageUsageFlags to_vk(const Flags<ImageUsage>& a)
     if(a.test(gfx::ImageUsage::TRANSFER_SRC_BIT))               { flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; }
     if(a.test(gfx::ImageUsage::TRANSFER_DST_BIT))               { flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; }
     if(a.test(gfx::ImageUsage::COLOR_ATTACHMENT_BIT))           { flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; }
-    if(a.test(gfx::ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT))   { flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; }
+    if(a.test(gfx::ImageUsage::DEPTH_BIT) || a.test(gfx::ImageUsage::STENCIL_BIT)) { flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; }
     return flags;
 }
 
@@ -271,6 +268,8 @@ VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
     if(a == gfx::PipelineStage::NONE)               { flags |= VK_PIPELINE_STAGE_2_NONE; }
     if(a == gfx::PipelineStage::ALL)                { flags |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
     if(a.test(gfx::PipelineStage::TRANSFER_BIT))    { flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT; }
+    if(a.test(gfx::PipelineStage::VERTEX_BIT))      { flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT; }
+    if(a.test(gfx::PipelineStage::FRAGMENT))        { flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; }
     if(a.test(gfx::PipelineStage::EARLY_Z_BIT))     { flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT; }
     if(a.test(gfx::PipelineStage::LATE_Z_BIT))      { flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT; }
     if(a.test(gfx::PipelineStage::COLOR_OUT_BIT))   { flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT; }

@@ -13,6 +13,9 @@ class Renderer
   public:
     void init();
     void update();
+
+    Handle<gfx::Pipeline> cull_pipeline;
+    Handle<gfx::Pipeline> hiz_pipeline;
 };
 
 class App

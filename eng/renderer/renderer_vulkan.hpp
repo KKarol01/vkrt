@@ -153,6 +153,7 @@ struct VkSamplerMetadata
     static void init(Sampler& a);
     static void destroy(Sampler& a);
     static VkSamplerMetadata& get(Sampler& a);
+    static const VkSamplerMetadata& get(const Sampler& a);
     // static const VkSamplerMetadata& get(const Sampler& a);
     VkSampler sampler{};
 };

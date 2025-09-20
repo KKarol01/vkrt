@@ -91,15 +91,18 @@ void BindlessPool::bind(CommandBuffer* cmd)
     cmd->bind_descriptors(&set, { 0, 1 });
 }
 
-uint32_t BindlessPool::get_index(Handle<Buffer> handle)
+uint32_t BindlessPool::get_index(Handle<Buffer> handle, Range range)
 {
-    const auto ret = buffer_indices.emplace(handle, ~index_t{});
-    if(ret.second)
+    auto& vec = buffer_indices[handle];
+    BufferView bv{ handle, range };
+    auto vecit = std::find_if(vec.begin(), vec.end(), [&bv](auto& e) { return e.first == bv; });
+    if(vecit == vec.end())
     {
-        ret.first->second = buffer_slots.allocate_slot();
+        vec.emplace_back(bv, buffer_slots.allocate_slot());
         update_index(handle);
+        vecit = vec.begin() + (vec.size() - 1);
     }
-    return ret.first->second;
+    return vecit->second;
 }
 
 uint32_t BindlessPool::get_index(Handle<Texture> handle)
@@ -115,11 +118,25 @@ uint32_t BindlessPool::get_index(Handle<Texture> handle)
     return ret.first->second;
 }
 
+uint32_t BindlessPool::get_index(Handle<Sampler> handle)
+{
+    const auto ret = sampler_indices.emplace(handle, ~index_t{});
+    if(ret.second)
+    {
+        ret.first->second = sampler_slots.allocate_slot();
+        update_index(handle);
+    }
+    return ret.first->second;
+}
+
 void BindlessPool::free_index(Handle<Buffer> handle)
 {
     if(auto it = buffer_indices.find(handle); it != buffer_indices.end())
     {
-        buffer_slots.free_slot(it->second);
+        for(const auto& e : it->second)
+        {
+            buffer_slots.free_slot(e.second);
+        }
         buffer_indices.erase(it);
     }
 }
@@ -148,16 +165,20 @@ void BindlessPool::free_index(Handle<Texture> handle)
 void BindlessPool::update_index(Handle<Buffer> handle)
 {
     if(!buffer_indices.contains(handle)) { return; }
-    const auto index = buffer_indices.at(handle);
-    const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{
-        .buffer = VkBufferMetadata::get(handle.get()).buffer, .range = VK_WHOLE_SIZE }));
-    const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
-                                                 .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
-                                                 .dstArrayElement = index,
-                                                 .descriptorCount = 1,
-                                                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                                 .pBufferInfo = &update });
-    updates.push_back(write);
+    const auto& views = buffer_indices.at(handle);
+
+    for(auto& e : views)
+    {
+        const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{
+            .buffer = VkBufferMetadata::get(handle.get()).buffer, .offset = e.first.range.offset, .range = e.first.range.size }));
+        const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
+                                                     .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
+                                                     .dstArrayElement = e.second,
+                                                     .descriptorCount = 1,
+                                                     .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                     .pBufferInfo = &update });
+        updates.push_back(write);
+    }
 }
 
 void BindlessPool::update_index(Handle<Texture> handle)
@@ -178,6 +199,21 @@ void BindlessPool::update_index(Handle<Texture> handle)
     updates.push_back(write);
 }
 
+void BindlessPool::update_index(Handle<Sampler> handle)
+{
+    const auto& res = handle.get();
+    const auto index = sampler_indices.at(handle);
+    const auto& update =
+        sampler_updates.emplace_back(Vks(VkDescriptorImageInfo{ .sampler = VkSamplerMetadata::get(res).sampler }));
+    const auto write = Vks(VkWriteDescriptorSet{ .dstSet = set,
+                                                 .dstBinding = (uint32_t)BINDLESS_SAMPLER_BINDING,
+                                                 .dstArrayElement = index,
+                                                 .descriptorCount = 1,
+                                                 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+                                                 .pImageInfo = &update });
+    updates.push_back(write);
+}
+
 void BindlessPool::update()
 {
     if(updates.empty()) { return; }
@@ -185,6 +221,7 @@ void BindlessPool::update()
     updates.clear();
     image_updates.clear();
     buffer_updates.clear();
+    sampler_updates.clear();
 }
 
 } // namespace gfx

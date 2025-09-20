@@ -37,7 +37,7 @@ VkFormat to_vk(const ImageFormat& a);
 VkFormat to_vk(const VertexFormat& a);
 VkImageType to_vk(const ImageType& a);
 VkImageViewType to_vk(const ImageViewType& a);
-VkImageAspectFlags to_vk(const ImageAspect& a);
+VkImageAspectFlags to_vk(const Flags<ImageAspect>& a);
 VkImageLayout to_vk(const ImageLayout& a);
 VkImageUsageFlags to_vk(const Flags<ImageUsage>& a);
 VkCullModeFlags to_vk(const CullFace& a);

@@ -146,6 +146,7 @@ enum class ImageFormat
     D24_S8_UNORM,
     D32_SFLOAT,
     R16F,
+    R32F,
     R32FG32FB32FA32F,
 };
 
@@ -167,7 +168,9 @@ enum class ImageUsage
     TRANSFER_DST_BIT = 0x8,
     TRANSFER_RW = TRANSFER_SRC_BIT | TRANSFER_DST_BIT,
     COLOR_ATTACHMENT_BIT = 0x10,
-    DEPTH_STENCIL_ATTACHMENT_BIT = 0x20,
+    DEPTH_BIT = 0x20,
+    STENCIL_BIT = 0x40,
+    DS = DEPTH_BIT | STENCIL_BIT,
 };
 ENG_ENABLE_FLAGS_OPERATORS(ImageUsage);
 
@@ -221,11 +224,13 @@ enum class PipelineStage : uint32_t
     NONE = 0x0,
     ALL = 0xFFFFFFFF,
     TRANSFER_BIT = 0x1,
-    EARLY_Z_BIT = 0x2,
-    LATE_Z_BIT = 0x4,
-    COLOR_OUT_BIT = 0x8,
-    COMPUTE_BIT = 0x10,
-    INDIRECT_BIT = 0x20,
+    VERTEX_BIT = 0x2,
+    FRAGMENT = 0x4,
+    EARLY_Z_BIT = 0x8,
+    LATE_Z_BIT = 0x10,
+    COLOR_OUT_BIT = 0x20,
+    COMPUTE_BIT = 0x40,
+    INDIRECT_BIT = 0x80,
 };
 using PipelineStageFlags = Flags<PipelineStage>;
 ENG_ENABLE_FLAGS_OPERATORS(PipelineStage);
@@ -244,6 +249,7 @@ enum class PipelineAccess : uint32_t
     DS_RW = DS_READ_BIT | DS_WRITE_BIT,
     STORAGE_READ_BIT = 0x40,
     STORAGE_WRITE_BIT = 0x80,
+    STORAGE_RW = STORAGE_READ_BIT | STORAGE_WRITE_BIT,
     INDIRECT_READ_BIT = 0x100,
     TRANSFER_READ_BIT = 0x200,
     TRANSFER_WRITE_BIT = 0x400,
@@ -511,11 +517,13 @@ struct Image
                                             : ImageViewType::NONE;
     }
 
-    ImageAspect deduce_aspect(bool depth_only = false) const
+    Flags<ImageAspect> deduce_aspect() const
     {
-        if(format == ImageFormat::D16_UNORM || format == ImageFormat::D32_SFLOAT) { return ImageAspect::DEPTH; }
-        if(format == ImageFormat::D24_S8_UNORM) { return depth_only ? ImageAspect::DEPTH : ImageAspect::DEPTH_STENCIL; }
-        return ImageAspect::COLOR;
+        Flags<ImageAspect> f;
+        if(usage.test(ImageUsage::DEPTH_BIT)) { f |= ImageAspect::DEPTH; }
+        if(usage.test(ImageUsage::STENCIL_BIT)) { f |= ImageAspect::STENCIL; }
+        if(!f) { f |= ImageAspect::COLOR; }
+        return f;
     }
 
     std::string name;
@@ -539,7 +547,7 @@ struct ImageViewDescriptor
     Handle<Image> image;
     std::optional<ImageViewType> view_type;
     std::optional<ImageFormat> format;
-    std::optional<ImageAspect> aspect;
+    std::optional<Flags<ImageAspect>> aspect;
     Range32 mips{ 0, ~0u };
     Range32 layers{ 0, ~0u };
     // swizzle always identity for now
@@ -556,7 +564,7 @@ struct ImageView
     Handle<Image> image;
     ImageViewType type{};
     ImageFormat format{};
-    ImageAspect aspect{};
+    Flags<ImageAspect> aspect{};
     Range32 mips{};
     Range32 layers{};
     void* metadata{};
@@ -715,7 +723,7 @@ DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
                                          t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
 DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
 DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.sampler));
-DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect, t.mips, t.layers));
+DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect.flags, t.mips, t.layers));
 
 ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Shader);
 ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Buffer);
@@ -751,6 +759,7 @@ struct SubmitInfo
 
 namespace RenderOrder
 {
+inline constexpr uint32_t CULLING = 45;
 inline constexpr uint32_t DEFAULT_UNLIT = 50;
 inline constexpr uint32_t PRESENT = 100;
 } // namespace RenderOrder
@@ -768,7 +777,8 @@ class Renderer
     struct MultiBatch
     {
         Handle<Pipeline> pipeline;
-        uint32_t count;
+        uint32_t instcount;
+        uint32_t cmdcount;
     };
 
     struct MeshletInstance
@@ -786,8 +796,9 @@ class Renderer
         std::vector<MultiBatch> mbatches;
         Handle<Buffer> cmd_buf;
         Handle<Buffer> ids_buf;
-        Handle<Buffer> bs_buf;
         uint32_t cmd_count;
+        uint32_t id_count;
+        uint32_t cmd_start;
         bool redo{ false };
     };
 
@@ -802,6 +813,12 @@ class Renderer
 
     struct Culling
     {
+        std::vector<MultiBatch> mbatches;
+        Handle<Image> hizpyramid;
+        Handle<Texture> hizptex;
+        std::vector<Handle<Texture>> hizpmiptexs;
+        Handle<Buffer> cmd_buf;
+        Handle<Buffer> ids_buf;
     };
 
     struct PerFrame
@@ -822,7 +839,7 @@ class Renderer
         Handle<Buffer> vpos_buf;    // positions
         Handle<Buffer> vattr_buf;   // rest of attributes
         Handle<Buffer> idx_buf;     // indices
-        Handle<Buffer> cull_bs_buf; // bouding spheres
+        Handle<Buffer> bsphere_buf; // bounding spheres
         // Handle<Buffer> const_bufs[2]{}; // constant settings
         Handle<Buffer> trs_bufs[2]{};
 
@@ -834,7 +851,7 @@ class Renderer
     void init(RendererBackend* backend);
     void update();
     void render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
-    void process_meshpass(MeshPassType pass, Sync** gpures_sync);
+    void process_meshpass(MeshPassType pass);
     void submit_mesh(const SubmitInfo& info);
 
     // void add_callback(const Callback<render_callback_t>& a) { on_render += a; }
@@ -843,7 +860,7 @@ class Renderer
     Handle<Image> make_image(const ImageDescriptor& info);
     Handle<ImageView> make_view(const ImageViewDescriptor& info);
     Handle<Sampler> make_sampler(const SamplerDescriptor& info);
-    Handle<Shader> make_shader(ShaderStage stage, const std::filesystem::path& path);
+    Handle<Shader> make_shader(const std::filesystem::path& path);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Sync* make_sync(const SyncCreateInfo& info);
     Handle<Texture> make_texture(const TextureDescriptor& info);
@@ -860,6 +877,7 @@ class Renderer
 
     SubmitQueue* get_queue(QueueType type);
     uint32_t get_bindless(Handle<Buffer> buffer);
+    PerFrame& get_perframe();
 
     Flags<RenderFlags> flags;
     SubmitQueue* gq{};
@@ -895,6 +913,10 @@ class Renderer
     std::array<MeshPassRenderData, (uint32_t)MeshPassType::LAST_ENUM> render_passes;
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
+    Handle<Pipeline> hiz_pipeline;
+    Handle<Sampler> hiz_sampler;
+    Handle<Pipeline> cull_pipeline;
+    Handle<Pipeline> cullzout_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;
     // Signal<render_callback_t> on_render;

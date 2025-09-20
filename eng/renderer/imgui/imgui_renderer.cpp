@@ -35,8 +35,7 @@ void ImGuiRenderer::init()
     size_t upload_size = width * height * 4 * sizeof(char);
 
     pipeline = r->make_pipeline(PipelineCreateInfo{
-        .shaders = { r->make_shader(ShaderStage::VERTEX_BIT, "imgui/imgui.vert.glsl"),
-                     r->make_shader(ShaderStage::PIXEL_BIT, "imgui/imgui.frag.glsl") },
+        .shaders = { r->make_shader("imgui/imgui.vert.glsl"), r->make_shader("imgui/imgui.frag.glsl") },
         .attachments = { .count = 1,
                          .color_formats = { ImageFormat::R8G8B8A8_SRGB },
                          .blend_states = { PipelineCreateInfo::BlendState{
