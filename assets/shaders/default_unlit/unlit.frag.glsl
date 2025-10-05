@@ -4,7 +4,8 @@
 
 layout(location = 0) in VsOut {
     vec3 position;
-    flat uint32_t instance_index;
+    vec2 uv;
+    flat uint32_t iidx;
 } fsin;
 
 layout(location = 0) out vec4 OUT_COLOR;
@@ -32,8 +33,14 @@ void main() {
         vec3(0.5, 0.5, 0.5)   // gray
     );
 
-    OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
+    GPUMaterial mat = get_mat(get_id(fsin.iidx).matidx);
 
+    //OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
+    vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
+    if(mat.base_color_idx != ~0u) {
+        color = texture(sampler2D(textures_2d[nonuniformEXT(mat.base_color_idx)], samplers[0]), fsin.uv);
+    }
+    OUT_COLOR = color;
 #if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;
 

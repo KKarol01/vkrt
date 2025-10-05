@@ -36,6 +36,7 @@ void ImGuiRenderer::init()
 
     pipeline = r->make_pipeline(PipelineCreateInfo{
         .shaders = { r->make_shader("imgui/imgui.vert.glsl"), r->make_shader("imgui/imgui.frag.glsl") },
+        .layout = r->bindless_pplayout,
         .attachments = { .count = 1,
                          .color_formats = { ImageFormat::R8G8B8A8_SRGB },
                          .blend_states = { PipelineCreateInfo::BlendState{
@@ -114,7 +115,7 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
 
     cmd->bind_index(index_buffer.get(), 0, VK_INDEX_TYPE_UINT16);
     cmd->bind_pipeline(pipeline.get());
-    r->bindless->bind(cmd);
+    assert(false); // r->bindless->bind(cmd);
     {
         float scale[2];
         scale[0] = 2.0f / draw_data->DisplaySize.x;

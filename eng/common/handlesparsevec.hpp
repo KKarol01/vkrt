@@ -7,9 +7,10 @@
 
 namespace eng
 {
-template <typename T, typename Storage = Handle<T>::Storage_T> class HandleSparseVec
+template <typename T> class HandleSparseVec
 {
-    using handle_t = Handle<T, Storage>;
+    using handle_t = Handle<T>;
+    using Storage = typename handle_t::Storage_T;
 
   public:
     auto size() const { return data.size() - free_list.size(); }

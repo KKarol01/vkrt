@@ -17,5 +17,5 @@ using Range32 = Range_T<uint32_t>;
 using Range64 = Range_T<uint64_t>;
 using Range = Range64;
 
-DEFINE_STD_HASH(Range32, eng::hash::combine_fnv1a(t.offset, t.size));
-DEFINE_STD_HASH(Range64, eng::hash::combine_fnv1a(t.offset, t.size));
+ENG_DEFINE_STD_HASH(Range32, eng::hash::combine_fnv1a(t.offset, t.size));
+ENG_DEFINE_STD_HASH(Range64, eng::hash::combine_fnv1a(t.offset, t.size));

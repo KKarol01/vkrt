@@ -29,7 +29,6 @@
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
-#include <eng/renderer/passes/passes.hpp>
 #include <eng/common/to_vk.hpp>
 #include <eng/common/paths.hpp>
 #include <eng/common/to_string.hpp>
@@ -59,6 +58,71 @@ namespace eng
 namespace gfx
 {
 
+void VkPipelineLayoutMetadata::init(PipelineLayout& a)
+{
+    if(a.metadata) { return; }
+    auto* r = RendererBackendVulkan::get_instance();
+    auto* md = new VkPipelineLayoutMetadata{};
+    a.metadata = md;
+
+    md->dlayouts.resize(a.info.sets.size());
+    std::vector<VkDescriptorSetLayoutCreateInfo> dslis(a.info.sets.size());
+    std::vector<std::vector<VkDescriptorSetLayoutBinding>> dslbis(a.info.sets.size());
+    std::vector<std::vector<VkDescriptorBindingFlags>> dslbifs(a.info.sets.size());
+    std::vector<std::vector<VkSampler>> dslbisamps(a.info.sets.size());
+    for(auto i = 0u; i < dslis.size(); ++i)
+    {
+        const auto& s = a.info.sets.at(i);
+        dslbis.at(i).resize(s.bindings.size());
+        dslbifs.at(i).resize(s.bindings.size());
+        auto& d = dslis.at(i);
+        d = Vks(VkDescriptorSetLayoutCreateInfo{
+            .flags = gfx::to_vk(s.flags),
+            .bindingCount = (uint32_t)s.bindings.size(),
+            .pBindings = dslbis.at(i).data(),
+        });
+        auto dslbfi = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{ .bindingCount = (uint32_t)s.bindings.size(),
+                                                                       .pBindingFlags = dslbifs.at(i).data() });
+        d.pNext = &dslbfi;
+        for(auto j = 0u; j < s.bindings.size(); ++j)
+        {
+            const auto& sb = s.bindings.at(j);
+            if(sb.immutable_samplers)
+            {
+                dslbisamps.at(i).resize(sb.size);
+                for(auto j = 0u; j < sb.size; ++j)
+                {
+                    dslbisamps.at(i).at(j) = VkSamplerMetadata::get(sb.immutable_samplers[j].get()).sampler;
+                }
+            }
+            dslbis.at(i).at(j) = Vks(VkDescriptorSetLayoutBinding{ .binding = sb.slot,
+                                                                   .descriptorType = gfx::to_vk(sb.type),
+                                                                   .descriptorCount = sb.size,
+                                                                   .stageFlags = gfx::to_vk(sb.stages),
+                                                                   .pImmutableSamplers = dslbisamps.at(i).data() });
+            dslbifs.at(i).at(j) = gfx::to_vk(sb.flags);
+        }
+        VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &d, nullptr, &md->dlayouts.at(i)));
+    }
+
+    VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.info.range.stages), .offset = 0ull, .size = a.info.range.size };
+
+    const auto pli = Vks(VkPipelineLayoutCreateInfo{ .setLayoutCount = (uint32_t)md->dlayouts.size(),
+                                                     .pSetLayouts = md->dlayouts.data(),
+                                                     .pushConstantRangeCount = range.size > 0 ? 1u : 0u,
+                                                     .pPushConstantRanges = &range });
+    VK_CHECK(vkCreatePipelineLayout(r->dev, &pli, nullptr, &md->layout));
+}
+
+void VkPipelineLayoutMetadata::destroy(PipelineLayout& a)
+{
+    // destroy set layouts
+    // destroy layout
+    // free metadata
+    ENG_TODO();
+    assert(false);
+}
+
 void VkPipelineMetadata::init(Pipeline& a)
 {
     if(a.metadata) { return; }
@@ -66,8 +130,8 @@ void VkPipelineMetadata::init(Pipeline& a)
     a.metadata = md;
     {
         const auto stage = a.info.shaders[0]->stage;
-        if(stage == ShaderStage::VERTEX_BIT) { a.info.type = PipelineType::GRAPHICS; }
-        else if(stage == ShaderStage::COMPUTE_BIT) { a.info.type = PipelineType::COMPUTE; }
+        if(stage == ShaderStage::VERTEX_BIT) { a.type = PipelineType::GRAPHICS; }
+        else if(stage == ShaderStage::COMPUTE_BIT) { a.type = PipelineType::COMPUTE; }
         else
         {
             assert(false);
@@ -78,7 +142,6 @@ void VkPipelineMetadata::init(Pipeline& a)
     }
 
     auto* r = RendererBackendVulkan::get_instance();
-    md->layout = Engine::get().renderer->bindless->get_pipeline_layout();
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     stages.reserve(a.info.shaders.size());
@@ -88,9 +151,10 @@ void VkPipelineMetadata::init(Pipeline& a)
             .stage = gfx::to_vk(e->stage), .module = ((VkShaderMetadata*)e->metadata)->shader, .pName = "main" }));
     }
 
-    if(a.info.type == PipelineType::COMPUTE)
+    if(a.type == PipelineType::COMPUTE)
     {
-        const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = md->layout });
+        const auto vkinfo = Vks(VkComputePipelineCreateInfo{
+            .stage = stages.at(0), .layout = VkPipelineLayoutMetadata::get(a.info.layout.get())->layout });
         VK_CHECK(vkCreateComputePipelines(r->dev, {}, 1, &vkinfo, {}, &md->pipeline));
         return;
     }
@@ -208,7 +272,7 @@ void VkPipelineMetadata::init(Pipeline& a)
         .pDepthStencilState = &pDepthStencilState,
         .pColorBlendState = &pColorBlendState,
         .pDynamicState = &pDynamicState,
-        .layout = Engine::get().renderer->bindless->get_pipeline_layout(),
+        .layout = VkPipelineLayoutMetadata::get(a.info.layout.get())->layout,
     });
     VK_CHECK(vkCreateGraphicsPipelines(r->dev, nullptr, 1, &vk_info, nullptr, &md->pipeline));
 }
@@ -221,6 +285,34 @@ void VkPipelineMetadata::destroy(Pipeline& a)
     vkDestroyPipeline(RendererBackendVulkan::get_instance()->dev, md->pipeline, nullptr);
     delete a.metadata;
     a.metadata = nullptr;
+}
+
+void VkDescriptorPoolMetadata::init(DescriptorPool& a)
+{
+    if(a.metadata) { return; }
+    auto* md = new VkDescriptorPoolMetadata{};
+    a.metadata = md;
+
+    std::vector<VkDescriptorPoolSize> sizes(a.info.pools.size());
+    for(auto i = 0u; i < sizes.size(); ++i)
+    {
+        sizes.at(i) =
+            VkDescriptorPoolSize{ .type = gfx::to_vk(a.info.pools.at(i).type), .descriptorCount = a.info.pools.at(i).count };
+    }
+    auto dpi = Vks(VkDescriptorPoolCreateInfo{
+        .flags = gfx::to_vk(a.info.flags),
+        .maxSets = a.info.max_sets,
+        .poolSizeCount = (uint32_t)sizes.size(),
+        .pPoolSizes = sizes.data(),
+    });
+    VK_CHECK(vkCreateDescriptorPool(RendererBackendVulkan::get_instance()->dev, &dpi, nullptr, &md->pool));
+    a.sets.reserve(a.info.max_sets);
+}
+
+void VkDescriptorPoolMetadata::destroy(DescriptorPool& a)
+{
+    ENG_TODO();
+    assert(false);
 }
 
 VkPipelineMetadata& VkPipelineMetadata::get(Pipeline& a)
@@ -1244,7 +1336,7 @@ void RendererBackendVulkan::initialize_vulkan()
 //         cmd->set_viewports(&viewport, 1);
 //         cmd->set_scissors(&scissor, 1);
 //         cmd->draw_indexed_indirect_count(bufs.buf_draw_cmds.get(), 8, bufs.buf_draw_cmds.get(), 0, bufs.command_count,
-//                                          sizeof(DrawIndirectCommand));
+//                                          sizeof(DrawIndexedIndirectCommand));
 //     }
 //     cmd->end_rendering();
 //
@@ -1383,6 +1475,12 @@ bool RendererBackendVulkan::compile_shader(Shader& shader)
     return true;
 }
 
+bool RendererBackendVulkan::compile_pplayout(PipelineLayout& layout)
+{
+    VkPipelineLayoutMetadata::init(layout);
+    return true;
+}
+
 bool RendererBackendVulkan::compile_pipeline(Pipeline& pipeline)
 {
     VkPipelineMetadata::init(pipeline);
@@ -1408,6 +1506,27 @@ SubmitQueue* RendererBackendVulkan::get_queue(QueueType type)
     if(type == QueueType::GRAPHICS) { return gq; }
     ENG_ERROR("Unsupported queue");
     return nullptr;
+}
+
+DescriptorPool RendererBackendVulkan::make_descpool(const DescriptorPoolCreateInfo& info)
+{
+    DescriptorPool pool{ .info = info };
+    VkDescriptorPoolMetadata::init(pool);
+    return pool;
+}
+
+DescriptorSet RendererBackendVulkan::allocate_set(DescriptorPool& pool, const PipelineLayout& playout, uint32_t dset_idx)
+{
+    assert(pool.metadata && playout.metadata);
+    DescriptorSet set{};
+    auto* md = new VkDescriptorSetMetadata{};
+    set.metadata = md;
+    const auto* vkpl = VkPipelineLayoutMetadata::get(playout);
+    const auto dsai = Vks(VkDescriptorSetAllocateInfo{ .descriptorPool = VkDescriptorPoolMetadata::get(pool)->pool,
+                                                       .descriptorSetCount = 1,
+                                                       .pSetLayouts = &vkpl->dlayouts.at(dset_idx) });
+    vkAllocateDescriptorSets(dev, &dsai, &md->set);
+    return set;
 }
 
 // todo: swapchain impl should not be here
@@ -1497,7 +1616,7 @@ Handle<ImageView> Swapchain::get_view() { return views.at(current_index); }
 //
 //         rp.mbatches.resize(rp.instances.size());
 //         std::vector<uint32_t> cnts(rp.instances.size());
-//         std::vector<DrawIndirectCommand> cmds(rp.instances.size());
+//         std::vector<DrawIndexedIndirectCommand> cmds(rp.instances.size());
 //         std::vector<GPUInstanceId> gpu_ids(rp.instances.size());
 //         std::vector<glm::vec4> gpu_bbs(rp.instances.size());
 //         Handle<Pipeline> prev_pipeline;
@@ -1521,7 +1640,7 @@ Handle<ImageView> Swapchain::get_view() { return views.at(current_index); }
 //                 const auto& g = mi.geometry.get();
 //                 prev_meshlet = mi.meshlet_idx;
 //                 ++cmd_off;
-//                 cmds.at(cmd_off) = DrawIndirectCommand{ .indexCount = ml.index_count,
+//                 cmds.at(cmd_off) = DrawIndexedIndirectCommand{ .indexCount = ml.index_count,
 //                                                         .instanceCount = 0,
 //                                                         .firstIndex = (uint32_t)g.index_range.offset + ml.index_offset,
 //                                                         .vertexOffset = (int32_t)(g.vertex_range.offset + ml.vertex_offset),
@@ -1926,7 +2045,7 @@ Handle<ImageView> Swapchain::get_view() { return views.at(current_index); }
 //             req.cmd->push_constants(ShaderStage::ALL, &engcbi, { 0, sizeof(engcbi) });
 //             req.cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
 //             req.cmd->draw_indexed_indirect_count(rp.cmd_buf.get(), cmdoff, rp.cmd_buf.get(), cntsz * i, rp.cmd_count,
-//                                                  sizeof(DrawIndirectCommand));
+//                                                  sizeof(DrawIndexedIndirectCommand));
 //         }
 //     }
 // }

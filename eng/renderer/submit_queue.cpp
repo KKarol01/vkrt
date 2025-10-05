@@ -12,8 +12,8 @@ namespace eng
 namespace gfx
 {
 
-void CommandBuffer::barrier(PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
-                            PipelineAccessFlags dst_access)
+void CommandBuffer::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                            Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access)
 {
     const auto barrier = Vks(VkMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
                                                .srcAccessMask = to_vk(src_access),
@@ -23,8 +23,9 @@ void CommandBuffer::barrier(PipelineStageFlags src_stage, PipelineAccessFlags sr
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-void CommandBuffer::barrier(Image& image, PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
-                            PipelineAccessFlags dst_access, ImageLayout old_layout, ImageLayout new_layout)
+void CommandBuffer::barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                            Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
+                            ImageLayout new_layout)
 {
     const auto barr =
         Vks(VkImageMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
@@ -102,32 +103,25 @@ void CommandBuffer::bind_index(Buffer& index, uint32_t offset, VkIndexType type)
 void CommandBuffer::bind_pipeline(const Pipeline& pipeline)
 {
     const auto& md = VkPipelineMetadata::get(pipeline);
-    vkCmdBindPipeline(cmd, to_vk(pipeline.info.type), md.pipeline);
+    vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
 }
 
-void CommandBuffer::bind_descriptors(VkDescriptorSet* sets, Range32 range)
+void CommandBuffer::bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32 range)
 {
-    const auto& md = VkPipelineMetadata::get(*current_pipeline);
-    auto& arr = desc_sets.at((uint32_t)current_pipeline->info.type);
-    auto update = false;
+    const auto& md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
+    std::array<VkDescriptorSet, 8> vksets{};
     for(auto i = 0u; i < range.size; ++i)
     {
-        update = true;
-        break;
-        if(arr.at(range.offset + i) != sets[i]) { update = true; }
-        arr.at(range.offset + i) = sets[i];
+        vksets.at(i) = VkDescriptorSetMetadata::get(ds[i])->set;
     }
-    if(update)
-    {
-        vkCmdBindDescriptorSets(cmd, to_vk(current_pipeline->info.type), md.layout, range.offset, range.size, sets, 0, nullptr);
-    }
+    vkCmdBindDescriptorSets(cmd, to_vk(current_pipeline->type), md->layout, range.offset, range.size, vksets.data(), 0, nullptr);
 }
 
 void CommandBuffer::push_constants(Flags<ShaderStage> stages, const void* const values, Range range)
 {
-    const auto& md = VkPipelineMetadata::get(*current_pipeline);
-    vkCmdPushConstants(cmd, md.layout, to_vk(stages), (uint32_t)range.offset, (uint32_t)range.size, values);
+    const auto& md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
+    vkCmdPushConstants(cmd, md->layout, to_vk(stages), (uint32_t)range.offset, (uint32_t)range.size, values);
 }
 
 void CommandBuffer::set_viewports(const VkViewport* viewports, uint32_t count)
@@ -312,7 +306,7 @@ CommandPool* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
     return &command_pools.emplace_back(dev, family_idx, flags);
 }
 
-SubmitQueue& SubmitQueue::wait_sync(Sync* sync, PipelineStageFlags stages, uint64_t value)
+SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
 {
     if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
     {
@@ -323,7 +317,7 @@ SubmitQueue& SubmitQueue::wait_sync(Sync* sync, PipelineStageFlags stages, uint6
     return *this;
 }
 
-SubmitQueue& SubmitQueue::signal_sync(Sync* sync, PipelineStageFlags stages, uint64_t value)
+SubmitQueue& SubmitQueue::signal_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
 {
     if(sync->type == SyncType::FENCE)
     {

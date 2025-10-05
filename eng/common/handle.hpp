@@ -8,7 +8,7 @@
 namespace eng
 {
 
-template <typename T, typename Storage = uint32_t> struct Handle;
+template <typename T> struct Handle;
 
 template <typename T> using handle_dispatcher_get_pfunc_t = T* (*)(Handle<T>);
 
@@ -47,21 +47,32 @@ namespace eng
 template <typename T>
 concept handle_has_dispatcher = std::same_as<T*, decltype(HandleDispatcher<T>::get_pfunc(std::declval<Handle<T>>()))>;
 
-template <typename T, typename Storage> struct Handle
+template <typename T> struct HandleStorage
 {
-    using Storage_T = Storage;
+    using Storage_T = uint32_t;
+};
+
+#define ENG_DEFINE_HANDLE_STORAGE(type, storage)                                                                       \
+    template <> struct ::eng::HandleStorage<type>                                                                      \
+    {                                                                                                                  \
+        using Storage_T = storage;                                                                                     \
+    }
+
+template <typename T> struct Handle
+{
+    using Storage_T = typename HandleStorage<T>::Storage_T;
     constexpr Handle() = default;
-    constexpr explicit Handle(Storage handle) : handle{ handle } {}
+    constexpr explicit Handle(Storage_T handle) : handle{ handle } {}
     constexpr Handle(const Handle& handle) { *this = handle; }
     constexpr Handle& operator=(const Handle& handle)
     {
         this->handle = *handle;
         return *this;
     }
-    explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage>::gen() } {}
-    constexpr Storage operator*() const { return handle; }
+    explicit Handle(HandleGenerate_T) : handle{ HandleGenerator<T, Storage_T>::gen() } {}
+    constexpr Storage_T operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;
-    constexpr explicit operator bool() const { return handle != ~Storage{}; }
+    constexpr explicit operator bool() const { return handle != ~Storage_T{}; }
 
     auto& get(this auto&& self)
         requires handle_has_dispatcher<T>
@@ -74,7 +85,7 @@ template <typename T, typename Storage> struct Handle
         return HandleDispatcher<T>::get_pfunc(self);
     }
 
-    Storage handle{ ~Storage{} };
+    Storage_T handle{ ~Storage_T{} };
 };
 
 } // namespace eng

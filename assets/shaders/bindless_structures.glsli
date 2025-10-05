@@ -3,7 +3,7 @@
 
 #define BINDLESS_STORAGE_BUFFER_BINDING 0
 #define BINDLESS_STORAGE_IMAGE_BINDING 1
-#define BINDLESS_COMBINED_IMAGE_BINDING 2
+// #define BINDLESS_COMBINED_IMAGE_BINDING 2
 #define BINDLESS_SAMPLED_IMAGE_BINDING 3
 #define BINDLESS_SAMPLER_BINDING 4
 #define BINDLESS_ACCELERATION_STRUCT_BINDING 5
@@ -64,7 +64,7 @@
 #define ENG_DECLARE_BINDLESS(type)
 #endif
 
-struct DrawIndirectCommand
+struct DrawIndexedIndirectCommand
 {
     ENG_TYPE_UINT indexCount;
     ENG_TYPE_UINT instanceCount;
@@ -72,9 +72,9 @@ struct DrawIndirectCommand
     ENG_TYPE_INT vertexOffset;
     ENG_TYPE_UINT firstInstance;
 };
-ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndirectCommandsBuffer) {
-    ENG_TYPE_UNSIZED(DrawIndirectCommand, commands);
-} ENG_DECLARE_BINDLESS(GPUDrawIndirectCommandsBuffer);
+ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndexedIndirectCommandsBuffer) {
+    ENG_TYPE_UNSIZED(DrawIndexedIndirectCommand, commands);
+} ENG_DECLARE_BINDLESS(GPUDrawIndexedIndirectCommandsBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUIndicesBuffer) { 
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, indices); 
@@ -107,11 +107,20 @@ struct GPUInstanceId
     uint32_t batch_id;      // index to indirect draw command for culling
     uint32_t residx;        // index to any per resource resource (shared by all the instances of)
     uint32_t instidx;       // index to any per instance of resource
+    uint32_t matidx;        // index to material
 };
 ENG_DECLARE_STORAGE_BUFFER(GPUMeshletIdsBuffer) {
     ENG_TYPE_UINT count;
     ENG_TYPE_UNSIZED(GPUInstanceId, ids);
 } ENG_DECLARE_BINDLESS(GPUMeshletIdsBuffer);
+
+struct GPUMaterial
+{
+    uint32_t base_color_idx;
+};
+ENG_DECLARE_STORAGE_BUFFER(GPUMaterialsBuffer) {
+    ENG_TYPE_UNSIZED(GPUMaterial, materials);
+} ENG_DECLARE_BINDLESS(GPUMaterialsBuffer);
 
 #define VSM_PHYSICAL_PAGE_RESOLUTION 4096
 #define VSM_VIRTUAL_PAGE_RESOLUTION 64
@@ -151,6 +160,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_UINT vidxb; // index buffer index
     ENG_TYPE_UINT rmbsb; // per-resource mesh bounding sphere buffer index
     ENG_TYPE_UINT itrsb; // per-instance transform buffer index
+    ENG_TYPE_UINT rmatb; // per-instance material buffer index
 
     ENG_TYPE_MAT4 view;
     ENG_TYPE_MAT4 proj;
@@ -162,13 +172,16 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_FLOAT3 cam_pos;
 } ENG_DECLARE_BINDLESS(GPUEngConstantsBuffer);
 
-
-
 #ifndef __cplusplus
 
+#define G_SAMPLER_LINEAR 0
+#define G_SAMPLER_NEAREST 1
+
+#if 0
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform usampler2D combinedImages_2du[];
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2D combinedImages_2d[];
 layout(set = 0, binding = BINDLESS_COMBINED_IMAGE_BINDING) uniform sampler2DArray combinedImages_2dArray[];
+#endif
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r16ui) restrict uniform uimage2D storageImages_2dr16ui[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r16f) restrict uniform image2D storageImages_2dr16f[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2D storageImages_2dr32ui[];

@@ -89,18 +89,45 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
 void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout final_layout)
 {
     auto& img = dst.get();
-    const auto total_size = img.width * img.height * 4;
-    auto [mem, size] = allocate(total_size);
-    assert(size >= total_size);
-    memcpy(mem, src, total_size);
-    const auto copy = Vks(VkBufferImageCopy2{ .bufferOffset = get_offset(mem),
-                                              .imageSubresource = { gfx::to_vk(img.deduce_aspect()), 0, 0, 1 },
-                                              .imageExtent = { img.width, img.height, img.depth } });
+    const auto block_data = GetBlockData(img.format);
+    const auto bx = img.width / block_data.x;
+    const auto by = img.height / block_data.y;
+    const auto bz = img.depth / block_data.z;
+    const auto bcount = bx * by * bz;
+    const auto rowsize = bx * block_data.size;
+    const auto imgsize = bcount * block_data.size;
+
     get_cmd()->barrier(img, PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
                        PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
-    get_cmd()->copy(img, buffer, &copy, 1);
+    size_t upbytes = 0;
+    while(upbytes < imgsize)
+    {
+        const auto upsize = imgsize - upbytes;
+        const auto uprows = upbytes / rowsize;
+        auto [almem, alsize] = allocate(upsize);
+        if(alsize < rowsize)
+        {
+            reset();
+            continue;
+        }
+        const auto urows = (uprows % img.height);
+        const auto uslices = (uprows / img.height);
+        const auto alrows = (alsize / rowsize);
+        const auto alslices = std::max((alrows / img.height), 1ull);
+        assert(alslices == 1);
+        const auto copy = Vks(VkBufferImageCopy2{
+            .bufferOffset = get_offset(almem) + upbytes,
+            .imageSubresource = { gfx::to_vk(img.deduce_aspect()), 0, 0, 1 },
+            .imageOffset = { 0, (int32_t)(urows * block_data.y), (int32_t)(uslices * block_data.z) },
+            .imageExtent = { img.width, (uint32_t)(alrows * block_data.y), (uint32_t)(alslices * block_data.z) } });
+        memcpy(almem, (std::byte*)src + upbytes, alsize);
+        get_cmd()->copy(img, buffer, &copy, 1);
+        upbytes += alrows * rowsize;
+    }
     get_cmd()->barrier(img, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
                        PipelineAccess::NONE, ImageLayout::TRANSFER_DST, final_layout);
+
+    assert(upbytes == imgsize);
 }
 
 void StagingBuffer::insert_barrier()

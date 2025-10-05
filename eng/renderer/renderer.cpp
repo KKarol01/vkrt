@@ -18,8 +18,26 @@
 
 namespace eng
 {
+
 namespace gfx
 {
+
+ImageBlockData GetBlockData(ImageFormat format)
+{
+    switch(format)
+    {
+    case ImageFormat::R8G8B8A8_UNORM:
+    case ImageFormat::R8G8B8A8_SRGB:
+    {
+        return { 4, 1, 1, 1 };
+    }
+    default:
+    {
+        assert(false && "Bad format.");
+        return {};
+    }
+    }
+}
 
 void Renderer::init(RendererBackend* backend)
 {
@@ -32,19 +50,49 @@ void Renderer::init(RendererBackend* backend)
     ENG_SET_HANDLE_DISPATCHER(Texture, { return &::eng::Engine::get().renderer->textures.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(Material, { return &::eng::Engine::get().renderer->materials.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(Shader, { return &::eng::Engine::get().renderer->shaders.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(PipelineLayout, { return &::eng::Engine::get().renderer->pplayouts.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(Pipeline, { return &::eng::Engine::get().renderer->pipelines.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(Sampler, { return &::eng::Engine::get().renderer->samplers.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(MeshPass, { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
     ENG_SET_HANDLE_DISPATCHER(ShaderEffect, { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(DescriptorPool, { return &::eng::Engine::get().renderer->descpools.at(*handle); });
     // clang-format on
 
     this->backend = backend;
     backend->init();
 
+    bindless_pool = make_descpool(DescriptorPoolCreateInfo{
+        .flags = DescriptorPoolFlags::UPDATE_AFTER_BIND_BIT,
+        .max_sets = 2,
+        .pools = { { PipelineBindingType::STORAGE_BUFFER, 2 * 1024 },
+                   { PipelineBindingType::STORAGE_IMAGE, 2 * 1024 },
+                   { PipelineBindingType::SAMPLED_IMAGE, 2 * 1024 },
+                   { PipelineBindingType::SEPARATE_SAMPLER, 2 * 2 } },
+    });
+
+    auto linear_sampler = make_sampler(SamplerDescriptor{});
+    auto nearest_sampler = make_sampler(SamplerDescriptor{ .filtering = { ImageFilter::NEAREST, ImageFilter::NEAREST } });
+    Handle<Sampler> imsamplers[]{ linear_sampler, nearest_sampler };
+    const auto bindless_bflags = PipelineBindingFlags::UPDATE_AFTER_BIND_BIT |
+                                 PipelineBindingFlags::UPDATE_UNUSED_WHILE_PENDING_BIT | PipelineBindingFlags::PARTIALLY_BOUND_BIT;
+
+    bindless_pplayout = make_pplayout(PipelineLayoutCreateInfo{
+        .sets = { PipelineLayoutCreateInfo::SetLayout{
+            .flags = PipelineSetFlags::UPDATE_AFTER_BIND_BIT,
+            .bindings = {
+                { PipelineBindingType::STORAGE_BUFFER, BINDLESS_STORAGE_BUFFER_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
+                { PipelineBindingType::STORAGE_IMAGE, BINDLESS_STORAGE_IMAGE_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
+                { PipelineBindingType::SAMPLED_IMAGE, BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
+                { PipelineBindingType::SEPARATE_SAMPLER, BINDLESS_SAMPLER_BINDING, 2, ShaderStage::ALL, bindless_bflags, imsamplers },
+            } } },
+        .range = {ShaderStage::ALL, 128},
+        });
+    bindless_set = bindless_pool->allocate(bindless_pplayout, 0);
+
     auto* ew = Engine::get().window;
     gq = backend->get_queue(QueueType::GRAPHICS);
     swapchain = backend->make_swapchain();
-    bindless = new BindlessPool{ ((RendererBackendVulkan*)backend)->dev };
+    bindless = new BindlessPool{ bindless_pool, bindless_set };
     sbuf = new StagingBuffer{};
     sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
     perframe.resize(frame_count);
@@ -111,6 +159,7 @@ void Renderer::init(RendererBackend* backend)
     bufs.vattr_buf = make_buffer(BufferDescriptor{ "vertex attributes", 1024, BufferUsage::STORAGE_BIT });
     bufs.idx_buf = make_buffer(BufferDescriptor{ "vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT });
     bufs.bsphere_buf = make_buffer(BufferDescriptor{ "bounding spheres", 1024, BufferUsage::STORAGE_BIT });
+    bufs.mats_buf = make_buffer(BufferDescriptor{ "materials", 1024, BufferUsage::STORAGE_BIT });
     for(uint32_t i = 0; i < 2; ++i)
     {
         bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
@@ -129,10 +178,20 @@ void Renderer::init(RendererBackend* backend)
 
     const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
         .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
-        .attachments = { .count = 1, .color_formats = { ImageFormat::R8G8B8A8_SRGB }, .depth_format = ImageFormat::D32_SFLOAT },
+        .layout = bindless_pplayout,
+        .attachments = { .count = 1,
+                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                         .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                           .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                           .color_op = BlendOp::ADD,
+                                                                           .src_alpha_factor = BlendFactor::ONE,
+                                                                           .dst_alpha_factor = BlendFactor::ZERO,
+                                                                           .alpha_op = BlendOp::ADD } },
+                         .depth_format = ImageFormat::D32_SFLOAT },
         .depth_test = true,
-        .depth_write = true,
-        .depth_compare = DepthCompare::GREATER,
+        .depth_write = false,
+        .depth_compare = DepthCompare::GEQUAL,
         .culling = CullFace::BACK,
     });
     MeshPassCreateInfo info{ .name = "default_unlit" };
@@ -141,17 +200,20 @@ void Renderer::init(RendererBackend* backend)
     default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
 
     hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") } });
+        .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = bindless_pplayout });
     hiz_sampler = make_sampler(SamplerDescriptor{
         .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
         .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
         .mipmap_mode = SamplerMipmapMode::NEAREST,
         .reduction_mode = SamplerReductionMode::MIN });
     cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") } });
+        .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
+        .layout = bindless_pplayout,
+    });
     cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
         .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
                      Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
+        .layout = bindless_pplayout,
         .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
         .depth_test = true,
         .depth_write = true,
@@ -167,21 +229,31 @@ void Renderer::update()
     auto& pf = get_perframe();
     const auto& ppf = perframe.at((Engine::get().frame_num + perframe.size() - 1) % perframe.size()); // get previous frame res
 
-    if(compile_shaders.size())
+    if(new_shaders.size())
     {
-        for(auto& e : compile_shaders)
+        for(auto& e : new_shaders)
         {
             backend->compile_shader(e.get());
         }
-        compile_shaders.clear();
+        new_shaders.clear();
     }
-    if(compile_pipelines.size())
+    if(new_pipelines.size())
     {
-        for(auto& e : compile_pipelines)
+        for(auto& e : new_pipelines)
         {
             backend->compile_pipeline(e.get());
         }
-        compile_pipelines.clear();
+        new_pipelines.clear();
+    }
+    if(new_materials.size())
+    {
+        for(const auto& e : new_materials)
+        {
+            // use stable handle index inside the storage to index it in the gpu
+            GPUMaterial gpumat{ .base_color_idx = get_bindless(e->base_color_texture) };
+            sbuf->copy(bufs.mats_buf, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+        }
+        new_materials.clear();
     }
 
     pf.ren_fen->wait_cpu(~0ull);
@@ -203,6 +275,7 @@ void Renderer::update()
         .vidxb = get_bindless(bufs.idx_buf),
         .rmbsb = get_bindless(bufs.bsphere_buf),
         .itrsb = get_bindless(bufs.trs_bufs[0]),
+        .rmatb = get_bindless(bufs.mats_buf),
         .view = view,
         .proj = proj,
         .proj_view = proj * view,
@@ -226,9 +299,15 @@ void Renderer::update()
     gq->wait_sync(sbuf->flush(), PipelineStage::ALL);
 
     rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::CULLING },
+        RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::DEFAULT_UNLIT },
         [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                     PipelineAccess::TRANSFER_WRITE_BIT);
+            b.access(rp.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+            b.access(pf.culling.ids_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                     PipelineAccess::TRANSFER_WRITE_BIT);
             b.access(ppf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
             b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
                      PipelineAccess::DS_RW, ImageLayout::GENERAL, true);
@@ -237,24 +316,19 @@ void Renderer::update()
         },
         [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            auto& hizp = pf.culling.hizpyramid.get();
             pf.culling.mbatches = rp.mbatches;
-            cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
-            cmd->bind_pipeline(cullzout_pipeline.get());
-            uint32_t pcids[]{ bindless->get_index(pf.constants), bindless->get_index(ppf.culling.ids_buf) };
-            cmd->push_constants(ShaderStage::ALL, &pcids, { 0, sizeof(pcids) });
-            bindless->bind(cmd);
+            pf.culling.cmd_start = rp.cmd_start;
+            pf.culling.cmd_count = rp.cmd_count;
+            pf.culling.id_count = rp.id_count;
+            uint32_t pcids[]{ get_bindless(pf.constants), get_bindless(ppf.culling.ids_buf) };
             VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
             VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
-            cmd->set_scissors(&vksciss, 1);
-            cmd->set_viewports(&vkview, 1);
             const auto vkdep = Vks(VkRenderingAttachmentInfo{
                 .imageView = VkImageViewMetadata::get(pf.gbuffer.depth->default_view.get()).view,
                 .imageLayout = to_vk(ImageLayout::ATTACHMENT),
                 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                 .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
-            auto cmdoffacc = 0u;
             const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
 
             const auto dstidscount = 0u;
@@ -264,32 +338,24 @@ void Renderer::update()
 
             q->wait_sync(sbuf->flush());
 
+            cmd->set_scissors(&vksciss, 1);
+            cmd->set_viewports(&vkview, 1);
+            cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
+            cmd->bind_pipeline(cullzout_pipeline.get());
+            cmd->push_constants(ShaderStage::ALL, &pcids, { 0, sizeof(pcids) });
+            cmd->bind_descriptors(&bindless_pool.get(), &bindless_pool->get_dset(bindless_set), { 0, 1 });
             cmd->begin_rendering(vkreninfo);
-            for(auto i = 0u; i < ppf.culling.mbatches.size(); ++i)
-            {
-                const auto& mb = ppf.culling.mbatches.at(i);
-                const auto cntoff = sizeof(uint32_t) * i;
-                const auto cmdoff = sizeof(DrawIndirectCommand) * cmdoffacc + rp.cmd_start;
-                cmd->draw_indexed_indirect_count(ppf.culling.cmd_buf.get(), cmdoff, ppf.culling.cmd_buf.get(), cntoff,
-                                                 mb.instcount, sizeof(DrawIndirectCommand));
-                cmdoffacc += mb.instcount;
-            }
+            render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf, ppf.culling.cmd_start,
+                            0ull, {}, false);
             cmd->end_rendering();
-            cmd->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL, PipelineAccess::NONE);
         });
     rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::CULLING },
+        RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
-            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::TRANSFER_WRITE_BIT);
-
-            b.access(pf.culling.ids_buf, RenderGraph::AccessType::RW, PipelineStage::VERTEX_BIT, PipelineAccess::STORAGE_READ_BIT);
-            b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_RW, ImageLayout::GENERAL, true);
             b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
                      PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
+            b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_RW, ImageLayout::GENERAL, true);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
@@ -299,8 +365,6 @@ void Renderer::update()
             {
                 uint32_t engconstsb;
                 uint32_t imidb;
-
-                uint32_t hizsampler;
                 uint32_t hizsrct2d;
                 uint32_t hizdsti;
                 uint32_t dstcmdb;
@@ -312,7 +376,6 @@ void Renderer::update()
                                                                                hiz_sampler, ImageLayout::GENERAL }));
             pc.hizdsti = bindless->get_index(make_texture(TextureDescriptor{
                 make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { 0, 1 } }), {}, ImageLayout::GENERAL }));
-            bindless->update();
             bindless->bind(cmd);
             cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
             cmd->dispatch((hizp.width + 31) / 32, (hizp.height + 31) / 32, 1);
@@ -324,10 +387,9 @@ void Renderer::update()
                     ImageLayout::GENERAL }));
                 pc.hizdsti = bindless->get_index(make_texture(TextureDescriptor{
                     make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i, 1 } }), {}, ImageLayout::GENERAL }));
-                cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
-                bindless->update();
                 const auto sx = ((hizp.width >> i) + 31) / 32;
                 const auto sy = ((hizp.height >> i) + 31) / 32;
+                cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
                 cmd->dispatch(sx, sy, 1);
                 cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT,
                              PipelineAccess::SHADER_RW);
@@ -337,21 +399,18 @@ void Renderer::update()
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::ALL,
-                     PipelineAccess::NONE, ImageLayout::ATTACHMENT, true);
-            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
-                     PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
+            b.access(rp.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.culling.ids_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.culling.hizptex->view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            cmd->bind_pipeline(cull_pipeline.get());
-
             struct PC
             {
                 uint32_t engconstsb;
                 uint32_t imidb;
-                uint32_t hizsampler;
                 uint32_t hizsrct2d;
                 uint32_t hizdsti;
                 uint32_t dstcmdb;
@@ -359,21 +418,24 @@ void Renderer::update()
             } pc;
             pc.engconstsb = bindless->get_index(pf.constants);
             pc.imidb = bindless->get_index(rp.ids_buf);
-            pc.dstcmdb = bindless->get_index(pf.culling.cmd_buf, { rp.cmd_start, ~0ull });
+            pc.hizsrct2d = get_bindless(pf.culling.hizptex);
+            pc.dstcmdb = bindless->get_index(pf.culling.cmd_buf, { pf.culling.cmd_start, ~0ull });
             pc.dstimidb = bindless->get_index(pf.culling.ids_buf);
-            cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
+            cmd->bind_pipeline(cull_pipeline.get());
             bindless->bind(cmd);
+            cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
             cmd->dispatch((rp.id_count + 31) / 32, 1, 1);
         });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::ALL,
+            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COLOR_OUT_BIT,
                      PipelineAccess::NONE, ImageLayout::ATTACHMENT, true);
-            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
-                     PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
+            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::EARLY_Z_BIT,
+                     PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
         },
         [this](SubmitQueue* q, CommandBuffer* cmd) { render(MeshPassType::FORWARD, q, cmd); });
     rgraph->add_pass(
@@ -389,6 +451,8 @@ void Renderer::update()
         });
 
     rgraph->compile();
+
+    bindless->update();
     rgraph->render();
     // imgui_renderer->update(cmd, pf.gbuffer.color->default_view);
 
@@ -411,50 +475,36 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
 {
     auto* ew = Engine::get().window;
     auto& pf = get_perframe();
-
-    cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
     auto& rp = render_passes.at((uint32_t)pass);
-    auto cmdoffacc = 0u;
-    for(auto i = 0u; i < rp.mbatches.size(); ++i)
-    {
-        const auto& mb = rp.mbatches.at(i);
-        cmd->bind_pipeline(mb.pipeline.get());
-        if(i == 0)
-        {
-            bindless->bind(cmd);
-            uint32_t pcids[]{ bindless->get_index(pf.constants), bindless->get_index(pf.culling.ids_buf) };
-            cmd->push_constants(ShaderStage::ALL, &pcids, { 0, 8 });
 
-            VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
-            VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
-            cmd->set_scissors(&vksciss, 1);
-            cmd->set_viewports(&vkview, 1);
+    const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
+        .imageView = VkImageViewMetadata::get(pf.gbuffer.color->default_view.get()).view,
+        .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = { .color = { .uint32 = {} } } }) };
+    const auto vkdep =
+        Vks(VkRenderingAttachmentInfo{ .imageView = VkImageViewMetadata::get(pf.gbuffer.depth->default_view.get()).view,
+                                       .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+                                       .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
+    VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+    VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+    const auto vkreninfo = Vks(VkRenderingInfo{
+        .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
 
-            const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
-                .imageView = VkImageViewMetadata::get(pf.gbuffer.color->default_view.get()).view,
-                .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = { .color = { .uint32 = {} } } }) };
-            const auto vkdep = Vks(VkRenderingAttachmentInfo{
-                .imageView = VkImageViewMetadata::get(pf.gbuffer.depth->default_view.get()).view,
-                .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
-            const auto vkreninfo = Vks(VkRenderingInfo{
-                .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
-            cmd->begin_rendering(vkreninfo);
-        }
-        const auto cntoff = sizeof(uint32_t) * i;
-        const auto cmdoff = sizeof(DrawIndirectCommand) * cmdoffacc + rp.cmd_start;
-        // cmd->draw_indexed_indirect_count(rp.cmd_buf.get(), cmdoff, rp.cmd_buf.get(), cntoff, mb.instcount,
-        //                                  sizeof(DrawIndirectCommand));
-        cmd->draw_indexed_indirect_count(pf.culling.cmd_buf.get(), cmdoff, pf.culling.cmd_buf.get(), cntoff,
-                                         mb.instcount, sizeof(DrawIndirectCommand));
-        cmdoffacc += mb.instcount;
-    }
-    if(rp.mbatches.size()) { cmd->end_rendering(); }
+    // todo: mbatches might be empty. is this bad that i run this?
+    cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
+    cmd->set_scissors(&vksciss, 1);
+    cmd->set_viewports(&vkview, 1);
+    cmd->begin_rendering(vkreninfo);
+    render_mbatches(cmd, rp.mbatches, pf.culling.cmd_buf, pf.culling.cmd_buf, pf.culling.cmd_start, 0ull,
+                    [this, &pf](CommandBuffer* cmd) {
+                        uint32_t pcids[]{ get_bindless(pf.constants), bindless->get_index(pf.culling.ids_buf) };
+                        bindless->bind(cmd);
+                        cmd->push_constants(ShaderStage::ALL, &pcids, { 0, 8 });
+                    });
+    cmd->end_rendering();
     rp.entities.clear();
 }
 
@@ -465,67 +515,68 @@ void Renderer::process_meshpass(MeshPassType pass)
     if(!rp.redo) { return; }
     rp.entity_cache = rp.entities;
 
-    std::vector<MeshletInstance> instances;
-    std::vector<ecs::entity> new_entities;
-    new_entities.reserve(rp.entities.size());
+    std::vector<MeshletInstance> insts;
+    std::vector<ecs::entity> newinsts;
+    newinsts.reserve(rp.entities.size());
     for(auto i = 0u; i < rp.entities.size(); ++i)
     {
-        const auto& e = rp.entities.at(i);
-        auto* emsh = Engine::get().ecs->get<ecs::Mesh>(e);
-        if(emsh->gpu_resource == ~0u)
+        const auto& ent = rp.entities.at(i);
+        auto* entmsh = Engine::get().ecs->get<ecs::Mesh>(ent);
+        if(entmsh->gpu_resource == ~0u)
         {
-            emsh->gpu_resource = gpu_resource_allocator.allocate_slot();
-            new_entities.push_back(e);
+            entmsh->gpu_resource = gpu_resource_allocator.allocate_slot();
+            newinsts.push_back(ent);
         }
-        for(const auto& esmshh : emsh->meshes)
+        for(auto i = 0u; i < entmsh->meshes.size(); ++i)
         {
-            const auto& esmsh = esmshh.get();
-            const auto& esmshgeo = esmsh.geometry.get();
-            for(auto j = 0u; j < esmshgeo.meshlet_range.size; ++j)
+            const auto& msh = entmsh->meshes.at(i).get();
+            const auto& geom = msh.geometry.get();
+            insts.reserve(insts.size() + geom.meshlet_range.size);
+            for(auto j = 0u; j < geom.meshlet_range.size; ++j)
             {
-                instances.push_back(MeshletInstance{ esmsh.geometry, esmsh.material, emsh->gpu_resource,
-                                                     (uint32_t)esmshgeo.meshlet_range.offset + j });
+                insts.push_back(MeshletInstance{ msh.geometry, msh.material, entmsh->gpu_resource,
+                                                 (uint32_t)geom.meshlet_range.offset + j });
             }
         }
     }
 
-    if(new_entities.size())
+    if(newinsts.size())
     {
         std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
         sbuf->copy(bufs.trs_bufs[0], bufs.trs_bufs[1], 0, { 0, bufs.trs_bufs[1]->size });
         sbuf->insert_barrier();
     }
-    for(auto i = 0u; i < new_entities.size(); ++i)
+    for(auto i = 0u; i < newinsts.size(); ++i)
     {
-        auto* t = Engine::get().ecs->get<ecs::Transform>(new_entities.at(i));
-        auto* m = Engine::get().ecs->get<ecs::Mesh>(new_entities.at(i));
-        sbuf->copy(bufs.trs_bufs[0], &t->global, m->gpu_resource * sizeof(t->global), sizeof(t->global));
+        auto* trs = Engine::get().ecs->get<ecs::Transform>(newinsts.at(i));
+        auto* msh = Engine::get().ecs->get<ecs::Mesh>(newinsts.at(i));
+        sbuf->copy(bufs.trs_bufs[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
     }
 
-    rp.mbatches.resize(instances.size());
-    std::vector<DrawIndirectCommand> cmds(instances.size());
-    std::vector<uint32_t> cmdcnts(instances.size());
-    std::vector<GPUInstanceId> gpuids(instances.size());
-    std::vector<glm::vec4> gpubbs(instances.size());
-    Handle<Pipeline> prev_pp;
+    rp.mbatches.resize(insts.size());
+    std::vector<DrawIndexedIndirectCommand> cmds(insts.size());
+    std::vector<uint32_t> cmdcnts(insts.size());
+    std::vector<GPUInstanceId> gpuids(insts.size());
+    std::vector<glm::vec4> gpubbs(insts.size());
+    Handle<Pipeline> ppp;
     uint32_t cmdi = ~0u;
     uint32_t mlti = ~0u;
     uint32_t batchi = ~0u;
-    std::sort(instances.begin(), instances.end(), [this](const auto& a, const auto& b) {
+    std::sort(insts.begin(), insts.end(), [this](const auto& a, const auto& b) {
         if(a.material >= b.material) { return false; } // first sort by material
         if(a.meshlet >= b.meshlet) { return false; }   // then sort by geometry
         return true;
     });
-    for(auto i = 0u; i < instances.size(); ++i)
+    for(auto i = 0u; i < insts.size(); ++i)
     {
-        const auto& inst = instances.at(i);
-        const auto& geo = inst.geometry.get();
+        const auto& inst = insts.at(i);
+        const auto& geom = inst.geometry.get();
         const auto& mlt = meshlets.at(inst.meshlet);
         const auto& mat = inst.material.get();
         const auto& pp = mat.mesh_pass->effects.at((uint32_t)pass)->pipeline;
-        if(pp != prev_pp)
+        if(pp != ppp)
         {
-            prev_pp = pp;
+            ppp = pp;
             ++batchi;
             rp.mbatches.at(batchi).pipeline = pp;
         }
@@ -533,18 +584,18 @@ void Renderer::process_meshpass(MeshPassType pass)
         {
             mlti = inst.meshlet;
             ++cmdi;
-            cmds.at(cmdi) = DrawIndirectCommand{ .indexCount = mlt.index_count,
-                                                 .instanceCount = 0,
-                                                 .firstIndex = (uint32_t)geo.index_range.offset + mlt.index_offset,
-                                                 .vertexOffset = (int32_t)(geo.vertex_range.offset + mlt.vertex_offset),
-                                                 .firstInstance = i };
+            cmds.at(cmdi) = DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
+                                                        .instanceCount = 0,
+                                                        .firstIndex = (uint32_t)geom.index_range.offset + mlt.index_offset,
+                                                        .vertexOffset = (int32_t)(geom.vertex_range.offset + mlt.vertex_offset),
+                                                        .firstInstance = i };
         }
-        gpuids.at(i) = GPUInstanceId{ .batch_id = cmdi, .residx = inst.meshlet, .instidx = inst.gpu_resource };
+        gpuids.at(i) =
+            GPUInstanceId{ .batch_id = cmdi, .residx = inst.meshlet, .instidx = inst.gpu_resource, .matidx = *inst.material };
         gpubbs.at(i) = mlt.bounding_sphere; // fix bbs to be per meshlet and indexable by gpuinstance id - or not...
         ++rp.mbatches.at(batchi).instcount;
-        rp.mbatches.at(batchi).cmdcount = cmdi + 1; // todo: use it
+        rp.mbatches.at(batchi).cmdcount = cmdi + 1;
         ++cmdcnts.at(batchi);
-        //++cmds.at(cmdi).instanceCount;
     }
     ++cmdi;
     ++batchi;
@@ -552,7 +603,7 @@ void Renderer::process_meshpass(MeshPassType pass)
     cmdcnts.resize(batchi);
     rp.mbatches.resize(batchi);
     const auto post_cull_tri_count = 0u;
-    const auto mltcount = (uint32_t)instances.size();
+    const auto mltcount = (uint32_t)insts.size();
     const auto cmdoff = align_up2(batchi * sizeof(uint32_t), 16ull);
     rp.cmd_count = cmdi;
     rp.id_count = gpuids.size();
@@ -569,8 +620,25 @@ void Renderer::submit_mesh(const SubmitInfo& info)
     auto& rp = render_passes.at((uint32_t)info.type);
     const auto idx = rp.entities.size();
     rp.entities.push_back(info.entity);
-    rp.redo = (rp.entities.size() > rp.entity_cache.size()) ||
-              (rp.entity_cache.size() > idx && rp.entities.at(idx) != rp.entity_cache.at(idx));
+    // if any entity at any position is mismatched - redo.
+    rp.redo |= rp.entity_cache.size() <= idx || rp.entities.at(idx) != rp.entity_cache.at(idx);
+}
+
+void Renderer::render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>& mbatches, Handle<Buffer> indirect,
+                               Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
+                               const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps)
+{
+    auto cmdoffacc = 0u;
+    for(auto i = 0u; i < mbatches.size(); ++i)
+    {
+        const auto& mb = mbatches.at(i);
+        const auto cntoff = sizeof(uint32_t) * i + cntoffset;
+        const auto cmdoff = sizeof(DrawIndexedIndirectCommand) * cmdoffacc + cmdoffset;
+        if(bind_pps) { cmd->bind_pipeline(mb.pipeline.get()); }
+        if(i == 0 && setup_resources) { setup_resources(cmd); }
+        cmd->draw_indexed_indirect_count(indirect.get(), cmdoff, count.get(), cntoff, mb.cmdcount, sizeof(DrawIndexedIndirectCommand));
+        cmdoffacc += mb.cmdcount;
+    }
 }
 
 Handle<Buffer> Renderer::make_buffer(const BufferDescriptor& info)
@@ -621,7 +689,15 @@ Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
     }
 
     auto it = shaders.insert(Shader{ eng::paths::canonize_path(eng::paths::SHADERS_DIR / path), stage });
-    if(it.success) { compile_shaders.push_back(it.handle); }
+    if(it.success) { new_shaders.push_back(it.handle); }
+    return it.handle;
+}
+
+Handle<PipelineLayout> Renderer::make_pplayout(const PipelineLayoutCreateInfo& info)
+{
+    PipelineLayout layout{ .info = info };
+    auto it = pplayouts.insert(std::move(layout));
+    if(it.success) { backend->compile_pplayout(it.handle.get()); }
     return it.handle;
 }
 
@@ -629,7 +705,7 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
     auto it = pipelines.insert(std::move(p));
-    if(it.success) { compile_pipelines.push_back(it.handle); }
+    if(it.success) { new_pipelines.push_back(it.handle); }
     return it.handle;
 }
 
@@ -644,7 +720,9 @@ Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
 {
     auto meshpass = mesh_passes.find(MeshPass{ desc.mesh_pass });
     if(!meshpass) { meshpass = default_meshpass; }
-    return materials.insert(Material{ .mesh_pass = meshpass, .base_color_texture = desc.base_color_texture }).handle;
+    auto ret = materials.insert(Material{ .mesh_pass = meshpass, .base_color_texture = desc.base_color_texture });
+    if(ret.success) { new_materials.push_back(ret.handle); }
+    return ret.handle;
 }
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
@@ -700,48 +778,46 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     const auto& indices = batch.indices;
     const auto& vertices = batch.vertices;
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
-    std::vector<meshopt_Meshlet> meshlets(max_meshlets);
-    std::vector<meshopt_Bounds> meshlets_bounds;
-    std::vector<uint32_t> meshlets_verts(max_meshlets * max_verts);
-    std::vector<uint8_t> meshlets_triangles(max_meshlets * max_tris * 3);
+    std::vector<meshopt_Meshlet> mlts(max_meshlets);
+    std::vector<meshopt_Bounds> mlt_bnds;
+    std::vector<uint32_t> mlt_vtxs(max_meshlets * max_verts);
+    std::vector<uint8_t> mlt_idxs(max_meshlets * max_tris * 3);
 
-    const auto meshlet_count = meshopt_buildMeshlets(meshlets.data(), meshlets_verts.data(), meshlets_triangles.data(),
-                                                     indices.data(), indices.size(), &vertices[0].position.x,
-                                                     vertices.size(), sizeof(vertices[0]), max_verts, max_tris, cone_weight);
+    const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vtxs.data(), mlt_idxs.data(), indices.data(),
+                                              indices.size(), &vertices[0].position.x, vertices.size(),
+                                              sizeof(vertices[0]), max_verts, max_tris, cone_weight);
 
-    const auto& last_meshlet = meshlets.at(meshlet_count - 1);
-    meshlets_verts.resize(last_meshlet.vertex_offset + last_meshlet.vertex_count);
-    meshlets_triangles.resize(last_meshlet.triangle_offset + ((last_meshlet.triangle_count * 3 + 3) & ~3));
-    meshlets.resize(meshlet_count);
-    meshlets_bounds.reserve(meshlet_count);
-
-    for(auto& m : meshlets)
+    const auto& last_mlt = mlts.at(mltcnt - 1);
+    mlt_vtxs.resize(last_mlt.vertex_offset + last_mlt.vertex_count);
+    mlt_idxs.resize(last_mlt.triangle_offset + ((last_mlt.triangle_count * 3 + 3) & ~3));
+    mlts.resize(mltcnt);
+    mlt_bnds.reserve(mltcnt);
+    for(auto& m : mlts)
     {
-        meshopt_optimizeMeshlet(&meshlets_verts.at(m.vertex_offset), &meshlets_triangles.at(m.triangle_offset),
-                                m.triangle_count, m.vertex_count);
+        meshopt_optimizeMeshlet(&mlt_vtxs.at(m.vertex_offset), &mlt_idxs.at(m.triangle_offset), m.triangle_count, m.vertex_count);
         const auto mbounds =
-            meshopt_computeMeshletBounds(&meshlets_verts.at(m.vertex_offset), &meshlets_triangles.at(m.triangle_offset),
+            meshopt_computeMeshletBounds(&mlt_vtxs.at(m.vertex_offset), &mlt_idxs.at(m.triangle_offset),
                                          m.triangle_count, &vertices[0].position.x, vertices.size(), sizeof(vertices[0]));
-        meshlets_bounds.push_back(mbounds);
+        mlt_bnds.push_back(mbounds);
     }
-
-    out_vertices.resize(meshlets_verts.size());
-    std::transform(meshlets_verts.begin(), meshlets_verts.end(), out_vertices.begin(),
+    out_vertices.resize(mlt_vtxs.size());
+    std::transform(mlt_vtxs.begin(), mlt_vtxs.end(), out_vertices.begin(),
                    [&vertices](uint32_t idx) { return vertices[idx]; });
 
-    out_indices.resize(meshlets_triangles.size());
-    std::transform(meshlets_triangles.begin(), meshlets_triangles.end(), out_indices.begin(),
-                   [](auto idx) { return static_cast<uint16_t>(idx); });
-    out_meshlets.resize(meshlet_count);
-    for(auto i = 0u; i < meshlet_count; ++i)
+    out_indices.resize(mlt_idxs.size());
+    std::transform(mlt_idxs.begin(), mlt_idxs.end(), out_indices.begin(),
+                   [](auto idx) { return static_cast<uint8_t>(idx); });
+    out_meshlets.resize(mltcnt);
+    for(auto i = 0u; i < mltcnt; ++i)
     {
-        const auto& m = meshlets.at(i);
-        const auto& mb = meshlets_bounds.at(i);
-        out_meshlets.at(i) = Meshlet{ .vertex_offset = m.vertex_offset,
-                                      .vertex_count = m.vertex_count,
-                                      .index_offset = m.triangle_offset,
-                                      .index_count = m.triangle_count * 3,
-                                      .bounding_sphere = glm::vec4{ mb.center[0], mb.center[1], mb.center[2], mb.radius } };
+        const auto& mlt = mlts.at(i);
+        const auto& mltb = mlt_bnds.at(i);
+        out_meshlets.at(i) =
+            Meshlet{ .vertex_offset = mlt.vertex_offset,
+                     .vertex_count = mlt.vertex_count,
+                     .index_offset = mlt.triangle_offset,
+                     .index_count = mlt.triangle_count * 3,
+                     .bounding_sphere = glm::vec4{ mltb.center[0], mltb.center[1], mltb.center[2], mltb.radius } };
     }
 }
 
@@ -763,13 +839,61 @@ Handle<MeshPass> Renderer::make_mesh_pass(const MeshPassCreateInfo& info)
     return it.handle;
 }
 
+Handle<DescriptorPool> Renderer::make_descpool(const DescriptorPoolCreateInfo& info)
+{
+    descpools.push_back(backend->make_descpool(info));
+    return Handle<DescriptorPool>{ (uint32_t)descpools.size() - 1 };
+}
+
 void Renderer::update_transform(ecs::entity entity) { ENG_TODO(); }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
 uint32_t Renderer::get_bindless(Handle<Buffer> buffer) { return bindless->get_index(buffer); }
 
+uint32_t Renderer::get_bindless(Handle<Texture> texture) { return bindless->get_index(texture); }
+
 Renderer::PerFrame& Renderer::get_perframe() { return perframe.at(Engine::get().frame_num % perframe.size()); }
+
+bool PipelineLayout::is_compatible(const PipelineLayout& a) const
+{
+    if(info.range != a.info.range) { return false; }
+
+    const size_t set_count = std::min(info.sets.size(), a.info.sets.size());
+    for(size_t i = 0; i < set_count; ++i)
+    {
+        const auto& s1 = info.sets[i];
+        const auto& s2 = a.info.sets[i];
+        if(s1.flags != s2.flags) { return false; }
+        if(s1.bindings.size() != s2.bindings.size()) { return false; }
+        for(size_t j = 0; j < s1.bindings.size(); ++j)
+        {
+            const auto& b1 = s1.bindings[j];
+            const auto& b2 = s2.bindings[j];
+            if(b1.type != b2.type) { return false; }
+            if(b1.slot != b2.slot) { return false; }
+            if(b1.size != b2.size) { return false; }
+            if(b1.stages != b2.stages) { return false; }
+            if(b1.flags != b2.flags) { return false; }
+            if(b1.immutable_samplers == nullptr && b2.immutable_samplers == nullptr) {}
+            else if(b1.immutable_samplers != nullptr && b2.immutable_samplers != nullptr)
+            {
+                for(auto i = 0u; i < b1.size; ++i)
+                {
+                    if(b1.immutable_samplers[i] != b2.immutable_samplers[i]) { return false; }
+                }
+            }
+            else { return false; }
+        }
+    }
+    return true;
+}
+
+Handle<DescriptorSet> DescriptorPool::allocate(Handle<PipelineLayout> playout, uint32_t dset_idx)
+{
+    sets.push_back(Engine::get().renderer->backend->allocate_set(*this, playout.get(), dset_idx));
+    return Handle<DescriptorSet>{ (uint32_t)sets.size() - 1 };
+}
 
 } // namespace gfx
 } // namespace eng

@@ -142,6 +142,7 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
     imgd.data = { imgdata, imgdata + x * y * ch };
     imgd.width = (uint32_t)x;
     imgd.height = (uint32_t)y;
+    imgd.format = format;
     const auto img = Engine::get().renderer->make_image(imgd);
     stbi_image_free(imgdata);
     ctx.images.at(index) = img;
@@ -190,7 +191,8 @@ static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::Imag
     const auto& ftex = asset.textures.at(index);
     const auto tex = Engine::get().renderer->make_texture(gfx::TextureDescriptor{
         .view = load_image(asset, format, ftex.imageIndex ? *ftex.imageIndex : ~0ull, ctx)->default_view,
-        .sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, ctx) });
+        .sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, ctx),
+        .layout = gfx::ImageLayout::READ_ONLY });
     ctx.textures.at(index) = tex;
     return tex;
 }
@@ -248,12 +250,23 @@ static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
 
     ecsr->emplace<ecs::Node>(entity, ecs::Node{ node.name.c_str() });
 
-    const auto& trs = std::get<fastgltf::TRS>(node.transform);
-    const auto glm_local =
-        glm::translate(glm::mat4{ 1.0f }, glm::vec3{ trs.translation.x(), trs.translation.y(), trs.translation.z() }) *
-        glm::mat4_cast(glm::quat{ trs.rotation.w(), trs.rotation.x(), trs.rotation.y(), trs.rotation.z() }) *
-        glm::scale(glm::mat4{ 1.0f }, glm::vec3{ trs.scale.x(), trs.scale.y(), trs.scale.z() });
-    const auto glm_global = glm_local * transform;
+    glm::mat4 glm_global = transform;
+    glm::mat4 glm_local;
+    if(node.transform.index() == 0)
+    {
+        const auto& trs = std::get<fastgltf::TRS>(node.transform);
+        glm_local =
+            glm::translate(glm::mat4{ 1.0f }, glm::vec3{ trs.translation.x(), trs.translation.y(), trs.translation.z() }) *
+            glm::mat4_cast(glm::quat{ trs.rotation.w(), trs.rotation.x(), trs.rotation.y(), trs.rotation.z() }) *
+            glm::scale(glm::mat4{ 1.0f }, glm::vec3{ trs.scale.x(), trs.scale.y(), trs.scale.z() });
+        glm_global = glm_local * glm_global;
+    }
+    else
+    {
+        const auto& trs = std::get<fastgltf::math::fmat4x4>(node.transform);
+        memcpy(&glm_local, &trs, sizeof(trs));
+        glm_global = glm_local * glm_global;
+    }
     ecsr->emplace<ecs::Transform>(entity, ecs::Transform{ .local = glm_local, .global = glm_global });
 
     load_mesh(entity, asset, node, ctx);

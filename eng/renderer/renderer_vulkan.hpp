@@ -108,6 +108,18 @@ struct VkShaderMetadata
     VkShaderModule shader{};
 };
 
+struct VkPipelineLayoutMetadata
+{
+    static void init(PipelineLayout& a);
+    static void destroy(PipelineLayout& a);
+    static VkPipelineLayoutMetadata* get(const PipelineLayout& a)
+    {
+        return static_cast<VkPipelineLayoutMetadata*>(a.metadata);
+    }
+    std::vector<VkDescriptorSetLayout> dlayouts;
+    VkPipelineLayout layout{};
+};
+
 struct VkPipelineMetadata
 {
     static void init(Pipeline& a);
@@ -115,7 +127,26 @@ struct VkPipelineMetadata
     static VkPipelineMetadata& get(Pipeline& a);
     static const VkPipelineMetadata& get(const Pipeline& a);
     VkPipeline pipeline{};
-    VkPipelineLayout layout{};
+};
+
+struct VkDescriptorPoolMetadata
+{
+    static void init(DescriptorPool& a);
+    static void destroy(DescriptorPool& a);
+    static VkDescriptorPoolMetadata* get(const DescriptorPool& a)
+    {
+        return static_cast<VkDescriptorPoolMetadata*>(a.metadata);
+    }
+    VkDescriptorPool pool{};
+};
+
+struct VkDescriptorSetMetadata
+{
+    static VkDescriptorSetMetadata* get(const DescriptorSet& a)
+    {
+        return static_cast<VkDescriptorSetMetadata*>(a.metadata);
+    }
+    VkDescriptorSet set{};
 };
 
 struct VkBufferMetadata
@@ -185,10 +216,13 @@ class RendererBackendVulkan : public RendererBackend
     void make_view(ImageView& view) final;
     Sampler make_sampler(const SamplerDescriptor& info) final;
     bool compile_shader(Shader& shader) final;
+    bool compile_pplayout(PipelineLayout& layout) final;
     bool compile_pipeline(Pipeline& pipeline) final;
     Sync* make_sync(const SyncCreateInfo& info) final;
     Swapchain* make_swapchain() final;
     SubmitQueue* get_queue(QueueType type) final;
+    DescriptorPool make_descpool(const DescriptorPoolCreateInfo& info) final;
+    DescriptorSet allocate_set(DescriptorPool& pool, const PipelineLayout& playout, uint32_t dset_idx) final;
 
     // void bake_indirect_commands();
     // void build_transforms_buffer();

@@ -23,10 +23,10 @@ class CommandPool;
 class CommandBuffer
 {
   public:
-    void barrier(PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
-                 PipelineAccessFlags dst_access);
-    void barrier(Image& image, PipelineStageFlags src_stage, PipelineAccessFlags src_access, PipelineStageFlags dst_stage,
-                 PipelineAccessFlags dst_access, ImageLayout old_layout, ImageLayout new_layout);
+    void barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
+                 Flags<PipelineAccess> dst_access);
+    void barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
+                 Flags<PipelineAccess> dst_access, ImageLayout old_layout, ImageLayout new_layout);
 
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range);
     void copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count);
@@ -38,7 +38,7 @@ class CommandBuffer
 
     void bind_index(Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);
-    void bind_descriptors(VkDescriptorSet* sets, Range32 range);
+    void bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32 range);
 
     void push_constants(Flags<ShaderStage> stages, const void* const values, Range range);
 
@@ -55,7 +55,6 @@ class CommandBuffer
 
     VkCommandBuffer cmd{};
     const Pipeline* current_pipeline{};
-    std::array<std::array<VkDescriptorSet, 4>, 4> desc_sets{};
 };
 
 class CommandPool
@@ -119,10 +118,10 @@ class SubmitQueue
     {
         std::vector<Sync*> wait_sems;
         std::vector<uint64_t> wait_values;
-        std::vector<PipelineStageFlags> wait_stages;
+        std::vector<Flags<PipelineStage>> wait_stages;
         std::vector<Sync*> signal_sems;
         std::vector<uint64_t> signal_values;
-        std::vector<PipelineStageFlags> signal_stages;
+        std::vector<Flags<PipelineStage>> signal_stages;
         std::vector<CommandBuffer*> cmds;
         Sync* fence{};
     };
@@ -133,8 +132,8 @@ class SubmitQueue
 
     CommandPool* make_command_pool(VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    SubmitQueue& wait_sync(Sync* sync, PipelineStageFlags stages = {}, uint64_t value = ~0ull);
-    SubmitQueue& signal_sync(Sync* sync, PipelineStageFlags stages = {}, uint64_t value = ~0ull);
+    SubmitQueue& wait_sync(Sync* sync, Flags<PipelineStage> stages = {}, uint64_t value = ~0ull);
+    SubmitQueue& signal_sync(Sync* sync, Flags<PipelineStage> stages = {}, uint64_t value = ~0ull);
     SubmitQueue& with_cmd_buf(CommandBuffer* cmd);
     VkResult submit();
     VkResult submit_wait(uint64_t timeout);

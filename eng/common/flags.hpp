@@ -2,6 +2,7 @@
 
 #include <type_traits>
 #include <compare>
+#include <eng/common/hash.hpp>
 
 #define ENG_ENABLE_FLAGS_OPERATORS(Type)                                                                               \
     constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept                                             \
@@ -54,3 +55,11 @@ template <typename T> struct Flags
 
     U flags{ 0 };
 };
+
+namespace std
+{
+    template<typename T> struct hash<Flags<T>>
+    {
+        size_t operator()(const Flags<T>& t) const noexcept { return eng::hash::combine_fnv1a(t.flags); }
+    };
+}

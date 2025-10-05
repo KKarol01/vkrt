@@ -10,8 +10,6 @@ layout(scalar, push_constant) uniform PushConstants
 {
     uint32_t engconstsb;
     uint32_t imidb;
-
-    uint32_t hizsampler;
     uint32_t hizsrct2d;
     uint32_t hizdsti;
     uint32_t dstcmdb;
@@ -24,9 +22,8 @@ layout(scalar, push_constant) uniform PushConstants
 #define boundingspheres    storageBuffers_GPUBoundingSpheresBuffer[engconsts.rmbsb].bounding_spheres_us
 #define srcids             storageBuffers_GPUMeshletIdsBuffer[imidb]
 #define dstids             storageBuffers_GPUMeshletIdsBuffer[dstimidb]
-#define dstcmds            storageBuffers_GPUDrawIndirectCommandsBuffer[dstcmdb].commands_us
-//#define hizsrc             sampler2D(textures_2d[hizsrct2d], samplers[hizsampler])
-#define hizsrc             combinedImages_2d[hizsrct2d]
+#define dstcmds            storageBuffers_GPUDrawIndexedIndirectCommandsBuffer[dstcmdb].commands_us
+#define hizsrc             textures_2d[hizsrct2d]
 #define hizdst             storageImages_2dr32f[hizdsti]
 
 #endif

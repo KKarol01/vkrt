@@ -28,7 +28,7 @@ struct BufferView
 } // namespace gfx
 } // namespace eng
 
-DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range.offset, t.range.size));
+ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range.offset, t.range.size));
 
 namespace eng
 {
@@ -41,12 +41,8 @@ class BindlessPool
     using index_t = uint32_t;
     static inline constexpr auto INVALID_INDEX = ~index_t{};
 
-    BindlessPool(VkDevice dev) noexcept;
-
+    BindlessPool(Handle<DescriptorPool> pool, Handle<DescriptorSet> set);
     void bind(CommandBuffer* cmd);
-
-    VkDescriptorSetLayout get_set_layout() const { return set_layout; }
-    VkPipelineLayout get_pipeline_layout() const { return pipeline_layout; }
 
     uint32_t get_index(Handle<Buffer> handle, Range range = { 0, ~0ull });
     uint32_t get_index(Handle<Texture> handle);
@@ -59,11 +55,8 @@ class BindlessPool
     void update();
 
   private:
-    VkDevice dev{};
-    VkDescriptorPool pool{};
-    VkDescriptorSetLayout set_layout{};
-    VkPipelineLayout pipeline_layout{};
-    VkDescriptorSet set{};
+    Handle<DescriptorPool> pool{};
+    Handle<DescriptorSet> set{};
 
     SlotAllocator buffer_slots;
     SlotAllocator image_slots;

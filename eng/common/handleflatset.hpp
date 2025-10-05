@@ -205,10 +205,10 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     std::vector<Bucket> buckets;
 };
 
-template <FlatSetCompatible T, typename HandleStorage = Handle<T>::Storage_T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>>
+template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>>
 class HandleFlatSet
 {
-    using handle_t = Handle<T, HandleStorage>;
+    using handle_t = Handle<T>;
     using set_t = FlatSet<T, Hash, EqualTo>;
     using index_t = set_t::index_t;
 

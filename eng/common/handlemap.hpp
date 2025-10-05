@@ -8,9 +8,9 @@
 
 namespace eng
 {
-template <typename T, typename Hash = std::hash<T>, typename Storage = Handle<T>::Storage_T> class HandleMap
+template <typename T, typename Hash = std::hash<T>> class HandleMap
 {
-    using handle_t = Handle<T, Storage>;
+    using handle_t = Handle<T>;
 
   public:
     auto begin() { return data.begin(); }
