@@ -411,11 +411,18 @@ void Renderer::update()
             b.access(pf.culling.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
             b.access(pf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
             b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COLOR_OUT_BIT,
-                     PipelineAccess::NONE, ImageLayout::ATTACHMENT, true);
+                     PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT, true);
             b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::EARLY_Z_BIT,
                      PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
         },
         [this](SubmitQueue* q, CommandBuffer* cmd) { render(MeshPassType::FORWARD, q, cmd); });
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "imgui", RenderOrder::PRESENT },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COLOR_OUT_BIT,
+                     PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT);
+        },
+        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) { imgui_renderer->update(cmd, pf.gbuffer.color->default_view); });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "present copy", RenderOrder::PRESENT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
@@ -429,10 +436,7 @@ void Renderer::update()
         });
 
     rgraph->compile();
-
-    bindless->update();
     rgraph->render();
-    // imgui_renderer->update(cmd, pf.gbuffer.color->default_view);
 
     auto* cmd = pf.cmdpool->begin();
     cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL,

@@ -223,6 +223,11 @@ class RenderGraph
             for(auto& p : s.passes)
             {
                 auto* cmd = gcmdpool->begin();
+                // todo: move this inside command buffer's begin
+                VkDebugUtilsLabelEXT vkdlab{ .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+                                             .pLabelName = p->name.c_str(),
+                                             .color = { 0.0f, 0.0f, 1.0f, 1.0f } };
+                vkCmdBeginDebugUtilsLabelEXT(cmd->cmd, &vkdlab);
                 // combine barrier flags for one big barrier for buffers
                 Flags<PipelineStage> bsrcs;
                 Flags<PipelineAccess> bsrca;
@@ -254,6 +259,7 @@ class RenderGraph
                 }
                 if(bbarrier) { cmd->barrier(bsrcs, bsrca, bdsts, bdsta); }
                 p->render_cb(gq, cmd);
+                vkCmdEndDebugUtilsLabelEXT(cmd->cmd);
                 gcmdpool->end(cmd);
                 gq->with_cmd_buf(cmd);
                 gq->submit();

@@ -96,6 +96,7 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
         vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
         idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
     }
+    sbuf->flush()->wait_cpu(~0ull); // todo: this shouldn't be here.
 
     VkRenderingAttachmentInfo r_col_atts[]{
         Vks(VkRenderingAttachmentInfo{
@@ -115,7 +116,6 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
 
     cmd->bind_index(index_buffer.get(), 0, VK_INDEX_TYPE_UINT16);
     cmd->bind_pipeline(pipeline.get());
-    assert(false); // r->bindless->bind(cmd);
     {
         float scale[2];
         scale[0] = 2.0f / draw_data->DisplaySize.x;
@@ -128,8 +128,7 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
     }
 
     {
-        const auto vertex_idx = r->bindless->get_index(vertex_buffer);
-        cmd->push_constants(ShaderStage::ALL, &vertex_idx, { 16, 4 });
+        cmd->bind_resource(4, vertex_buffer);
     }
 
     cmd->begin_rendering(rendering_info);
@@ -174,8 +173,7 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
             scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
             cmd->set_scissors(&scissor, 1);
 
-            const auto texid = r->bindless->get_index(Handle<Texture>{ (uint32_t)imcmd->GetTexID() - 1 });
-            cmd->push_constants(ShaderStage::ALL, &texid, { 20, 4 });
+            cmd->bind_resource(5, Handle<Texture>{ (uint32_t)imcmd->GetTexID() - 1 });
             cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset, imcmd->VtxOffset + global_vtx_offset, 0);
         }
         global_idx_offset += draw_list->IdxBuffer.Size;
@@ -197,7 +195,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         image = r->make_image(ImageDescriptor{ "imgui image", (uint32_t)imtex->Width, (uint32_t)imtex->Height, 1u, 1u,
                                                ImageFormat::R8G8B8A8_UNORM, ImageType::TYPE_2D,
                                                ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_DST_BIT });
-        auto texture = r->make_texture(TextureDescriptor{ image->default_view, sampler });
+        auto texture = r->make_texture(TextureDescriptor{ image->default_view, sampler, ImageLayout::READ_ONLY });
         images.push_back(image);
         textures.push_back(texture);
         imtex->SetTexID((ImTextureID)(*texture + 1)); // +1 so GetTexID doesn't complain when it's 0.

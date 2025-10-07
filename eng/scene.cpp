@@ -535,23 +535,23 @@ void Scene::ui_draw_manipulate()
     auto* imnode = ImGui::DockBuilderGetNode(Engine::get().ui->viewport_imid);
 
     ImGui::Begin("Manipulate", 0, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-    // ImGuizmo::SetDrawlist();
+    ImGuizmo::SetDrawlist();
 
-    // const auto view = Engine::get().camera->get_view();
-    // auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
-    // proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
-    // const auto window_width = ImGui::GetWindowWidth();
-    // const auto window_height = ImGui::GetWindowHeight();
-    // const auto window_pos = ImGui::GetWindowPos();
-    // glm::mat4 tr{ 1.0f };
-    // ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
-    // auto translation = ctransform->global;
-    // glm::mat4 delta;
-    // if(ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::OPERATION::TRANSLATE, ImGuizmo::MODE::LOCAL,
-    //                         &ctransform->local[0][0]))
-    //{
-    //     update_transform(entity);
-    // }
+    const auto view = Engine::get().camera->get_view();
+    auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
+    proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
+    const auto window_width = ImGui::GetWindowWidth();
+    const auto window_height = ImGui::GetWindowHeight();
+    const auto window_pos = ImGui::GetWindowPos();
+    glm::mat4 tr{ 1.0f };
+    ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+    auto translation = ctransform->global;
+    glm::mat4 delta;
+    if(ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::OPERATION::TRANSLATE, ImGuizmo::MODE::LOCAL,
+                            &ctransform->local[0][0]))
+    {
+        update_transform(entity);
+    }
 
     ImGui::End();
 }
