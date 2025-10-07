@@ -5,6 +5,7 @@
 #include <eng/common/to_vk.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/set_debug_name.hpp>
+#include <eng/renderer/bindlesspool.hpp>
 #include <eng/engine.hpp>
 
 namespace eng
@@ -109,7 +110,7 @@ void CommandBuffer::bind_pipeline(const Pipeline& pipeline)
 
 void CommandBuffer::bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32 range)
 {
-    const auto& md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
+    const auto* md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
     std::array<VkDescriptorSet, 8> vksets{};
     for(auto i = 0u; i < range.size; ++i)
     {
@@ -118,10 +119,22 @@ void CommandBuffer::bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Rang
     vkCmdBindDescriptorSets(cmd, to_vk(current_pipeline->type), md->layout, range.offset, range.size, vksets.data(), 0, nullptr);
 }
 
-void CommandBuffer::push_constants(Flags<ShaderStage> stages, const void* const values, Range range)
+void CommandBuffer::push_constants(Flags<ShaderStage> stages, const void* const values, Range32 range)
 {
-    const auto& md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
-    vkCmdPushConstants(cmd, md->layout, to_vk(stages), (uint32_t)range.offset, (uint32_t)range.size, values);
+    memcpy(pcbuf + range.offset, values, range.size);
+    flush_pc_size = std::max(flush_pc_size, range.offset + range.size);
+}
+
+void CommandBuffer::bind_resource(uint32_t slot, Handle<Buffer> resource, Range range)
+{
+    const auto idx = Engine::get().renderer->get_bindless(resource, range);
+    push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
+}
+
+void CommandBuffer::bind_resource(uint32_t slot, Handle<Texture> resource)
+{
+    const auto idx = Engine::get().renderer->get_bindless(resource);
+    push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
 }
 
 void CommandBuffer::set_viewports(const VkViewport* viewports, uint32_t count)
@@ -134,24 +147,47 @@ void CommandBuffer::set_scissors(const VkRect2D* scissors, uint32_t count)
     vkCmdSetScissorWithCount(cmd, count, scissors);
 }
 
-void CommandBuffer::begin_rendering(const VkRenderingInfo& info) { vkCmdBeginRendering(cmd, &info); }
+void CommandBuffer::begin_rendering(const VkRenderingInfo& info)
+{
+    before_draw_dispatch(); // todo: not sure if this should be the only place for non compute/rt dispatches
+    vkCmdBeginRendering(cmd, &info);
+}
 
 void CommandBuffer::end_rendering() { vkCmdEndRendering(cmd); }
+
+void CommandBuffer::before_draw_dispatch()
+{
+    if(flush_pc_size > 0)
+    {
+        const auto* md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
+        vkCmdPushConstants(cmd, md->layout, gfx::to_vk(Flags<ShaderStage>{ ShaderStage::ALL }), 0u, flush_pc_size, pcbuf);
+        flush_pc_size = 0;
+        auto* r = Engine::get().renderer;
+        // todo: don't do this each time; only when pipeline layouts disturb it and when it wasn't already bound.
+        r->bindless->bind(this);
+    }
+}
 
 void CommandBuffer::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
                                  uint32_t vertex_offset, uint32_t instance_offset)
 {
+    before_draw_dispatch();
     vkCmdDrawIndexed(cmd, index_count, instance_count, index_offset, vertex_offset, instance_offset);
 }
 
 void CommandBuffer::draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count,
                                                 size_t count_offset, uint32_t max_draw_count, uint32_t stride)
 {
+    before_draw_dispatch();
     vkCmdDrawIndexedIndirectCount(cmd, VkBufferMetadata::get(indirect).buffer, indirect_offset,
                                   VkBufferMetadata::get(count).buffer, count_offset, max_draw_count, stride);
 }
 
-void CommandBuffer::dispatch(uint32_t x, uint32_t y, uint32_t z) { vkCmdDispatch(cmd, x, y, z); }
+void CommandBuffer::dispatch(uint32_t x, uint32_t y, uint32_t z)
+{
+    before_draw_dispatch();
+    vkCmdDispatch(cmd, x, y, z);
+}
 
 CommandPool::CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
 {

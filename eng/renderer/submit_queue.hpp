@@ -40,13 +40,18 @@ class CommandBuffer
     void bind_pipeline(const Pipeline& pipeline);
     void bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32 range);
 
-    void push_constants(Flags<ShaderStage> stages, const void* const values, Range range);
+    void push_constants(Flags<ShaderStage> stages, const void* const values, Range32 range);
+    void bind_resource(uint32_t slot, Handle<Buffer> resource, Range range = { 0, ~0ull });
+    void bind_resource(uint32_t slot, Handle<Texture> resource);
 
     void set_viewports(const VkViewport* viewports, uint32_t count);
     void set_scissors(const VkRect2D* scissors, uint32_t count);
 
     void begin_rendering(const VkRenderingInfo& info);
     void end_rendering();
+
+    void before_draw_dispatch();
+
     void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset, uint32_t vertex_offset,
                       uint32_t instance_offset);
     void draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count, size_t count_offset,
@@ -55,6 +60,8 @@ class CommandBuffer
 
     VkCommandBuffer cmd{};
     const Pipeline* current_pipeline{};
+    uint32_t flush_pc_size{};
+    std::byte pcbuf[PipelineLayoutCreateInfo::MAX_PUSH_BYTES];
 };
 
 class CommandPool

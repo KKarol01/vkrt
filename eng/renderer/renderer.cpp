@@ -320,7 +320,6 @@ void Renderer::update()
             pf.culling.cmd_start = rp.cmd_start;
             pf.culling.cmd_count = rp.cmd_count;
             pf.culling.id_count = rp.id_count;
-            uint32_t pcids[]{ get_bindless(pf.constants), get_bindless(ppf.culling.ids_buf) };
             VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
             VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
             const auto vkdep = Vks(VkRenderingAttachmentInfo{
@@ -342,7 +341,8 @@ void Renderer::update()
             cmd->set_viewports(&vkview, 1);
             cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
             cmd->bind_pipeline(cullzout_pipeline.get());
-            cmd->push_constants(ShaderStage::ALL, &pcids, { 0, sizeof(pcids) });
+            cmd->bind_resource(0, pf.constants);
+            cmd->bind_resource(1, ppf.culling.ids_buf);
             cmd->bind_descriptors(&bindless_pool.get(), &bindless_pool->get_dset(bindless_set), { 0, 1 });
             cmd->begin_rendering(vkreninfo);
             render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf, ppf.culling.cmd_start,
@@ -360,36 +360,25 @@ void Renderer::update()
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
             auto& hizp = pf.culling.hizpyramid.get();
-
-            struct PC
-            {
-                uint32_t engconstsb;
-                uint32_t imidb;
-                uint32_t hizsrct2d;
-                uint32_t hizdsti;
-                uint32_t dstcmdb;
-                uint32_t dstimidb;
-            } pc;
-
             cmd->bind_pipeline(hiz_pipeline.get());
-            pc.hizsrct2d = bindless->get_index(make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view,
-                                                                               hiz_sampler, ImageLayout::GENERAL }));
-            pc.hizdsti = bindless->get_index(make_texture(TextureDescriptor{
-                make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { 0, 1 } }), {}, ImageLayout::GENERAL }));
-            bindless->bind(cmd);
-            cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
+            cmd->bind_resource(2, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, hiz_sampler, ImageLayout::GENERAL }));
+            cmd->bind_resource(3, make_texture(TextureDescriptor{
+                                      make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { 0, 1 } }),
+                                      {},
+                                      ImageLayout::GENERAL }));
             cmd->dispatch((hizp.width + 31) / 32, (hizp.height + 31) / 32, 1);
             cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
             for(auto i = 1u; i < hizp.mips; ++i)
             {
-                pc.hizsrct2d = bindless->get_index(make_texture(TextureDescriptor{
-                    make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i - 1, 1 } }), hiz_sampler,
-                    ImageLayout::GENERAL }));
-                pc.hizdsti = bindless->get_index(make_texture(TextureDescriptor{
-                    make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i, 1 } }), {}, ImageLayout::GENERAL }));
+                cmd->bind_resource(2, make_texture(TextureDescriptor{
+                                          make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i - 1, 1 } }),
+                                          hiz_sampler, ImageLayout::GENERAL }));
+                cmd->bind_resource(3, make_texture(TextureDescriptor{
+                                          make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i, 1 } }),
+                                          {},
+                                          ImageLayout::GENERAL }));
                 const auto sx = ((hizp.width >> i) + 31) / 32;
                 const auto sy = ((hizp.height >> i) + 31) / 32;
-                cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
                 cmd->dispatch(sx, sy, 1);
                 cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT,
                              PipelineAccess::SHADER_RW);
@@ -407,23 +396,12 @@ void Renderer::update()
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            struct PC
-            {
-                uint32_t engconstsb;
-                uint32_t imidb;
-                uint32_t hizsrct2d;
-                uint32_t hizdsti;
-                uint32_t dstcmdb;
-                uint32_t dstimidb;
-            } pc;
-            pc.engconstsb = bindless->get_index(pf.constants);
-            pc.imidb = bindless->get_index(rp.ids_buf);
-            pc.hizsrct2d = get_bindless(pf.culling.hizptex);
-            pc.dstcmdb = bindless->get_index(pf.culling.cmd_buf, { pf.culling.cmd_start, ~0ull });
-            pc.dstimidb = bindless->get_index(pf.culling.ids_buf);
             cmd->bind_pipeline(cull_pipeline.get());
-            bindless->bind(cmd);
-            cmd->push_constants(ShaderStage::ALL, &pc, { 0, sizeof(pc) });
+            cmd->bind_resource(0, pf.constants);
+            cmd->bind_resource(1, rp.ids_buf);
+            cmd->bind_resource(2, pf.culling.hizptex);
+            cmd->bind_resource(4, pf.culling.cmd_buf, { pf.culling.cmd_start, ~0ull });
+            cmd->bind_resource(5, pf.culling.ids_buf);
             cmd->dispatch((rp.id_count + 31) / 32, 1, 1);
         });
     rgraph->add_pass(
@@ -500,9 +478,8 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
     cmd->begin_rendering(vkreninfo);
     render_mbatches(cmd, rp.mbatches, pf.culling.cmd_buf, pf.culling.cmd_buf, pf.culling.cmd_start, 0ull,
                     [this, &pf](CommandBuffer* cmd) {
-                        uint32_t pcids[]{ get_bindless(pf.constants), bindless->get_index(pf.culling.ids_buf) };
-                        bindless->bind(cmd);
-                        cmd->push_constants(ShaderStage::ALL, &pcids, { 0, 8 });
+                        cmd->bind_resource(0, pf.constants);
+                        cmd->bind_resource(1, pf.culling.ids_buf);
                     });
     cmd->end_rendering();
     rp.entities.clear();
@@ -849,7 +826,7 @@ void Renderer::update_transform(ecs::entity entity) { ENG_TODO(); }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
-uint32_t Renderer::get_bindless(Handle<Buffer> buffer) { return bindless->get_index(buffer); }
+uint32_t Renderer::get_bindless(Handle<Buffer> buffer, Range range) { return bindless->get_index(buffer, range); }
 
 uint32_t Renderer::get_bindless(Handle<Texture> texture) { return bindless->get_index(texture); }
 

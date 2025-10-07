@@ -44,7 +44,7 @@ class BindlessPool
     BindlessPool(Handle<DescriptorPool> pool, Handle<DescriptorSet> set);
     void bind(CommandBuffer* cmd);
 
-    uint32_t get_index(Handle<Buffer> handle, Range range = { 0, ~0ull });
+    uint32_t get_index(Handle<Buffer> handle, Range range = { 0ull, ~0ull });
     uint32_t get_index(Handle<Texture> handle);
     uint32_t get_index(Handle<Sampler> handle);
     void free_index(Handle<Buffer> handle);

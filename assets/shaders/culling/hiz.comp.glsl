@@ -8,7 +8,7 @@ void main()
 {
     const uvec2 x = gl_GlobalInvocationID.xy;
     const uvec2 sz = uvec2(imageSize(hizdst).xy);
-    // if(any(greaterThanEqual(x, sz))) { return; }
+    if(any(greaterThanEqual(x, sz))) { return; }
     const float depth = texture(sampler2D(hizsrc, samplers[G_SAMPLER_LINEAR]), (vec2(x) + vec2(0.5)) / vec2(sz)).x;
     imageStore(hizdst, ivec2(x), vec4(depth));
 }

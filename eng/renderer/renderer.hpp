@@ -338,6 +338,7 @@ struct Shader
 
 struct PipelineLayoutCreateInfo
 {
+    inline static constexpr auto MAX_PUSH_BYTES = 128u;
     struct SetLayout
     {
         struct Binding
@@ -1018,7 +1019,7 @@ class Renderer
     void update_transform(ecs::entity entity);
 
     SubmitQueue* get_queue(QueueType type);
-    uint32_t get_bindless(Handle<Buffer> buffer);
+    uint32_t get_bindless(Handle<Buffer> buffer, Range range = { 0ull, ~0ull });
     uint32_t get_bindless(Handle<Texture> texture);
     PerFrame& get_perframe();
 
