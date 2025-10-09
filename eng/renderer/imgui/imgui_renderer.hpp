@@ -26,18 +26,20 @@ class ImGuiRenderer
   public:
     void init();
     void update(CommandBuffer* cmd, Handle<ImageView> output);
-    void add_ui_callback(const Callback<void()>& cb);
 
   private:
     void handle_imtexture(ImTextureData* imtex);
 
+  public:
+    Signal<void()> ui_callbacks;
+
+  private:
     Handle<Pipeline> pipeline;
     Handle<Sampler> sampler;
     Handle<Buffer> vertex_buffer;
     Handle<Buffer> index_buffer;
     std::vector<Handle<Image>> images;
     std::vector<Handle<Texture>> textures;
-    Signal<void()> ui_callbacks;
 };
 
 } // namespace gfx

@@ -182,8 +182,6 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
     cmd->end_rendering();
 }
 
-void ImGuiRenderer::add_ui_callback(const Callback<void()>& cb) { ui_callbacks += cb; }
-
 void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
 {
     if(imtex->Status == ImTextureStatus_OK) { return; }

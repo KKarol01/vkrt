@@ -20,15 +20,20 @@ void UI::init()
 {
     use_default_layout = !std::filesystem::exists("imgui.ini");
 
-    eng::Engine::get().renderer->imgui_renderer->add_ui_callback([this] {
-        viewport_imid = ImGui::GetID("viewport_dockspace");
-        ImGui::DockSpaceOverViewport(viewport_imid, 0, ImGuiDockNodeFlags_PassthruCentralNode);
-        if(use_default_layout)
+    eng::Engine::get().renderer->imgui_renderer->ui_callbacks += ([this] {
+        static bool once = true;
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, 0u);
+        viewport_imid = ImGui::DockSpaceOverViewport(0, 0, ImGuiDockNodeFlags_PassthruCentralNode);
+        if(once && use_default_layout)
         {
             left_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Left, 0.2f, nullptr, &viewport_imid);
             right_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Right, 0.25f, nullptr, &viewport_imid);
             bottom_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Down, 0.3f, nullptr, &viewport_imid);
-            viewport_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Down, 0.0f, nullptr, &viewport_imid);
+            // viewport_imid = ImGui::DockBuilderSplitNode(viewport_imid, ImGuiDir_Down, 0.0f, nullptr, &viewport_imid);
+
+            // ImGui::DockBuilderRemoveNode(viewport_imid);
+            // ImGui::DockBuilderAddNode(viewport_imid);
+            // ImGui::DockBuilderSetNodeSize(viewport_imid, ImGui::GetMainViewport()->Size);
 
             for(const auto& e : tabs)
             {
@@ -54,10 +59,10 @@ void UI::init()
                     ImGui::DockBuilderDockWindow(e.name.c_str(), viewport_imid);
                     break;
                 }
-                case Location::NEW_PANE:
-                {
-                    break;
-                }
+                // case Location::NEW_PANE:
+                //{
+                //     break;
+                // }
                 default:
                 {
                     ENG_ERROR("Unrecognized case");
@@ -69,10 +74,12 @@ void UI::init()
             use_default_layout = false;
         }
 
+        ImGui::PopStyleColor();
         for(const auto& e : tabs)
         {
             e.cb_func();
         }
+        once = false;
     });
 }
 

@@ -436,7 +436,7 @@ void Scene::update()
 
 void Scene::ui_draw_scene()
 {
-    if(ImGui::Begin("Scene"))
+    if(ImGui::Begin("Scene", 0, ImGuiWindowFlags_HorizontalScrollbar))
     {
         const auto draw_hierarchy = [this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
             const auto enode = reg->get<ecs::Node>(e);
@@ -532,9 +532,11 @@ void Scene::ui_draw_manipulate()
     auto* cmesh = ecs->get<ecs::Mesh>(entity);
 
     auto& io = ImGui::GetIO();
-    auto* imnode = ImGui::DockBuilderGetNode(Engine::get().ui->viewport_imid);
-
-    ImGui::Begin("Manipulate", 0, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+    auto& style = ImGui::GetStyle();
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, 0u); // don't set no background, make host dock push style with no bg, and somehow it works -
+                                                  // the content window actually does not have the background
+    ImGui::Begin("Manipulate", 0, ImGuiWindowFlags_NoDecoration);
+    ImGui::PopStyleColor(1);
     ImGuizmo::SetDrawlist();
 
     const auto view = Engine::get().camera->get_view();
