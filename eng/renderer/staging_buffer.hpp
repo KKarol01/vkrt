@@ -26,12 +26,28 @@ class StagingBuffer
 {
     static constexpr auto CAPACITY = 64ull * 1024 * 1024;
     static constexpr auto ALIGNMENT = 512ull;
-    static constexpr auto CMD_COUNT = 8ull;
+    static constexpr auto CMD_COUNT = 32ull;
 
     struct CmdBufWrapper
     {
+        enum State
+        {
+            INITIAL,
+            RECORDING,
+            EXECUTABLE,
+            PENDING
+        };
+        State state{ INITIAL };
         CommandBuffer* cmd{};
         Sync* sem{};
+    };
+
+    struct Allocation
+    {
+        Buffer* buf{};
+        void* mem{};
+        size_t offset{};
+        size_t size{};
     };
 
   public:
@@ -50,13 +66,10 @@ class StagingBuffer
     void reset();
 
   private:
-    Sync* flush_pending();
     void begin_new_cmd_buffer();
-    std::pair<void*, size_t> allocate(size_t size);
-    size_t get_offset(const void* const alloc) const { return (uintptr_t)alloc - (uintptr_t)buffer.memory; }
-    uint32_t get_cmd_index() const;
-    CmdBufWrapper& get_wrapped_cmd();
-    CommandBuffer* get_cmd();
+    Allocation allocate(size_t size);
+    CommandBuffer* get_cmd() { return cmds.at(cmdhead).cmd; }
+    CmdBufWrapper& get_wrapper() { return cmds.at(cmdhead); }
 
     size_t head{};
     Buffer buffer;
@@ -64,10 +77,9 @@ class StagingBuffer
     Callback<void(Handle<Buffer>)> on_buffer_resize;
 
     CommandPool* cmdpool{};
-    Sync* dummy_sem{};
-    uint32_t cmdstart{ 0 };
-    uint32_t cmdcount{ 0 };
+    uint32_t cmdhead{ 0 };
     std::array<CmdBufWrapper, CMD_COUNT> cmds;
+    std::vector<CmdBufWrapper*> pending;
 };
 
 } // namespace gfx

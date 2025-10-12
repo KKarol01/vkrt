@@ -23,10 +23,11 @@ void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)
     cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     for(auto i = 0u; i < CMD_COUNT; ++i)
     {
-        cmds[i] = { cmdpool->allocate(), r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("staging_sem_{}", i) }) };
+        cmds[i] = { CmdBufWrapper::INITIAL, cmdpool->allocate(),
+                    r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("staging_sem_{}", i) }) };
     }
-    dummy_sem = r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 1, "staging_dummy_sem" });
-    begin_new_cmd_buffer();
+    pending.reserve(cmds.size());
+    reset();
 }
 
 void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
@@ -77,10 +78,10 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
         size_t uploaded = 0;
         while(uploaded < src_size)
         {
-            auto [mem, size] = allocate(src_size - uploaded);
-            memcpy(mem, (const std::byte*)src + uploaded, size);
-            get_cmd()->copy(dst.get(), buffer, dst_offset + uploaded, { get_offset(mem), size });
-            uploaded += size;
+            auto alloc = allocate(src_size - uploaded);
+            memcpy(alloc.mem, (const std::byte*)src + uploaded, alloc.size);
+            get_cmd()->copy(dst.get(), buffer, dst_offset + uploaded, { alloc.offset, alloc.size });
+            uploaded += alloc.size;
         }
     }
     dst->size = std::max(dst->size, dst_offset + src_size);
@@ -104,23 +105,23 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout f
     {
         const auto upsize = imgsize - upbytes;
         const auto uprows = upbytes / rowsize;
-        auto [almem, alsize] = allocate(upsize);
-        if(alsize < rowsize)
+        auto alloc = allocate(upsize);
+        if(alloc.size < rowsize)
         {
             reset();
             continue;
         }
         const auto urows = (uprows % img.height);
         const auto uslices = (uprows / img.height);
-        const auto alrows = (alsize / rowsize);
+        const auto alrows = (alloc.size / rowsize);
         const auto alslices = std::max((alrows / img.height), 1ull);
         assert(alslices == 1);
         const auto copy = Vks(VkBufferImageCopy2{
-            .bufferOffset = get_offset(almem) + upbytes,
+            .bufferOffset = alloc.offset + upbytes,
             .imageSubresource = { gfx::to_vk(img.deduce_aspect()), 0, 0, 1 },
             .imageOffset = { 0, (int32_t)(urows * block_data.y), (int32_t)(uslices * block_data.z) },
             .imageExtent = { img.width, (uint32_t)(alrows * block_data.y), (uint32_t)(alslices * block_data.z) } });
-        memcpy(almem, (std::byte*)src + upbytes, alsize);
+        memcpy(alloc.mem, (std::byte*)src + upbytes, alloc.size);
         get_cmd()->copy(img, buffer, &copy, 1);
         upbytes += alrows * rowsize;
     }
@@ -138,52 +139,62 @@ void StagingBuffer::insert_barrier()
 
 Sync* StagingBuffer::flush()
 {
-    auto* sync = flush_pending();
+    if(pending.empty()) { return get_wrapper().sem; }
+    auto* sem = pending.front()->sem;
+    for(auto& e : pending)
+    {
+        if(e->state == CmdBufWrapper::RECORDING) { cmdpool->end(e->cmd); }
+        e->state = CmdBufWrapper::PENDING;
+        queue->with_cmd_buf(e->cmd);
+        queue->signal_sync(e->sem);
+    }
+    queue->submit();
+    pending.clear();
     begin_new_cmd_buffer();
-    return sync;
+    return sem;
 }
 
 void StagingBuffer::reset()
 {
-    flush_pending();
-    for(auto i = 0u; i < CMD_COUNT; ++i)
+    flush();
+    for(auto i = 0u; i < cmds.size(); ++i)
     {
-        cmds[i].sem->wait_cpu(~0ull);
-        cmds[i].sem->reset();
+        if(cmds.at(i).state == CmdBufWrapper::PENDING)
+        {
+            cmds.at(i).sem->wait_cpu(~0ull);
+            cmds.at(i).sem->reset();
+        }
+        cmds.at(i).state = CmdBufWrapper::INITIAL;
     }
     head = 0;
-    cmdstart = 0;
-    cmdcount = 0;
-}
-
-Sync* StagingBuffer::flush_pending()
-{
-    if(cmdcount == 0) { return dummy_sem; }
-    for(auto i = 0u; i < cmdcount; ++i)
-    {
-        const auto idx = (cmdstart + i) % CMD_COUNT;
-        const auto& cmd = cmds[idx];
-        cmdpool->end(cmd.cmd);
-        queue->with_cmd_buf(cmd.cmd);
-        queue->signal_sync(cmd.sem);
-    }
-    queue->submit();
-    auto* sync = cmds[cmdstart].sem;
-    cmdstart = (cmdstart + cmdcount) % CMD_COUNT;
-    cmdcount = 0;
-    return sync;
+    cmdhead = 0;
+    begin_new_cmd_buffer();
+    return;
 }
 
 void StagingBuffer::begin_new_cmd_buffer()
 {
-    if(cmdcount == CMD_COUNT) { reset(); }
-    auto& cmdbuf = cmds[cmdstart];
-    cmdbuf.sem->wait_cpu(~0ull);
-    cmdpool->begin(cmds[cmdstart].cmd);
-    ++cmdcount;
+    for(auto i = 0u; i < cmds.size(); ++i)
+    {
+        const auto cmdi = (cmdhead + i) & (cmds.size() - 1);
+        auto& cmd = cmds.at(cmdi);
+        if(cmd.state == CmdBufWrapper::INITIAL || cmd.state == CmdBufWrapper::RECORDING)
+        {
+            if(cmd.state == CmdBufWrapper::INITIAL)
+            {
+                cmd.state = CmdBufWrapper::RECORDING;
+                cmdpool->begin(cmd.cmd);
+                pending.push_back(&cmd);
+            }
+            cmdhead = cmdi;
+            return;
+        }
+    }
+    reset();
+    begin_new_cmd_buffer();
 }
 
-std::pair<void*, size_t> StagingBuffer::allocate(size_t size)
+StagingBuffer::Allocation StagingBuffer::allocate(size_t size)
 {
     auto free_space = CAPACITY - head;
     if(free_space == 0)
@@ -194,27 +205,9 @@ std::pair<void*, size_t> StagingBuffer::allocate(size_t size)
     assert(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
     const auto aligned_size = std::min(align_up2(size, ALIGNMENT), free_space);
     assert(aligned_size % ALIGNMENT == 0 && aligned_size <= free_space);
-    void* const mem = (std::byte*)buffer.memory + head;
+    void* mem = (std::byte*)buffer.memory + head;
     head += aligned_size;
-    return { mem, std::min(size, aligned_size) };
-}
-
-uint32_t StagingBuffer::get_cmd_index() const
-{
-    assert(cmdcount > 0);
-    return (cmdstart + cmdcount - 1) % CMD_COUNT;
-}
-
-StagingBuffer::CmdBufWrapper& StagingBuffer::get_wrapped_cmd()
-{
-    assert(cmdcount > 0);
-    return cmds[get_cmd_index()];
-}
-
-CommandBuffer* StagingBuffer::get_cmd()
-{
-    if(cmdcount == 0) { begin_new_cmd_buffer(); }
-    return get_wrapped_cmd().cmd;
+    return { &buffer, mem, (uintptr_t)mem - (uintptr_t)buffer.memory, std::min(size, aligned_size) };
 }
 
 } // namespace gfx
