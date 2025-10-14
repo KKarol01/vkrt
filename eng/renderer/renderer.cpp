@@ -2,10 +2,10 @@
 
 #include <meshoptimizer/src/meshoptimizer.h>
 #include "renderer.hpp"
+#include <eng/renderer/staging_buffer.hpp>
 #include <eng/engine.hpp>
 #include <eng/utils.hpp>
 #include <eng/camera.hpp>
-#include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/common/to_vk.hpp>
@@ -525,7 +525,6 @@ void Renderer::process_meshpass(MeshPassType pass)
     {
         std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
         sbuf->copy(bufs.trs_bufs[0], bufs.trs_bufs[1], 0, { 0, bufs.trs_bufs[1]->size });
-        sbuf->insert_barrier();
     }
     for(auto i = 0u; i < newinsts.size(); ++i)
     {
@@ -631,7 +630,20 @@ Handle<Image> Renderer::make_image(const ImageDescriptor& info)
 {
     auto h = images.insert(backend->make_image(info));
     h->default_view = make_view(ImageViewDescriptor{ .name = ENG_FMT("{}_default", info.name), .image = h });
-    if(info.data.size_bytes()) { sbuf->copy(h, info.data.data(), ImageLayout::READ_ONLY); }
+    if(info.data.size_bytes())
+    {
+        sbuf->copy(h, info.data.data(), ImageLayout::READ_ONLY);
+        for(auto i = 0u; i < info.mips - 1; ++i)
+        {
+            const Range3D32i srcsz{
+                { 0, 0, 0 }, { std::max(info.width >> i, 1u), std::max(info.height >> i, 1u), std::max(info.depth >> i, 1u) }
+            };
+            const Range3D32i dstsz{ { 0, 0, 0 },
+                                    { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
+                                      std::max(srcsz.size.z >> 1, 1) } };
+            sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz }, ImageLayout::READ_ONLY);
+        }
+    }
     return h;
 }
 

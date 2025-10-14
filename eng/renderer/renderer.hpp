@@ -310,6 +310,19 @@ enum class QueueType
     COPY,
     COMPUTE,
 };
+
+enum class SamplerReductionMode
+{
+    MIN,
+    MAX
+};
+
+enum class SamplerMipmapMode
+{
+    NEAREST,
+    LINEAR,
+};
+
 } // namespace gfx
 } // namespace eng
 
@@ -664,8 +677,8 @@ struct ImageViewDescriptor
     std::optional<ImageViewType> view_type;
     std::optional<ImageFormat> format;
     std::optional<Flags<ImageAspect>> aspect;
-    Range32 mips{ 0, ~0u };
-    Range32 layers{ 0, ~0u };
+    Range32u mips{ 0, ~0u };
+    Range32u layers{ 0, ~0u };
     // swizzle always identity for now
 };
 
@@ -681,21 +694,38 @@ struct ImageView
     ImageViewType type{};
     ImageFormat format{};
     Flags<ImageAspect> aspect{};
-    Range32 mips{};
-    Range32 layers{};
+    Range32u mips{};
+    Range32u layers{};
     void* metadata{};
 };
 
-enum class SamplerReductionMode
+struct ImageSubRange
 {
-    MIN,
-    MAX
+    Range32u mips{};
+    Range32u layers{};
 };
 
-enum class SamplerMipmapMode
+struct ImageSubLayers
 {
-    NEAREST,
-    LINEAR,
+    uint32_t mip{};
+    Range32u layers{};
+};
+
+struct ImageBlit
+{
+    ImageSubLayers srclayers{};
+    ImageSubLayers dstlayers{};
+    Range3D32i srcrange{};
+    Range3D32i dstrange{};
+};
+
+struct ImageCopy
+{
+    ImageSubLayers srclayers{};
+    ImageSubLayers dstlayers{};
+    Vec3i32 srcoffset{};
+    Vec3i32 dstoffset{};
+    Vec3u32 extent{};
 };
 
 struct SamplerDescriptor

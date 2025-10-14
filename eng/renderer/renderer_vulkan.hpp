@@ -164,8 +164,7 @@ struct VkImageMetadata
 {
     static void init(Image& a, VkImage img = {});
     static void destroy(Image& a, bool destroy_image = true);
-    static VkImageMetadata& get(Image& a);
-    static const VkImageMetadata& get(const Image& a);
+    static VkImageMetadata* get(const Image& a) { return static_cast<VkImageMetadata*>(a.metadata); }
     VkImage image{};
     VmaAllocation vmaa{};
 };

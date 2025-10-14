@@ -138,11 +138,12 @@ static Handle<gfx::Image> load_image(const fastgltf::Asset& asset, gfx::ImageFor
         return {};
     }
 
-    imgd.usage = gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT;
+    imgd.usage = gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT | gfx::ImageUsage::TRANSFER_SRC_BIT;
     imgd.data = { imgdata, imgdata + x * y * ch };
     imgd.width = (uint32_t)x;
     imgd.height = (uint32_t)y;
     imgd.format = format;
+    imgd.mips = std::log2(std::min(x, y)) + 1;
     const auto img = Engine::get().renderer->make_image(imgd);
     stbi_image_free(imgdata);
     ctx.images.at(index) = img;

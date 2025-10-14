@@ -1,11 +1,11 @@
 #include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/utils.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/to_vk.hpp>
-#include <deque>
 
 namespace eng
 {
@@ -63,7 +63,12 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
     {
         memcpy((std::byte*)dst->memory + dst_offset, (const std::byte*)src->memory + range.offset, range.size);
     }
-    else { get_cmd()->copy(dst.get(), src.get(), dst_offset, range); }
+    else
+    {
+        get_cmd()->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
+        get_cmd()->copy(dst.get(), src.get(), dst_offset, range);
+        get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::ALL, PipelineAccess::NONE);
+    }
     dst->size = std::max(dst->size, dst_offset + range.size);
 }
 
@@ -131,10 +136,40 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout f
     assert(upbytes == imgsize);
 }
 
-void StagingBuffer::insert_barrier()
+void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy, ImageLayout dst_final_layout)
 {
-    get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::TRANSFER_BIT,
-                       PipelineAccess::TRANSFER_WRITE_BIT);
+    // dst and src may be the same. if that's the case, need to make sure to check if ranges overlap.
+    const auto oldsrcl = src->current_layout;
+    assert(oldsrcl != ImageLayout::UNDEFINED);
+    const auto dstrange = ImageSubRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
+    const auto srcrange = ImageSubRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
+    get_cmd()->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
+    get_cmd()->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
+    get_cmd()->copy(dst.get(), src.get(), copy, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC);
+    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
+                       PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
+    get_cmd()->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT, PipelineStage::ALL,
+                       PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
+}
+
+void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit, ImageLayout dst_final_layout)
+{
+    const auto oldsrcl = src->current_layout;
+    assert(oldsrcl != ImageLayout::UNDEFINED);
+    const auto dstrange = ImageSubRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
+    const auto srcrange = ImageSubRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
+    get_cmd()->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
+    get_cmd()->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
+
+    get_cmd()->blit(dst.get(), src.get(), blit, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageFilter::LINEAR);
+    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
+                       PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
+    get_cmd()->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT, PipelineStage::ALL,
+                       PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
 }
 
 Sync* StagingBuffer::flush()
@@ -146,7 +181,7 @@ Sync* StagingBuffer::flush()
         if(e->state == CmdBufWrapper::RECORDING) { cmdpool->end(e->cmd); }
         e->state = CmdBufWrapper::PENDING;
         queue->with_cmd_buf(e->cmd);
-        queue->signal_sync(e->sem);
+        queue->signal_sync(e->sem, PipelineStage::TRANSFER_BIT);
     }
     queue->submit();
     pending.clear();

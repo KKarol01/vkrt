@@ -7,7 +7,6 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
-#include <eng/renderer/staging_buffer.hpp>
 #include <eng/scene.hpp>
 #include <eng/ui.hpp>
 #include <eng/ecs/ecs.hpp>

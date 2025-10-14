@@ -4,6 +4,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
 #include <eng/renderer/renderer.hpp>
+#include <eng/renderer/submit_queue.hpp>
 
 namespace eng
 {

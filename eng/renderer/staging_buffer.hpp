@@ -1,24 +1,16 @@
 #pragma once
 
-#include <span>
 #include <vector>
-#include <thread>
-#include <atomic>
-#include <memory>
-#include <deque>
-#include <mutex>
-#include <numeric>
-#include <functional>
+#include <array>
 #include <eng/common/types.hpp>
-#include <eng/renderer/submit_queue.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
+#include <eng/renderer/renderer.hpp>
 
 namespace eng
 {
 namespace gfx
 {
-struct Buffer;
 
 static constexpr auto STAGING_APPEND = ~0ull;
 
@@ -61,7 +53,10 @@ class StagingBuffer
         copy(dst, vec.data(), dst_offset, vec.size() * sizeof(T));
     }
     void copy(Handle<Image> dst, const void* const src, ImageLayout final_layout);
-    void insert_barrier();
+    void copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy,
+              ImageLayout dst_final_layout);
+    void blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit,
+              ImageLayout dst_final_layout);
     Sync* flush();
     void reset();
 

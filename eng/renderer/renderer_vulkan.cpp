@@ -434,22 +434,10 @@ void VkImageMetadata::destroy(Image& a, bool destroy_image)
 {
     if(!a.metadata) { return; }
     auto* r = RendererBackendVulkan::get_instance();
-    auto& md = VkImageMetadata::get(a);
-    if(destroy_image) { vmaDestroyImage(r->vma, md.image, md.vmaa); }
+    auto* md = VkImageMetadata::get(a);
+    if(destroy_image) { vmaDestroyImage(r->vma, md->image, md->vmaa); }
     delete a.metadata;
     a.metadata = nullptr;
-}
-
-VkImageMetadata& VkImageMetadata::get(Image& a)
-{
-    assert(a.metadata);
-    return *(VkImageMetadata*)a.metadata;
-}
-
-const VkImageMetadata& VkImageMetadata::get(const Image& a)
-{
-    assert(a.metadata);
-    return *(const VkImageMetadata*)a.metadata;
 }
 
 void VkImageViewMetadata::init(ImageView& a)

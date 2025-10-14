@@ -28,9 +28,15 @@ class CommandBuffer
     void barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
                  Flags<PipelineAccess> dst_access, ImageLayout old_layout, ImageLayout new_layout);
 
+    // doesn't set 'current layout' member
+    void barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
+                 Flags<PipelineAccess> dst_access, ImageLayout old_layout, ImageLayout new_layout, const ImageSubRange& range);
+
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range);
     void copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count);
+    void copy(Image& dst, const Image& src, const ImageCopy& copy, ImageLayout dstlayout, ImageLayout srclayout);
     void copy(Image& dst, const Image& src);
+    void blit(Image& dst, const Image& src, const ImageBlit& range, ImageLayout dstlayout, ImageLayout srclayout, ImageFilter filter);
 
     void clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color);
     void clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil,
@@ -38,9 +44,9 @@ class CommandBuffer
 
     void bind_index(Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);
-    void bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32 range);
+    void bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32u range);
 
-    void push_constants(Flags<ShaderStage> stages, const void* const values, Range32 range);
+    void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range);
     void bind_resource(uint32_t slot, Handle<Buffer> resource, Range range = { 0, ~0ull });
     void bind_resource(uint32_t slot, Handle<Texture> resource);
 
