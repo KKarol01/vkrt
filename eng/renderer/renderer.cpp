@@ -42,40 +42,104 @@ ImageBlockData GetBlockData(ImageFormat format)
 void Renderer::init(RendererBackend* backend)
 {
     // clang-format off
-    ENG_SET_HANDLE_DISPATCHER(Buffer, { return &::eng::Engine::get().renderer->buffers.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Image, { return &::eng::Engine::get().renderer->images.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(ImageView, { return &::eng::Engine::get().renderer->image_views.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Geometry, { return &::eng::Engine::get().renderer->geometries.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Mesh, { return &::eng::Engine::get().renderer->meshes.at(*handle); });
-    ENG_SET_HANDLE_DISPATCHER(Texture, { return &::eng::Engine::get().renderer->textures.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Material, { return &::eng::Engine::get().renderer->materials.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Shader, { return &::eng::Engine::get().renderer->shaders.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(PipelineLayout, { return &::eng::Engine::get().renderer->pplayouts.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Pipeline, { return &::eng::Engine::get().renderer->pipelines.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Sampler, { return &::eng::Engine::get().renderer->samplers.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(MeshPass, { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(ShaderEffect, { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(DescriptorPool, { return &::eng::Engine::get().renderer->descpools.at(*handle); });
+    ENG_SET_HANDLE_DISPATCHER(Buffer,           { return &::eng::Engine::get().renderer->buffers.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Image,            { return &::eng::Engine::get().renderer->images.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(ImageView,        { return &::eng::Engine::get().renderer->image_views.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Geometry,         { return &::eng::Engine::get().renderer->geometries.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Mesh,             { return &::eng::Engine::get().renderer->meshes.at(*handle); });
+    ENG_SET_HANDLE_DISPATCHER(Texture,          { return &::eng::Engine::get().renderer->textures.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Material,         { return &::eng::Engine::get().renderer->materials.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Shader,           { return &::eng::Engine::get().renderer->shaders.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(PipelineLayout,   { return &::eng::Engine::get().renderer->pplayouts.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Pipeline,         { return &::eng::Engine::get().renderer->pipelines.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(Sampler,          { return &::eng::Engine::get().renderer->samplers.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(MeshPass,         { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(ShaderEffect,     { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
+    ENG_SET_HANDLE_DISPATCHER(DescriptorPool,   { return &::eng::Engine::get().renderer->descpools.at(*handle); });
     // clang-format on
 
     this->backend = backend;
     backend->init();
 
-    bindless_pool = make_descpool(DescriptorPoolCreateInfo{
-        .flags = DescriptorPoolFlags::UPDATE_AFTER_BIND_BIT,
-        .max_sets = 2,
-        .pools = { { PipelineBindingType::STORAGE_BUFFER, 2 * 1024 },
-                   { PipelineBindingType::STORAGE_IMAGE, 2 * 1024 },
-                   { PipelineBindingType::SAMPLED_IMAGE, 2 * 1024 },
-                   { PipelineBindingType::SEPARATE_SAMPLER, 2 * 2 } },
-    });
+    gq = backend->get_queue(QueueType::GRAPHICS);
+    swapchain = backend->make_swapchain();
+    sbuf = new StagingBuffer{};
+    sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
+    rgraph = new RenderGraph{};
+    rgraph->init(this);
 
+    init_bufs();
+    init_perframes();
+    init_pipelines();
+    init_helper_geom();
+
+    imgui_renderer = new ImGuiRenderer{};
+    imgui_renderer->init();
+}
+
+void Renderer::init_helper_geom()
+{
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    const auto gen_uv_sphere = [&vertices, &indices] {
+        const auto segs = 16;
+        const auto rings = 16;
+        vertices.clear();
+        indices.clear();
+        vertices.reserve(segs * rings);
+        indices.reserve((rings - 1) * (segs - 1) * 6);
+        for(auto y = 0u; y < rings; ++y)
+        {
+            const auto v = (float)y / (float)(rings - 1);
+            const auto theta = v * glm::pi<float>();
+            const auto st = std::sinf(theta);
+            const auto ct = std::cosf(theta);
+            for(auto x = 0u; x < segs; ++x)
+            {
+                const auto u = (float)x / (float)(segs - 1);
+                const auto phi = u * 2.0f * glm::pi<float>();
+                const auto sp = std::sinf(phi);
+                const auto cp = std::cosf(phi);
+                vertices.push_back(Vertex{ .position = { st * cp, ct, st * sp }, .uv = { u, v } });
+            }
+        }
+        for(auto y = 0u; y < rings - 1; ++y)
+        {
+            for(auto x = 0u; x < segs - 1; ++x)
+            {
+                const auto idx = y * segs + x;
+                indices.push_back(idx);
+                indices.push_back(idx + 1);
+                indices.push_back(idx + segs);
+                indices.push_back(idx + segs);
+                indices.push_back(idx + 1);
+                indices.push_back(idx + segs + 1);
+            }
+        }
+    };
+
+    gen_uv_sphere();
+    assert(vertices.size() <= ~uint16_t{});
+    helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
+    helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
+                     Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
+        .layout = bindless_pplayout,
+        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
+        .depth_test = true,
+        .depth_write = true,
+        .depth_compare = DepthCompare::GREATER,
+        .culling = CullFace::BACK,
+    });
+}
+
+void Renderer::init_pipelines()
+{
     auto linear_sampler = make_sampler(SamplerDescriptor{});
     auto nearest_sampler = make_sampler(SamplerDescriptor{ .filtering = { ImageFilter::NEAREST, ImageFilter::NEAREST } });
     Handle<Sampler> imsamplers[]{ linear_sampler, nearest_sampler };
     const auto bindless_bflags = PipelineBindingFlags::UPDATE_AFTER_BIND_BIT |
                                  PipelineBindingFlags::UPDATE_UNUSED_WHILE_PENDING_BIT | PipelineBindingFlags::PARTIALLY_BOUND_BIT;
-
     bindless_pplayout = make_pplayout(PipelineLayoutCreateInfo{
         .sets = { PipelineLayoutCreateInfo::SetLayout{
             .flags = PipelineSetFlags::UPDATE_AFTER_BIND_BIT,
@@ -87,17 +151,66 @@ void Renderer::init(RendererBackend* backend)
             } } },
         .range = {ShaderStage::ALL, 128},
         });
+    bindless_pool = make_descpool(DescriptorPoolCreateInfo{
+        .flags = DescriptorPoolFlags::UPDATE_AFTER_BIND_BIT,
+        .max_sets = 2,
+        .pools = { { PipelineBindingType::STORAGE_BUFFER, 2 * 1024 },
+                   { PipelineBindingType::STORAGE_IMAGE, 2 * 1024 },
+                   { PipelineBindingType::SAMPLED_IMAGE, 2 * 1024 },
+                   { PipelineBindingType::SEPARATE_SAMPLER, 2 * 2 } },
+    });
     bindless_set = bindless_pool->allocate(bindless_pplayout, 0);
-
-    auto* ew = Engine::get().window;
-    gq = backend->get_queue(QueueType::GRAPHICS);
-    swapchain = backend->make_swapchain();
     bindless = new BindlessPool{ bindless_pool, bindless_set };
-    sbuf = new StagingBuffer{};
-    sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
+
+    hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = bindless_pplayout });
+    hiz_sampler = make_sampler(SamplerDescriptor{
+        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
+        .mipmap_mode = SamplerMipmapMode::NEAREST,
+        .reduction_mode = SamplerReductionMode::MIN });
+    cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
+        .layout = bindless_pplayout,
+    });
+    cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
+                     Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
+        .layout = bindless_pplayout,
+        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
+        .depth_test = true,
+        .depth_write = true,
+        .depth_compare = DepthCompare::GREATER,
+        .culling = CullFace::BACK,
+    });
+    default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
+        .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
+        .layout = bindless_pplayout,
+        .attachments = { .count = 1,
+                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                         .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                           .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                           .color_op = BlendOp::ADD,
+                                                                           .src_alpha_factor = BlendFactor::ONE,
+                                                                           .dst_alpha_factor = BlendFactor::ZERO,
+                                                                           .alpha_op = BlendOp::ADD } },
+                         .depth_format = ImageFormat::D32_SFLOAT },
+        .depth_test = true,
+        .depth_write = false,
+        .depth_compare = DepthCompare::GEQUAL,
+        .culling = CullFace::BACK,
+    });
+    MeshPassCreateInfo info{ .name = "default_unlit" };
+    info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline });
+    default_meshpass = make_mesh_pass(info);
+    default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
+}
+
+void Renderer::init_perframes()
+{
+    auto* ew = Engine::get().window;
     perframe.resize(frame_count);
-    rgraph = new RenderGraph{};
-    rgraph->init(this);
     for(auto i = 0u; i < frame_count; ++i)
     {
         auto& pf = perframe[i];
@@ -154,7 +267,10 @@ void Renderer::init(RendererBackend* backend)
         pf.culling.ids_buf =
             make_buffer(BufferDescriptor{ ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
     }
+}
 
+void Renderer::init_bufs()
+{
     bufs.vpos_buf = make_buffer(BufferDescriptor{ "vertex positions", 1024, BufferUsage::STORAGE_BIT });
     bufs.vattr_buf = make_buffer(BufferDescriptor{ "vertex attributes", 1024, BufferUsage::STORAGE_BIT });
     bufs.idx_buf = make_buffer(BufferDescriptor{ "vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT });
@@ -163,7 +279,6 @@ void Renderer::init(RendererBackend* backend)
     for(uint32_t i = 0; i < 2; ++i)
     {
         bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
-        // bufs.const_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("constants_{}", i), 1024, BufferUsage::STORAGE_BIT });
     }
     for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
     {
@@ -172,56 +287,6 @@ void Renderer::init(RendererBackend* backend)
         render_passes.at(i).ids_buf =
             make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
     }
-
-    imgui_renderer = new ImGuiRenderer{};
-    imgui_renderer->init();
-
-    const auto pp_default_unlit = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
-        .layout = bindless_pplayout,
-        .attachments = { .count = 1,
-                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
-                         .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-                                                                           .src_color_factor = BlendFactor::SRC_ALPHA,
-                                                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                                                           .color_op = BlendOp::ADD,
-                                                                           .src_alpha_factor = BlendFactor::ONE,
-                                                                           .dst_alpha_factor = BlendFactor::ZERO,
-                                                                           .alpha_op = BlendOp::ADD } },
-                         .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
-        .depth_write = false,
-        .depth_compare = DepthCompare::GEQUAL,
-        .culling = CullFace::BACK,
-    });
-    MeshPassCreateInfo info{ .name = "default_unlit" };
-    info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
-    default_meshpass = make_mesh_pass(info);
-    default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
-
-    hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = bindless_pplayout });
-    hiz_sampler = make_sampler(SamplerDescriptor{
-        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
-        .mipmap_mode = SamplerMipmapMode::NEAREST,
-        .reduction_mode = SamplerReductionMode::MIN });
-    cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
-        .layout = bindless_pplayout,
-    });
-    cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
-                     Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
-        .layout = bindless_pplayout,
-        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
-        .depth_write = true,
-        .depth_compare = DepthCompare::GREATER,
-        .culling = CullFace::BACK,
-    });
-
-    rinit_helper_geom();
 }
 
 void Renderer::update()
@@ -256,6 +321,18 @@ void Renderer::update()
             sbuf->copy(bufs.mats_buf, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
         }
         new_materials.clear();
+    }
+    if(new_transforms.size())
+    {
+        std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
+        sbuf->copy(bufs.trs_bufs[0], bufs.trs_bufs[1], 0, { 0, bufs.trs_bufs[1]->size });
+        for(auto i = 0u; i < new_transforms.size(); ++i)
+        {
+            const auto* trs = Engine::get().ecs->get<ecs::Transform>(new_transforms.at(i));
+            const auto* msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms.at(i));
+            sbuf->copy(bufs.trs_bufs[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
+        }
+        new_transforms.clear();
     }
 
     pf.ren_fen->wait_cpu(~0ull);
@@ -517,30 +594,17 @@ void Renderer::process_meshpass(MeshPassType pass)
         {
             entmsh->gpu_resource = gpu_resource_allocator.allocate_slot();
             newinsts.push_back(ent);
+            new_transforms.push_back(ent);
         }
         for(auto i = 0u; i < entmsh->meshes.size(); ++i)
         {
             const auto& msh = entmsh->meshes.at(i).get();
             const auto& geom = msh.geometry.get();
-            insts.reserve(insts.size() + geom.meshlet_range.size);
             for(auto j = 0u; j < geom.meshlet_range.size; ++j)
             {
-                insts.push_back(MeshletInstance{ msh.geometry, msh.material, entmsh->gpu_resource,
-                                                 (uint32_t)geom.meshlet_range.offset + j });
+                insts.push_back(MeshletInstance{ msh.geometry, msh.material, entmsh->gpu_resource, geom.meshlet_range.offset + j });
             }
         }
-    }
-
-    if(newinsts.size())
-    {
-        std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
-        sbuf->copy(bufs.trs_bufs[0], bufs.trs_bufs[1], 0, { 0, bufs.trs_bufs[1]->size });
-    }
-    for(auto i = 0u; i < newinsts.size(); ++i)
-    {
-        auto* trs = Engine::get().ecs->get<ecs::Transform>(newinsts.at(i));
-        auto* msh = Engine::get().ecs->get<ecs::Mesh>(newinsts.at(i));
-        sbuf->copy(bufs.trs_bufs[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
     }
 
     rp.mbatches.resize(insts.size());
@@ -629,63 +693,6 @@ void Renderer::render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>
         cmd->draw_indexed_indirect_count(indirect.get(), cmdoff, count.get(), cntoff, mb.cmdcount, sizeof(DrawIndexedIndirectCommand));
         cmdoffacc += mb.cmdcount;
     }
-}
-
-void Renderer::rinit_helper_geom()
-{
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    const auto gen_uv_sphere = [&vertices, &indices] {
-        const auto segs = 16;
-        const auto rings = 16;
-        vertices.clear();
-        indices.clear();
-        vertices.reserve(segs * rings);
-        indices.reserve((rings - 1) * (segs - 1) * 6);
-        for(auto y = 0u; y < rings; ++y)
-        {
-            const auto v = (float)y / (float)(rings - 1);
-            const auto theta = v * glm::pi<float>();
-            const auto st = std::sinf(theta);
-            const auto ct = std::cosf(theta);
-            for(auto x = 0u; x < segs; ++x)
-            {
-                const auto u = (float)x / (float)(segs - 1);
-                const auto phi = u * 2.0f * glm::pi<float>();
-                const auto sp = std::sinf(phi);
-                const auto cp = std::cosf(phi);
-                vertices.push_back(Vertex{ .position = { st * cp, ct, st * sp }, .uv = { u, v } });
-            }
-        }
-        for(auto y = 0u; y < rings - 1; ++y)
-        {
-            for(auto x = 0u; x < segs - 1; ++x)
-            {
-                const auto idx = y * segs + x;
-                indices.push_back(idx);
-                indices.push_back(idx + 1);
-                indices.push_back(idx + segs);
-                indices.push_back(idx + segs);
-                indices.push_back(idx + 1);
-                indices.push_back(idx + segs + 1);
-            }
-        }
-    };
-
-    gen_uv_sphere();
-    assert(vertices.size() <= ~uint16_t{});
-    helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
-
-    helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
-                     Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
-        .layout = bindless_pplayout,
-        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
-        .depth_write = true,
-        .depth_compare = DepthCompare::GREATER,
-        .culling = CullFace::BACK,
-    });
 }
 
 Handle<Buffer> Renderer::make_buffer(const BufferDescriptor& info)
@@ -792,7 +799,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     std::vector<Meshlet> out_meshlets;
     meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
 
-    Geometry geometry{ .meshlet_range = { meshlets.size(), out_meshlets.size() } };
+    Geometry geometry{ .meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)out_meshlets.size() } };
 
     static constexpr auto VXATTRSIZE = sizeof(Vertex) - sizeof(Vertex::position);
     std::vector<glm::vec3> positions(out_vertices.size());
@@ -905,7 +912,10 @@ Handle<DescriptorPool> Renderer::make_descpool(const DescriptorPoolCreateInfo& i
     return Handle<DescriptorPool>{ (uint32_t)descpools.size() - 1 };
 }
 
-void Renderer::update_transform(ecs::entity entity) { ENG_TODO(); }
+void Renderer::update_transform(ecs::entity entity)
+{
+    if(Engine::get().ecs->get<ecs::Mesh>(entity)) { new_transforms.push_back(entity); }
+}
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 

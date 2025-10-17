@@ -523,7 +523,7 @@ struct Pipeline
 struct Geometry
 {
     auto operator<=>(const Geometry& a) const = default;
-    Range meshlet_range{}; // position inside meshlet buffer
+    Range32u meshlet_range{}; // position inside meshlet buffer
     // VkAccelerationStructureKHR blas{};
     // Handle<Buffer> blas_buffer{};
 };
@@ -1028,6 +1028,11 @@ class Renderer
     };
 
     void init(RendererBackend* backend);
+    void init_helper_geom();
+    void init_pipelines();
+    void init_perframes();
+    void init_bufs();
+
     void update();
     void render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
     void process_meshpass(MeshPassType pass);
@@ -1035,8 +1040,6 @@ class Renderer
     void render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>& mbatches, Handle<Buffer> indirect,
                          Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
                          const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
-
-    void rinit_helper_geom();
 
     Handle<Buffer> make_buffer(const BufferDescriptor& info);
     Handle<Image> make_image(const ImageDescriptor& info);
@@ -1091,6 +1094,7 @@ class Renderer
     HandleFlatSet<Material> materials;
     std::vector<DescriptorPool> descpools;
     std::vector<Handle<Material>> new_materials;
+    std::vector<ecs::entity> new_transforms;
 
     GeometryBuffers bufs;
     SlotAllocator gpu_resource_allocator;
@@ -1101,6 +1105,7 @@ class Renderer
     Handle<DescriptorPool> bindless_pool;
     Handle<DescriptorSet> bindless_set;
     Handle<PipelineLayout> bindless_pplayout;
+    Handle<Pipeline> default_unlit_pipeline;
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
     Handle<Pipeline> hiz_pipeline;

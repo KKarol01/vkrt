@@ -241,15 +241,15 @@ class Registry
     void traverse_hierarchy(entity e, const auto& callback)
     {
         if(!is_valid(e)) { return; }
-        const auto dfs = [this, callback](entity p, entity e, const auto& self) -> void {
+        const auto dfs = [this, &callback](const auto& self, entity p, entity e) -> void {
             callback(p, e);
             auto& ch = metadatas.at(e).children;
             for(auto c : ch)
             {
-                self(e, c, self);
+                self(self, e, c);
             }
         };
-        dfs(INVALID_ENTITY, e, dfs);
+        dfs(dfs, INVALID_ENTITY, e);
     }
 
     entity clone(entity src)

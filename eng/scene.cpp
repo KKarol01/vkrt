@@ -382,14 +382,7 @@ void Scene::update_transform(ecs::entity entity)
         ENG_WARN("Entity does not have transform component.");
         return;
     }
-
-    Engine::get().ecs->traverse_hierarchy(entity, [this](auto e, auto p) {
-        auto it = std::lower_bound(pending_transforms.begin(), pending_transforms.end(), e);
-        if(it != pending_transforms.end() && *it == e) { pending_transforms.erase(it); }
-    });
-
-    auto it = std::lower_bound(pending_transforms.begin(), pending_transforms.end(), entity);
-    pending_transforms.insert(it, entity);
+    pending_transforms.push_back(entity);
 }
 
 void Scene::update()
@@ -397,37 +390,57 @@ void Scene::update()
     // Relies on pending transforms not having child nodes of other nodes (no two nodes from the same hierarchy)
     if(pending_transforms.size())
     {
-        while(pending_transforms.size())
+        std::unordered_set<ecs::entity> visited;
+
+        // leave only those entities, who have no ancestors in the pending trs.
+        std::vector<ecs::entity> filtered;
+        filtered.reserve(pending_transforms.size());
+        visited.insert(pending_transforms.begin(), pending_transforms.end());
+        for(auto e : pending_transforms)
         {
-            const auto entity = pending_transforms.back();
-            pending_transforms.pop_back();
-            const auto parent = Engine::get().ecs->get_parent(entity);
-
-            std::stack<ecs::entity> echs;
-            std::stack<glm::mat4> ts;
-            echs.push(entity);
-            if(parent != ecs::INVALID_ENTITY)
+            auto p = e;
+            auto passes = true;
+            while(p != ecs::INVALID_ENTITY)
             {
-                auto* pt = Engine::get().ecs->get<ecs::Transform>(parent);
-                ts.push(pt->global);
+                p = Engine::get().ecs->get_parent(e);
+                if(visited.contains(p))
+                {
+                    passes = false;
+                    break;
+                }
             }
-            else { ts.push(glm::identity<glm::mat4>()); }
+            if(passes) { filtered.push_back(e); }
+        }
+        pending_transforms = std::move(filtered);
 
-            while(echs.size())
+        for(auto e : pending_transforms)
+        {
+            const auto p = Engine::get().ecs->get_parent(e);
+            std::stack<ecs::entity> visit;
+            std::stack<glm::mat4> trs;
+            visit.push(e);
+            if(p != ecs::INVALID_ENTITY)
             {
-                assert(ts.size() == echs.size());
-                auto e = echs.top();
-                auto pt = ts.top();
-                echs.pop();
-                ts.pop();
+                auto* pt = Engine::get().ecs->get<ecs::Transform>(p);
+                trs.push(pt->global);
+            }
+            else { trs.push(glm::identity<glm::mat4>()); }
+
+            while(visit.size())
+            {
+                assert(trs.size() == visit.size());
+                auto e = visit.top();
+                auto pt = trs.top();
+                visit.pop();
+                trs.pop();
                 auto* t = Engine::get().ecs->get<ecs::Transform>(e);
                 t->global = t->local * pt;
                 Engine::get().renderer->update_transform(e);
                 const auto& ech = Engine::get().ecs->get_children(e);
                 for(auto i = 0u; i < ech.size(); ++i)
                 {
-                    ts.push(t->global);
-                    echs.push(ech[i]);
+                    trs.push(t->global);
+                    visit.push(ech[i]);
                 }
             }
         }
