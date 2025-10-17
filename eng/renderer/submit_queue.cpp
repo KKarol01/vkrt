@@ -44,7 +44,7 @@ void CommandBuffer::barrier(Image& image, Flags<PipelineStage> src_stage, Flags<
                                    .dstAccessMask = to_vk(dst_access),
                                    .oldLayout = to_vk(old_layout),
                                    .newLayout = to_vk(new_layout),
-                                   .image = VkImageMetadata::get(image)->image,
+                                   .image = image.md.vk->image,
                                    .subresourceRange = { to_vk(image.deduce_aspect()), range.mips.offset,
                                                          range.mips.size, range.layers.offset, range.layers.size } });
     const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
@@ -60,7 +60,7 @@ void CommandBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Rang
 void CommandBuffer::copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
 {
     const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = VkBufferMetadata::get(src).buffer,
-                                                    .dstImage = VkImageMetadata::get(dst)->image,
+                                                    .dstImage = dst.md.vk->image,
                                                     .dstImageLayout = to_vk(dst.current_layout),
                                                     .regionCount = count,
                                                     .pRegions = regions });
@@ -69,8 +69,8 @@ void CommandBuffer::copy(Image& dst, const Buffer& src, const VkBufferImageCopy2
 
 void CommandBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, ImageLayout dstlayout, ImageLayout srclayout)
 {
-    auto* dstmd = VkImageMetadata::get(dst);
-    const auto* srcmd = VkImageMetadata::get(src);
+    auto* dstmd = dst.md.vk;
+    const auto* srcmd = dst.md.vk;
     VkImageCopy vkcp{ .srcSubresource = { to_vk(src.deduce_aspect()), copy.srclayers.mip, copy.srclayers.layers.offset,
                                           copy.srclayers.layers.size },
                       .srcOffset = { copy.srcoffset.x, copy.srcoffset.y, copy.srcoffset.z },
@@ -83,8 +83,8 @@ void CommandBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, Im
 
 void CommandBuffer::copy(Image& dst, const Image& src)
 {
-    auto* dstmd = VkImageMetadata::get(dst);
-    const auto* srcmd = VkImageMetadata::get(src);
+    auto* dstmd = dst.md.vk;
+    const auto* srcmd = src.md.vk;
     const auto vkr = VkImageCopy{ .srcSubresource = { to_vk(src.deduce_aspect()), 0, 0, std::min(dst.layers, src.layers) },
                                   .dstSubresource = { to_vk(dst.deduce_aspect()), 0, 0, std::min(dst.layers, src.layers) },
                                   .extent = { dst.width, dst.height, dst.depth } };
@@ -94,8 +94,8 @@ void CommandBuffer::copy(Image& dst, const Image& src)
 void CommandBuffer::blit(Image& dst, const Image& src, const ImageBlit& range, ImageLayout dstlayout,
                          ImageLayout srclayout, ImageFilter filter)
 {
-    auto* dstmd = VkImageMetadata::get(dst);
-    const auto* srcmd = VkImageMetadata::get(src);
+    auto* dstmd = dst.md.vk;
+    const auto* srcmd = src.md.vk;
     auto blit = VkImageBlit{};
     blit.srcSubresource = { .aspectMask = to_vk(src.deduce_aspect()),
                             .mipLevel = range.srclayers.mip,
@@ -126,7 +126,7 @@ void CommandBuffer::clear_color(Image& image, ImageLayout layout, Range mips, Ra
     const auto clear = VkClearColorValue{ .float32 = color };
     const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
                                                 (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
-    vkCmdClearColorImage(cmd, VkImageMetadata::get(image)->image, to_vk(layout), &clear, 1, &range);
+    vkCmdClearColorImage(cmd, image.md.vk->image, to_vk(layout), &clear, 1, &range);
 }
 
 void CommandBuffer::clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil, ImageLayout layout,
@@ -141,7 +141,7 @@ void CommandBuffer::clear_depth_stencil(Image& image, float clear_depth, uint32_
     const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil };
     const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
                                                 (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
-    vkCmdClearDepthStencilImage(cmd, VkImageMetadata::get(image)->image, to_vk(layout), &clear, 1, &range);
+    vkCmdClearDepthStencilImage(cmd, image.md.vk->image, to_vk(layout), &clear, 1, &range);
 }
 
 void CommandBuffer::bind_index(Buffer& index, uint32_t offset, VkIndexType type)

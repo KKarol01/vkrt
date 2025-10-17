@@ -398,7 +398,7 @@ const VkBufferMetadata& VkBufferMetadata::get(const Buffer& a)
 
 void VkImageMetadata::init(Image& a, VkImage img)
 {
-    if(a.metadata)
+    if(a.md.vk)
     {
         ENG_ERROR("Trying to init already init image");
         return;
@@ -406,7 +406,7 @@ void VkImageMetadata::init(Image& a, VkImage img)
 
     auto* r = RendererBackendVulkan::get_instance();
     auto* md = new VkImageMetadata{};
-    a.metadata = md;
+    a.md.vk = md;
 
     if(a.width + a.height + a.depth == 0)
     {
@@ -432,17 +432,17 @@ void VkImageMetadata::init(Image& a, VkImage img)
 
 void VkImageMetadata::destroy(Image& a, bool destroy_image)
 {
-    if(!a.metadata) { return; }
+    if(!a.md.vk) { return; }
     auto* r = RendererBackendVulkan::get_instance();
-    auto* md = VkImageMetadata::get(a);
+    auto* md = a.md.vk;
     if(destroy_image) { vmaDestroyImage(r->vma, md->image, md->vmaa); }
-    delete a.metadata;
-    a.metadata = nullptr;
+    delete a.md.vk;
+    a.md.vk = nullptr;
 }
 
 void VkImageViewMetadata::init(ImageView& a)
 {
-    if(a.metadata)
+    if(a.md.vk)
     {
         ENG_ERROR("Trying to init already init image view");
         return;
@@ -450,15 +450,15 @@ void VkImageViewMetadata::init(ImageView& a)
     assert(a.image);
     auto* r = RendererBackendVulkan::get_instance();
     auto& img = a.image.get();
-    assert(img.metadata);
+    assert(img.md.vk);
     const auto vkinfo = Vks(VkImageViewCreateInfo{
-        .image = ((VkImageMetadata*)img.metadata)->image,
+        .image = a.image->md.vk->image,
         .viewType = to_vk(a.type),
         .format = to_vk(a.format),
         .subresourceRange = { to_vk(a.aspect), a.mips.offset, a.mips.size, a.layers.offset, a.layers.size } });
 
     auto* md = new VkImageViewMetadata{};
-    a.metadata = md;
+    a.md.vk = md;
     VK_CHECK(vkCreateImageView(r->dev, &vkinfo, {}, &md->view));
     if(!md->view) { ENG_ERROR("Could not create image view for image {}", img.name); }
     else { set_debug_name(md->view, a.name); }
@@ -466,19 +466,13 @@ void VkImageViewMetadata::init(ImageView& a)
 
 void VkImageViewMetadata::destroy(ImageView& a)
 {
-    if(!a.metadata) { return; }
-    auto* md = (VkImageViewMetadata*)a.metadata;
+    if(!a.md.vk) { return; }
+    auto* md = a.md.vk;
     assert(md->view);
     auto* r = RendererBackendVulkan::get_instance();
     vkDestroyImageView(r->dev, md->view, nullptr);
     delete md;
-    a.metadata = nullptr;
-}
-
-VkImageViewMetadata& VkImageViewMetadata::get(ImageView& a)
-{
-    assert(a.metadata);
-    return *(VkImageViewMetadata*)a.metadata;
+    a.md.vk = nullptr;
 }
 
 void VkSamplerMetadata::init(Sampler& a)

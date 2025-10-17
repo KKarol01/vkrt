@@ -220,6 +220,8 @@ void Renderer::init(RendererBackend* backend)
         .depth_compare = DepthCompare::GREATER,
         .culling = CullFace::BACK,
     });
+
+    rinit_helper_geom();
 }
 
 void Renderer::update()
@@ -322,12 +324,12 @@ void Renderer::update()
             pf.culling.id_count = rp.id_count;
             VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
             VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
-            const auto vkdep = Vks(VkRenderingAttachmentInfo{
-                .imageView = VkImageViewMetadata::get(pf.gbuffer.depth->default_view.get()).view,
-                .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
+            const auto vkdep =
+                Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
+                                               .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+                                               .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                               .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                               .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
             const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
 
             const auto dstidscount = 0u;
@@ -460,16 +462,15 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
     auto& rp = render_passes.at((uint32_t)pass);
 
     const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
-        .imageView = VkImageViewMetadata::get(pf.gbuffer.color->default_view.get()).view,
+        .imageView = pf.gbuffer.color->default_view->md.vk->view,
         .imageLayout = to_vk(ImageLayout::ATTACHMENT),
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         .clearValue = { .color = { .uint32 = {} } } }) };
-    const auto vkdep =
-        Vks(VkRenderingAttachmentInfo{ .imageView = VkImageViewMetadata::get(pf.gbuffer.depth->default_view.get()).view,
-                                       .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                                       .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
+    const auto vkdep = Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
+                                                      .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+                                                      .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                                                      .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
     VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
     VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
     const auto vkreninfo = Vks(VkRenderingInfo{
@@ -485,6 +486,15 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
                         cmd->bind_resource(0, pf.constants);
                         cmd->bind_resource(1, pf.culling.ids_buf);
                     });
+    {
+        const auto& geom = helpergeom.uvsphere.get();
+        cmd->bind_pipeline(helpergeom.ppskybox.get());
+        for(auto mli = 0u; mli < geom.meshlet_range.size; ++mli)
+        {
+            const auto& ml = meshlets.at(geom.meshlet_range.offset + mli);
+            cmd->draw_indexed(ml.index_count, 1, ml.index_offset, ml.vertex_offset, 0);
+        }
+    }
     cmd->end_rendering();
     rp.entities.clear();
 }
@@ -566,8 +576,8 @@ void Renderer::process_meshpass(MeshPassType pass)
             ++cmdi;
             cmds.at(cmdi) = DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
                                                         .instanceCount = 0,
-                                                        .firstIndex = (uint32_t)geom.index_range.offset + mlt.index_offset,
-                                                        .vertexOffset = (int32_t)(geom.vertex_range.offset + mlt.vertex_offset),
+                                                        .firstIndex = mlt.index_offset,
+                                                        .vertexOffset = mlt.vertex_offset,
                                                         .firstInstance = i };
         }
         gpuids.at(i) =
@@ -619,6 +629,63 @@ void Renderer::render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>
         cmd->draw_indexed_indirect_count(indirect.get(), cmdoff, count.get(), cntoff, mb.cmdcount, sizeof(DrawIndexedIndirectCommand));
         cmdoffacc += mb.cmdcount;
     }
+}
+
+void Renderer::rinit_helper_geom()
+{
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    const auto gen_uv_sphere = [&vertices, &indices] {
+        const auto segs = 16;
+        const auto rings = 16;
+        vertices.clear();
+        indices.clear();
+        vertices.reserve(segs * rings);
+        indices.reserve((rings - 1) * (segs - 1) * 6);
+        for(auto y = 0u; y < rings; ++y)
+        {
+            const auto v = (float)y / (float)(rings - 1);
+            const auto theta = v * glm::pi<float>();
+            const auto st = std::sinf(theta);
+            const auto ct = std::cosf(theta);
+            for(auto x = 0u; x < segs; ++x)
+            {
+                const auto u = (float)x / (float)(segs - 1);
+                const auto phi = u * 2.0f * glm::pi<float>();
+                const auto sp = std::sinf(phi);
+                const auto cp = std::cosf(phi);
+                vertices.push_back(Vertex{ .position = { st * cp, ct, st * sp }, .uv = { u, v } });
+            }
+        }
+        for(auto y = 0u; y < rings - 1; ++y)
+        {
+            for(auto x = 0u; x < segs - 1; ++x)
+            {
+                const auto idx = y * segs + x;
+                indices.push_back(idx);
+                indices.push_back(idx + 1);
+                indices.push_back(idx + segs);
+                indices.push_back(idx + segs);
+                indices.push_back(idx + 1);
+                indices.push_back(idx + segs + 1);
+            }
+        }
+    };
+
+    gen_uv_sphere();
+    assert(vertices.size() <= ~uint16_t{});
+    helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
+
+    helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
+                     Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
+        .layout = bindless_pplayout,
+        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
+        .depth_test = true,
+        .depth_write = true,
+        .depth_compare = DepthCompare::GREATER,
+        .culling = CullFace::BACK,
+    });
 }
 
 Handle<Buffer> Renderer::make_buffer(const BufferDescriptor& info)
@@ -725,9 +792,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     std::vector<Meshlet> out_meshlets;
     meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
 
-    Geometry geometry{ .vertex_range = { bufs.vertex_count, out_vertices.size() },
-                       .index_range = { bufs.index_count, out_indices.size() },
-                       .meshlet_range = { meshlets.size(), out_meshlets.size() } };
+    Geometry geometry{ .meshlet_range = { meshlets.size(), out_meshlets.size() } };
 
     static constexpr auto VXATTRSIZE = sizeof(Vertex) - sizeof(Vertex::position);
     std::vector<glm::vec3> positions(out_vertices.size());
@@ -741,6 +806,8 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     std::vector<glm::vec4> bounding_spheres(out_meshlets.size());
     for(auto i = 0u; i < out_meshlets.size(); ++i)
     {
+        out_meshlets.at(i).vertex_offset += bufs.vertex_count;
+        out_meshlets.at(i).index_offset += bufs.index_count;
         bounding_spheres.at(i) = out_meshlets.at(i).bounding_sphere;
     }
 
@@ -806,7 +873,7 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
         const auto& mlt = mlts.at(i);
         const auto& mltb = mlt_bnds.at(i);
         out_meshlets.at(i) =
-            Meshlet{ .vertex_offset = mlt.vertex_offset,
+            Meshlet{ .vertex_offset = (int32_t)mlt.vertex_offset,
                      .vertex_count = mlt.vertex_count,
                      .index_offset = mlt.triangle_offset,
                      .index_count = mlt.triangle_count * 3,

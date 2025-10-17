@@ -117,7 +117,7 @@ void BindlessPool::update_index(Handle<Texture> handle)
     const auto index = txt.sampler ? texture_indices.at(handle) : image_indices.at(handle);
     const auto& update = image_updates.emplace_back(Vks(VkDescriptorImageInfo{
         .sampler = txt.sampler ? VkSamplerMetadata::get(txt.sampler.get()).sampler : nullptr,
-        .imageView = VkImageViewMetadata::get(txt.view.get()).view,
+        .imageView = txt.view->md.vk->view,
         .imageLayout = to_vk(txt.layout) }));
     const auto write = Vks(VkWriteDescriptorSet{
         .dstSet = VkDescriptorSetMetadata::get(pool->get_dset(set))->set,

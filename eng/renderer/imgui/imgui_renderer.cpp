@@ -100,7 +100,7 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
 
     VkRenderingAttachmentInfo r_col_atts[]{
         Vks(VkRenderingAttachmentInfo{
-            .imageView = VkImageViewMetadata::get(output.get()).view,
+            .imageView = output->md.vk->view,
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,

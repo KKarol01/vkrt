@@ -41,6 +41,9 @@ class RenderGraph;
 class DescriptorSet;
 class PipelineLayout;
 
+struct VkImageMetadata;
+struct VkImageViewMetadata;
+
 enum class CullFace
 {
     NONE,
@@ -520,8 +523,6 @@ struct Pipeline
 struct Geometry
 {
     auto operator<=>(const Geometry& a) const = default;
-    Range vertex_range{};  // position inside vertex buffer
-    Range index_range{};   // position inside index buffer
     Range meshlet_range{}; // position inside meshlet buffer
     // VkAccelerationStructureKHR blas{};
     // Handle<Buffer> blas_buffer{};
@@ -570,7 +571,7 @@ struct Vertex
 
 struct Meshlet
 {
-    uint32_t vertex_offset;
+    int32_t vertex_offset;
     uint32_t vertex_count;
     uint32_t index_offset;
     uint32_t index_count;
@@ -667,7 +668,9 @@ struct Image
     ImageLayout current_layout{ ImageLayout::UNDEFINED };
     Handle<ImageView> default_view;
     std::vector<Handle<ImageView>> views;
-    void* metadata{};
+    union Metadata {
+        VkImageMetadata* vk{};
+    } md;
 };
 
 struct ImageViewDescriptor
@@ -696,7 +699,9 @@ struct ImageView
     Flags<ImageAspect> aspect{};
     Range32u mips{};
     Range32u layers{};
-    void* metadata{};
+    union Metadata {
+        VkImageViewMetadata* vk{};
+    } md;
 };
 
 struct ImageSubRange
@@ -876,7 +881,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo, [&t] {
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout, eng::hash::combine_fnv1a(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Shader, eng::hash::combine_fnv1a(t.path));
-ENG_DEFINE_STD_HASH(eng::gfx::Geometry, eng::hash::combine_fnv1a(t.vertex_range, t.index_range, t.meshlet_range));
+ENG_DEFINE_STD_HASH(eng::gfx::Geometry, eng::hash::combine_fnv1a(t.meshlet_range));
 ENG_DEFINE_STD_HASH(eng::gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.base_color_texture));
 ENG_DEFINE_STD_HASH(eng::gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
 ENG_DEFINE_STD_HASH(eng::gfx::MeshPass, eng::hash::combine_fnv1a(t.name));
@@ -1016,6 +1021,12 @@ class Renderer
         size_t index_count{};
     };
 
+    struct HelperGeometry
+    {
+        Handle<Geometry> uvsphere;
+        Handle<Pipeline> ppskybox;
+    };
+
     void init(RendererBackend* backend);
     void update();
     void render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
@@ -1025,7 +1036,7 @@ class Renderer
                          Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
                          const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
 
-    // void add_callback(const Callback<render_callback_t>& a) { on_render += a; }
+    void rinit_helper_geom();
 
     Handle<Buffer> make_buffer(const BufferDescriptor& info);
     Handle<Image> make_image(const ImageDescriptor& info);
@@ -1098,6 +1109,7 @@ class Renderer
     Handle<Pipeline> cullzout_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;
+    HelperGeometry helpergeom;
 };
 
 } // namespace gfx
