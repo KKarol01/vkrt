@@ -412,7 +412,7 @@ void Renderer::update()
             const auto dstidscount = 0u;
             sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
             sbuf->copy(pf.culling.ids_buf, &dstidscount, 0, 4u);
-            sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 4u, { 4u, rp.ids_buf->size - 4u });
+            sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 4u, { 4u, std::max(rp.ids_buf->size, 4ull) - 4u });
 
             q->wait_sync(sbuf->flush());
 
