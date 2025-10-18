@@ -279,6 +279,7 @@ void Renderer::init_bufs()
     for(uint32_t i = 0; i < 2; ++i)
     {
         bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
+        bufs.lights_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("lights {}", i), 256, BufferUsage::STORAGE_BIT });
     }
     for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
     {
@@ -334,6 +335,24 @@ void Renderer::update()
         }
         new_transforms.clear();
     }
+    if(new_lights.size())
+    {
+        std::swap(bufs.lights_bufs[0], bufs.lights_bufs[1]);
+        sbuf->copy(bufs.lights_bufs[0], bufs.lights_bufs[1], 0, { 0, bufs.lights_bufs[1]->size });
+        for(auto i = 0u; i < new_lights.size(); ++i)
+        {
+            auto* l = Engine::get().ecs->get<ecs::Light>(new_lights.at(i));
+            const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights.at(i));
+            if(l->gpu_index == ~0u)
+            {
+                l->gpu_index = lights.size();
+                lights.push_back(new_lights.at(i));
+            }
+            GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
+            sbuf->copy(bufs.lights_bufs[0], &gpul, l->gpu_index * sizeof(GPULight), sizeof(GPULight));
+        }
+        new_lights.clear();
+    }
 
     pf.ren_fen->wait_cpu(~0ull);
     pf.ren_fen->reset();
@@ -355,6 +374,7 @@ void Renderer::update()
         .rmbsb = get_bindless(bufs.bsphere_buf),
         .itrsb = get_bindless(bufs.trs_bufs[0]),
         .rmatb = get_bindless(bufs.mats_buf),
+        .lighb = get_bindless(bufs.lights_bufs[0]),
         .view = view,
         .proj = proj,
         .proj_view = proj * view,
@@ -679,6 +699,8 @@ void Renderer::submit_mesh(const SubmitInfo& info)
     rp.redo |= rp.entity_cache.size() <= idx || rp.entities.at(idx) != rp.entity_cache.at(idx);
 }
 
+void Renderer::add_light(ecs::entity light) { new_lights.push_back(light); }
+
 void Renderer::render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>& mbatches, Handle<Buffer> indirect,
                                Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
                                const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps)
@@ -916,6 +938,7 @@ Handle<DescriptorPool> Renderer::make_descpool(const DescriptorPoolCreateInfo& i
 void Renderer::update_transform(ecs::entity entity)
 {
     if(Engine::get().ecs->get<ecs::Mesh>(entity)) { new_transforms.push_back(entity); }
+    if(Engine::get().ecs->get<ecs::Light>(entity)) { new_lights.push_back(entity); }
 }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }

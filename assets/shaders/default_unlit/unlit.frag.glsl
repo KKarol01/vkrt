@@ -4,11 +4,13 @@
 
 layout(location = 0) in VsOut {
     vec3 position;
+    vec3 normal;
     vec2 uv;
     flat uint32_t iidx;
 } fsin;
 
 layout(location = 0) out vec4 OUT_COLOR;
+
 // Constants (tweak these values as needed)
 const vec3 LIGHT_DIR = normalize(vec3(0.5, 1.0, 0.3));
 const vec3 WATER_COLOR = vec3(0.0, 0.1, 0.3) * 1.8;
@@ -35,11 +37,25 @@ void main() {
 
     GPUMaterial mat = get_mat(get_id(fsin.iidx).matidx);
 
+    // visualize meshlets
     //OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
+
     vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
     if(mat.base_color_idx != ~0u) {
         color = texture(sampler2D(gt_2d[nonuniformEXT(mat.base_color_idx)], g_samplers[0]), fsin.uv);
     }
+
+    const GPULight l0 = get_buf(GPULight, engconsts.lighb).lights_us[0];
+    float att = 1.0;
+    if(l0.type == GPU_LIGHT_TYPE_POINT) 
+    {
+        const float d = distance(l0.pos, fsin.position);
+        att = clamp(1.0 - d / l0.range, 0.0, 1.0);
+        att = att * att * l0.intensity * max(0.0, dot(fsin.normal, normalize(l0.pos - fsin.position))); // could be divided by d, instead of normalizing?
+        color *= l0.color;
+    }
+    color.xyz *= att;
+
     OUT_COLOR = color;
 #if 0
     vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;

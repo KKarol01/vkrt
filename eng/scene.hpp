@@ -18,7 +18,7 @@ namespace eng
 
 struct LoadedNode
 {
-    ecs::entity root;
+    ecs::entity root{ ecs::INVALID_ENTITY };
     std::vector<Handle<gfx::Geometry>> geometries;
     std::vector<Handle<gfx::Image>> images;
     std::vector<Handle<gfx::Sampler>> samplers;

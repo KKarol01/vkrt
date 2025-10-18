@@ -42,6 +42,8 @@
     layout(set = 0, binding = BINDLESS_STORAGE_BUFFER_BINDING, scalar) buffer SB_##type
 #define ENG_DECLARE_BINDLESS(type) gsb_##type[]
 
+#define get_buf(type, index) gsb_##type##Buffer[index]
+
 #elif __cplusplus
 #define ENG_TYPE_INT2 glm::ivec2
 #define ENG_TYPE_INT3 glm::ivec3
@@ -161,6 +163,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_UINT rmbsb; // per-resource mesh bounding sphere buffer index
     ENG_TYPE_UINT itrsb; // per-instance transform buffer index
     ENG_TYPE_UINT rmatb; // per-instance material buffer index
+    ENG_TYPE_UINT lighb; // lights buffer index
 
     ENG_TYPE_MAT4 view;
     ENG_TYPE_MAT4 proj;
@@ -171,6 +174,19 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_MAT3 rand_mat;
     ENG_TYPE_FLOAT3 cam_pos;
 } ENG_DECLARE_BINDLESS(GPUEngConstantsBuffer);
+
+#define GPU_LIGHT_TYPE_POINT 0
+struct GPULight
+{
+    ENG_TYPE_FLOAT3 pos;
+    ENG_TYPE_FLOAT range;
+    ENG_TYPE_FLOAT4 color;
+    ENG_TYPE_FLOAT intensity;
+    ENG_TYPE_UINT type;
+};
+ENG_DECLARE_STORAGE_BUFFER(GPULightBuffer) { 
+    ENG_TYPE_UNSIZED(GPULight, lights);
+} ENG_DECLARE_BINDLESS(GPULightBuffer);
 
 #ifndef __cplusplus
 

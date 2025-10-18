@@ -505,6 +505,7 @@ void Scene::ui_draw_inspector()
     auto* ctransform = ecs->get<ecs::Transform>(entity);
     auto* cnode = ecs->get<ecs::Node>(entity);
     auto* cmesh = ecs->get<ecs::Mesh>(entity);
+    auto* clight = ecs->get<ecs::Light>(entity);
 
     if(ImGui::Begin("Inspector"))
     {
@@ -530,6 +531,17 @@ void Scene::ui_draw_inspector()
                 }
                 // ImGui::Unindent();
             }
+        }
+        if(clight)
+        {
+            ImGui::SeparatorText("Light");
+            ImGui::Text("Type: %s", to_string(clight->type).c_str());
+            bool edited = false;
+            edited |= ImGui::ColorEdit4("Color", &clight->color.x);
+            edited |= ImGui::SliderFloat("Range", &clight->range, 0.0f, 100.0f);
+            edited |= ImGui::SliderFloat("Intensity", &clight->intensity, 0.0f, 100.0f);
+            // todo: don't like that entities with light component have to be detected and handled separately
+            if(edited) { update_transform(entity); }
         }
     }
     ImGui::End();

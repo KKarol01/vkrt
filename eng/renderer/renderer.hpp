@@ -940,11 +940,6 @@ class Renderer
   public:
     static inline uint32_t frame_count = 2;
 
-    enum class RenderFlags : uint32_t
-    {
-
-    };
-
     struct MultiBatch
     {
         Handle<Pipeline> pipeline;
@@ -1015,6 +1010,7 @@ class Renderer
         Handle<Buffer> bsphere_buf; // bounding spheres
         Handle<Buffer> mats_buf;    // materials
         Handle<Buffer> trs_bufs[2]{};
+        Handle<Buffer> lights_bufs[2]{};
 
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
         size_t vertex_count{};
@@ -1037,6 +1033,7 @@ class Renderer
     void render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
     void process_meshpass(MeshPassType pass);
     void submit_mesh(const SubmitInfo& info);
+    void add_light(ecs::entity light);
     void render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>& mbatches, Handle<Buffer> indirect,
                          Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
                          const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
@@ -1067,7 +1064,6 @@ class Renderer
     uint32_t get_bindless(Handle<Texture> texture);
     PerFrame& get_perframe();
 
-    Flags<RenderFlags> flags;
     SubmitQueue* gq{};
     Swapchain* swapchain{};
     RendererBackend* backend{};
@@ -1095,13 +1091,14 @@ class Renderer
     std::vector<DescriptorPool> descpools;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::entity> new_transforms;
+    std::array<MeshPassRenderData, (uint32_t)MeshPassType::LAST_ENUM> render_passes;
+    std::vector<ecs::entity> lights;
+    std::vector<ecs::entity> new_lights;
 
     GeometryBuffers bufs;
     SlotAllocator gpu_resource_allocator;
     std::vector<MeshletInstance> mesh_instances;
-    std::vector<ecs::entity> entities; // indexed via meshlet_intsances[0].index
     std::vector<Sync*> syncs;
-    std::array<MeshPassRenderData, (uint32_t)MeshPassType::LAST_ENUM> render_passes;
     Handle<DescriptorPool> bindless_pool;
     Handle<DescriptorSet> bindless_set;
     Handle<PipelineLayout> bindless_pplayout;
