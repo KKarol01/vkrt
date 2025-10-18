@@ -563,6 +563,7 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
                         cmd->bind_resource(0, pf.constants);
                         cmd->bind_resource(1, pf.culling.ids_buf);
                     });
+    if(0)
     {
         const auto& geom = helpergeom.uvsphere.get();
         cmd->bind_pipeline(helpergeom.ppskybox.get());

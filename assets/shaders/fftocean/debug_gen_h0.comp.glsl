@@ -4,8 +4,8 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
-#define h0_image storageImages_2drgba32f[h0]
-#define normal_distribution_image storageImages_2drgba32f[gaussian]
+#define h0_image gsi_2drgba32f[h0]
+#define normal_distribution_image gsi_2drgba32f[gaussian]
 
 float phillips_spectrum(vec2 k) {
     float k_ = max(length(k), 1e-5);

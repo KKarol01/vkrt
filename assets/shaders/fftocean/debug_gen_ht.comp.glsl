@@ -4,10 +4,10 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
-#define h0_image storageImages_2drgba32f[h0]
-#define ht_image storageImages_2drg32f[ht]
-#define dtx_image storageImages_2drg32f[dtx]
-#define dtz_image storageImages_2drg32f[dtz]
+#define h0_image gsi_2drgba32f[h0]
+#define ht_image gsi_2drg32f[ht]
+#define dtx_image gsi_2drg32f[dtx]
+#define dtz_image gsi_2drg32f[dtz]
 
 void main() {
     vec2 kl = vec2(gl_GlobalInvocationID.xy) - settings.num_samples * 0.5;

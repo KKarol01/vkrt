@@ -38,7 +38,7 @@ void main() {
     //OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
     vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
     if(mat.base_color_idx != ~0u) {
-        color = texture(sampler2D(textures_2d[nonuniformEXT(mat.base_color_idx)], samplers[0]), fsin.uv);
+        color = texture(sampler2D(gt_2d[nonuniformEXT(mat.base_color_idx)], g_samplers[0]), fsin.uv);
     }
     OUT_COLOR = color;
 #if 0

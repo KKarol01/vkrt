@@ -21,10 +21,10 @@ layout(scalar, push_constant) uniform PushConstants {
 };
 #endif
 
-#define vsm_constants storageBuffers_GPUVsmConstantsBuffer[vsm_buffer_index]
-#define vsm_alloc_constants storageBuffers_GPUVsmAllocConstantsBuffer[vsm_alloc_index]
-#define vsm_page_table storageImages_2dr32uiArray[page_table_index]
-#define vsm_pdepth_uint storageImages_2dr32ui[vsm_physical_depth_image_index]
+#define vsm_constants gsb_GPUVsmConstantsBuffer[vsm_buffer_index]
+#define vsm_alloc_constants gsb_GPUVsmAllocConstantsBuffer[vsm_alloc_index]
+#define vsm_page_table gsi_2dr32uiv[page_table_index]
+#define vsm_pdepth_uint gsi_2dr32ui[vsm_physical_depth_image_index]
 
 #define depth_buffer combinedImages_2d[depth_buffer_index]
 

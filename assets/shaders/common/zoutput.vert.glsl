@@ -8,10 +8,10 @@ layout(scalar, push_constant) uniform PushConstants
     uint32_t imidb;
 };
 
-#define engvpos            storageBuffers_GPUVertexPositionsBuffer[engconsts.vposb].positions_us
-#define engconsts          storageBuffers_GPUEngConstantsBuffer[engconstsb]
-#define get_trs(idx)       storageBuffers_GPUTransformsBuffer[engconsts.itrsb].transforms_us[idx]
-#define get_id(idx)        storageBuffers_GPUMeshletIdsBuffer[imidb].ids_us[idx]
+#define engvpos            gsb_GPUVertexPositionsBuffer[engconsts.vposb].positions_us
+#define engconsts          gsb_GPUEngConstantsBuffer[engconstsb]
+#define get_trs(idx)       gsb_GPUTransformsBuffer[engconsts.itrsb].transforms_us[idx]
+#define get_id(idx)        gsb_GPUMeshletIdsBuffer[imidb].ids_us[idx]
 
 void main()
 {

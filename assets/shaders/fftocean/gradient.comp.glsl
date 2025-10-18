@@ -4,8 +4,8 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
-#define disp_image storageImages_2drgba32f[disp]
-#define grad_image storageImages_2drgba32f[grad]
+#define disp_image gsi_2drgba32f[disp]
+#define grad_image gsi_2drgba32f[grad]
 
 void main() {
     ivec2 x = ivec2(gl_GlobalInvocationID.xy);

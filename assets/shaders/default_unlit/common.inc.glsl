@@ -13,11 +13,11 @@ layout(scalar, push_constant) uniform PushConstants
 };
 #endif
 
-#define engconsts          storageBuffers_GPUEngConstantsBuffer[engconstsb]
-#define engvpos            storageBuffers_GPUVertexPositionsBuffer[engconsts.vposb].positions_us
-#define engvattrs          storageBuffers_GPUVertexAttributesBuffer[engconsts.vatrb].attributes_us
-#define get_trs(idx)       storageBuffers_GPUTransformsBuffer[engconsts.itrsb].transforms_us[idx]
-#define get_id(idx)        storageBuffers_GPUMeshletIdsBuffer[imidb].ids_us[idx]
-#define get_mat(idx)       storageBuffers_GPUMaterialsBuffer[engconsts.rmatb].materials_us[idx]
+#define engconsts          gsb_GPUEngConstantsBuffer[engconstsb]
+#define engvpos            gsb_GPUVertexPositionsBuffer[engconsts.vposb].positions_us
+#define engvattrs          gsb_GPUVertexAttributesBuffer[engconsts.vatrb].attributes_us
+#define get_trs(idx)       gsb_GPUTransformsBuffer[engconsts.itrsb].transforms_us[idx]
+#define get_id(idx)        gsb_GPUMeshletIdsBuffer[imidb].ids_us[idx]
+#define get_mat(idx)       gsb_GPUMaterialsBuffer[engconsts.rmatb].materials_us[idx]
 
 #endif

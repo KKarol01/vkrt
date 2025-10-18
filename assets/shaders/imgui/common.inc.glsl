@@ -27,7 +27,7 @@ layout(scalar, push_constant) uniform PushConstants
 };
 #endif
 
-#define imgui_vertices storageBuffers_GPUImGuiVertexBuffer[vertex_buffer_index].vertices_us
-#define imgui_texture  textures_2d[texture_index]
+#define imgui_vertices gsb_GPUImGuiVertexBuffer[vertex_buffer_index].vertices_us
+#define imgui_texture  gt_2d[texture_index]
 
 #endif

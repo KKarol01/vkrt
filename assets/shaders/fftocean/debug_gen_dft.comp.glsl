@@ -4,8 +4,8 @@
 
 layout(local_size_x = NUM_SAMPLES) in;
 
-#define read_image storageImages_2drg32f[ht]
-#define write_image storageImages_2drg32f[dft]
+#define read_image gsi_2drg32f[ht]
+#define write_image gsi_2drg32f[dft]
 
 shared vec2 s_values[NUM_SAMPLES];
 

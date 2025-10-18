@@ -7,8 +7,8 @@ layout(scalar, push_constant) uniform PushConstants
 	uint32_t engconstsb;
 };
 
-#define engconsts          storageBuffers_GPUEngConstantsBuffer[engconstsb]
-#define engvpos            storageBuffers_GPUVertexPositionsBuffer[engconsts.vposb].positions_us
+#define engconsts          gsb_GPUEngConstantsBuffer[engconstsb]
+#define engvpos            gsb_GPUVertexPositionsBuffer[engconsts.vposb].positions_us
 
 void main()
 {

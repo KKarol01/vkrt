@@ -17,13 +17,13 @@ layout(scalar, push_constant) uniform PushConstants
 };
 #endif
 
-#define engconsts          storageBuffers_GPUEngConstantsBuffer[engconstsb]
-#define transforms         storageBuffers_GPUTransformsBuffer[engconsts.itrsb].transforms_us
-#define boundingspheres    storageBuffers_GPUBoundingSpheresBuffer[engconsts.rmbsb].bounding_spheres_us
-#define srcids             storageBuffers_GPUMeshletIdsBuffer[imidb]
-#define dstids             storageBuffers_GPUMeshletIdsBuffer[dstimidb]
-#define dstcmds            storageBuffers_GPUDrawIndexedIndirectCommandsBuffer[dstcmdb].commands_us
-#define hizsrc             textures_2d[hizsrct2d]
-#define hizdst             storageImages_2dr32f[hizdsti]
+#define engconsts          gsb_GPUEngConstantsBuffer[engconstsb]
+#define transforms         gsb_GPUTransformsBuffer[engconsts.itrsb].transforms_us
+#define boundingspheres    gsb_GPUBoundingSpheresBuffer[engconsts.rmbsb].bounding_spheres_us
+#define srcids             gsb_GPUMeshletIdsBuffer[imidb]
+#define dstids             gsb_GPUMeshletIdsBuffer[dstimidb]
+#define dstcmds            gsb_GPUDrawIndexedIndirectCommandsBuffer[dstcmdb].commands_us
+#define hizsrc             gt_2d[hizsrct2d]
+#define hizdst             gsi_2dr32f[hizdsti]
 
 #endif
