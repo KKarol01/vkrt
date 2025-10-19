@@ -216,11 +216,21 @@ class RenderGraph
             const Pass::Resource* res{};
         };
         std::unordered_map<uint32_t, BarrierData> rhists; // todo: this can be precomputed
+        std::string passnames;
 
         gcmdpool->reset();
+        ENG_LOG("[RGRAPH] Start");
         for(auto si = 0u; si < stages.size(); ++si)
         {
             auto& s = stages.at(si);
+
+            passnames.clear();
+            for(const auto& p : s.passes)
+            {
+                passnames += ENG_FMT("\"{}\" ", p->name);
+            }
+            ENG_LOG("[RGRAPH] Stage {} with passes: [{}]", si, passnames);
+
             for(auto& p : s.passes)
             {
                 auto* cmd = gcmdpool->begin();
@@ -266,6 +276,7 @@ class RenderGraph
                 gq->submit();
             }
         }
+        ENG_LOG("[RGRAPH] End");
         passes.clear();
     }
 

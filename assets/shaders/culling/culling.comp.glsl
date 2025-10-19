@@ -79,12 +79,12 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
 	vec4 aabb;
 	if (project_sphere_bounds(vec3(center.xy, -center.z), radius, 0.1, P00, P11, aabb))
 	{
-		float width = (aabb.z - aabb.x) * float(textureSize(sampler2D(hizsrc, g_samplers[G_SAMPLER_LINEAR]), 0).x);
-		float height = (aabb.w - aabb.y) * float(textureSize(sampler2D(hizsrc, g_samplers[G_SAMPLER_LINEAR]), 0).y);
+		float width = (aabb.z - aabb.x) * float(textureSize(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), 0).x);
+		float height = (aabb.w - aabb.y) * float(textureSize(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), 0).y);
 
 		float level = floor(log2(max(width, height)));
 
-		float depth = textureLod(sampler2D(hizsrc, g_samplers[G_SAMPLER_LINEAR]), (aabb.xy + aabb.zw) * 0.5, level).x;
+		float depth = textureLod(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), (aabb.xy + aabb.zw) * 0.5, level).x;
 
 		float depthSphere = 0.1 / (-center.z - radius);
 		return depthSphere >= depth;

@@ -49,6 +49,7 @@ class CommandBuffer
     void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range);
     void bind_resource(uint32_t slot, Handle<Buffer> resource, Range range = { 0, ~0ull });
     void bind_resource(uint32_t slot, Handle<Texture> resource);
+    void bind_resource(uint32_t slot, Handle<Sampler> resource);
 
     void set_viewports(const VkViewport* viewports, uint32_t count);
     void set_scissors(const VkRect2D* scissors, uint32_t count);

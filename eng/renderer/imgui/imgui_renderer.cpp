@@ -193,7 +193,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         image = r->make_image(ImageDescriptor{ "imgui image", (uint32_t)imtex->Width, (uint32_t)imtex->Height, 1u, 1u,
                                                ImageFormat::R8G8B8A8_UNORM, ImageType::TYPE_2D,
                                                ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_DST_BIT });
-        auto texture = r->make_texture(TextureDescriptor{ image->default_view, sampler, ImageLayout::READ_ONLY });
+        auto texture = r->make_texture(TextureDescriptor{ image->default_view, ImageLayout::READ_ONLY, false });
         images.push_back(image);
         textures.push_back(texture);
         imtex->SetTexID((ImTextureID)(*texture + 1)); // +1 so GetTexID doesn't complain when it's 0.

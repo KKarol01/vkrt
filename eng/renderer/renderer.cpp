@@ -137,7 +137,17 @@ void Renderer::init_pipelines()
 {
     auto linear_sampler = make_sampler(SamplerDescriptor{});
     auto nearest_sampler = make_sampler(SamplerDescriptor{ .filtering = { ImageFilter::NEAREST, ImageFilter::NEAREST } });
-    Handle<Sampler> imsamplers[]{ linear_sampler, nearest_sampler };
+    auto hiz_sampler = make_sampler(SamplerDescriptor{
+        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
+        .mipmap_mode = SamplerMipmapMode::NEAREST,
+        .reduction_mode = SamplerReductionMode::MIN });
+
+    Handle<Sampler> imsamplers[3]{};
+    imsamplers[ENG_SAMPLER_LINEAR] = linear_sampler;
+    imsamplers[ENG_SAMPLER_NEAREST] = nearest_sampler;
+    imsamplers[ENG_SAMPLER_HIZ] = hiz_sampler;
+
     const auto bindless_bflags = PipelineBindingFlags::UPDATE_AFTER_BIND_BIT |
                                  PipelineBindingFlags::UPDATE_UNUSED_WHILE_PENDING_BIT | PipelineBindingFlags::PARTIALLY_BOUND_BIT;
     bindless_pplayout = make_pplayout(PipelineLayoutCreateInfo{
@@ -147,7 +157,7 @@ void Renderer::init_pipelines()
                 { PipelineBindingType::STORAGE_BUFFER, BINDLESS_STORAGE_BUFFER_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
                 { PipelineBindingType::STORAGE_IMAGE, BINDLESS_STORAGE_IMAGE_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
                 { PipelineBindingType::SAMPLED_IMAGE, BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
-                { PipelineBindingType::SEPARATE_SAMPLER, BINDLESS_SAMPLER_BINDING, 2, ShaderStage::ALL, bindless_bflags, imsamplers },
+                { PipelineBindingType::SEPARATE_SAMPLER, BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, bindless_bflags, imsamplers },
             } } },
         .range = {ShaderStage::ALL, 128},
         });
@@ -164,11 +174,6 @@ void Renderer::init_pipelines()
 
     hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
         .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = bindless_pplayout });
-    hiz_sampler = make_sampler(SamplerDescriptor{
-        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
-        .mipmap_mode = SamplerMipmapMode::NEAREST,
-        .reduction_mode = SamplerReductionMode::MIN });
     cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
         .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
         .layout = bindless_pplayout,
@@ -182,6 +187,10 @@ void Renderer::init_pipelines()
         .depth_write = true,
         .depth_compare = DepthCompare::GREATER,
         .culling = CullFace::BACK,
+    });
+    fwdp_gen_frust_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("forwardp/gen_frusts.comp.glsl") },
+        .layout = bindless_pplayout,
     });
     default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
         .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
@@ -245,8 +254,7 @@ void Renderer::init_perframes()
             .format = ImageFormat::R32F,
             .usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT,
         });
-        pf.culling.hizptex =
-            make_texture(TextureDescriptor{ pf.culling.hizpyramid->default_view, hiz_sampler, ImageLayout::GENERAL });
+        pf.culling.hizptex = make_texture(TextureDescriptor{ pf.culling.hizpyramid->default_view, ImageLayout::GENERAL });
         pf.culling.hizpmiptexs.resize(hizpmips);
         for(auto i = 0u; i < hizpmips; ++i)
         {
@@ -258,14 +266,27 @@ void Renderer::init_perframes()
                                                                                ImageAspect::COLOR,
                                                                                { i, 1 },
                                                                                { 0, 1 } }),
-                                                {},
-                                                ImageLayout::GENERAL });
+
+                                                ImageLayout::GENERAL, true });
         }
 
         pf.culling.cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("cull cmds {}", i), 1024,
                                                            BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
         pf.culling.ids_buf =
             make_buffer(BufferDescriptor{ ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
+
+        {
+            const auto* w = Engine::get().window;
+            const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
+            const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
+            const auto num_tiles = num_tiles_x * num_tiles_y;
+            const auto light_list_size = num_tiles * bufs.fwdp_lights_per_tile * sizeof(uint32_t);
+            const auto light_grid_size = num_tiles * 2 * sizeof(uint32_t);
+            pf.fwdp.light_list_buf =
+                make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_list_size, BufferUsage::STORAGE_BIT });
+            pf.fwdp.light_grid_buf =
+                make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_grid_size, BufferUsage::STORAGE_BIT });
+        }
     }
 }
 
@@ -287,6 +308,15 @@ void Renderer::init_bufs()
                                                                     BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
         render_passes.at(i).ids_buf =
             make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
+    }
+
+    {
+        const auto* w = Engine::get().window;
+        const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
+        const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
+        const auto num_tiles = num_tiles_x * num_tiles_y;
+        const auto size = num_tiles * sizeof(FWDPFrustum);
+        bufs.fwdp_frustums_buf = make_buffer(BufferDescriptor{ "fwdp_frustums", size, BufferUsage::STORAGE_BIT });
     }
 }
 
@@ -411,7 +441,7 @@ void Renderer::update()
             b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
                      PipelineAccess::DS_RW, ImageLayout::GENERAL, true);
             b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
-                     PipelineAccess::DS_RW, ImageLayout::GENERAL);
+                     PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
         },
         [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
@@ -442,7 +472,7 @@ void Renderer::update()
             cmd->bind_pipeline(cullzout_pipeline.get());
             cmd->bind_resource(0, pf.constants);
             cmd->bind_resource(1, ppf.culling.ids_buf);
-            cmd->bind_descriptors(&bindless_pool.get(), &bindless_pool->get_dset(bindless_set), { 0, 1 });
+            bindless->bind(cmd);
             cmd->begin_rendering(vkreninfo);
             render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf, ppf.culling.cmd_start,
                             0ull, {}, false);
@@ -452,7 +482,7 @@ void Renderer::update()
         RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
             b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
+                     PipelineAccess::SHADER_READ_BIT, ImageLayout::READ_ONLY);
             b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT,
                      PipelineAccess::SHADER_RW, ImageLayout::GENERAL, true);
         },
@@ -460,22 +490,20 @@ void Renderer::update()
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
             auto& hizp = pf.culling.hizpyramid.get();
             cmd->bind_pipeline(hiz_pipeline.get());
-            cmd->bind_resource(2, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, hiz_sampler, ImageLayout::GENERAL }));
+            cmd->bind_resource(2, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::READ_ONLY, false }));
             cmd->bind_resource(3, make_texture(TextureDescriptor{
                                       make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { 0, 1 } }),
-                                      {},
-                                      ImageLayout::GENERAL }));
+                                      ImageLayout::GENERAL, true }));
             cmd->dispatch((hizp.width + 31) / 32, (hizp.height + 31) / 32, 1);
             cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
             for(auto i = 1u; i < hizp.mips; ++i)
             {
                 cmd->bind_resource(2, make_texture(TextureDescriptor{
                                           make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i - 1, 1 } }),
-                                          hiz_sampler, ImageLayout::GENERAL }));
+                                          ImageLayout::GENERAL, false }));
                 cmd->bind_resource(3, make_texture(TextureDescriptor{
                                           make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i, 1 } }),
-                                          {},
-                                          ImageLayout::GENERAL }));
+                                          ImageLayout::GENERAL, true }));
                 const auto sx = ((hizp.width >> i) + 31) / 32;
                 const auto sy = ((hizp.height >> i) + 31) / 32;
                 cmd->dispatch(sx, sy, 1);
@@ -483,6 +511,21 @@ void Renderer::update()
                              PipelineAccess::SHADER_RW);
             }
         });
+    if(bufs.fwdp_regenerate_frustums)
+    {
+        rgraph->add_pass(
+            RenderGraph::PassCreateInfo{ "fwdp gen frustums", RenderOrder::DEFAULT_UNLIT },
+            [&pf, this](RenderGraph::PassResourceBuilder& b) {
+                b.access(bufs.fwdp_frustums_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COMPUTE_BIT,
+                         PipelineAccess::SHADER_WRITE_BIT);
+                b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+                         PipelineAccess::SHADER_READ_BIT, ImageLayout::READ_ONLY);
+            },
+            [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+
+            });
+        bufs.fwdp_regenerate_frustums = false;
+    }
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
@@ -720,6 +763,11 @@ void Renderer::render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>
 
 Handle<Buffer> Renderer::make_buffer(const BufferDescriptor& info)
 {
+    uint32_t order = 0;
+    float size = (float)info.size;
+    for(; size >= 1024.0f && order < 4; size /= 1024.0f, ++order) {}
+    static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
+    ENG_LOG("Creating buffer {} [{:.2f} {}]", info.name, size, units[order]);
     return buffers.insert(backend->make_buffer(info));
 }
 
@@ -803,7 +851,7 @@ Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_syn
 
 Handle<Texture> Renderer::make_texture(const TextureDescriptor& batch)
 {
-    return textures.insert(Texture{ batch.view, batch.sampler, batch.layout }).handle;
+    return textures.insert(Texture{ batch.view, batch.layout, batch.is_storage }).handle;
 }
 
 Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
@@ -946,6 +994,8 @@ SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(typ
 uint32_t Renderer::get_bindless(Handle<Buffer> buffer, Range range) { return bindless->get_index(buffer, range); }
 
 uint32_t Renderer::get_bindless(Handle<Texture> texture) { return bindless->get_index(texture); }
+
+uint32_t Renderer::get_bindless(Handle<Sampler> sampler) { return bindless->get_index(sampler); }
 
 Renderer::PerFrame& Renderer::get_perframe() { return perframe.at(Engine::get().frame_num % perframe.size()); }
 

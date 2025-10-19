@@ -192,8 +192,9 @@ static Handle<gfx::Texture> load_texture(const fastgltf::Asset& asset, gfx::Imag
     const auto& ftex = asset.textures.at(index);
     const auto tex = Engine::get().renderer->make_texture(gfx::TextureDescriptor{
         .view = load_image(asset, format, ftex.imageIndex ? *ftex.imageIndex : ~0ull, ctx)->default_view,
-        .sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, ctx),
-        .layout = gfx::ImageLayout::READ_ONLY });
+        .layout = gfx::ImageLayout::READ_ONLY,
+        //.sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, ctx), // todo: somehow pass the sampler -- or set it in the gui, once it's done...
+        .is_storage = false });
     ctx.textures.at(index) = tex;
     return tex;
 }

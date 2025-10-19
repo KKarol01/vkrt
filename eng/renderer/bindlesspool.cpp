@@ -37,12 +37,12 @@ uint32_t BindlessPool::get_index(Handle<Buffer> handle, Range range)
 
 uint32_t BindlessPool::get_index(Handle<Texture> handle)
 {
-    const auto has_sampler = (bool)(handle->sampler);
-    const auto ret = has_sampler ? texture_indices.emplace(handle, ~index_t{}) : image_indices.emplace(handle, ~index_t{});
+    const auto is_storage = handle->is_storage;
+    const auto ret = is_storage ? image_indices.emplace(handle, ~index_t{}) : texture_indices.emplace(handle, ~index_t{});
     if(ret.second)
     {
-        if(has_sampler) { ret.first->second = texture_slots.allocate_slot(); }
-        else { ret.first->second = image_slots.allocate_slot(); }
+        if(is_storage) { ret.first->second = image_slots.allocate_slot(); }
+        else { ret.first->second = texture_slots.allocate_slot(); }
         update_index(handle);
     }
     return ret.first->second;
@@ -73,21 +73,21 @@ void BindlessPool::free_index(Handle<Buffer> handle)
 
 void BindlessPool::free_index(Handle<Texture> handle)
 {
-    const auto has_sampler = (bool)(handle->sampler);
-    if(has_sampler)
-    {
-        if(auto it = texture_indices.find(handle); it != texture_indices.end())
-        {
-            texture_slots.free_slot(it->second);
-            texture_indices.erase(it);
-        }
-    }
-    else
+    const auto is_storage = handle->is_storage;
+    if(is_storage)
     {
         if(auto it = image_indices.find(handle); it != image_indices.end())
         {
             image_slots.free_slot(it->second);
             image_indices.erase(it);
+        }
+    }
+    else
+    {
+        if(auto it = texture_indices.find(handle); it != texture_indices.end())
+        {
+            texture_slots.free_slot(it->second);
+            texture_indices.erase(it);
         }
     }
 }
@@ -114,17 +114,15 @@ void BindlessPool::update_index(Handle<Buffer> handle)
 void BindlessPool::update_index(Handle<Texture> handle)
 {
     const auto& txt = handle.get();
-    const auto index = txt.sampler ? texture_indices.at(handle) : image_indices.at(handle);
+    const auto index = txt.is_storage ? image_indices.at(handle) : texture_indices.at(handle);
     const auto& update = image_updates.emplace_back(Vks(VkDescriptorImageInfo{
-        .sampler = txt.sampler ? VkSamplerMetadata::get(txt.sampler.get()).sampler : nullptr,
-        .imageView = txt.view->md.vk->view,
-        .imageLayout = to_vk(txt.layout) }));
+        .sampler = nullptr, .imageView = txt.view->md.vk->view, .imageLayout = to_vk(txt.layout) }));
     const auto write = Vks(VkWriteDescriptorSet{
         .dstSet = VkDescriptorSetMetadata::get(pool->get_dset(set))->set,
-        .dstBinding = (uint32_t)(txt.sampler ? BINDLESS_SAMPLED_IMAGE_BINDING : BINDLESS_STORAGE_IMAGE_BINDING),
+        .dstBinding = (uint32_t)(txt.is_storage ? BINDLESS_STORAGE_IMAGE_BINDING : BINDLESS_SAMPLED_IMAGE_BINDING),
         .dstArrayElement = index,
         .descriptorCount = 1,
-        .descriptorType = (txt.sampler ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        .descriptorType = (txt.is_storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE),
         .pImageInfo = &update });
     updates.push_back(write);
 }

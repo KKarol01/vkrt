@@ -185,6 +185,12 @@ void CommandBuffer::bind_resource(uint32_t slot, Handle<Texture> resource)
     push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
 }
 
+void CommandBuffer::bind_resource(uint32_t slot, Handle<Sampler> resource)
+{
+    const auto idx = Engine::get().renderer->get_bindless(resource);
+    push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
+}
+
 void CommandBuffer::set_viewports(const VkViewport* viewports, uint32_t count)
 {
     vkCmdSetViewportWithCount(cmd, count, viewports);

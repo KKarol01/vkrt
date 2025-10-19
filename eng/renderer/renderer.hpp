@@ -352,6 +352,7 @@ struct Shader
     void* metadata{};
 };
 
+// todo: make sure when the user passes it, it gets checked for compatibility (i think it does -- see pplayouts)
 struct PipelineLayoutCreateInfo
 {
     inline static constexpr auto MAX_PUSH_BYTES = 128u;
@@ -753,16 +754,16 @@ struct Sampler
 struct TextureDescriptor
 {
     Handle<ImageView> view;
-    Handle<Sampler> sampler;
     ImageLayout layout;
+    bool is_storage{ false };
 };
 
 struct Texture
 {
     auto operator<=>(const Texture& t) const = default;
     Handle<ImageView> view;
-    Handle<Sampler> sampler;
     ImageLayout layout{ ImageLayout::READ_ONLY };
+    bool is_storage{ false };
 };
 
 struct MaterialDescriptor
@@ -890,7 +891,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
                     eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],
                                              t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
 ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
-ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.sampler));
+ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect.flags, t.mips, t.layers));
 
 ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Shader);
@@ -912,8 +913,6 @@ namespace eng
 {
 namespace gfx
 {
-
-static auto IsPpLayoutComp = [](const PipelineLayout& a, const PipelineLayout& b) -> bool { return a.is_compatible(b); };
 
 enum class SubmitFlags : uint32_t
 {
@@ -989,10 +988,17 @@ class Renderer
         uint32_t cmd_start;
     };
 
+    struct ForwardPlus
+    {
+        Handle<Buffer> light_list_buf; // assume 50 lights per fwdp frustum
+        Handle<Buffer> light_grid_buf; // (offset 4B, light count 4B) per tile
+    };
+
     struct PerFrame
     {
         Culling culling;
         GBuffer gbuffer;
+        ForwardPlus fwdp;
 
         CommandPool* cmdpool{};
         Sync* acq_sem{};
@@ -1004,13 +1010,19 @@ class Renderer
 
     struct GeometryBuffers
     {
-        Handle<Buffer> vpos_buf;    // positions
-        Handle<Buffer> vattr_buf;   // rest of attributes
-        Handle<Buffer> idx_buf;     // indices
-        Handle<Buffer> bsphere_buf; // bounding spheres
-        Handle<Buffer> mats_buf;    // materials
-        Handle<Buffer> trs_bufs[2]{};
-        Handle<Buffer> lights_bufs[2]{};
+        Handle<Buffer> vpos_buf;      // positions
+        Handle<Buffer> vattr_buf;     // rest of attributes
+        Handle<Buffer> idx_buf;       // indices
+        Handle<Buffer> bsphere_buf;   // bounding spheres
+        Handle<Buffer> mats_buf;      // materials
+        Handle<Buffer> trs_bufs[2]{}; // transforms
+
+        Handle<Buffer> lights_bufs[2]{}; // lights
+
+        static inline constexpr uint32_t fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
+        uint32_t fwdp_lights_per_tile{ 50 };                     // changing requires resizing the buffers
+        Handle<Buffer> fwdp_frustums_buf;                        // {vec3 normal, float dist}*4 frustum planes per tile
+        bool fwdp_regenerate_frustums{ true };
 
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
         size_t vertex_count{};
@@ -1062,6 +1074,8 @@ class Renderer
     SubmitQueue* get_queue(QueueType type);
     uint32_t get_bindless(Handle<Buffer> buffer, Range range = { 0ull, ~0ull });
     uint32_t get_bindless(Handle<Texture> texture);
+    uint32_t get_bindless(Handle<Sampler> sampler);
+
     PerFrame& get_perframe();
 
     SubmitQueue* gq{};
@@ -1077,7 +1091,9 @@ class Renderer
     HandleFlatSet<ImageView> image_views;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
-    HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>, decltype(IsPpLayoutComp)> pplayouts;
+    HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>,
+                  decltype([](const PipelineLayout& a, const PipelineLayout& b) -> bool { return a.is_compatible(b); })>
+        pplayouts;
     HandleFlatSet<Pipeline> pipelines;
     std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Meshlet> meshlets;
@@ -1106,9 +1122,10 @@ class Renderer
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
     Handle<Pipeline> hiz_pipeline;
-    Handle<Sampler> hiz_sampler;
+    // Handle<Sampler> hiz_sampler; // moved to immutable samplers
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> cullzout_pipeline;
+    Handle<Pipeline> fwdp_gen_frust_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;
     HelperGeometry helpergeom;

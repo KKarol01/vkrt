@@ -12,6 +12,10 @@
 #define ENG_TYPE_UINT8 uint8_t
 #define ENG_TYPE_FLOAT float
 
+#define ENG_SAMPLER_LINEAR 0
+#define ENG_SAMPLER_NEAREST 1
+#define ENG_SAMPLER_HIZ 2
+
 #ifndef __cplusplus
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_scalar_block_layout : enable
@@ -188,10 +192,20 @@ ENG_DECLARE_STORAGE_BUFFER(GPULightBuffer) {
     ENG_TYPE_UNSIZED(GPULight, lights);
 } ENG_DECLARE_BINDLESS(GPULightBuffer);
 
-#ifndef __cplusplus
+struct FWDPFrustumPlane
+{
+    ENG_TYPE_FLOAT3 n;
+    ENG_TYPE_FLOAT d;
+};
+struct FWDPFrustum
+{
+    FWDPFrustumPlane planes[4];
+};
+ENG_DECLARE_STORAGE_BUFFER(GPUFWDPFrustumBuffer) { 
+    ENG_TYPE_UNSIZED(FWDPFrustum, frustums);
+} ENG_DECLARE_BINDLESS(GPUFWDPFrustumBuffer);
 
-#define G_SAMPLER_LINEAR 0
-#define G_SAMPLER_NEAREST 1
+#ifndef __cplusplus
 
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r16ui) restrict uniform uimage2D gsi_2dr16ui[];
 layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r16f) restrict uniform image2D gsi_2dr16f[];
