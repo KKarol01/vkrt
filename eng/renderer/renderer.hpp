@@ -1022,6 +1022,7 @@ class Renderer
         static inline constexpr uint32_t fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
         uint32_t fwdp_lights_per_tile{ 50 };                     // changing requires resizing the buffers
         Handle<Buffer> fwdp_frustums_buf;                        // {vec3 normal, float dist}*4 frustum planes per tile
+        uint32_t fwdp_num_tiles{};
         bool fwdp_regenerate_frustums{ true };
 
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };

@@ -42,10 +42,10 @@ void main() {
 
     vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
     if(mat.base_color_idx != ~0u) {
-        color = texture(sampler2D(gt_2d[nonuniformEXT(mat.base_color_idx)], g_samplers[0]), fsin.uv);
+        color = texture(sampler2D(gt_2d[nonuniformEXT(mat.base_color_idx)], g_samplers[ENG_SAMPLER_LINEAR]), fsin.uv);
     }
 
-    const GPULight l0 = get_buf(GPULight, engconsts.lighb).lights_us[0];
+    const GPULight l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[0];
     float att = 1.0;
     if(l0.type == GPU_LIGHT_TYPE_POINT) 
     {

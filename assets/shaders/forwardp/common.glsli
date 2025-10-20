@@ -8,14 +8,12 @@
 #ifndef NO_PUSH_CONSTANTS
 layout(scalar, push_constant) uniform PushConstants
 {
-    uint32_t engconstsb;
+    uint32_t GPUEngConstantsBufferIndex;
     uint32_t fwdp_tile_pixels;
     uint32_t fwdp_lights_per_tile;
-    uint32_t fwdp_num_frustums;
-    uint32_t fwdp_frustums;
+    uint32_t fwdp_num_tiles;
+    uint32_t GPUFWDPFrustumsBufferIndex;
 };
 #endif
-
-#define get_frustums get_buf(GPUFWDPFrustum, fwdp_frustums)
 
 #endif

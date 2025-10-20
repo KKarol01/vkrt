@@ -46,7 +46,12 @@
     layout(set = 0, binding = BINDLESS_STORAGE_BUFFER_BINDING, scalar) buffer SB_##type
 #define ENG_DECLARE_BINDLESS(type) gsb_##type[]
 
-#define get_buf(type, index) gsb_##type##Buffer[index]
+// for picking index right from the push constants
+#define get_buf(type) gsb_##type##sBuffer[type##sBufferIndex]
+// for picking with custom index
+#define get_buf2(type, index) gsb_##type##sBuffer[index]
+// for picking index that's inside some object buf
+#define get_bufb(type, buf) gsb_##type##sBuffer[buf.type##sBufferIndex]
 
 #elif __cplusplus
 #define ENG_TYPE_INT2 glm::ivec2
@@ -167,7 +172,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_UINT rmbsb; // per-resource mesh bounding sphere buffer index
     ENG_TYPE_UINT itrsb; // per-instance transform buffer index
     ENG_TYPE_UINT rmatb; // per-instance material buffer index
-    ENG_TYPE_UINT lighb; // lights buffer index
+    ENG_TYPE_UINT GPULightsBufferIndex; // lights buffer index
 
     ENG_TYPE_MAT4 view;
     ENG_TYPE_MAT4 proj;
@@ -188,22 +193,21 @@ struct GPULight
     ENG_TYPE_FLOAT intensity;
     ENG_TYPE_UINT type;
 };
-ENG_DECLARE_STORAGE_BUFFER(GPULightBuffer) { 
+ENG_DECLARE_STORAGE_BUFFER(GPULightsBuffer) { 
     ENG_TYPE_UNSIZED(GPULight, lights);
-} ENG_DECLARE_BINDLESS(GPULightBuffer);
+} ENG_DECLARE_BINDLESS(GPULightsBuffer);
 
-struct FWDPFrustumPlane
+struct GPUFWDPFrustumPlane
 {
     ENG_TYPE_FLOAT3 n;
     ENG_TYPE_FLOAT d;
 };
-struct FWDPFrustum
-{
-    FWDPFrustumPlane planes[4];
+struct GPUFWDPFrustum {
+    GPUFWDPFrustumPlane planes[4];
 };
-ENG_DECLARE_STORAGE_BUFFER(GPUFWDPFrustumBuffer) { 
-    ENG_TYPE_UNSIZED(FWDPFrustum, frustums);
-} ENG_DECLARE_BINDLESS(GPUFWDPFrustumBuffer);
+ENG_DECLARE_STORAGE_BUFFER(GPUFWDPFrustumsBuffer) { 
+    ENG_TYPE_UNSIZED(GPUFWDPFrustum, frustums);
+} ENG_DECLARE_BINDLESS(GPUFWDPFrustumsBuffer);
 
 #ifndef __cplusplus
 

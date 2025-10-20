@@ -285,7 +285,7 @@ void Renderer::init_perframes()
             pf.fwdp.light_list_buf =
                 make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_list_size, BufferUsage::STORAGE_BIT });
             pf.fwdp.light_grid_buf =
-                make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_grid_size, BufferUsage::STORAGE_BIT });
+                make_buffer(BufferDescriptor{ ENG_FMT("fwdp light grid {}", i), light_grid_size, BufferUsage::STORAGE_BIT });
         }
     }
 }
@@ -315,8 +315,9 @@ void Renderer::init_bufs()
         const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
-        const auto size = num_tiles * sizeof(FWDPFrustum);
+        const auto size = num_tiles * sizeof(GPUFWDPFrustum);
         bufs.fwdp_frustums_buf = make_buffer(BufferDescriptor{ "fwdp_frustums", size, BufferUsage::STORAGE_BIT });
+        bufs.fwdp_num_tiles = num_tiles;
     }
 }
 
@@ -404,7 +405,7 @@ void Renderer::update()
         .rmbsb = get_bindless(bufs.bsphere_buf),
         .itrsb = get_bindless(bufs.trs_bufs[0]),
         .rmatb = get_bindless(bufs.mats_buf),
-        .lighb = get_bindless(bufs.lights_bufs[0]),
+        .GPULightsBufferIndex = get_bindless(bufs.lights_bufs[0]),
         .view = view,
         .proj = proj,
         .proj_view = proj * view,
@@ -472,7 +473,6 @@ void Renderer::update()
             cmd->bind_pipeline(cullzout_pipeline.get());
             cmd->bind_resource(0, pf.constants);
             cmd->bind_resource(1, ppf.culling.ids_buf);
-            bindless->bind(cmd);
             cmd->begin_rendering(vkreninfo);
             render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf, ppf.culling.cmd_start,
                             0ull, {}, false);
@@ -522,7 +522,18 @@ void Renderer::update()
                          PipelineAccess::SHADER_READ_BIT, ImageLayout::READ_ONLY);
             },
             [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-
+                uint32_t fwdp_tile_pixels;
+                uint32_t fwdp_lights_per_tile;
+                uint32_t fwdp_num_frustums;
+                uint32_t GPUFWDPFrustumsBufferIndex;
+                cmd->bind_pipeline(fwdp_gen_frust_pipeline.get());
+                cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
+                cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
+                cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
+                cmd->bind_resource(4, bufs.fwdp_frustums_buf);
+                const auto* w = Engine::get().window;
+                cmd->dispatch((w->width + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels,
+                              (w->height + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels, 1);
             });
         bufs.fwdp_regenerate_frustums = false;
     }

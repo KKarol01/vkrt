@@ -15,7 +15,7 @@ void main()
 
     GPUInstanceId id = get_id(gl_InstanceIndex);
     vsout.position = vec3(get_trs(id.instidx) * vec4(pos, 1.0));
-    gl_Position = engconsts.proj_view * vec4(vsout.position, 1.0);
+    gl_Position = get_buf(GPUEngConstant).proj_view * vec4(vsout.position, 1.0);
     vsout.normal = engvattrs[gl_VertexIndex].normal;
     vsout.uv = engvattrs[gl_VertexIndex].uv;
     vsout.iidx = gl_InstanceIndex;
