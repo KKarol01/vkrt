@@ -192,6 +192,10 @@ void Renderer::init_pipelines()
         .shaders = { Engine::get().renderer->make_shader("forwardp/gen_frusts.comp.glsl") },
         .layout = bindless_pplayout,
     });
+    fwdp_cull_lights_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+        .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
+        .layout = bindless_pplayout,
+    });
     default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
         .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
         .layout = bindless_pplayout,
@@ -236,7 +240,7 @@ void Renderer::init_perframes()
             .width = (uint32_t)ew->width,
             .height = (uint32_t)ew->height,
             .format = ImageFormat::D32_SFLOAT,
-            .usage = ImageUsage::DEPTH_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT,
+            .usage = ImageUsage::DEPTH_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT,
         });
         pf.cmdpool = gq->make_command_pool();
         pf.acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
@@ -277,11 +281,8 @@ void Renderer::init_perframes()
 
         {
             const auto* w = Engine::get().window;
-            const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
-            const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
-            const auto num_tiles = num_tiles_x * num_tiles_y;
-            const auto light_list_size = num_tiles * bufs.fwdp_lights_per_tile * sizeof(uint32_t);
-            const auto light_grid_size = num_tiles * 2 * sizeof(uint32_t);
+            const auto light_list_size = bufs.fwdp_num_tiles * bufs.fwdp_lights_per_tile * sizeof(uint32_t) + sizeof(uint32_t);
+            const auto light_grid_size = bufs.fwdp_num_tiles * 2 * sizeof(uint32_t);
             pf.fwdp.light_list_buf =
                 make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_list_size, BufferUsage::STORAGE_BIT });
             pf.fwdp.light_grid_buf =
@@ -380,9 +381,93 @@ void Renderer::update()
                 lights.push_back(new_lights.at(i));
             }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
-            sbuf->copy(bufs.lights_bufs[0], &gpul, l->gpu_index * sizeof(GPULight), sizeof(GPULight));
+            sbuf->copy(bufs.lights_bufs[0], &gpul,
+                       offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
         }
+        const auto lc = (uint32_t)lights.size();
+        sbuf->copy(bufs.lights_bufs[0], &lc, 0, 4);
         new_lights.clear();
+    }
+
+    if(0)
+    {
+        struct Frustum
+        {
+            glm::vec3 planes[4];
+        };
+        std::vector<Frustum> frusts;
+        auto w = 1280;
+        auto h = 768;
+        auto ts = 16;
+        auto tx = w / ts;
+        auto ty = h / ts;
+        const auto proj = Engine::get().camera->get_projection();
+        const auto view = Engine::get().camera->get_view();
+        for(auto i = 0u; i < tx; ++i)
+        {
+            for(auto j = 0u; j < ty; ++j)
+            {
+                const auto to_ndc = [&](glm::vec2 screen) {
+                    screen /= glm::vec2{ w, h };
+                    screen.x = screen.x * 2.0f - 1.0f;
+                    screen.y = (1.0f - screen.y) * 2.0f - 1.0f;
+                    return screen;
+                };
+                glm::ivec2 tileid{ i, j };
+                glm::vec2 ndcMin{ to_ndc(glm::vec2{ i, j + 1 } * (float)ts) };
+                glm::vec2 ndcMax{ to_ndc(glm::vec2{ i + 1, j } * (float)ts) };
+                glm::vec4 ndcCorners[]{
+                    glm::vec4{ ndcMin.x, ndcMin.y, 1.0, 1.0 },
+                    glm::vec4{ ndcMax.x, ndcMin.y, 1.0, 1.0 },
+                    glm::vec4{ ndcMin.x, ndcMax.y, 1.0, 1.0 },
+                    glm::vec4{ ndcMax.x, ndcMax.y, 1.0, 1.0 },
+                };
+                glm::vec4 viewCorners[4];
+                glm::vec3 viewDirs[4];
+
+                for(int i = 0; i < 4; ++i)
+                {
+                    viewCorners[i] = glm::inverse(proj) * ndcCorners[i];
+                    viewCorners[i] /= viewCorners[i].w;
+                    viewDirs[i] = glm::normalize(glm::vec3{ viewCorners[i] });
+                }
+                const auto createSidePlane = [](glm::vec3 a, glm::vec3 b) { return glm::normalize(glm::cross(b, a)); };
+                glm::vec3 sidePlanes[]{
+                    createSidePlane(viewDirs[0], viewDirs[2]),
+                    createSidePlane(viewDirs[3], viewDirs[1]),
+                    createSidePlane(viewDirs[1], viewDirs[0]),
+                    createSidePlane(viewDirs[2], viewDirs[3]),
+                };
+                Frustum f;
+                f.planes[0] = sidePlanes[0];
+                f.planes[1] = sidePlanes[1];
+                f.planes[2] = sidePlanes[2];
+                f.planes[3] = sidePlanes[3];
+                frusts.push_back(f);
+            }
+        }
+
+        uint32_t passed_frust_count = 0;
+        for(auto li = 0u; li < lights.size(); ++li)
+        {
+            auto& l = *Engine::get().ecs->get<ecs::Light>(lights.at(li));
+            auto& lp = *Engine::get().ecs->get<ecs::Transform>(lights.at(li));
+            auto lvs = glm::vec3{ view * glm::vec4{ lp.pos(), 1.0f } };
+            for(auto fi = 0u; fi < frusts.size(); ++fi)
+            {
+                auto& f = frusts.at(fi);
+                const auto passed = [&f, &lvs, &l] {
+                    for(auto fpi = 0u; fpi < 4; ++fpi)
+                    {
+                        auto& fp = f.planes[fpi];
+                        if(glm::dot(fp, lvs) < -l.range) { return false; }
+                    }
+                    return true;
+                }();
+                passed_frust_count += (uint32_t)passed;
+            }
+        }
+        ENG_LOG("TILES PASSED: {}", passed_frust_count);
     }
 
     pf.ren_fen->wait_cpu(~0ull);
@@ -426,6 +511,10 @@ void Renderer::update()
         sbuf->resize(pf.culling.ids_buf, render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size);
     }
 
+    {
+        const uint32_t zero = 0u;
+        sbuf->copy(pf.fwdp.light_list_buf, &zero, 0ull, 4);
+    }
     gq->wait_sync(sbuf->flush(), PipelineStage::ALL);
 
     rgraph->add_pass(
@@ -464,7 +553,6 @@ void Renderer::update()
             sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
             sbuf->copy(pf.culling.ids_buf, &dstidscount, 0, 4u);
             sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 4u, { 4u, std::max(rp.ids_buf->size, 4ull) - 4u });
-
             q->wait_sync(sbuf->flush());
 
             cmd->set_scissors(&vksciss, 1);
@@ -518,8 +606,6 @@ void Renderer::update()
             [&pf, this](RenderGraph::PassResourceBuilder& b) {
                 b.access(bufs.fwdp_frustums_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COMPUTE_BIT,
                          PipelineAccess::SHADER_WRITE_BIT);
-                b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
-                         PipelineAccess::SHADER_READ_BIT, ImageLayout::READ_ONLY);
             },
             [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
                 uint32_t fwdp_tile_pixels;
@@ -531,12 +617,45 @@ void Renderer::update()
                 cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
                 cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
                 cmd->bind_resource(4, bufs.fwdp_frustums_buf);
+
                 const auto* w = Engine::get().window;
-                cmd->dispatch((w->width + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels,
-                              (w->height + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels, 1);
+                auto dx = (uint32_t)w->width;
+                auto dy = (uint32_t)w->height;
+                dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // first calc (rounding up) how many tiles in x there are
+                dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // then divide by local_size_x in compute shader
+                dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+                dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+                cmd->dispatch(dx, dy, 1);
             });
         bufs.fwdp_regenerate_frustums = false;
     }
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            b.access(bufs.fwdp_frustums_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.fwdp.light_list_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.fwdp.light_grid_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+                     PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
+        },
+        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+            cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
+            cmd->bind_resource(0, pf.constants);
+            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
+            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
+            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
+            cmd->bind_resource(4, bufs.fwdp_frustums_buf);
+            cmd->bind_resource(5, pf.fwdp.light_grid_buf);
+            cmd->bind_resource(6, pf.fwdp.light_list_buf);
+            cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
+            const auto* w = Engine::get().window;
+            auto dx = (uint32_t)w->width;
+            auto dy = (uint32_t)w->height;
+            dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all the pixels in 16x16 workgroups
+            dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+            cmd->dispatch(1, 1, 1);
+        });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
@@ -567,6 +686,8 @@ void Renderer::update()
                      PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT, true);
             b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::EARLY_Z_BIT,
                      PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
+            b.access(pf.fwdp.light_grid_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.fwdp.light_list_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
         },
         [this](SubmitQueue* q, CommandBuffer* cmd) { render(MeshPassType::FORWARD, q, cmd); });
     rgraph->add_pass(
@@ -636,6 +757,8 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
                     [this, &pf](CommandBuffer* cmd) {
                         cmd->bind_resource(0, pf.constants);
                         cmd->bind_resource(1, pf.culling.ids_buf);
+                        cmd->bind_resource(2, pf.fwdp.light_grid_buf);
+                        cmd->bind_resource(3, bufs.fwdp_frustums_buf);
                     });
     if(0)
     {

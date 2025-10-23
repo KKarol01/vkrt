@@ -1127,6 +1127,7 @@ class Renderer
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> cullzout_pipeline;
     Handle<Pipeline> fwdp_gen_frust_pipeline;
+    Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;
     HelperGeometry helpergeom;

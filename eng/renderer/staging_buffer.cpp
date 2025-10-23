@@ -85,7 +85,9 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
         {
             auto alloc = allocate(src_size - uploaded);
             memcpy(alloc.mem, (const std::byte*)src + uploaded, alloc.size);
+            get_cmd()->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
             get_cmd()->copy(dst.get(), buffer, dst_offset + uploaded, { alloc.offset, alloc.size });
+            get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::ALL, PipelineAccess::NONE);
             uploaded += alloc.size;
         }
     }

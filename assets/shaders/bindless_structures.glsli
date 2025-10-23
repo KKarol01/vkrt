@@ -194,6 +194,7 @@ struct GPULight
     ENG_TYPE_UINT type;
 };
 ENG_DECLARE_STORAGE_BUFFER(GPULightsBuffer) { 
+    ENG_TYPE_UINT count;
     ENG_TYPE_UNSIZED(GPULight, lights);
 } ENG_DECLARE_BINDLESS(GPULightsBuffer);
 
@@ -208,6 +209,15 @@ struct GPUFWDPFrustum {
 ENG_DECLARE_STORAGE_BUFFER(GPUFWDPFrustumsBuffer) { 
     ENG_TYPE_UNSIZED(GPUFWDPFrustum, frustums);
 } ENG_DECLARE_BINDLESS(GPUFWDPFrustumsBuffer);
+
+ENG_DECLARE_STORAGE_BUFFER(GPUFWDPLightListsBuffer) { 
+    ENG_TYPE_UINT head;
+    ENG_TYPE_UNSIZED(ENG_TYPE_UINT, lights);
+} ENG_DECLARE_BINDLESS(GPUFWDPLightListsBuffer);
+
+ENG_DECLARE_STORAGE_BUFFER(GPUFWDPLightGridsBuffer) { 
+    ENG_TYPE_UNSIZED(ENG_TYPE_UINT2, grids);
+} ENG_DECLARE_BINDLESS(GPUFWDPLightGridsBuffer);
 
 #ifndef __cplusplus
 

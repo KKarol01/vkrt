@@ -11,93 +11,28 @@ layout(location = 0) in VsOut {
 
 layout(location = 0) out vec4 OUT_COLOR;
 
-// Constants (tweak these values as needed)
-const vec3 LIGHT_DIR = normalize(vec3(0.5, 1.0, 0.3));
-const vec3 WATER_COLOR = vec3(0.0, 0.1, 0.3) * 1.8;
-const vec3 SKY_COLOR = vec3(0.6, 0.8, 1.0);
-const float SHININESS = 64.0;
-const float FRESNEL_POWER = 5.0;
-const float SPECULAR_INTENSITY = 1.0;
-const float TRANSMISSION_INTENSITY = 0.5;
-const float REFRACT_IOR = 1.33; // approximate water IOR
+const vec3 colors[10] = vec3[](
+    vec3(1.0, 0.0, 0.0),  // red
+    vec3(0.0, 1.0, 0.0),  // green
+    vec3(0.0, 0.0, 1.0),  // blue
+    vec3(1.0, 1.0, 0.0),  // yellow
+    vec3(1.0, 0.0, 1.0),  // magenta
+    vec3(0.0, 1.0, 1.0),  // cyan
+    vec3(1.0, 0.5, 0.0),  // orange
+    vec3(0.5, 0.0, 1.0),  // purple
+    vec3(0.0, 0.5, 0.5),  // teal
+    vec3(0.5, 0.5, 0.5)   // gray
+);
 
-void main() {
-    const vec3 colors[10] = vec3[](
-        vec3(1.0, 0.0, 0.0),  // red
-        vec3(0.0, 1.0, 0.0),  // green
-        vec3(0.0, 0.0, 1.0),  // blue
-        vec3(1.0, 1.0, 0.0),  // yellow
-        vec3(1.0, 0.0, 1.0),  // magenta
-        vec3(0.0, 1.0, 1.0),  // cyan
-        vec3(1.0, 0.5, 0.0),  // orange
-        vec3(0.5, 0.0, 1.0),  // purple
-        vec3(0.0, 0.5, 0.5),  // teal
-        vec3(0.5, 0.5, 0.5)   // gray
-    );
-
-    GPUMaterial mat = get_mat(get_id(fsin.iidx).matidx);
-
-    // visualize meshlets
-    //OUT_COLOR = vec4(vec3(colors[fsin.instance_index % 10]), 1.0);
-
-    vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
-    if(mat.base_color_idx != ~0u) {
-        color = texture(sampler2D(gt_2d[nonuniformEXT(mat.base_color_idx)], g_samplers[ENG_SAMPLER_LINEAR]), fsin.uv);
-    }
-
-    const GPULight l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[0];
-    float att = 1.0;
-    if(l0.type == GPU_LIGHT_TYPE_POINT) 
-    {
-        const float d = distance(l0.pos, fsin.position);
-        att = clamp(1.0 - d / l0.range, 0.0, 1.0);
-        att = att * att * l0.intensity * max(0.0, dot(fsin.normal, normalize(l0.pos - fsin.position))); // could be divided by d, instead of normalizing?
-        color *= l0.color;
-    }
-    color.xyz *= att;
-
-    OUT_COLOR = color;
-#if 0
-    vec4 grad = texture(combinedImages_2d[fft_gradient_index], fsin.uv).rgba;
-
-    // Compute view direction per-fragment
-    vec3 viewDir = normalize(constants.cam_pos - fsin.position);
-
-    // Reconstruct normal from world position derivatives
-    vec3 dx = dFdx(fsin.position);
-    vec3 dy = dFdy(fsin.position);
-    vec3 normal = normalize(cross(dx, dy));
-    normal = normalize(vec3(grad.x, 1.0, grad.y));
-    if (dot(normal, viewDir) < 0.0) normal = -normal;
-
-    // Fresnel term (Schlick's approximation)
-    float cosTheta = clamp(dot(normal, viewDir), 0.0, 1.0);
-    float fresnel   = pow(1.0 - cosTheta, FRESNEL_POWER);
-
-    // Diffuse component (minimal)
-    float lambert = max(dot(normal, LIGHT_DIR), 0.0);
-    vec3 diffuse  = WATER_COLOR * lambert;
-
-    // Specular component (Blinn-Phong)
-    vec3 halfDir  = normalize(LIGHT_DIR + viewDir);
-    float spec    = SPECULAR_INTENSITY * pow(max(dot(normal, halfDir), 0.0), SHININESS);
-
-    // Sky reflection via Fresnel blend
-    vec3 skyReflect = mix(diffuse + spec * vec3(1.0), SKY_COLOR, fresnel);
-
-    // Diffuse transmission (approximate subsurface scattering)
-    vec3 refractDir = refract(-viewDir, normal, 1.0 / REFRACT_IOR);
-    float transAmt  = TRANSMISSION_INTENSITY * (1.0 - lambert);
-    vec3 transmit  = WATER_COLOR * transAmt;
-
-    // Combine reflection and transmission
-
-	float J = grad.z;
-	J = clamp(pow(J, 32.0) - 1.3, 0.0, 1.0);
-	J = smoothstep(0.5, 1.3, J);
-    vec3 color = mix(transmit, skyReflect, fresnel);
-	color = mix(color, vec3(1.0), J);
+void main() 
+{
+ 	uvec2 ss = uvec2(1280, 768);
+	uint ts = 16;
+	uvec2 tc = uvec2(ss + uvec2(ts - 1)) / uvec2(ts);
+    uvec2 tuv = uvec2(gl_FragCoord.xy / vec2(ts));
+    uint tx = tuv.x + tuv.y * tc.x;
     
-    OUT_COLOR = vec4(vec3(color), 1.0);
-#endif
+    float lgc = float(get_buf(GPUFWDPLightGrid).grids_us[tx].y);
+
+    OUT_COLOR = vec4(vec2(tuv) / vec2(tc), lgc, 1.0);
 }
