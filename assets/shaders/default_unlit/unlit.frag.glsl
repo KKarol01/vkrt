@@ -48,11 +48,11 @@ void main()
 
     if(lgc > 0.0)
     {
-        const float d = distance(l0.pos, fsin.position);
-        att = clamp(1.0 - d / l0.range, 0.0, 1.0);
-        att = att * att * l0.intensity * max(0.0, dot(fsin.normal, normalize(l0.pos - fsin.position))); // could be divided by d, instead of normalizing?
-        color *= l0.color;
-        color.xyz *= att;
+        //const float d = distance(l0.pos, fsin.position);
+        //att = clamp(1.0 - d / l0.range, 0.0, 1.0);
+        //att = att * att * l0.intensity * max(0.0, dot(fsin.normal, normalize(l0.pos - fsin.position))); // could be divided by d, instead of normalizing?
+        //color *= l0.color;
+        //color.xyz *= att;
     }
 
     //OUT_COLOR = color;

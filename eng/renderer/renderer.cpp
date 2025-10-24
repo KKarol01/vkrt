@@ -247,7 +247,7 @@ void Renderer::init_perframes()
         pf.ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
         pf.ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
-        pf.constants = make_buffer(BufferDescriptor{ ENG_FMT("constants_{}", i), 1024, BufferUsage::STORAGE_BIT });
+        pf.constants = make_buffer(BufferDescriptor{ ENG_FMT("constants_{}", i), sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT });
 
         const auto hizpmips = (uint32_t)(std::log2f(std::max(ew->width, ew->height)) + 1);
         pf.culling.hizpyramid = make_image(ImageDescriptor{

@@ -77,7 +77,7 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
     // -y because projection matrix does that
     // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.
     center.yz *= -1.0;
-    float radius = max(bounding_sphere.w, 0.5) * 1.0;
+    float radius = max(bounding_sphere.w, 1.0) * 1.0;
 	vec4 aabb;
 	if (project_sphere_bounds(vec3(center.xy, center.z), radius, 0.1, P00, P11, aabb))
 	{
@@ -102,7 +102,7 @@ void main()
     GPUInstanceId id = srcids.ids_us[x];
     vec4 bs = vec4(vec3(transforms[id.instidx] * vec4(boundingspheres[id.residx].xyz, 1.0)), boundingspheres[id.residx].w);
     // bs.w = max(bs.w, 0.5);
-    //bs.w *= 0.4;
+    // bs.w *= 1.0;
 
     if(frustum_cull(bs) && occlusion_cull(bs, engconsts.proj[0][0], engconsts.proj[1][1]))
     {
