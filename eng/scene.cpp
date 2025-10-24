@@ -458,6 +458,7 @@ void Scene::ui_draw_scene()
             const auto& echildren = reg->get_children(e);
             auto idd = ImGui::GetID(enode->name.c_str());
             ImGui::PushID(enode->name.c_str());
+            ImGui::PushID((int)e);
             const auto imhid = ImGui::GetItemID();
             assert(idd != imhid);
             auto& ui_node = ui.scene.nodes[imhid];
@@ -487,6 +488,7 @@ void Scene::ui_draw_scene()
                 }
                 ImGui::Unindent();
             }
+            ImGui::PopID();
             ImGui::PopID();
         };
         for(const auto& e : scene)

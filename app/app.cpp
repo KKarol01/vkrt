@@ -57,7 +57,7 @@ void App::start()
 void App::on_init()
 {
     renderer.init();
-    const auto e = Engine::get().scene->load_from_file("container.glb");
+    const auto e = Engine::get().scene->load_from_file("occlusion_culling1.glb");
 
     auto* ecs = Engine::get().ecs;
     auto light = ecs->create();
@@ -66,6 +66,7 @@ void App::on_init()
     ecs->emplace<ecs::Light>(light, ecs::Light{ .range = 5.0f, .type = ecs::Light::Type::POINT });
 
     Engine::get().scene->instance_entity(e);
+    //Engine::get().scene->instance_entity(e);
     Engine::get().scene->scene.push_back(light);
     Engine::get().renderer->add_light(light); // todo: this should be automated; maybe stage - same as meshes
                                               // also, static/dynamic should be added

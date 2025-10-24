@@ -7,7 +7,7 @@ layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 bool frustum_cull(vec4 bounding_sphere)
 {
     // clang-format off
-    const vec4 pos = engconsts.view * vec4(bounding_sphere.xyz, 1.0);
+    const vec4 pos = engconsts.prev_view * vec4(bounding_sphere.xyz, 1.0);
     vec4 L = vec4(engconsts.proj[0][3] + engconsts.proj[0][0],
                   engconsts.proj[1][3] + engconsts.proj[1][0],
                   engconsts.proj[2][3] + engconsts.proj[2][0],
@@ -24,26 +24,28 @@ bool frustum_cull(vec4 bounding_sphere)
                   engconsts.proj[1][3] - engconsts.proj[1][1],
                   engconsts.proj[2][3] - engconsts.proj[2][1],
                   engconsts.proj[3][3] - engconsts.proj[3][1]);
-//    vec4 N = vec4(engconsts.proj[0][2],
-//                  engconsts.proj[1][2],
-//                  engconsts.proj[2][2],
-//                  engconsts.proj[3][2]);
-//    vec4 F = vec4(engconsts.proj[0][3] - engconsts.proj[0][2],
-//                  engconsts.proj[1][3] - engconsts.proj[1][2],
-//                  engconsts.proj[2][3] - engconsts.proj[2][2],
-//                  engconsts.proj[3][3] - engconsts.proj[3][2]);
+    vec4 N = vec4(engconsts.proj[0][3] - engconsts.proj[0][2],
+                  engconsts.proj[1][3] - engconsts.proj[1][2],
+                  engconsts.proj[2][3] - engconsts.proj[2][2],
+                  engconsts.proj[3][3] - engconsts.proj[3][2]);
+ // vec4 F = vec4(engconsts.proj[0][3] - engconsts.proj[0][2],
+ //               engconsts.proj[1][3] - engconsts.proj[1][2],
+ //               engconsts.proj[2][3] - engconsts.proj[2][2],
+ //               engconsts.proj[3][3] - engconsts.proj[3][2]);
 
     L /= length(L.xyz);
     R /= length(R.xyz);
     B /= length(B.xyz);
     T /= length(T.xyz);
-  //  N /= length(N.xyz);
-  //  F /= length(F.xyz);
+    N /= length(N.xyz);
+ // F /= length(F.xyz);
 
     if(    dot(L.xyz, pos.xyz) + L.w + bounding_sphere.w >= 0.0
         && dot(R.xyz, pos.xyz) + R.w + bounding_sphere.w >= 0.0
         && dot(B.xyz, pos.xyz) + B.w + bounding_sphere.w >= 0.0
-        && dot(T.xyz, pos.xyz) + T.w + bounding_sphere.w >= 0.0) { return true; }
+        && dot(T.xyz, pos.xyz) + T.w + bounding_sphere.w >= 0.0
+        && dot(N.xyz, pos.xyz) + N.w + bounding_sphere.w >= 0.0
+    ) { return true; }
     return false;
     // clang-format on
 }
@@ -71,13 +73,13 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
 }
 
 bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
-    vec3 center = vec3(engconsts.view * vec4(bounding_sphere.xyz, 1.0));
+    vec3 center = vec3(engconsts.prev_view * vec4(bounding_sphere.xyz, 1.0));
     // -y because projection matrix does that
     // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.
     center.yz *= -1.0;
-    float radius = max(bounding_sphere.w, 0.4) * 1.0;
+    float radius = max(bounding_sphere.w, 0.5) * 1.0;
 	vec4 aabb;
-	if (project_sphere_bounds(vec3(center.xy, -center.z), radius, 0.1, P00, P11, aabb))
+	if (project_sphere_bounds(vec3(center.xy, center.z), radius, 0.1, P00, P11, aabb))
 	{
 		float width = (aabb.z - aabb.x) * float(textureSize(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), 0).x);
 		float height = (aabb.w - aabb.y) * float(textureSize(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), 0).y);
@@ -86,7 +88,7 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
 
 		float depth = textureLod(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), (aabb.xy + aabb.zw) * 0.5, level).x;
 
-		float depthSphere = 0.1 / (-center.z - radius);
+		float depthSphere = 0.1 / (center.z - radius);
 		return depthSphere >= depth;
 	}
     return true;
@@ -100,7 +102,7 @@ void main()
     GPUInstanceId id = srcids.ids_us[x];
     vec4 bs = vec4(vec3(transforms[id.instidx] * vec4(boundingspheres[id.residx].xyz, 1.0)), boundingspheres[id.residx].w);
     // bs.w = max(bs.w, 0.5);
-    // bs.w *= 0.5;
+    //bs.w *= 0.4;
 
     if(frustum_cull(bs) && occlusion_cull(bs, engconsts.proj[0][0], engconsts.proj[1][1]))
     {

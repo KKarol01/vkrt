@@ -175,6 +175,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_UINT GPULightsBufferIndex; // lights buffer index
 
     ENG_TYPE_MAT4 view;
+    ENG_TYPE_MAT4 prev_view;
     ENG_TYPE_MAT4 proj;
     ENG_TYPE_MAT4 proj_view;
     ENG_TYPE_MAT4 inv_view;

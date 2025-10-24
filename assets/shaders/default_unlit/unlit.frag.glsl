@@ -37,19 +37,25 @@ void main()
     uint matidx = get_buf2(GPUMeshletId, imidb).ids_us[imidb].matidx;
     GPUMaterial mat = get_buf2(GPUMaterial, get_buf(GPUEngConstant).rmatb).materials_us[matidx];
 
-    vec4 color = vec4(1.0);
+    vec4 color = vec4(vec3(colors[fsin.iidx % 10]), 1.0);
     if(lgc > 0.0 && mat.base_color_idx != ~0)
     {
-        color = texture(sampler2D(gt_2d[mat.base_color_idx], g_samplers[ENG_SAMPLER_LINEAR]), fsin.uv);
+    //    color = texture(sampler2D(gt_2d[mat.base_color_idx], g_samplers[ENG_SAMPLER_LINEAR]), fsin.uv);
     }
 
     GPULight l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[0];
     float att = 1.0;
-    const float d = distance(l0.pos, fsin.position);
-    att = clamp(1.0 - d / l0.range, 0.0, 1.0);
-    att = att * att * l0.intensity * max(0.0, dot(fsin.normal, normalize(l0.pos - fsin.position))); // could be divided by d, instead of normalizing?
-    color *= l0.color;
-    color.xyz *= att;
 
+    if(lgc > 0.0)
+    {
+        const float d = distance(l0.pos, fsin.position);
+        att = clamp(1.0 - d / l0.range, 0.0, 1.0);
+        att = att * att * l0.intensity * max(0.0, dot(fsin.normal, normalize(l0.pos - fsin.position))); // could be divided by d, instead of normalizing?
+        color *= l0.color;
+        color.xyz *= att;
+    }
+
+    //OUT_COLOR = color;
     OUT_COLOR = color;
+
 }

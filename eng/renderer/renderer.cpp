@@ -209,7 +209,7 @@ void Renderer::init_pipelines()
                                                                            .dst_alpha_factor = BlendFactor::ZERO,
                                                                            .alpha_op = BlendOp::ADD } },
                          .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
+        .depth_test = false,
         .depth_write = false,
         .depth_compare = DepthCompare::GEQUAL,
         .culling = CullFace::BACK,
@@ -402,6 +402,9 @@ void Renderer::update()
     const auto invview = glm::inverse(view);
     const auto invproj = glm::inverse(proj);
 
+    static auto prev_view = view;
+    if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
+
     GPUEngConstantsBuffer cb{
         .vposb = get_bindless(bufs.vpos_buf),
         .vatrb = get_bindless(bufs.vattr_buf),
@@ -411,6 +414,7 @@ void Renderer::update()
         .rmatb = get_bindless(bufs.mats_buf),
         .GPULightsBufferIndex = get_bindless(bufs.lights_bufs[0]),
         .view = view,
+        .prev_view = prev_view,
         .proj = proj,
         .proj_view = proj * view,
         .inv_view = invview,
@@ -436,55 +440,59 @@ void Renderer::update()
     }
     gq->wait_sync(sbuf->flush(), PipelineStage::ALL);
 
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::DEFAULT_UNLIT },
-        [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
-            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(rp.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
-            b.access(pf.culling.ids_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(ppf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
-                     PipelineAccess::DS_RW, ImageLayout::GENERAL, true);
-            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
-                     PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
-        },
-        [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            pf.culling.mbatches = rp.mbatches;
-            pf.culling.cmd_start = rp.cmd_start;
-            pf.culling.cmd_count = rp.cmd_count;
-            pf.culling.id_count = rp.id_count;
-            VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
-            VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
-            const auto vkdep =
-                Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
-                                               .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                                               .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                               .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                                               .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
-            const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
+    if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS)
+    {
+        rgraph->add_pass(
+            RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::DEFAULT_UNLIT },
+            [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
+                const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+                b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+                b.access(pf.culling.cmd_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                         PipelineAccess::TRANSFER_WRITE_BIT);
+                b.access(rp.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+                b.access(pf.culling.ids_buf, RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
+                         PipelineAccess::TRANSFER_WRITE_BIT);
+                b.access(ppf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT,
+                         PipelineAccess::SHADER_READ_BIT);
+                b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
+                         PipelineAccess::DS_RW, ImageLayout::GENERAL, true);
+                b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
+                         PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
+            },
+            [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
+                const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+                pf.culling.mbatches = rp.mbatches;
+                pf.culling.cmd_start = rp.cmd_start;
+                pf.culling.cmd_count = rp.cmd_count;
+                pf.culling.id_count = rp.id_count;
+                VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+                VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+                const auto vkdep =
+                    Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
+                                                   .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                                   .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
+                const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
 
-            const auto dstidscount = 0u;
-            sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
-            sbuf->copy(pf.culling.ids_buf, &dstidscount, 0, 4u);
-            sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 4u, { 4u, std::max(rp.ids_buf->size, 4ull) - 4u });
-            q->wait_sync(sbuf->flush());
+                const auto dstidscount = 0u;
+                sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
+                sbuf->copy(pf.culling.ids_buf, &dstidscount, 0, 4u);
+                sbuf->copy(pf.culling.ids_buf, rp.ids_buf, 4u, { 4u, std::max(rp.ids_buf->size, 4ull) - 4u });
+                q->wait_sync(sbuf->flush());
 
-            cmd->set_scissors(&vksciss, 1);
-            cmd->set_viewports(&vkview, 1);
-            cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
-            cmd->bind_pipeline(cullzout_pipeline.get());
-            cmd->bind_resource(0, pf.constants);
-            cmd->bind_resource(1, ppf.culling.ids_buf);
-            cmd->begin_rendering(vkreninfo);
-            render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf, ppf.culling.cmd_start,
-                            0ull, {}, false);
-            cmd->end_rendering();
-        });
+                cmd->set_scissors(&vksciss, 1);
+                cmd->set_viewports(&vkview, 1);
+                cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
+                cmd->bind_pipeline(cullzout_pipeline.get());
+                cmd->bind_resource(0, pf.constants);
+                cmd->bind_resource(1, ppf.culling.ids_buf);
+                cmd->begin_rendering(vkreninfo);
+                render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf,
+                                ppf.culling.cmd_start, 0ull, {}, false);
+                cmd->end_rendering();
+            });
+    }
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {

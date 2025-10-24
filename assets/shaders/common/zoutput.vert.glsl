@@ -18,7 +18,7 @@ void main()
 	GPUInstanceId id = get_id(gl_InstanceIndex);
 	vec4 pos = vec4(engvpos[gl_VertexIndex].xyz, 1.0);
 	pos = get_trs(id.instidx) * pos;
-	pos = engconsts.proj_view * pos;
+	pos = engconsts.proj * engconsts.view * pos;
 
     gl_Position = pos;
 }
