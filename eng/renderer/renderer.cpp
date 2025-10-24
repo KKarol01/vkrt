@@ -209,7 +209,7 @@ void Renderer::init_pipelines()
                                                                            .dst_alpha_factor = BlendFactor::ZERO,
                                                                            .alpha_op = BlendOp::ADD } },
                          .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = false,
+        .depth_test = true,
         .depth_write = false,
         .depth_compare = DepthCompare::GEQUAL,
         .culling = CullFace::BACK,
