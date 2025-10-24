@@ -2,6 +2,8 @@
 
 #include <string>
 
+namespace eng
+{
 namespace gfx
 {
 enum class ImageFormat;
@@ -11,11 +13,6 @@ enum class SyncType;
 struct ImageViewDescriptor;
 enum class MeshPassType : uint32_t;
 } // namespace gfx
-
-struct VkImageViewCreateInfo;
-
-namespace eng
-{
 
 std::string to_string(const gfx::ImageFormat& a);
 std::string to_string(const gfx::ImageType& a);

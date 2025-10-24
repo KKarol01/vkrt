@@ -193,4 +193,13 @@ target_precompile_headers(eng
         <vk-bootstrap/src/VkBootstrap.h>
         <shaderc/shaderc.hpp>
         <fmt/format.h>
+        <eng/common/flags.hpp>
+        <eng/common/handle.hpp>
+        <eng/common/handleflatset.hpp>
+        <eng/common/hash.hpp>
+        <eng/common/logger.hpp>
+        <eng/common/sparseset.hpp>
+        <eng/common/to_vk.hpp>
+        <eng/common/to_string.hpp>
+        <eng/common/types.hpp>
 )

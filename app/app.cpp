@@ -1,5 +1,6 @@
 #include "app.hpp"
 
+
 #include <eng/engine.hpp>
 #include <eng/scene.hpp>
 #include <eng/renderer/renderer.hpp>
@@ -7,6 +8,8 @@
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <assets/shaders/bindless_structures.glsli>
+#include <eng/common/handle.hpp>
+#include <eng/renderer/submit_queue.hpp>
 #include <eng/utils.hpp>
 
 // todo: :(
