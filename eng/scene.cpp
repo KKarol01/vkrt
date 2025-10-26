@@ -403,7 +403,7 @@ void Scene::update()
             auto passes = true;
             while(p != ecs::INVALID_ENTITY)
             {
-                p = Engine::get().ecs->get_parent(e);
+                p = Engine::get().ecs->get_parent(p);
                 if(visited.contains(p))
                 {
                     passes = false;
