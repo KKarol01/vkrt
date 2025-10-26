@@ -84,7 +84,8 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
 		float width = (aabb.z - aabb.x) * float(1280.0);
 		float height = (aabb.w - aabb.y) * float(768.0);
 
-		float level = max(floor(log2(max(width, height))), 1.0) - 1.0;
+		float level = ceil(log2(max(width, height))) - 1;
+        uint max_span = max(uint(ceil(width)), uint(ceil(height)));
 
 		float depth = textureLod(sampler2D(gt_2d[hizsrcti], g_samplers[ENG_SAMPLER_HIZ]), (aabb.xy + aabb.zw) * 0.5, level).x;
 
