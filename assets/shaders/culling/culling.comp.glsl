@@ -72,28 +72,25 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
     return true;
 }
 
-bool occlusion_cull(vec4 bounding_sphere, float P00, float P11, out vec2 rp, out float rd, out float projd) {
+bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
     vec3 center = vec3(get_buf(GPUEngConstant).view * vec4(bounding_sphere.xyz, 1.0));
     // -y because projection matrix does that
     // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.
+    float radius = bounding_sphere.w;
     center.yz *= -1.0;
-    float radius = max(bounding_sphere.w, 0.4);
 	vec4 aabb;
-	if (project_sphere_bounds(vec3(center.xy, center.z), radius, 0.1, P00, P11, aabb))
+	if (project_sphere_bounds(vec3(center.x, center.y, center.z), radius, 0.1, P00, P11, aabb))
 	{
 		float width = (aabb.z - aabb.x) * float(1280.0);
 		float height = (aabb.w - aabb.y) * float(768.0);
 
-		float level = floor(log2(max(width, height)));
+		float level = max(floor(log2(max(width, height))), 1.0) - 1.0;
 
-		float depth = textureLod(sampler2D(gt_2d[hizsrcti], g_samplers[ENG_SAMPLER_LINEAR]), (aabb.xy + aabb.zw) * 0.5, level).x;
+		float depth = textureLod(sampler2D(gt_2d[hizsrcti], g_samplers[ENG_SAMPLER_HIZ]), (aabb.xy + aabb.zw) * 0.5, level).x;
+
 		float depthSphere = 0.1 / (center.z - radius);
 
-		rd = depth;
-		projd = depthSphere;
-		rp = (aabb.xy + aabb.zw) * 0.5;
-
-		return depthSphere >= depth - 0.1;
+		return depthSphere >= depth;
 	}
     return true;
 }
@@ -105,30 +102,14 @@ void main()
 
     GPUInstanceId id = get_buf2(GPUInstanceId, srcidsbi).ids_us[x];
     vec4 gpubs = get_bufb(GPUBoundingSphere, get_buf(GPUEngConstant)).bounding_spheres_us[id.resi];
-    vec4 bs = vec4(gpubs.xyz, 1.0);
+    vec4 bs = get_bufb(GPUTransform, get_buf(GPUEngConstant)).transforms_us[id.insti] * vec4(gpubs.xyz, 1.0);
     bs.w = gpubs.w;
-    // bs.w = max(bs.w, 0.5);
-    bs.w *= 1.0;
 
-	vec4 center = get_buf(GPUEngConstant).proj *  get_buf(GPUEngConstant).view * vec4(bs.xyz, 1.0);
-	center /= center.w;
-	center.xy = (center.xy * 0.5 + 0.5) * vec2(1280, 768);
-
-	vec2 rp = vec2(0.0);
-	float rd = 0.0;
-	float pd = 0.0;
-
-    if(occlusion_cull(bs, get_buf(GPUEngConstant).proj[0][0], get_buf(GPUEngConstant).proj[1][1], rp, rd, pd))
+    uint first_instance = get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].firstInstance;
+    if(occlusion_cull(bs, get_buf(GPUEngConstant).proj[0][0], get_buf(GPUEngConstant).proj[1][1]))
     {
         const uint off = atomicAdd(get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].instanceCount, 1);
-        //atomicAdd(get_buf2(GPUInstanceId, dstidsbi).count, 1);
-        get_buf2(GPUInstanceId, dstidsbi).ids_us[get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].firstInstance + off] = id;
-		imageStore(gsi_2drgba32f[debug_bs], ivec2(center.xy), vec4(1.0));
-		imageStore(gsi_2drgba32f[debug_bs], ivec2(rp * vec2(1280, 768)), vec4(1.0));
+        get_buf2(GPUInstanceId, dstidsbi).ids_us[first_instance + off] = id;
+        atomicAdd(get_buf2(GPUInstanceId, dstidsbi).count, 1);
 	} 
-	else
-	{
-		imageStore(gsi_2drgba32f[debug_bs], ivec2(center.xy), vec4(1.0));
-		imageStore(gsi_2drgba32f[debug_bs], ivec2(rp * vec2(1280, 768)), vec4(1.0));
-	}
 }

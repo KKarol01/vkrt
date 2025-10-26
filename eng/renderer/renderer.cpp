@@ -406,6 +406,11 @@ void Renderer::update()
         new_lights.clear();
     }
 
+    auto& fwdrp = render_passes[(uint32_t)MeshPassType::FORWARD];
+    const auto ZERO = 0u;
+    sbuf->copy(pf.culling.cmd_buf, fwdrp.cmd_buf, 0, { 0, fwdrp.cmd_buf->size });
+    sbuf->copy(pf.culling.ids_buf, &ZERO, 0, 4);
+
     pf.ren_fen->wait_cpu(~0ull);
     pf.ren_fen->reset();
     pf.acq_sem->reset();
@@ -528,33 +533,33 @@ void Renderer::update()
                              PipelineAccess::SHADER_RW);
             }
         });
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(bufs.fwdp_frustums_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.fwdp.light_list_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-            b.access(pf.fwdp.light_grid_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
-        },
-        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
-            cmd->bind_resource(0, pf.constants);
-            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
-            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
-            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
-            cmd->bind_resource(4, bufs.fwdp_frustums_buf);
-            cmd->bind_resource(5, pf.fwdp.light_grid_buf);
-            cmd->bind_resource(6, pf.fwdp.light_list_buf);
-            cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
-            const auto* w = Engine::get().window;
-            auto dx = (uint32_t)w->width;
-            auto dy = (uint32_t)w->height;
-            dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all the pixels in 16x16 workgroups
-            dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-            // cmd->dispatch(1, 1, 1);
-        });
+    // rgraph->add_pass(
+    //     RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
+    //     [&pf, this](RenderGraph::PassResourceBuilder& b) {
+    //         b.access(bufs.fwdp_frustums_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+    //                  PipelineAccess::SHADER_READ_BIT);
+    //         b.access(pf.fwdp.light_list_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+    //         b.access(pf.fwdp.light_grid_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+    //         b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+    //                  PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
+    //     },
+    //     [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+    //         cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
+    //         cmd->bind_resource(0, pf.constants);
+    //         cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
+    //         cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
+    //         cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
+    //         cmd->bind_resource(4, bufs.fwdp_frustums_buf);
+    //         cmd->bind_resource(5, pf.fwdp.light_grid_buf);
+    //         cmd->bind_resource(6, pf.fwdp.light_list_buf);
+    //         cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
+    //         const auto* w = Engine::get().window;
+    //         auto dx = (uint32_t)w->width;
+    //         auto dy = (uint32_t)w->height;
+    //         dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all the pixels in 16x16 workgroups
+    //         dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+    //         // cmd->dispatch(1, 1, 1);
+    //     });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
@@ -580,11 +585,11 @@ void Renderer::update()
             pf.culling.cmd_start = rp.cmd_start;
             pf.culling.cmd_count = rp.cmd_count;
             pf.culling.id_count = rp.id_count;
-            const uint32_t zero = 0;
-            sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
-            // sbuf->copy(pf.culling.ids_buf, &zero, 0, 4);
-            q->wait_sync(sbuf->flush());
-            // sbuf->flush()->wait_cpu(~0ull);
+            // const uint32_t zero = 0;
+            //  sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
+            //   sbuf->copy(pf.culling.ids_buf, &zero, 0, 4);
+            //  q->wait_sync(sbuf->flush());
+            //   sbuf->flush()->wait_cpu(~0ull);
 
             cmd->clear_color(pf.culling.debug_bsphere.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
             cmd->clear_color(pf.culling.debug_depth.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
@@ -631,8 +636,8 @@ void Renderer::update()
                      PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::TRANSFER_DST);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            //cmd->copy(swapchain->get_image().get(), pf.gbuffer.color.get());
-            cmd->copy(swapchain->get_image().get(), pf.culling.debug_bsphere.get());
+            cmd->copy(swapchain->get_image().get(), pf.gbuffer.color.get());
+            // cmd->copy(swapchain->get_image().get(), pf.culling.debug_bsphere.get());
         });
 
     rgraph->compile();
