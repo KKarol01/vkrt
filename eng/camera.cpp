@@ -14,7 +14,7 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
     const float w = h * height / width;
     glm::mat4 result = glm::zero<glm::mat4>();
     result[0][0] = w;
-    result[1][1] = -h;
+    result[1][1] = h;
     result[2][2] = 0.0f;
     result[2][3] = -1.0f;
     result[3][2] = zNear;
@@ -25,6 +25,7 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
 {
     GLFWwindow* window = Engine::get().window->window;
     projection = infinitePerspectiveFovReverseZRH_ZO(glm::radians(75.0f), 1280.0f, 768.0f, 0.1f);
+    projection[1][1] *= -1.0f;
 
     double pos[2];
     glfwGetCursorPos(window, &pos[0], &pos[1]);

@@ -18,18 +18,18 @@ class StagingBuffer
 {
     static constexpr auto CAPACITY = 64ull * 1024 * 1024;
     static constexpr auto ALIGNMENT = 512ull;
-    static constexpr auto CMD_COUNT = 32ull;
 
     struct CmdBufWrapper
     {
-        enum State
+        enum class State
         {
+            UNINITIALIZED,
             INITIAL,
             RECORDING,
             EXECUTABLE,
             PENDING
         };
-        State state{ INITIAL };
+        State state{ State::UNINITIALIZED };
         CommandBuffer* cmd{};
         Sync* sem{};
     };
@@ -53,18 +53,16 @@ class StagingBuffer
         copy(dst, vec.data(), dst_offset, vec.size() * sizeof(T));
     }
     void copy(Handle<Image> dst, const void* const src, ImageLayout final_layout);
-    void copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy,
-              ImageLayout dst_final_layout);
-    void blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit,
-              ImageLayout dst_final_layout);
+    void copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy, ImageLayout dst_final_layout);
+    void blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit, ImageLayout dst_final_layout);
     Sync* flush();
     void reset();
 
   private:
     void begin_new_cmd_buffer();
     Allocation allocate(size_t size);
-    CommandBuffer* get_cmd() { return cmds.at(cmdhead).cmd; }
-    CmdBufWrapper& get_wrapper() { return cmds.at(cmdhead); }
+    CommandBuffer* get_cmd();
+    CmdBufWrapper& get_wrapper();
 
     size_t head{};
     Buffer buffer;
@@ -72,9 +70,11 @@ class StagingBuffer
     Callback<void(Handle<Buffer>)> on_buffer_resize;
 
     CommandPool* cmdpool{};
-    uint32_t cmdhead{ 0 };
-    std::array<CmdBufWrapper, CMD_COUNT> cmds;
+    CmdBufWrapper* cmd{};
+    Sync* signaled_sync{};
+    std::vector<std::vector<CmdBufWrapper>> wrappers;
     std::vector<CmdBufWrapper*> pending;
+    std::vector<CmdBufWrapper*> used;
 };
 
 } // namespace gfx

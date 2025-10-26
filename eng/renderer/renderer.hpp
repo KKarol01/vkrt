@@ -981,6 +981,8 @@ class Renderer
         Handle<Image> hizpyramid;
         Handle<Texture> hizptex;
         std::vector<Handle<Texture>> hizpmiptexs;
+        Handle<Image> debug_bsphere;
+        Handle<Image> debug_depth;
         Handle<Buffer> cmd_buf;
         Handle<Buffer> ids_buf;
         uint32_t cmd_count;
@@ -1023,7 +1025,6 @@ class Renderer
         uint32_t fwdp_lights_per_tile{ 50 };                     // changing requires resizing the buffers
         Handle<Buffer> fwdp_frustums_buf;                        // {vec3 normal, float dist}*4 frustum planes per tile
         uint32_t fwdp_num_tiles{};
-        bool fwdp_regenerate_frustums{ true };
 
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
         size_t vertex_count{};

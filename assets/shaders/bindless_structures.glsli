@@ -48,8 +48,10 @@
 
 // for picking index right from the push constants
 #define get_buf(type) gsb_##type##sBuffer[type##sBufferIndex]
+
 // for picking with custom index
 #define get_buf2(type, index) gsb_##type##sBuffer[index]
+
 // for picking index that's inside some object buf
 #define get_bufb(type, buf) gsb_##type##sBuffer[buf.type##sBufferIndex]
 
@@ -86,6 +88,9 @@ struct DrawIndexedIndirectCommand
 ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndexedIndirectCommandsBuffer) {
     ENG_TYPE_UNSIZED(DrawIndexedIndirectCommand, commands);
 } ENG_DECLARE_BINDLESS(GPUDrawIndexedIndirectCommandsBuffer);
+ENG_DECLARE_STORAGE_BUFFER(GPUIndirectCountsBuffer) {
+    ENG_TYPE_UNSIZED(ENG_TYPE_UINT, counts);
+} ENG_DECLARE_BINDLESS(GPUIndirectCountsBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUIndicesBuffer) { 
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, indices); 
@@ -115,15 +120,15 @@ ENG_DECLARE_STORAGE_BUFFER(GPUBoundingSpheresBuffer) {
 
 struct GPUInstanceId
 {
-    uint32_t batch_id;      // index to indirect draw command for culling
-    uint32_t residx;        // index to any per resource resource (shared by all the instances of)
-    uint32_t instidx;       // index to any per instance of resource
-    uint32_t matidx;        // index to material
+    uint32_t cmdi;      // index of indirect draw command
+    uint32_t resi;      // index of resource shared by instances 
+    uint32_t insti;     // index of resource owned by instance
+    uint32_t mati;      // index of material
 };
-ENG_DECLARE_STORAGE_BUFFER(GPUMeshletIdsBuffer) {
+ENG_DECLARE_STORAGE_BUFFER(GPUInstanceIdsBuffer) {
     ENG_TYPE_UINT count;
     ENG_TYPE_UNSIZED(GPUInstanceId, ids);
-} ENG_DECLARE_BINDLESS(GPUMeshletIdsBuffer);
+} ENG_DECLARE_BINDLESS(GPUInstanceIdsBuffer);
 
 struct GPUMaterial
 {
@@ -169,8 +174,8 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_UINT vposb; // vertex positions buffer index
     ENG_TYPE_UINT vatrb; // vertex attributes buffer index
     ENG_TYPE_UINT vidxb; // index buffer index
-    ENG_TYPE_UINT rmbsb; // per-resource mesh bounding sphere buffer index
-    ENG_TYPE_UINT itrsb; // per-instance transform buffer index
+    ENG_TYPE_UINT GPUBoundingSpheresBufferIndex; // per-resource mesh bounding sphere buffer index
+    ENG_TYPE_UINT GPUTransformsBufferIndex; // per-instance transform buffer index
     ENG_TYPE_UINT rmatb; // per-instance material buffer index
     ENG_TYPE_UINT GPULightsBufferIndex; // lights buffer index
 

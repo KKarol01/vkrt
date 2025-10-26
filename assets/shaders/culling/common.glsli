@@ -8,22 +8,15 @@
 #ifndef NO_PUSH_CONSTANTS
 layout(scalar, push_constant) uniform PushConstants
 {
-    uint32_t engconstsb;
-    uint32_t imidb;
-    uint32_t hizsrct2d;
-    uint32_t hizdsti;
-    uint32_t dstcmdb;
-    uint32_t dstimidb;
+    uint32_t GPUEngConstantsBufferIndex;
+    uint32_t srcidsbi;
+    uint32_t dstidsbi;
+    uint32_t dstcmdsbi;
+    uint32_t hizsrcti;
+    uint32_t hizdstii;
+    uint32_t debug_bs;
+    uint32_t debug_dp;
 };
 #endif
-
-#define engconsts          gsb_GPUEngConstantsBuffer[engconstsb]
-#define transforms         gsb_GPUTransformsBuffer[engconsts.itrsb].transforms_us
-#define boundingspheres    gsb_GPUBoundingSpheresBuffer[engconsts.rmbsb].bounding_spheres_us
-#define srcids             gsb_GPUMeshletIdsBuffer[imidb]
-#define dstids             gsb_GPUMeshletIdsBuffer[dstimidb]
-#define dstcmds            gsb_GPUDrawIndexedIndirectCommandsBuffer[dstcmdb].commands_us
-#define hizsrc             gt_2d[hizsrct2d]
-#define hizdst             gsi_2dr32f[hizdsti]
 
 #endif

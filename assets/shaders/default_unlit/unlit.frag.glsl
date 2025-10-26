@@ -34,7 +34,7 @@ void main()
     
     float lgc = float(get_buf(GPUFWDPLightGrid).grids_us[tx].y);
 
-    uint matidx = get_buf2(GPUMeshletId, imidb).ids_us[imidb].matidx;
+    uint matidx = get_buf2(GPUInstanceId, imidb).ids_us[fsin.iidx].mati;
     GPUMaterial mat = get_buf2(GPUMaterial, get_buf(GPUEngConstant).rmatb).materials_us[matidx];
 
     vec4 color = vec4(vec3(colors[fsin.iidx % 10]), 1.0);

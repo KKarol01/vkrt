@@ -21,18 +21,11 @@ void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)
     this->queue = queue;
     this->on_buffer_resize = on_buffer_resize;
     cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-    for(auto i = 0u; i < CMD_COUNT; ++i)
-    {
-        cmds[i] = { CmdBufWrapper::INITIAL, cmdpool->allocate(),
-                    r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("staging_sem_{}", i) }) };
-    }
-    pending.reserve(cmds.size());
-    reset();
+    signaled_sync = r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 1, "staging signaled sync" });
 }
 
 void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
 {
-    flush()->wait_cpu(~0ull);
     auto& old = buffer.get();
     if(newsize <= old.capacity)
     {
@@ -46,6 +39,7 @@ void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
     if(newbuffer.memory) { memcpy(newbuffer.memory, old.memory, old.size); }
     else if(old.size > 0)
     {
+        flush()->wait_cpu(~0ull);
         get_cmd()->copy(newbuffer, old, 0, { 0, old.size });
         flush()->wait_cpu(~0ull);
     }
@@ -176,58 +170,70 @@ void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& 
 
 Sync* StagingBuffer::flush()
 {
-    if(pending.empty()) { return get_wrapper().sem; }
+    if(pending.empty()) { return signaled_sync; }
     auto* sem = pending.front()->sem;
-    for(auto& e : pending)
+    for(auto* e : pending)
     {
-        if(e->state == CmdBufWrapper::RECORDING) { cmdpool->end(e->cmd); }
-        e->state = CmdBufWrapper::PENDING;
+        if(e->state == CmdBufWrapper::State::RECORDING) { cmdpool->end(e->cmd); }
+        e->state = CmdBufWrapper::State::PENDING;
         queue->with_cmd_buf(e->cmd);
         queue->signal_sync(e->sem, PipelineStage::TRANSFER_BIT);
+        used.push_back(e);
     }
     queue->submit();
     pending.clear();
-    begin_new_cmd_buffer();
+    cmd = nullptr;
     return sem;
 }
 
 void StagingBuffer::reset()
 {
     flush();
-    for(auto i = 0u; i < cmds.size(); ++i)
+    for(auto i = 0u; i < used.size(); ++i)
     {
-        if(cmds.at(i).state == CmdBufWrapper::PENDING)
+        if(used.at(i)->state == CmdBufWrapper::State::PENDING)
         {
-            cmds.at(i).sem->wait_cpu(~0ull);
-            cmds.at(i).sem->reset();
+            used.at(i)->sem->wait_cpu(~0ull);
+            used.at(i)->sem->reset();
         }
-        cmds.at(i).state = CmdBufWrapper::INITIAL;
+        used.at(i)->state = CmdBufWrapper::State::INITIAL;
     }
     head = 0;
-    cmdhead = 0;
-    begin_new_cmd_buffer();
-    return;
+    used.clear();
+    cmd = nullptr;
 }
 
 void StagingBuffer::begin_new_cmd_buffer()
 {
-    for(auto i = 0u; i < cmds.size(); ++i)
-    {
-        const auto cmdi = (cmdhead + i) & (cmds.size() - 1);
-        auto& cmd = cmds.at(cmdi);
-        if(cmd.state == CmdBufWrapper::INITIAL || cmd.state == CmdBufWrapper::RECORDING)
+    auto* wrapper = [this] -> CmdBufWrapper* {
+        for(auto& e : wrappers)
         {
-            if(cmd.state == CmdBufWrapper::INITIAL)
+            for(auto& f : e)
             {
-                cmd.state = CmdBufWrapper::RECORDING;
-                cmdpool->begin(cmd.cmd);
-                pending.push_back(&cmd);
+                if(f.state == CmdBufWrapper::State::UNINITIALIZED || f.state == CmdBufWrapper::State::INITIAL)
+                {
+                    return &f;
+                }
             }
-            cmdhead = cmdi;
-            return;
         }
+        return nullptr;
+    }();
+    if(wrapper)
+    {
+        if(wrapper->state == CmdBufWrapper::State::UNINITIALIZED)
+        {
+            wrapper->cmd = cmdpool->allocate();
+            wrapper->sem =
+                Engine::get().renderer->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("sbuf sync") });
+            ENG_LOG("NEW BUFFER");
+        }
+        wrapper->state = CmdBufWrapper::State::RECORDING;
+        cmdpool->begin(wrapper->cmd);
+        cmd = wrapper;
+        pending.push_back(cmd);
+        return;
     }
-    reset();
+    wrappers.emplace_back().resize(32);
     begin_new_cmd_buffer();
 }
 
@@ -245,6 +251,20 @@ StagingBuffer::Allocation StagingBuffer::allocate(size_t size)
     void* mem = (std::byte*)buffer.memory + head;
     head += aligned_size;
     return { &buffer, mem, (uintptr_t)mem - (uintptr_t)buffer.memory, std::min(size, aligned_size) };
+}
+
+CommandBuffer* StagingBuffer::get_cmd()
+{
+    if(cmd) { return cmd->cmd; }
+    begin_new_cmd_buffer();
+    return cmd->cmd;
+}
+
+StagingBuffer::CmdBufWrapper& StagingBuffer::get_wrapper()
+{
+    if(cmd) { return *cmd; }
+    begin_new_cmd_buffer();
+    return *cmd;
 }
 
 } // namespace gfx

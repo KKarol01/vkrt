@@ -14,7 +14,7 @@ void main()
     vec3 pos = engvpos[gl_VertexIndex];
 
     GPUInstanceId id = get_id(gl_InstanceIndex);
-    vsout.position = vec3(get_trs(id.instidx) * vec4(pos, 1.0));
+    vsout.position = vec3(get_trs(id.insti) * vec4(pos, 1.0));
     gl_Position = get_buf(GPUEngConstant).proj_view * vec4(vsout.position, 1.0);
     vsout.normal = engvattrs[gl_VertexIndex].normal;
     vsout.uv = engvattrs[gl_VertexIndex].uv;

@@ -7,31 +7,31 @@ layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 bool frustum_cull(vec4 bounding_sphere)
 {
     // clang-format off
-    const vec4 pos = engconsts.prev_view * vec4(bounding_sphere.xyz, 1.0);
-    vec4 L = vec4(engconsts.proj[0][3] + engconsts.proj[0][0],
-                  engconsts.proj[1][3] + engconsts.proj[1][0],
-                  engconsts.proj[2][3] + engconsts.proj[2][0],
-                  engconsts.proj[3][3] + engconsts.proj[3][0]);
-    vec4 R = vec4(engconsts.proj[0][3] - engconsts.proj[0][0],
-                  engconsts.proj[1][3] - engconsts.proj[1][0],
-                  engconsts.proj[2][3] - engconsts.proj[2][0],
-                  engconsts.proj[3][3] - engconsts.proj[3][0]);
-    vec4 B = vec4(engconsts.proj[0][3] + engconsts.proj[0][1],
-                  engconsts.proj[1][3] + engconsts.proj[1][1],
-                  engconsts.proj[2][3] + engconsts.proj[2][1],
-                  engconsts.proj[3][3] + engconsts.proj[3][1]);
-    vec4 T = vec4(engconsts.proj[0][3] - engconsts.proj[0][1],
-                  engconsts.proj[1][3] - engconsts.proj[1][1],
-                  engconsts.proj[2][3] - engconsts.proj[2][1],
-                  engconsts.proj[3][3] - engconsts.proj[3][1]);
-    vec4 N = vec4(engconsts.proj[0][3] - engconsts.proj[0][2],
-                  engconsts.proj[1][3] - engconsts.proj[1][2],
-                  engconsts.proj[2][3] - engconsts.proj[2][2],
-                  engconsts.proj[3][3] - engconsts.proj[3][2]);
- // vec4 F = vec4(engconsts.proj[0][3] - engconsts.proj[0][2],
- //               engconsts.proj[1][3] - engconsts.proj[1][2],
- //               engconsts.proj[2][3] - engconsts.proj[2][2],
- //               engconsts.proj[3][3] - engconsts.proj[3][2]);
+    const vec4 pos = get_buf(GPUEngConstant).prev_view * vec4(bounding_sphere.xyz, 1.0);
+    vec4 L = vec4(get_buf(GPUEngConstant).proj[0][3] + get_buf(GPUEngConstant).proj[0][0],
+                  get_buf(GPUEngConstant).proj[1][3] + get_buf(GPUEngConstant).proj[1][0],
+                  get_buf(GPUEngConstant).proj[2][3] + get_buf(GPUEngConstant).proj[2][0],
+                  get_buf(GPUEngConstant).proj[3][3] + get_buf(GPUEngConstant).proj[3][0]);
+    vec4 R = vec4(get_buf(GPUEngConstant).proj[0][3] - get_buf(GPUEngConstant).proj[0][0],
+                  get_buf(GPUEngConstant).proj[1][3] - get_buf(GPUEngConstant).proj[1][0],
+                  get_buf(GPUEngConstant).proj[2][3] - get_buf(GPUEngConstant).proj[2][0],
+                  get_buf(GPUEngConstant).proj[3][3] - get_buf(GPUEngConstant).proj[3][0]);
+    vec4 B = vec4(get_buf(GPUEngConstant).proj[0][3] + get_buf(GPUEngConstant).proj[0][1],
+                  get_buf(GPUEngConstant).proj[1][3] + get_buf(GPUEngConstant).proj[1][1],
+                  get_buf(GPUEngConstant).proj[2][3] + get_buf(GPUEngConstant).proj[2][1],
+                  get_buf(GPUEngConstant).proj[3][3] + get_buf(GPUEngConstant).proj[3][1]);
+    vec4 T = vec4(get_buf(GPUEngConstant).proj[0][3] - get_buf(GPUEngConstant).proj[0][1],
+                  get_buf(GPUEngConstant).proj[1][3] - get_buf(GPUEngConstant).proj[1][1],
+                  get_buf(GPUEngConstant).proj[2][3] - get_buf(GPUEngConstant).proj[2][1],
+                  get_buf(GPUEngConstant).proj[3][3] - get_buf(GPUEngConstant).proj[3][1]);
+    vec4 N = vec4(get_buf(GPUEngConstant).proj[0][3] - get_buf(GPUEngConstant).proj[0][2],
+                  get_buf(GPUEngConstant).proj[1][3] - get_buf(GPUEngConstant).proj[1][2],
+                  get_buf(GPUEngConstant).proj[2][3] - get_buf(GPUEngConstant).proj[2][2],
+                  get_buf(GPUEngConstant).proj[3][3] - get_buf(GPUEngConstant).proj[3][2]);
+ // vec4 F = vec4(get_buf(GPUEngConstant).proj[0][3] - get_buf(GPUEngConstant).proj[0][2],
+ //               get_buf(GPUEngConstant).proj[1][3] - get_buf(GPUEngConstant).proj[1][2],
+ //               get_buf(GPUEngConstant).proj[2][3] - get_buf(GPUEngConstant).proj[2][2],
+ //               get_buf(GPUEngConstant).proj[3][3] - get_buf(GPUEngConstant).proj[3][2]);
 
     L /= length(L.xyz);
     R /= length(R.xyz);
@@ -72,24 +72,28 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
     return true;
 }
 
-bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
-    vec3 center = vec3(engconsts.prev_view * vec4(bounding_sphere.xyz, 1.0));
+bool occlusion_cull(vec4 bounding_sphere, float P00, float P11, out vec2 rp, out float rd, out float projd) {
+    vec3 center = vec3(get_buf(GPUEngConstant).view * vec4(bounding_sphere.xyz, 1.0));
     // -y because projection matrix does that
     // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.
     center.yz *= -1.0;
-    float radius = max(bounding_sphere.w, 1.0) * 1.0;
+    float radius = max(bounding_sphere.w, 0.4);
 	vec4 aabb;
 	if (project_sphere_bounds(vec3(center.xy, center.z), radius, 0.1, P00, P11, aabb))
 	{
-		float width = (aabb.z - aabb.x) * float(textureSize(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), 0).x);
-		float height = (aabb.w - aabb.y) * float(textureSize(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), 0).y);
+		float width = (aabb.z - aabb.x) * float(1280.0);
+		float height = (aabb.w - aabb.y) * float(768.0);
 
 		float level = floor(log2(max(width, height)));
 
-		float depth = textureLod(sampler2D(hizsrc, g_samplers[ENG_SAMPLER_LINEAR]), (aabb.xy + aabb.zw) * 0.5, level).x;
-
+		float depth = textureLod(sampler2D(gt_2d[hizsrcti], g_samplers[ENG_SAMPLER_LINEAR]), (aabb.xy + aabb.zw) * 0.5, level).x;
 		float depthSphere = 0.1 / (center.z - radius);
-		return depthSphere >= depth;
+
+		rd = depth;
+		projd = depthSphere;
+		rp = (aabb.xy + aabb.zw) * 0.5;
+
+		return depthSphere >= depth - 0.1;
 	}
     return true;
 }
@@ -97,18 +101,34 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
 void main()
 {
     const uint x = uint(gl_GlobalInvocationID.x);
-    if(srcids.count <= x) { return; }
+    if(get_buf2(GPUInstanceId, srcidsbi).count <= x) { return; }
 
-    GPUInstanceId id = srcids.ids_us[x];
-    vec4 bs = vec4(vec3(transforms[id.instidx] * vec4(boundingspheres[id.residx].xyz, 1.0)), boundingspheres[id.residx].w);
+    GPUInstanceId id = get_buf2(GPUInstanceId, srcidsbi).ids_us[x];
+    vec4 gpubs = get_bufb(GPUBoundingSphere, get_buf(GPUEngConstant)).bounding_spheres_us[id.resi];
+    vec4 bs = vec4(gpubs.xyz, 1.0);
+    bs.w = gpubs.w;
     // bs.w = max(bs.w, 0.5);
-    // bs.w *= 1.0;
+    bs.w *= 1.0;
 
-    if(frustum_cull(bs) && occlusion_cull(bs, engconsts.proj[0][0], engconsts.proj[1][1]))
+	vec4 center = get_buf(GPUEngConstant).proj *  get_buf(GPUEngConstant).view * vec4(bs.xyz, 1.0);
+	center /= center.w;
+	center.xy = (center.xy * 0.5 + 0.5) * vec2(1280, 768);
+
+	vec2 rp = vec2(0.0);
+	float rd = 0.0;
+	float pd = 0.0;
+
+    if(occlusion_cull(bs, get_buf(GPUEngConstant).proj[0][0], get_buf(GPUEngConstant).proj[1][1], rp, rd, pd))
     {
-        const uint off = atomicAdd(dstcmds[id.batch_id].instanceCount, 1);
-        atomicAdd(dstids.count, 1);
-        // atomicAdd(dstcmds.count, indirect_cmds.commands_us[id.batch_id].indexCount / 3);
-        dstids.ids_us[dstcmds[id.batch_id].firstInstance + off] = id;
-    }
+        const uint off = atomicAdd(get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].instanceCount, 1);
+        //atomicAdd(get_buf2(GPUInstanceId, dstidsbi).count, 1);
+        get_buf2(GPUInstanceId, dstidsbi).ids_us[get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].firstInstance + off] = id;
+		imageStore(gsi_2drgba32f[debug_bs], ivec2(center.xy), vec4(1.0));
+		imageStore(gsi_2drgba32f[debug_bs], ivec2(rp * vec2(1280, 768)), vec4(1.0));
+	} 
+	else
+	{
+		imageStore(gsi_2drgba32f[debug_bs], ivec2(center.xy), vec4(1.0));
+		imageStore(gsi_2drgba32f[debug_bs], ivec2(rp * vec2(1280, 768)), vec4(1.0));
+	}
 }
