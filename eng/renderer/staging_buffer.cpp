@@ -191,12 +191,11 @@ void StagingBuffer::reset()
     flush();
     for(auto i = 0u; i < used.size(); ++i)
     {
-        if(used.at(i)->state == CmdBufWrapper::State::PENDING)
+        if(used.at(i)->state == CmdBufWrapper::State::PENDING && used.at(i)->sem->wait_cpu(0) == VK_SUCCESS)
         {
-            used.at(i)->sem->wait_cpu(~0ull);
             used.at(i)->sem->reset();
+            used.at(i)->state = CmdBufWrapper::State::INITIAL;
         }
-        used.at(i)->state = CmdBufWrapper::State::INITIAL;
     }
     head = 0;
     used.clear();
