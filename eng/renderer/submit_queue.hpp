@@ -112,7 +112,7 @@ struct Sync
     void init(const SyncCreateInfo& info);
     void destroy();
     void signal_cpu(uint64_t value = ~0ull);
-    VkResult wait_cpu(size_t timeout, uint64_t value = ~0ull);
+    VkResult wait_cpu(size_t timeout, uint64_t value = ~0ull) const;
     uint64_t signal_gpu(uint64_t value = ~0ull);
     uint64_t wait_gpu(uint64_t value = ~0ull);
     void reset(uint64_t value = 0);
@@ -130,7 +130,7 @@ class SubmitQueue
 {
     struct Submission
     {
-        std::vector<Sync*> wait_sems;
+        std::vector<const Sync*> wait_sems;
         std::vector<uint64_t> wait_values;
         std::vector<Flags<PipelineStage>> wait_stages;
         std::vector<Sync*> signal_sems;

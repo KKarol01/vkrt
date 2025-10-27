@@ -225,7 +225,6 @@ void StagingBuffer::begin_new_cmd_buffer()
             wrapper->cmd = cmdpool->allocate();
             wrapper->sem =
                 Engine::get().renderer->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("sbuf sync") });
-            ENG_LOG("NEW BUFFER");
         }
         wrapper->state = CmdBufWrapper::State::RECORDING;
         cmdpool->begin(wrapper->cmd);

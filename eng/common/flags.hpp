@@ -8,6 +8,14 @@
     constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept                                             \
     {                                                                                                                  \
         return Flags<Type>{ a } | Flags<Type>{ b };                                                                    \
+    }                                                                                                                  \
+    constexpr Flags<Type> operator^(const Type& a, const Type& b) noexcept                                             \
+    {                                                                                                                  \
+        return Flags<Type>{ a } ^ Flags<Type>{ b };                                                                    \
+    }                                                                                                                  \
+    constexpr Flags<Type> operator&=(const Type& a, const Type& b) noexcept                                            \
+    {                                                                                                                  \
+        return Flags<Type>{ a } &= Flags<Type>{ b };                                                                   \
     }
 
 template <typename T> struct Flags
@@ -21,6 +29,7 @@ template <typename T> struct Flags
     constexpr auto operator<=>(const Flags<T>& a) const noexcept = default;
     constexpr Flags<T> operator|(Flags<T> a) const noexcept { return Flags<T>{ flags | a.flags }; }
     constexpr Flags<T> operator&(Flags<T> a) const noexcept { return Flags<T>{ a.flags & flags }; }
+    constexpr Flags<T> operator^(Flags<T> a) const noexcept { return Flags<T>{ a.flags ^ flags }; }
     constexpr Flags<T> operator~() const noexcept { return Flags<T>{ ~flags }; }
     constexpr Flags<T>& operator|=(Flags<T> f) noexcept
     {
@@ -58,8 +67,8 @@ template <typename T> struct Flags
 
 namespace std
 {
-    template<typename T> struct hash<Flags<T>>
-    {
-        size_t operator()(const Flags<T>& t) const noexcept { return eng::hash::combine_fnv1a(t.flags); }
-    };
-}
+template <typename T> struct hash<Flags<T>>
+{
+    size_t operator()(const Flags<T>& t) const noexcept { return eng::hash::combine_fnv1a(t.flags); }
+};
+} // namespace std

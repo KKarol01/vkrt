@@ -341,7 +341,7 @@ void Sync::signal_cpu(uint64_t value)
     this->value = value;
 }
 
-VkResult Sync::wait_cpu(size_t timeout, uint64_t value)
+VkResult Sync::wait_cpu(size_t timeout, uint64_t value) const
 {
     if(type == UNKNOWN)
     {
@@ -398,6 +398,7 @@ CommandPool* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
 
 SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
 {
+    assert(sync);
     if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
     {
         submission.wait_sems.push_back(sync);

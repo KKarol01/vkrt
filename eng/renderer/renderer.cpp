@@ -406,11 +406,6 @@ void Renderer::update()
         new_lights.clear();
     }
 
-    auto& fwdrp = render_passes[(uint32_t)MeshPassType::FORWARD];
-    const auto ZERO = 0u;
-    sbuf->copy(pf.culling.cmd_buf, fwdrp.cmd_buf, 0, { 0, fwdrp.cmd_buf->size });
-    sbuf->copy(pf.culling.ids_buf, &ZERO, 0, 4);
-
     pf.ren_fen->wait_cpu(~0ull);
     pf.ren_fen->reset();
     pf.acq_sem->reset();
@@ -418,7 +413,6 @@ void Renderer::update()
     pf.swp_sem->reset();
     pf.cmdpool->reset();
     swapchain->acquire(~0ull, pf.acq_sem);
-    sbuf->reset();
 
     const auto view = Engine::get().camera->get_view();
     const auto proj = Engine::get().camera->get_projection();
@@ -452,6 +446,11 @@ void Renderer::update()
     {
         process_meshpass((MeshPassType)i);
     }
+    auto& fwdrp = render_passes[(uint32_t)MeshPassType::FORWARD];
+    const auto ZERO = 0u;
+    sbuf->copy(pf.culling.cmd_buf, fwdrp.cmd_buf, 0, { 0, fwdrp.cmd_buf->size });
+    sbuf->copy(pf.culling.ids_buf, &ZERO, 0, 4);
+
     if(pf.culling.ids_buf->capacity < render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size)
     {
         sbuf->resize(pf.culling.ids_buf, render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size);
@@ -462,20 +461,16 @@ void Renderer::update()
         sbuf->copy(pf.fwdp.light_list_buf, &zero, 0ull, 4);
     }
 
-    gq->wait_sync(sbuf->flush(), PipelineStage::ALL);
-
     if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS)
     {
         rgraph->add_pass(
             RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::DEFAULT_UNLIT },
             [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
                 const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-                b.access(ppf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT,
-                         PipelineAccess::SHADER_READ_BIT);
-                b.access(ppf.culling.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT,
-                         PipelineAccess::SHADER_READ_BIT);
-                b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::RW, PipelineStage::EARLY_Z_BIT,
-                         PipelineAccess::DS_RW, ImageLayout::ATTACHMENT, true);
+                b.access(ppf.culling.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+                b.access(ppf.culling.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+                b.access(pf.gbuffer.depth->default_view, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW,
+                         ImageLayout::ATTACHMENT, true);
             },
             [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
                 const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
@@ -503,10 +498,10 @@ void Renderer::update()
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_READ_BIT, ImageLayout::READ_ONLY);
-            b.access(pf.culling.hizpyramid->default_view, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_RW, ImageLayout::GENERAL, true);
+            b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT,
+                     ImageLayout::READ_ONLY);
+            b.access(pf.culling.hizpyramid->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW,
+                     ImageLayout::GENERAL, true);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
@@ -536,11 +531,11 @@ void Renderer::update()
     // rgraph->add_pass(
     //     RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
     //     [&pf, this](RenderGraph::PassResourceBuilder& b) {
-    //         b.access(bufs.fwdp_frustums_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+    //         b.access(bufs.fwdp_frustums_buf, PipelineStage::COMPUTE_BIT,
     //                  PipelineAccess::SHADER_READ_BIT);
-    //         b.access(pf.fwdp.light_list_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-    //         b.access(pf.fwdp.light_grid_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-    //         b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
+    //         b.access(pf.fwdp.light_list_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+    //         b.access(pf.fwdp.light_grid_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+    //         b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT,
     //                  PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
     //     },
     //     [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
@@ -552,31 +547,26 @@ void Renderer::update()
     //         cmd->bind_resource(4, bufs.fwdp_frustums_buf);
     //         cmd->bind_resource(5, pf.fwdp.light_grid_buf);
     //         cmd->bind_resource(6, pf.fwdp.light_list_buf);
-    //         cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
-    //         const auto* w = Engine::get().window;
-    //         auto dx = (uint32_t)w->width;
-    //         auto dy = (uint32_t)w->height;
-    //         dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all the pixels in 16x16 workgroups
-    //         dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+    //         cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view,
+    //         ImageLayout::GENERAL, true })); const auto* w = Engine::get().window; auto dx = (uint32_t)w->width; auto
+    //         dy = (uint32_t)w->height; dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all
+    //         the pixels in 16x16 workgroups dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
     //         // cmd->dispatch(1, 1, 1);
     //     });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(rp.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(rp.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
-            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
+            b.access(rp.ids_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(rp.cmd_buf, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+            b.access(pf.culling.cmd_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                      PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(pf.culling.ids_buf, RenderGraph::AccessType::RW, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
+            b.access(pf.culling.ids_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                      PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(pf.culling.hizptex->view, RenderGraph::AccessType::READ_BIT, PipelineStage::COMPUTE_BIT,
-                     PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
-            b.access(pf.culling.debug_bsphere->default_view, RenderGraph::AccessType::RW,
-                     PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
+            b.access(pf.culling.hizptex->view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
+            b.access(pf.culling.debug_bsphere->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                      PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
-            b.access(pf.culling.debug_depth->default_view, RenderGraph::AccessType::RW,
-                     PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
+            b.access(pf.culling.debug_depth->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                      PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
@@ -585,11 +575,6 @@ void Renderer::update()
             pf.culling.cmd_start = rp.cmd_start;
             pf.culling.cmd_count = rp.cmd_count;
             pf.culling.id_count = rp.id_count;
-            // const uint32_t zero = 0;
-            //  sbuf->copy(pf.culling.cmd_buf, rp.cmd_buf, 0, { 0, rp.cmd_buf->size });
-            //   sbuf->copy(pf.culling.ids_buf, &zero, 0, 4);
-            //  q->wait_sync(sbuf->flush());
-            //   sbuf->flush()->wait_cpu(~0ull);
 
             cmd->clear_color(pf.culling.debug_bsphere.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
             cmd->clear_color(pf.culling.debug_depth.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
@@ -610,30 +595,28 @@ void Renderer::update()
         RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
             const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(pf.culling.cmd_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.culling.ids_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COLOR_OUT_BIT,
-                     PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT, true);
-            b.access(pf.gbuffer.depth->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::EARLY_Z_BIT,
-                     PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
-            b.access(pf.fwdp.light_grid_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.fwdp.light_list_buf, RenderGraph::AccessType::READ_BIT, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.culling.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.culling.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.gbuffer.color->default_view, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT,
+                     ImageLayout::ATTACHMENT, true);
+            b.access(pf.gbuffer.depth->default_view, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
+            b.access(pf.fwdp.light_grid_buf, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.fwdp.light_list_buf, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
         },
         [this](SubmitQueue* q, CommandBuffer* cmd) { render(MeshPassType::FORWARD, q, cmd); });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "imgui", RenderOrder::PRESENT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::WRITE_BIT, PipelineStage::COLOR_OUT_BIT,
-                     PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT);
+            b.access(pf.gbuffer.color->default_view, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT,
+                     ImageLayout::ATTACHMENT);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) { imgui_renderer->update(cmd, pf.gbuffer.color->default_view); });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "present copy", RenderOrder::PRESENT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.gbuffer.color->default_view, RenderGraph::AccessType::READ_BIT, PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::TRANSFER_READ_BIT, ImageLayout::TRANSFER_SRC);
-            b.access(swapchain->get_view(), RenderGraph::AccessType::WRITE_BIT, PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::TRANSFER_DST);
+            b.access(pf.gbuffer.color->default_view, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT,
+                     ImageLayout::TRANSFER_SRC);
+            b.access(swapchain->get_view(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::TRANSFER_DST);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             cmd->copy(swapchain->get_image().get(), pf.gbuffer.color.get());
@@ -641,21 +624,22 @@ void Renderer::update()
         });
 
     rgraph->compile();
-    rgraph->render();
+    auto* rgsync = rgraph->execute(sbuf->flush());
 
     auto* cmd = pf.cmdpool->begin();
     cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL,
                  PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
     pf.cmdpool->end(cmd);
 
-    gq->wait_sync(sbuf->flush())
-        .wait_sync(pf.acq_sem, PipelineStage::ALL)
+    gq->wait_sync(pf.acq_sem, PipelineStage::ALL)
+        .wait_sync(rgsync, PipelineStage::ALL)
         .with_cmd_buf(cmd)
         .signal_sync(pf.swp_sem, PipelineStage::NONE)
         .signal_sync(pf.ren_fen)
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
     gq->wait_idle();
+    sbuf->reset();
 }
 
 void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
