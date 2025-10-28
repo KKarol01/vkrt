@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <array>
+#include <deque>
 #include <eng/common/types.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
@@ -19,27 +19,28 @@ class StagingBuffer
     static constexpr auto CAPACITY = 64ull * 1024 * 1024;
     static constexpr auto ALIGNMENT = 512ull;
 
-    struct CmdBufWrapper
+    struct Transaction
     {
         enum class State
         {
             UNINITIALIZED,
             INITIAL,
             RECORDING,
-            EXECUTABLE,
             PENDING
         };
         State state{ State::UNINITIALIZED };
         CommandBuffer* cmd{};
-        Sync* sem{};
+        Sync* sync{};
     };
 
     struct Allocation
     {
+        Transaction* transaction{};
         Buffer* buf{};
         void* mem{};
         size_t offset{};
-        size_t size{};
+        size_t realsize{}; // actual size
+        size_t size{};     // min of realsize and user-requested size
     };
 
   public:
@@ -59,10 +60,10 @@ class StagingBuffer
     void reset();
 
   private:
-    void begin_new_cmd_buffer();
     Allocation allocate(size_t size);
+    Transaction& get_transaction();
     CommandBuffer* get_cmd();
-    CmdBufWrapper& get_wrapper();
+    Sync* get_sync();
 
     size_t head{};
     Buffer buffer;
@@ -70,11 +71,13 @@ class StagingBuffer
     Callback<void(Handle<Buffer>)> on_buffer_resize;
 
     CommandPool* cmdpool{};
-    CmdBufWrapper* cmd{};
-    Sync* signaled_sync{};
-    std::vector<std::vector<CmdBufWrapper>> wrappers;
-    std::vector<CmdBufWrapper*> pending;
-    std::vector<CmdBufWrapper*> used;
+    Sync* dummy_sync{};
+    std::deque<Transaction> transactions;
+    std::vector<Allocation> allocations;
+    std::deque<Sync*> syncs;
+    std::deque<CommandBuffer*> cmds;
+    std::vector<Transaction*> staged;
+    std::vector<Allocation> free_allocs;
 };
 
 } // namespace gfx

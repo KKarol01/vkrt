@@ -528,31 +528,32 @@ void Renderer::update()
                              PipelineAccess::SHADER_RW);
             }
         });
-    // rgraph->add_pass(
-    //     RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
-    //     [&pf, this](RenderGraph::PassResourceBuilder& b) {
-    //         b.access(bufs.fwdp_frustums_buf, PipelineStage::COMPUTE_BIT,
-    //                  PipelineAccess::SHADER_READ_BIT);
-    //         b.access(pf.fwdp.light_list_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-    //         b.access(pf.fwdp.light_grid_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-    //         b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT,
-    //                  PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
-    //     },
-    //     [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-    //         cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
-    //         cmd->bind_resource(0, pf.constants);
-    //         cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
-    //         cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
-    //         cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
-    //         cmd->bind_resource(4, bufs.fwdp_frustums_buf);
-    //         cmd->bind_resource(5, pf.fwdp.light_grid_buf);
-    //         cmd->bind_resource(6, pf.fwdp.light_list_buf);
-    //         cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view,
-    //         ImageLayout::GENERAL, true })); const auto* w = Engine::get().window; auto dx = (uint32_t)w->width; auto
-    //         dy = (uint32_t)w->height; dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all
-    //         the pixels in 16x16 workgroups dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-    //         // cmd->dispatch(1, 1, 1);
-    //     });
+    rgraph->add_pass(
+        RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
+        [&pf, this](RenderGraph::PassResourceBuilder& b) {
+            b.access(bufs.fwdp_frustums_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.fwdp.light_list_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.fwdp.light_grid_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
+            b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT,
+                     ImageLayout::GENERAL);
+        },
+        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
+            cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
+            cmd->bind_resource(0, pf.constants);
+            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
+            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
+            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
+            cmd->bind_resource(4, bufs.fwdp_frustums_buf);
+            cmd->bind_resource(5, pf.fwdp.light_grid_buf);
+            cmd->bind_resource(6, pf.fwdp.light_list_buf);
+            cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
+            const auto* w = Engine::get().window;
+            auto dx = (uint32_t)w->width;
+            auto dy = (uint32_t)w->height;
+            dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all
+            // the pixels in 16x16 workgroups dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+            //cmd->dispatch(1, 1, 1);
+        });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {

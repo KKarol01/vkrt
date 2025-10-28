@@ -21,7 +21,7 @@ void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)
     this->queue = queue;
     this->on_buffer_resize = on_buffer_resize;
     cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-    signaled_sync = r->make_sync({ SyncType::TIMELINE_SEMAPHORE, 1, "staging signaled sync" });
+    dummy_sync = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "sbuf dummy sync" });
 }
 
 void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
@@ -39,9 +39,9 @@ void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
     if(newbuffer.memory) { memcpy(newbuffer.memory, old.memory, old.size); }
     else if(old.size > 0)
     {
-        flush()->wait_cpu(~0ull);
-        get_cmd()->copy(newbuffer, old, 0, { 0, old.size });
-        flush()->wait_cpu(~0ull);
+        flush(); // flush any previous transactions that might've been done for that buffer.
+        get_transaction().cmd->copy(newbuffer, old, 0, { 0, old.size });
+        flush(); // copy contents to new buffer and wait for completion before destroying the old one.
     }
     VkBufferMetadata::destroy(old);
     old = std::move(newbuffer);
@@ -59,9 +59,11 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
     }
     else
     {
-        get_cmd()->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
-        get_cmd()->copy(dst.get(), src.get(), dst_offset, range);
-        get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::ALL, PipelineAccess::NONE);
+        get_transaction().cmd->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                       PipelineAccess::TRANSFER_RW);
+        get_transaction().cmd->copy(dst.get(), src.get(), dst_offset, range);
+        get_transaction().cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::ALL,
+                                       PipelineAccess::NONE);
     }
     dst->size = std::max(dst->size, dst_offset + range.size);
 }
@@ -79,9 +81,11 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
         {
             auto alloc = allocate(src_size - uploaded);
             memcpy(alloc.mem, (const std::byte*)src + uploaded, alloc.size);
-            get_cmd()->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
-            get_cmd()->copy(dst.get(), buffer, dst_offset + uploaded, { alloc.offset, alloc.size });
-            get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::ALL, PipelineAccess::NONE);
+            get_transaction().cmd->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                           PipelineAccess::TRANSFER_RW);
+            get_transaction().cmd->copy(dst.get(), buffer, dst_offset + uploaded, { alloc.offset, alloc.size });
+            get_transaction().cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::ALL,
+                                           PipelineAccess::NONE);
             uploaded += alloc.size;
         }
     }
@@ -99,8 +103,8 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout f
     const auto rowsize = bx * block_data.size;
     const auto imgsize = bcount * block_data.size;
 
-    get_cmd()->barrier(img, PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-                       PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
+    get_transaction().cmd->barrier(img, PipelineStage::NONE, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                   PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
     size_t upbytes = 0;
     while(upbytes < imgsize)
     {
@@ -123,11 +127,11 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout f
             .imageOffset = { 0, (int32_t)(urows * block_data.y), (int32_t)(uslices * block_data.z) },
             .imageExtent = { img.width, (uint32_t)(alrows * block_data.y), (uint32_t)(alslices * block_data.z) } });
         memcpy(alloc.mem, (std::byte*)src + upbytes, alloc.size);
-        get_cmd()->copy(img, buffer, &copy, 1);
+        get_transaction().cmd->copy(img, buffer, &copy, 1);
         upbytes += alrows * rowsize;
     }
-    get_cmd()->barrier(img, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
-                       PipelineAccess::NONE, ImageLayout::TRANSFER_DST, final_layout);
+    get_transaction().cmd->barrier(img, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
+                                   PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::TRANSFER_DST, final_layout);
 
     assert(upbytes == imgsize);
 }
@@ -139,15 +143,15 @@ void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& 
     assert(oldsrcl != ImageLayout::UNDEFINED);
     const auto dstrange = ImageSubRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
     const auto srcrange = ImageSubRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
-    get_cmd()->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-                       PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
-    get_cmd()->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-                       PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
-    get_cmd()->copy(dst.get(), src.get(), copy, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC);
-    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
-                       PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
-    get_cmd()->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT, PipelineStage::ALL,
-                       PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
+    get_transaction().cmd->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                   PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
+    get_transaction().cmd->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                   PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
+    get_transaction().cmd->copy(dst.get(), src.get(), copy, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC);
+    get_transaction().cmd->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
+                                   PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
+    get_transaction().cmd->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT,
+                                   PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
 }
 
 void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit, ImageLayout dst_final_layout)
@@ -156,113 +160,187 @@ void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& 
     assert(oldsrcl != ImageLayout::UNDEFINED);
     const auto dstrange = ImageSubRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
     const auto srcrange = ImageSubRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
-    get_cmd()->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-                       PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
-    get_cmd()->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-                       PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
+    get_transaction().cmd->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                   PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
+    get_transaction().cmd->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
+                                   PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
 
-    get_cmd()->blit(dst.get(), src.get(), blit, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageFilter::LINEAR);
-    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
-                       PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
-    get_cmd()->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT, PipelineStage::ALL,
-                       PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
+    get_transaction().cmd->blit(dst.get(), src.get(), blit, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageFilter::LINEAR);
+    get_transaction().cmd->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
+                                   PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
+    get_transaction().cmd->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT,
+                                   PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
 }
 
+// main idea of flush:
+// 1. if no transactions staged: return nullptr - no sync to wait on.
+// 2. go over the staged ones, changed their states to pending
+// 3. submit.
 Sync* StagingBuffer::flush()
 {
-    if(pending.empty()) { return signaled_sync; }
-    auto* sem = pending.front()->sem;
-    for(auto* e : pending)
+    if(staged.empty()) { return dummy_sync; }
+    auto* sem = staged.front()->sync;
+    for(auto* e : staged)
     {
-        if(e->state == CmdBufWrapper::State::RECORDING) { cmdpool->end(e->cmd); }
-        e->state = CmdBufWrapper::State::PENDING;
+        if(e->state == Transaction::State::RECORDING) { cmdpool->end(e->cmd); }
+        e->state = Transaction::State::PENDING;
         queue->with_cmd_buf(e->cmd);
-        queue->signal_sync(e->sem, PipelineStage::TRANSFER_BIT);
-        used.push_back(e);
+        queue->signal_sync(e->sync, PipelineStage::TRANSFER_BIT);
     }
     queue->submit();
-    pending.clear();
-    cmd = nullptr;
+    staged.clear();
     return sem;
 }
 
+// main idea of reset
+// 1. flush any staged
+// 2. start removing oldest transactions until failure.
+// 3. on each success, reset sync, cmd, add them to their free lists
+// 4. remove all the allocations belonging to the deleted transactions
+//    and put them in the free allocs for later allocs.
+// 5. actually remove transactions with pop_front to not disturb pointers/refs to other transactions.
+// 6. optionally, if all the transactions have completed and have been deleted,
+//    reset everything, with buffer head and free allocs
 void StagingBuffer::reset()
 {
     flush();
-    for(auto i = 0u; i < used.size(); ++i)
+    assert(staged.empty());
+    auto it = transactions.begin();
+    while(it != transactions.end())
     {
-        if(used.at(i)->state == CmdBufWrapper::State::PENDING && used.at(i)->sem->wait_cpu(0) == VK_SUCCESS)
+        if(it->state == Transaction::State::PENDING && it->sync->wait_cpu(0) == VK_SUCCESS)
         {
-            used.at(i)->sem->reset();
-            used.at(i)->state = CmdBufWrapper::State::INITIAL;
+            it->sync->reset();
+            cmdpool->reset(it->cmd);
+            cmds.push_back(it->cmd);
+            syncs.push_back(it->sync);
+            ++it;
+            continue;
         }
+        break;
     }
-    head = 0;
-    used.clear();
-    cmd = nullptr;
+    bool sort_free_allocs = false;
+    for(auto dit = transactions.begin(); dit != it; ++dit)
+    {
+        auto sit = std::remove_if(allocations.begin(), allocations.end(), [dit](const auto& e) {
+            assert(e.transaction);
+            return e.transaction == &*dit;
+        });
+        for(auto it = sit; it != allocations.end(); ++it)
+        {
+            it->transaction = nullptr;
+            free_allocs.push_back(*it);
+            sort_free_allocs = true;
+        }
+        allocations.erase(sit, allocations.end());
+    }
+    if(sort_free_allocs)
+    {
+        std::sort(free_allocs.begin(), free_allocs.end(),
+                  [](const auto& a, const auto& b) { return a.realsize < b.realsize; });
+    }
+    const auto delcount = std::distance(transactions.begin(), it);
+    for(auto i = 0u; i < delcount; ++i)
+    {
+        transactions.pop_front();
+    }
+    if(transactions.empty())
+    {
+        assert(allocations.empty());
+        assert(cmds.size());
+        assert(syncs.size());
+        head = 0;
+        free_allocs.clear();
+    }
 }
 
-void StagingBuffer::begin_new_cmd_buffer()
-{
-    auto* wrapper = [this] -> CmdBufWrapper* {
-        for(auto& e : wrappers)
-        {
-            for(auto& f : e)
-            {
-                if(f.state == CmdBufWrapper::State::UNINITIALIZED || f.state == CmdBufWrapper::State::INITIAL)
-                {
-                    return &f;
-                }
-            }
-        }
-        return nullptr;
-    }();
-    if(wrapper)
-    {
-        if(wrapper->state == CmdBufWrapper::State::UNINITIALIZED)
-        {
-            wrapper->cmd = cmdpool->allocate();
-            wrapper->sem =
-                Engine::get().renderer->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("sbuf sync") });
-        }
-        wrapper->state = CmdBufWrapper::State::RECORDING;
-        cmdpool->begin(wrapper->cmd);
-        cmd = wrapper;
-        pending.push_back(cmd);
-        return;
-    }
-    wrappers.emplace_back().resize(32);
-    begin_new_cmd_buffer();
-}
-
+// main idea of this algorithm:
+// 1. if there is free memory - allocate.
+// 2. if no free space in the buffer, look for free alocs
+// 3. allocs are sorted in ascending size, so pick the first one that is big enough.
+// 4. if there is no big enough, get the biggest one.
+// 5. if no free allocs, and no memory, call reset, and repeat.
 StagingBuffer::Allocation StagingBuffer::allocate(size_t size)
 {
-    auto free_space = CAPACITY - head;
-    if(free_space == 0)
+    while(true)
     {
-        reset();
-        free_space = CAPACITY;
+        auto free_space = CAPACITY - head;
+        if(free_space == 0)
+        {
+            auto it = std::upper_bound(free_allocs.begin(), free_allocs.end(), size,
+                                       [](const auto size, const auto& iter) { return size < iter.realsize; });
+            if(it == free_allocs.end() && free_allocs.size() > 0) { it = it - 1; }
+            if(it != free_allocs.end())
+            {
+                auto fa = free_allocs.back();
+                free_allocs.pop_back();
+                fa.transaction = &get_transaction();
+                fa.size = std::min(size, fa.realsize);
+                return fa;
+            }
+            reset();
+            continue;
+        }
+        assert(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
+        const auto aligned_size = std::min(align_up2(size, ALIGNMENT), free_space);
+        assert(aligned_size % ALIGNMENT == 0 && aligned_size <= free_space);
+        void* mem = (std::byte*)buffer.memory + head;
+        head += aligned_size;
+        Allocation alloc{
+            &get_transaction(),          &buffer, mem, (uintptr_t)mem - (uintptr_t)buffer.memory, aligned_size,
+            std::min(aligned_size, size)
+        };
+        allocations.push_back(alloc);
+        return alloc;
     }
-    assert(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
-    const auto aligned_size = std::min(align_up2(size, ALIGNMENT), free_space);
-    assert(aligned_size % ALIGNMENT == 0 && aligned_size <= free_space);
-    void* mem = (std::byte*)buffer.memory + head;
-    head += aligned_size;
-    return { &buffer, mem, (uintptr_t)mem - (uintptr_t)buffer.memory, std::min(size, aligned_size) };
+}
+
+// 1. find one recording
+// 2. if failed, make new one.
+StagingBuffer::Transaction& StagingBuffer::get_transaction()
+{
+    if(transactions.empty()) { transactions.emplace_back(); }
+    if(transactions.back().state != Transaction::State::RECORDING)
+    {
+        auto& back = transactions.back();
+        if(back.state == Transaction::State::UNINITIALIZED)
+        {
+            back.state = Transaction::State::INITIAL;
+            back.cmd = get_cmd();
+            back.sync = get_sync();
+        }
+        if(back.state == Transaction::State::INITIAL)
+        {
+            back.state = Transaction::State::RECORDING;
+            cmdpool->begin(back.cmd);
+            staged.push_back(&back);
+        }
+        if(back.state == Transaction::State::PENDING)
+        {
+            transactions.emplace_back();
+            return get_transaction();
+        }
+    }
+    return transactions.back();
 }
 
 CommandBuffer* StagingBuffer::get_cmd()
 {
-    if(cmd) { return cmd->cmd; }
-    begin_new_cmd_buffer();
-    return cmd->cmd;
+    if(cmds.empty()) { return cmdpool->allocate(); }
+    auto* back = cmds.back();
+    cmds.pop_back();
+    return back;
 }
 
-StagingBuffer::CmdBufWrapper& StagingBuffer::get_wrapper()
+Sync* StagingBuffer::get_sync()
 {
-    if(cmd) { return *cmd; }
-    begin_new_cmd_buffer();
-    return *cmd;
+    if(syncs.empty())
+    {
+        return Engine::get().renderer->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "staging sync" });
+    }
+    auto* back = syncs.back();
+    syncs.pop_back();
+    return back;
 }
 
 } // namespace gfx
