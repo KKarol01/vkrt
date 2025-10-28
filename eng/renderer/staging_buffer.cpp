@@ -173,7 +173,7 @@ void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& 
 }
 
 // main idea of flush:
-// 1. if no transactions staged: return nullptr - no sync to wait on.
+// 1. if no transactions staged: return dummy, always signaled, sync.
 // 2. go over the staged ones, changed their states to pending
 // 3. submit.
 Sync* StagingBuffer::flush()
