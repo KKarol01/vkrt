@@ -39,9 +39,9 @@ void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
     if(newbuffer.memory) { memcpy(newbuffer.memory, old.memory, old.size); }
     else if(old.size > 0)
     {
-        flush(); // flush any previous transactions that might've been done for that buffer.
+        flush()->wait_cpu(~0ull); // flush any previous transactions that might've been done for that buffer.
         get_transaction().cmd->copy(newbuffer, old, 0, { 0, old.size });
-        flush(); // copy contents to new buffer and wait for completion before destroying the old one.
+        flush()->wait_cpu(~0ull); // copy contents to new buffer and wait for completion before destroying the old one.
     }
     VkBufferMetadata::destroy(old);
     old = std::move(newbuffer);
