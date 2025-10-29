@@ -276,7 +276,9 @@ void StagingBuffer::reset()
         assert(syncs.size());
         head = 0;
         free_allocs.clear();
+#ifdef ENG_SBUF_DEBUG_STATS
         debugstats.reset();
+#endif
     }
 }
 
