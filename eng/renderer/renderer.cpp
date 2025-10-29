@@ -552,7 +552,7 @@ void Renderer::update()
             auto dy = (uint32_t)w->height;
             dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all
             // the pixels in 16x16 workgroups dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-            //cmd->dispatch(1, 1, 1);
+            // cmd->dispatch(1, 1, 1);
         });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
@@ -829,7 +829,7 @@ Handle<Image> Renderer::make_image(const ImageDescriptor& info)
     h->default_view = make_view(ImageViewDescriptor{ .name = ENG_FMT("{}_default", info.name), .image = h });
     if(info.data.size_bytes())
     {
-        sbuf->copy(h, info.data.data(), ImageLayout::READ_ONLY);
+        sbuf->copy(h, info.data.data());
         for(auto i = 0u; i < info.mips - 1; ++i)
         {
             const Range3D32i srcsz{
@@ -838,8 +838,11 @@ Handle<Image> Renderer::make_image(const ImageDescriptor& info)
             const Range3D32i dstsz{ { 0, 0, 0 },
                                     { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
                                       std::max(srcsz.size.z >> 1, 1) } };
-            sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz }, ImageLayout::READ_ONLY);
+            sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
+            sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageSubRange{ { i + 1, 1 }, { 0, 1 } });
+            sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz });
         }
+        sbuf->barrier(h, ImageLayout::READ_ONLY);
     }
     return h;
 }

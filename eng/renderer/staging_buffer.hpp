@@ -1,5 +1,7 @@
 #pragma once
 
+#define ENG_SBUF_DEBUG_STATS
+
 #include <vector>
 #include <deque>
 #include <eng/common/types.hpp>
@@ -43,6 +45,12 @@ class StagingBuffer
         size_t size{};     // min of realsize and user-requested size
     };
 
+    struct RetiredBuffer
+    {
+        Transaction* transaction{};
+        Buffer buf;
+    };
+
   public:
     void init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)>& on_buffer_resize = {});
 
@@ -53,9 +61,12 @@ class StagingBuffer
     {
         copy(dst, vec.data(), dst_offset, vec.size() * sizeof(T));
     }
-    void copy(Handle<Image> dst, const void* const src, ImageLayout final_layout);
-    void copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy, ImageLayout dst_final_layout);
-    void blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit, ImageLayout dst_final_layout);
+    void copy(Handle<Image> dst, const void* const src, ImageLayout dstlayout = ImageLayout::UNDEFINED);
+    void copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy);
+    void blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit);
+    void barrier();
+    void barrier(Handle<Image> image, ImageLayout dstlayout);
+    void barrier(Handle<Image> image, ImageLayout dstlayout, ImageSubRange range);
     Sync* flush();
     void reset();
 
@@ -74,10 +85,25 @@ class StagingBuffer
     Sync* dummy_sync{};
     std::deque<Transaction> transactions;
     std::vector<Allocation> allocations;
-    std::deque<Sync*> syncs;
-    std::deque<CommandBuffer*> cmds;
+    std::vector<Sync*> syncs;
+    std::vector<CommandBuffer*> cmds;
     std::vector<Transaction*> staged;
     std::vector<Allocation> free_allocs;
+    std::vector<RetiredBuffer> retired_bufs;
+
+#ifdef ENG_SBUF_DEBUG_STATS
+    struct DebugStats
+    {
+        void reset();
+        uint32_t flush_count{};
+        uint32_t linalloc_count{};
+        uint32_t freealloc_count{};
+        uint32_t buf_resize_count{};
+        uint32_t transaction_count{};
+        uint32_t sync_count{};
+        uint32_t cmd_count{};
+    } debugstats;
+#endif
 };
 
 } // namespace gfx

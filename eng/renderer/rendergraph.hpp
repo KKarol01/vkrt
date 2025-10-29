@@ -185,6 +185,7 @@ class RenderGraph
                         rhist.last_layout = pr.layout;
                     }
                     stage.all_stages |= pr.stage;
+                    if(stage.all_stages & PipelineStage::EARLY_Z_BIT) { stage.all_stages |= PipelineStage::LATE_Z_BIT; }
                 }
                 if(pr.is_read())
                 {
@@ -243,8 +244,7 @@ class RenderGraph
                 {
                     for(const auto& ib : s.imgbarriers)
                     {
-                        cmd->barrier(ib.image.get(), PipelineStage::NONE, PipelineAccess::NONE, ib.stage, ib.access,
-                                     ib.from, ib.to);
+                        cmd->barrier(ib.image.get(), PipelineStage::ALL, PipelineAccess::NONE, ib.stage, ib.access, ib.from, ib.to);
                     }
                 }
                 // todo: move this inside command buffer's begin
