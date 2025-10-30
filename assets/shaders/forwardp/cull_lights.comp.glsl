@@ -48,10 +48,10 @@ void main()
 	if(glidxy.x == 0 && glidxy.y == 0)
 	{
 		const vec3 viewps[4] = vec3[](
-			ss2vs(vec4(vec2(gidxy.x,   gidxy.y)     * gsz, 1.0, 1.0)).xyz,
-			ss2vs(vec4(vec2(gidxy.x+1, gidxy.y)     * gsz, 1.0, 1.0)).xyz,
-			ss2vs(vec4(vec2(gidxy.x,   gidxy.y + 1) * gsz, 1.0, 1.0)).xyz,
-			ss2vs(vec4(vec2(gidxy.x+1, gidxy.y + 1) * gsz, 1.0, 1.0)).xyz
+			ss2vs(vec4(vec2(gidxy.x,   gidxy.y)     * gsz, -1.0, 1.0)).xyz,
+			ss2vs(vec4(vec2(gidxy.x+1, gidxy.y)     * gsz, -1.0, 1.0)).xyz,
+			ss2vs(vec4(vec2(gidxy.x,   gidxy.y + 1) * gsz, -1.0, 1.0)).xyz,
+			ss2vs(vec4(vec2(gidxy.x+1, gidxy.y + 1) * gsz, -1.0, 1.0)).xyz
 		);
 		sh_frust[0] = normalize(cross(viewps[2], viewps[0]));
 		sh_frust[1] = normalize(cross(viewps[1], viewps[3]));
@@ -89,7 +89,8 @@ void main()
 	if(glidxy.x == 0 && glidxy.y == 0)
 	{
 		const uint list_offset = atomicAdd(get_buf(GPUFWDPLightList).head, sh_lightcnt);
-		for(int i=0; i<sh_lightcnt; ++i)
+		const uint lightcnt = min(sh_lightcnt, get_buf(GPUFWDPLightList).max_lights_per_tile);
+		for(int i=0; i<lightcnt; ++i)
 		{
 			get_buf(GPUFWDPLightList).lights_us[list_offset + i] = sh_lights[i];
 		}

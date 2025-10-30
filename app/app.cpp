@@ -59,7 +59,7 @@ void App::on_init()
     const auto e = Engine::get().scene->load_from_file("occlusion_culling1.glb");
 
     auto* ecs = Engine::get().ecs;
-    for(auto i = 0u; i < 3; ++i)
+    for(auto i = 0u; i < 1; ++i)
     {
         auto light = ecs->create();
         ecs->emplace<ecs::Node>(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) });

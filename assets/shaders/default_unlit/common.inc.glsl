@@ -11,7 +11,6 @@ layout(scalar, push_constant) uniform PushConstants
     uint32_t GPUEngConstantsBufferIndex;
     uint32_t imidb;
     uint32_t GPUFWDPLightGridsBufferIndex;
-    uint32_t GPUFWDPFrustumsBufferIndex;
     uint32_t GPUFWDPLightListsBufferIndex;
 };
 #endif

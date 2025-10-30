@@ -1022,8 +1022,7 @@ class Renderer
         Handle<Buffer> lights_bufs[2]{}; // lights
 
         static inline constexpr uint32_t fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
-        uint32_t fwdp_lights_per_tile{ 50 };                     // changing requires resizing the buffers
-        Handle<Buffer> fwdp_frustums_buf;                        // {vec3 normal, float dist}*4 frustum planes per tile
+        uint32_t fwdp_lights_per_tile{ 32 };                     // changing requires resizing the buffers
         uint32_t fwdp_num_tiles{};
 
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
@@ -1127,7 +1126,6 @@ class Renderer
     // Handle<Sampler> hiz_sampler; // moved to immutable samplers
     Handle<Pipeline> cull_pipeline;
     Handle<Pipeline> cullzout_pipeline;
-    Handle<Pipeline> fwdp_gen_frust_pipeline;
     Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;

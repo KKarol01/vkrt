@@ -188,10 +188,6 @@ void Renderer::init_pipelines()
         .depth_compare = DepthCompare::GREATER,
         .culling = CullFace::BACK,
     });
-    fwdp_gen_frust_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("forwardp/gen_frusts.comp.glsl") },
-        .layout = bindless_pplayout,
-    });
     fwdp_cull_lights_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
         .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
         .layout = bindless_pplayout,
@@ -298,12 +294,14 @@ void Renderer::init_perframes()
 
         {
             const auto* w = Engine::get().window;
-            const auto light_list_size = bufs.fwdp_num_tiles * bufs.fwdp_lights_per_tile * sizeof(uint32_t) + sizeof(uint32_t);
+            const auto light_list_size = bufs.fwdp_num_tiles * bufs.fwdp_lights_per_tile * sizeof(uint32_t) + 128;
             const auto light_grid_size = bufs.fwdp_num_tiles * 2 * sizeof(uint32_t);
             pf.fwdp.light_list_buf =
                 make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_list_size, BufferUsage::STORAGE_BIT });
             pf.fwdp.light_grid_buf =
                 make_buffer(BufferDescriptor{ ENG_FMT("fwdp light grid {}", i), light_grid_size, BufferUsage::STORAGE_BIT });
+            sbuf->copy(pf.fwdp.light_list_buf, &bufs.fwdp_lights_per_tile,
+                       offsetof(GPUFWDPLightListsBuffer, max_lights_per_tile), 4);
         }
     }
 }
@@ -327,14 +325,11 @@ void Renderer::init_bufs()
         render_passes.at(i).ids_buf =
             make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
     }
-
     {
         const auto* w = Engine::get().window;
         const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
-        const auto size = num_tiles * sizeof(GPUFWDPFrustum);
-        bufs.fwdp_frustums_buf = make_buffer(BufferDescriptor{ "fwdp_frustums", size, BufferUsage::STORAGE_BIT });
         bufs.fwdp_num_tiles = num_tiles;
     }
 }
@@ -531,7 +526,6 @@ void Renderer::update()
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(bufs.fwdp_frustums_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
             b.access(pf.fwdp.light_list_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
             b.access(pf.fwdp.light_grid_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
             b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT,
@@ -540,19 +534,14 @@ void Renderer::update()
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
             cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
             cmd->bind_resource(0, pf.constants);
-            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_tile_pixels, { 4, 4 });
-            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_lights_per_tile, { 8, 4 });
-            cmd->push_constants(ShaderStage::ALL, &bufs.fwdp_num_tiles, { 12, 4 });
-            cmd->bind_resource(4, bufs.fwdp_frustums_buf);
-            cmd->bind_resource(5, pf.fwdp.light_grid_buf);
-            cmd->bind_resource(6, pf.fwdp.light_list_buf);
-            cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
+            cmd->bind_resource(1, pf.fwdp.light_grid_buf);
+            cmd->bind_resource(2, pf.fwdp.light_list_buf);
+            cmd->bind_resource(3, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
             const auto* w = Engine::get().window;
             auto dx = (uint32_t)w->width;
             auto dy = (uint32_t)w->height;
             dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
             dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-            //cmd->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL, PipelineAccess::NONE);
             cmd->dispatch(dx, dy, 1);
         });
     rgraph->add_pass(
@@ -675,8 +664,7 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
                         cmd->bind_resource(0, pf.constants);
                         cmd->bind_resource(1, pf.culling.ids_buf);
                         cmd->bind_resource(2, pf.fwdp.light_grid_buf);
-                        cmd->bind_resource(3, bufs.fwdp_frustums_buf);
-                        cmd->bind_resource(4, pf.fwdp.light_list_buf);
+                        cmd->bind_resource(3, pf.fwdp.light_list_buf);
                     });
     if(0)
     {
