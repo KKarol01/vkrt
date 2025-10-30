@@ -44,7 +44,6 @@ void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
         get_transaction().cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
                                        PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
         get_transaction().cmd->copy(newbuffer, old, 0, { 0, old.size });
-        // flush()->wait_cpu(~0ull); // copy contents to new buffer and wait for completion before destroying the old one.
     }
     retired_bufs.push_back(RetiredBuffer{ &get_transaction(), old });
     old = std::move(newbuffer);
@@ -136,15 +135,7 @@ void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& 
     assert(oldsrcl != ImageLayout::UNDEFINED);
     const auto dstrange = ImageSubRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
     const auto srcrange = ImageSubRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
-    // get_transaction().cmd->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-    //                                PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
-    // get_transaction().cmd->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-    //                                PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
     get_transaction().cmd->copy(dst.get(), src.get(), copy, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC);
-    // get_transaction().cmd->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
-    //                                PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
-    // get_transaction().cmd->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT,
-    //                                PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
 }
 
 void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit)
@@ -153,15 +144,7 @@ void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& 
     assert(oldsrcl != ImageLayout::UNDEFINED);
     const auto dstrange = ImageSubRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
     const auto srcrange = ImageSubRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
-    // get_transaction().cmd->barrier(dst.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-    //                                PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST, dstrange);
-    // get_transaction().cmd->barrier(src.get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::TRANSFER_BIT,
-    //                                PipelineAccess::TRANSFER_READ_BIT, src->current_layout, ImageLayout::TRANSFER_SRC, srcrange);
     get_transaction().cmd->blit(dst.get(), src.get(), blit, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageFilter::LINEAR);
-    // get_transaction().cmd->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::ALL,
-    //                                PipelineAccess::NONE, ImageLayout::TRANSFER_DST, dst_final_layout, dstrange);
-    // get_transaction().cmd->barrier(src.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT,
-    //                                PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::TRANSFER_SRC, oldsrcl, srcrange);
 }
 
 void StagingBuffer::barrier()
