@@ -73,7 +73,7 @@ void main()
 	{
 		GPULight l = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[i];
 		const vec3 lvs = vec3(get_buf(GPUEngConstant).view * vec4(l.pos, 1.0));
-		bool passed = !((lvs.z - l.range > nearvs) || (lvs.z + l.range < maxdvs));
+		bool passed = !((lvs.z - l.range > mindvs) || (lvs.z + l.range < maxdvs));
 		for(int pi=0; passed && pi<4; ++pi)
 		{
 			if(dot(sh_frust[pi], lvs) < -l.range) { passed = false; }

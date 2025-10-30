@@ -65,5 +65,6 @@ void main()
 
     //OUT_COLOR = color;
     OUT_COLOR = color;
+    // OUT_COLOR.rgb += mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), lgc/3.0);
     // OUT_COLOR = vec4(mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc / 4.0), 1.0);
 }
