@@ -550,9 +550,10 @@ void Renderer::update()
             const auto* w = Engine::get().window;
             auto dx = (uint32_t)w->width;
             auto dy = (uint32_t)w->height;
-            dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels; // go over all
-            // the pixels in 16x16 workgroups dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-            // cmd->dispatch(1, 1, 1);
+            dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+            dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
+            //cmd->barrier(PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL, PipelineAccess::NONE);
+            cmd->dispatch(dx, dy, 1);
         });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
@@ -675,6 +676,7 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
                         cmd->bind_resource(1, pf.culling.ids_buf);
                         cmd->bind_resource(2, pf.fwdp.light_grid_buf);
                         cmd->bind_resource(3, bufs.fwdp_frustums_buf);
+                        cmd->bind_resource(4, pf.fwdp.light_list_buf);
                     });
     if(0)
     {

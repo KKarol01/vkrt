@@ -3,12 +3,13 @@
 #include "./forwardp/common.glsli"
 
 // make 16 not hardcoded, if needed -- compile with compile constants maybe
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-uvec2 ss = uvec2(1280, 768);
-uint ts = 16;
-uvec2 tc = uvec2(ss + uvec2(ts - 1)) / uvec2(ts);
-uint ttc = tc.x * tc.y;
+shared uint sh_mindepth;
+shared uint sh_maxdepth;
+shared uint sh_lightcnt;
+shared uint sh_lights[64];
+shared vec3 sh_frust[4];
 
 vec3 clip2vs(vec4 p)
 {
@@ -19,58 +20,79 @@ vec3 clip2vs(vec4 p)
 
 vec3 ss2vs(vec4 p)
 {
-	vec2 uv = p.xy / vec2(ss);
+	vec2 uv = p.xy / imageSize(gsi_2dr32f[depth_texture_index]);
 	vec4 clip = vec4(vec2(uv.x, uv.y) * 2.0 - 1.0, p.z, p.w);
 	return clip2vs(clip);
 }
 
 void main()
 {
-	for(uint i=0; i<ttc; ++i)
+	const uvec2 gsz = gl_WorkGroupSize.xy;
+	const uvec2 gidxy = gl_WorkGroupID.xy;
+	const uvec2 gcnt = gl_NumWorkGroups.xy;
+	const uvec2 glidxy = gl_LocalInvocationID.xy;
+	const uvec2 ggidxy = gl_GlobalInvocationID.xy;
+	const uint glid = glidxy.x + glidxy.y*gsz.x;
+	const ivec2 dimgsize = imageSize(gsi_2dr32f[depth_texture_index]).xy;
+
+	if(any(greaterThanEqual(ivec2(ggidxy), dimgsize))) { return; }
+
+	if(glidxy.x == 0 && glidxy.y == 0)
 	{
-		uvec2 tuv = uvec2(i % tc.x, i / tc.x);
-		float mind = 0.0;
-		float maxd = 1.0;
-		for(uint dx = 0; dx < 16; ++dx)
-		{
-			for(uint dy = 0; dy < 16; ++dy)
-			{
-				float d = imageLoad(gsi_2dr32f[depth_texture_index], ivec2(tuv + uvec2(dx, dy))).r;
-				mind = max(mind, d);
-				maxd = min(maxd, d);
-			}
-		}
-		vec3 mindvs = clip2vs(vec4(0.0, 0.0, mind, 1.0));
-		vec3 maxdvs = clip2vs(vec4(0.0, 0.0, maxd, 1.0));
-
-		vec3 viewps[4] = vec3[](
-			ss2vs(vec4(vec2(tuv.x,   tuv.y + 1) * ts, 1.0, 1.0)).xyz,
-			ss2vs(vec4(vec2(tuv.x+1, tuv.y + 1) * ts, 1.0, 1.0)).xyz,
-			ss2vs(vec4(vec2(tuv.x,   tuv.y) * ts,	  1.0, 1.0)).xyz,
-			ss2vs(vec4(vec2(tuv.x+1, tuv.y) * ts,	  1.0, 1.0)).xyz
-		);
-
-		vec3 planes[4] = vec3[](
-			normalize(cross(viewps[2], viewps[0])),
-			normalize(cross(viewps[1], viewps[3])),
-			normalize(cross(viewps[0], viewps[1])),
-			normalize(cross(viewps[3], viewps[2]))
-		);
-
-		GPULight l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[0];
-		vec3 lvs = vec3(get_buf(GPUEngConstant).view * vec4(l0.pos, 1.0));
-		uint passed = 0;
-		if(lvs.z - l0.range < mindvs.z || lvs.z + l0.range > maxdvs.z) { passed = 1; }
-		if(passed > 0)
-		{
-			passed = 0;
-			for(int i=0; i<4; ++i, ++passed)
-			{
-				if(dot(planes[i], lvs) < -l0.range) { break; }
-			}
-		}
-		if(passed == 4 && (maxd - mind) < 1.0) { get_buf(GPUFWDPLightGrid).grids_us[i].y = 1; }
-		else { get_buf(GPUFWDPLightGrid).grids_us[i].y = 0; }
+		sh_mindepth = floatBitsToUint(0.0);
+		sh_maxdepth = floatBitsToUint(1.0);
+		sh_lightcnt = 0;
 	}
+	barrier();
 
+	if(glidxy.x == 0 && glidxy.y == 0)
+	{
+		const vec3 viewps[4] = vec3[](
+			ss2vs(vec4(vec2(gidxy.x,   gidxy.y)     * gsz, 1.0, 1.0)).xyz,
+			ss2vs(vec4(vec2(gidxy.x+1, gidxy.y)     * gsz, 1.0, 1.0)).xyz,
+			ss2vs(vec4(vec2(gidxy.x,   gidxy.y + 1) * gsz, 1.0, 1.0)).xyz,
+			ss2vs(vec4(vec2(gidxy.x+1, gidxy.y + 1) * gsz, 1.0, 1.0)).xyz
+		);
+		sh_frust[0] = normalize(cross(viewps[2], viewps[0]));
+		sh_frust[1] = normalize(cross(viewps[1], viewps[3]));
+		sh_frust[2] = normalize(cross(viewps[0], viewps[1]));
+		sh_frust[3] = normalize(cross(viewps[3], viewps[2]));
+	}
+	barrier();
+
+	const ivec2 depthcoords = ivec2(ggidxy);
+	const float d = imageLoad(gsi_2dr32f[depth_texture_index], depthcoords).r;
+	atomicMax(sh_mindepth, floatBitsToUint(d));
+	atomicMin(sh_maxdepth, floatBitsToUint(d));
+		
+	const float mindvs = clip2vs(vec4(0.0, 0.0, uintBitsToFloat(sh_mindepth), 1.0)).z;
+	const float maxdvs = clip2vs(vec4(0.0, 0.0, uintBitsToFloat(sh_maxdepth), 1.0)).z;
+	const float nearvs = clip2vs(vec4(0.0, 0.0, 1.0, 1.0)).z;
+	const uint lc = get_bufb(GPULight, get_buf(GPUEngConstant)).count;
+	for(uint i=glid; i<4; i+=gsz.x*gsz.y)
+	{
+		GPULight l = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[i];
+		const vec3 lvs = vec3(get_buf(GPUEngConstant).view * vec4(l.pos, 1.0));
+		bool passed = !((lvs.z - l.range > nearvs) || (lvs.z + l.range < maxdvs));
+		for(int pi=0; passed && pi<4; ++pi)
+		{
+			if(dot(sh_frust[pi], lvs) < -l.range) { passed = false; }
+		}
+		if(passed)
+		{
+			const uint passed_idx = atomicAdd(sh_lightcnt, 1);
+			if(passed_idx < 64) { sh_lights[passed_idx] = i; }
+		}
+	}
+	barrier();
+	
+	if(glidxy.x == 0 && glidxy.y == 0)
+	{
+		const uint list_offset = atomicAdd(get_buf(GPUFWDPLightList).head, sh_lightcnt);
+		for(int i=0; i<sh_lightcnt; ++i)
+		{
+			get_buf(GPUFWDPLightList).lights_us[list_offset + i] = sh_lights[i];
+		}
+		get_buf(GPUFWDPLightGrid).grids_us[gidxy.x + gidxy.y*gcnt.x].xy = uvec2(list_offset, sh_lightcnt);
+	}
 }
