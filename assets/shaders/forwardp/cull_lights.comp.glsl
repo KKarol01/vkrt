@@ -64,6 +64,7 @@ void main()
 	const float d = imageLoad(gsi_2dr32f[depth_texture_index], depthcoords).r;
 	atomicMax(sh_mindepth, floatBitsToUint(d));
 	atomicMin(sh_maxdepth, floatBitsToUint(d));
+	barrier();
 		
 	const float mindvs = clip2vs(vec4(0.0, 0.0, uintBitsToFloat(sh_mindepth), 1.0)).z;
 	const float maxdvs = clip2vs(vec4(0.0, 0.0, uintBitsToFloat(sh_maxdepth), 1.0)).z;
