@@ -69,7 +69,7 @@ void main()
 	const float maxdvs = clip2vs(vec4(0.0, 0.0, uintBitsToFloat(sh_maxdepth), 1.0)).z;
 	const float nearvs = clip2vs(vec4(0.0, 0.0, 1.0, 1.0)).z;
 	const uint lc = get_bufb(GPULight, get_buf(GPUEngConstant)).count;
-	for(uint i=glid; i<4; i+=gsz.x*gsz.y)
+	for(uint i=glid; i<lc; i+=gsz.x*gsz.y)
 	{
 		GPULight l = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[i];
 		const vec3 lvs = vec3(get_buf(GPUEngConstant).view * vec4(l.pos, 1.0));
