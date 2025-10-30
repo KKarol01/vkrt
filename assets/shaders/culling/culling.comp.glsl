@@ -107,7 +107,7 @@ void main()
     bs.w = gpubs.w;
 
     uint first_instance = get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].firstInstance;
-    if(occlusion_cull(bs, get_buf(GPUEngConstant).proj[0][0], get_buf(GPUEngConstant).proj[1][1]))
+    if(frustum_cull(bs) && occlusion_cull(bs, get_buf(GPUEngConstant).proj[0][0], get_buf(GPUEngConstant).proj[1][1]))
     {
         const uint off = atomicAdd(get_buf2(GPUDrawIndexedIndirectCommand, dstcmdsbi).commands_us[id.cmdi].instanceCount, 1);
         get_buf2(GPUInstanceId, dstidsbi).ids_us[first_instance + off] = id;
