@@ -188,6 +188,10 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_MAT4 inv_proj_view;
     ENG_TYPE_MAT3 rand_mat;
     ENG_TYPE_FLOAT3 cam_pos;
+
+    ENG_TYPE_UINT output_mode;
+   
+    ENG_TYPE_UINT fwdp_enable;
 } ENG_DECLARE_BINDLESS(GPUEngConstantsBuffer);
 
 #define GPU_LIGHT_TYPE_POINT 0

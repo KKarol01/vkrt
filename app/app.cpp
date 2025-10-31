@@ -59,15 +59,30 @@ void App::on_init()
     const auto e = Engine::get().scene->load_from_file("occlusion_culling1.glb");
 
     auto* ecs = Engine::get().ecs;
-    for(auto i = 0u; i < 1; ++i)
+    const float maxRadius = 10.0f;
+    const uint32_t numLights = 64;
+    const float goldenAngle = 3.14159265359f * (3.0f - std::sqrt(5.0f));
+    srand(0);
+    for (uint32_t i = 0; i < numLights; ++i)
     {
+        float y = 1.0f - (i / float(numLights - 1)) * 2.0f;
+        float r = std::sqrt(1.0f - y * y);
+        float theta = goldenAngle * i;
+
+        float x = std::cos(theta) * r;
+        float z = std::sin(theta) * r;
+
+        glm::vec3 dir = glm::normalize(glm::vec3(x, y, z));
+
+        float radius = (float(rand()) / RAND_MAX) * maxRadius;
+        glm::vec3 pos = dir * radius;
+
         auto light = ecs->create();
         ecs->emplace<ecs::Node>(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) });
-        ecs->emplace<ecs::Transform>(light, ecs::Transform::from({ 0.0f, 0.0f, 1.0f }));
+        ecs->emplace<ecs::Transform>(light, ecs::Transform::from(pos));
         ecs->emplace<ecs::Light>(light, ecs::Light{ .range = 5.0f, .type = ecs::Light::Type::POINT });
         Engine::get().scene->scene.push_back(light);
-        Engine::get().renderer->add_light(light); // todo: this should be automated; maybe stage - same as meshes
-                                                  // also, static/dynamic should be added
+        Engine::get().renderer->add_light(light);
     }
 
     Engine::get().scene->instance_entity(e);

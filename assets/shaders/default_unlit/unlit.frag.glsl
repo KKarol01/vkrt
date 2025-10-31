@@ -34,6 +34,11 @@ void main()
     
     uint lloff = get_buf(GPUFWDPLightGrid).grids_us[tx].x;
     uint lgc = get_buf(GPUFWDPLightGrid).grids_us[tx].y;
+    const bool fwdp_enable = get_buf(GPUEngConstant).fwdp_enable == 1;
+    if(!fwdp_enable)
+    {
+        lgc = get_bufb(GPULight, get_buf(GPUEngConstant)).count;
+    }
 
     uint matidx = get_buf2(GPUInstanceId, imidb).ids_us[fsin.iidx].mati;
     GPUMaterial mat = get_buf2(GPUMaterial, get_buf(GPUEngConstant).rmatb).materials_us[matidx];
@@ -48,8 +53,12 @@ void main()
     vec3 lighting = vec3(0.0);
     for (uint i = 0; i < lgc; ++i)
     {
-        uint lidx = get_buf(GPUFWDPLightList).lights_us[lloff + i];
-        GPULight l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[lidx];
+        GPULight l0;
+        if(fwdp_enable) 
+        {
+            const uint lidx = get_buf(GPUFWDPLightList).lights_us[lloff + i];
+            l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[lidx];
+        } else { l0 = get_bufb(GPULight, get_buf(GPUEngConstant)).lights_us[i]; }
         
         vec3 L = l0.pos - fsin.position;
         float d = length(L);
@@ -64,7 +73,15 @@ void main()
     color.rgb *= lighting;
 
     //OUT_COLOR = color;
-    OUT_COLOR = color;
-    // OUT_COLOR.rgb += mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), lgc/3.0);
+    const uint output_mode = get_buf(GPUEngConstant).output_mode;
+    if(output_mode == 0)
+    {
+        OUT_COLOR = color;
+    }
+    else if(output_mode == 1)
+    {
+        OUT_COLOR.rgb = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc/256.0);
+        OUT_COLOR.a = 1.0;
+    }
     // OUT_COLOR = vec4(mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc / 4.0), 1.0);
 }

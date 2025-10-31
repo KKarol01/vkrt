@@ -14,6 +14,7 @@
 #include <eng/common/paths.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
+#include <eng/ui.hpp>
 #include <assets/shaders/bindless_structures.glsli>
 
 namespace eng
@@ -75,6 +76,25 @@ void Renderer::init(RendererBackend* backend)
 
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
+
+    Engine::get().ui->add_tab(UI::Tab{ "Debug", UI::Location::RIGHT_PANE, [this] {
+                                          if(!Engine::get().ui->show_debug_tab) { return; }
+                                          if(ImGui::Begin("Debug"))
+                                          {
+                                              ImGui::SeparatorText("Forward+");
+                                              ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
+                                              ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
+                                              ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
+
+                                              bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
+                                              bool changed = false;
+                                              changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
+                                              if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
+                                              else { debug_output = DebugOutput::COLOR; }
+                                              ImGui::Checkbox("FWDP enable", &fwdp_enable);
+                                          }
+                                          ImGui::End();
+                                      } });
 }
 
 void Renderer::init_helper_geom()
@@ -434,6 +454,9 @@ void Renderer::update()
         .inv_proj_view = invview * invproj,
         //.rand_mat = rand_mat,
         .cam_pos = Engine::get().camera->pos,
+
+        .output_mode = (uint32_t)debug_output,
+        .fwdp_enable = (uint32_t)fwdp_enable
     };
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
 
@@ -661,6 +684,7 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
     cmd->begin_rendering(vkreninfo);
     render_mbatches(cmd, rp.mbatches, pf.culling.cmd_buf, pf.culling.cmd_buf, pf.culling.cmd_start, 0ull,
                     [this, &pf](CommandBuffer* cmd) {
+                        const auto outputmode = (uint32_t)debug_output;
                         cmd->bind_resource(0, pf.constants);
                         cmd->bind_resource(1, pf.culling.ids_buf);
                         cmd->bind_resource(2, pf.fwdp.light_grid_buf);

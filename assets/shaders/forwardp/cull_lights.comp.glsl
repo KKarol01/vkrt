@@ -8,7 +8,7 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 shared uint sh_mindepth;
 shared uint sh_maxdepth;
 shared uint sh_lightcnt;
-shared uint sh_lights[64];
+shared uint sh_lights[256];
 shared vec3 sh_frust[4];
 
 vec3 clip2vs(vec4 p)

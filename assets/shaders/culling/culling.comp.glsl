@@ -79,10 +79,11 @@ bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
     float radius = bounding_sphere.w;
     center.yz *= -1.0;
 	vec4 aabb;
+    const ivec2 screensize = textureSize(sampler2D(gt_2d[hizsrcti], g_samplers[ENG_SAMPLER_HIZ]), 0).xy;
 	if (project_sphere_bounds(vec3(center.x, center.y, center.z), radius, 0.1, P00, P11, aabb))
 	{
-		float width = (aabb.z - aabb.x) * float(1280.0);
-		float height = (aabb.w - aabb.y) * float(768.0);
+		float width = (aabb.z - aabb.x) * float(screensize.x);
+		float height = (aabb.w - aabb.y) * float(screensize.y);
 
 		float level = ceil(log2(max(width, height))) - 1;
         uint max_span = max(uint(ceil(width)), uint(ceil(height)));

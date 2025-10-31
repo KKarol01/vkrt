@@ -1022,7 +1022,7 @@ class Renderer
         Handle<Buffer> lights_bufs[2]{}; // lights
 
         static inline constexpr uint32_t fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
-        uint32_t fwdp_lights_per_tile{ 32 };                     // changing requires resizing the buffers
+        uint32_t fwdp_lights_per_tile{ 256 }; // changing requires resizing the buffers
         uint32_t fwdp_num_tiles{};
 
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
@@ -1085,6 +1085,14 @@ class Renderer
     StagingBuffer* sbuf{};
     BindlessPool* bindless{};
     RenderGraph* rgraph{};
+
+    enum class DebugOutput
+    {
+        COLOR,
+        FWDP_GRID
+    };
+    DebugOutput debug_output{};
+    bool fwdp_enable{ true };
 
     HandleSparseVec<Buffer> buffers;
     HandleSparseVec<Image> images;

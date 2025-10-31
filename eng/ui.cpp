@@ -21,6 +21,13 @@ void UI::init()
     use_default_layout = !std::filesystem::exists("imgui.ini");
 
     eng::Engine::get().renderer->imgui_renderer->ui_callbacks += ([this] {
+        if(ImGui::BeginMainMenuBar())
+        {
+            ImGui::Button("File");
+            show_debug_tab ^= ImGui::Button("Debug");
+            ImGui::EndMainMenuBar();
+        }
+
         static bool once = true;
         ImGui::PushStyleColor(ImGuiCol_WindowBg, 0u);
         viewport_imid = ImGui::DockSpaceOverViewport(0, 0, ImGuiDockNodeFlags_PassthruCentralNode);
@@ -84,5 +91,10 @@ void UI::init()
 }
 
 void UI::update() {}
+
+void UI::add_tab(const Tab& t)
+{
+    tabs.emplace_back(t);
+}
 
 } // namespace eng

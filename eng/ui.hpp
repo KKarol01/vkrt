@@ -31,10 +31,11 @@ class UI
     };
 
     inline static bool use_default_layout = false;
+    bool show_debug_tab = false;
 
     void init();
     void update();
-    void add_tab(const Tab& t) { tabs.emplace_back(t); }
+    void add_tab(const Tab& t);
     std::vector<Tab> tabs;
     uint32_t viewport_imid;
     uint32_t left_imid;
