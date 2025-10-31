@@ -80,7 +80,7 @@ void main()
     }
     else if(output_mode == 1)
     {
-        OUT_COLOR.rgb = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc/256.0);
+        OUT_COLOR.rgb = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc/64.0);
         OUT_COLOR.a = 1.0;
     }
     // OUT_COLOR = vec4(mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc / 4.0), 1.0);

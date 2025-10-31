@@ -81,6 +81,11 @@ void Renderer::init(RendererBackend* backend)
                                           if(!Engine::get().ui->show_debug_tab) { return; }
                                           if(ImGui::Begin("Debug"))
                                           {
+                                              auto* camera = Engine::get().camera;
+                                              ImGui::SeparatorText("Camera");
+                                              ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y,
+                                                          camera->pos.z);
+
                                               ImGui::SeparatorText("Forward+");
                                               ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
                                               ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
@@ -92,6 +97,24 @@ void Renderer::init(RendererBackend* backend)
                                               if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
                                               else { debug_output = DebugOutput::COLOR; }
                                               ImGui::Checkbox("FWDP enable", &fwdp_enable);
+
+                                              ImGui::SeparatorText("Culling");
+                                              const auto& ppf = get_perframe(-1);
+                                              const auto& cullbuf = ppf.culling.ids_buf.get();
+                                              uint32_t mlts = 0;
+                                              for(auto e : render_passes.at((uint32_t)MeshPassType::FORWARD).entity_cache)
+                                              {
+                                                  const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
+                                                  for(auto mmsh : msh->meshes)
+                                                  {
+                                                      mlts += mmsh->geometry->meshlet_range.size;
+                                                  }
+                                              }
+                                              ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
+                                              float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
+                                              ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
+                                              ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
+                                              ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
                                           }
                                           ImGui::End();
                                       } });
@@ -293,8 +316,8 @@ void Renderer::init_perframes()
 
         pf.culling.cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("cull cmds {}", i), 1024,
                                                            BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
-        pf.culling.ids_buf =
-            make_buffer(BufferDescriptor{ ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
+        pf.culling.ids_buf = make_buffer(BufferDescriptor{
+            ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT | BufferUsage::CPU_ACCESS });
         pf.culling.debug_bsphere = make_image(ImageDescriptor{
             .name = ENG_FMT("debug_bsphere{}", i),
             .width = (uint32_t)ew->width,
@@ -456,7 +479,9 @@ void Renderer::update()
         .cam_pos = Engine::get().camera->pos,
 
         .output_mode = (uint32_t)debug_output,
-        .fwdp_enable = (uint32_t)fwdp_enable
+        .fwdp_enable = (uint32_t)fwdp_enable,
+        .mlt_frust_cull_enable = (uint32_t)mlt_frust_cull_enable,
+        .mlt_occ_cull_enable = (uint32_t)mlt_occ_cull_enable,
     };
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
 
@@ -652,7 +677,7 @@ void Renderer::update()
         .signal_sync(pf.ren_fen)
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
-    gq->wait_idle();
+    // gq->wait_idle();
     sbuf->reset();
 }
 
@@ -1066,7 +1091,11 @@ uint32_t Renderer::get_bindless(Handle<Texture> texture) { return bindless->get_
 
 uint32_t Renderer::get_bindless(Handle<Sampler> sampler) { return bindless->get_index(sampler); }
 
-Renderer::PerFrame& Renderer::get_perframe() { return perframe.at(Engine::get().frame_num % perframe.size()); }
+Renderer::PerFrame& Renderer::get_perframe(int32_t offset)
+{
+    const int32_t idx = Engine::get().frame_num + perframe.size() + offset;
+    return perframe.at(idx % perframe.size());
+}
 
 bool PipelineLayout::is_compatible(const PipelineLayout& a) const
 {

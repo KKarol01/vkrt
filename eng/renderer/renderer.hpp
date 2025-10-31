@@ -1077,7 +1077,7 @@ class Renderer
     uint32_t get_bindless(Handle<Texture> texture);
     uint32_t get_bindless(Handle<Sampler> sampler);
 
-    PerFrame& get_perframe();
+    PerFrame& get_perframe(int32_t offset = 0);
 
     SubmitQueue* gq{};
     Swapchain* swapchain{};
@@ -1093,6 +1093,8 @@ class Renderer
     };
     DebugOutput debug_output{};
     bool fwdp_enable{ true };
+    bool mlt_occ_cull_enable{ true };
+    bool mlt_frust_cull_enable{ true };
 
     HandleSparseVec<Buffer> buffers;
     HandleSparseVec<Image> images;
@@ -1122,7 +1124,6 @@ class Renderer
 
     GeometryBuffers bufs;
     SlotAllocator gpu_resource_allocator;
-    std::vector<MeshletInstance> mesh_instances;
     std::vector<Sync*> syncs;
     Handle<DescriptorPool> bindless_pool;
     Handle<DescriptorSet> bindless_set;

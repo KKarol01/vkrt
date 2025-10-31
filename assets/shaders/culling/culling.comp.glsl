@@ -6,6 +6,7 @@ layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 bool frustum_cull(vec4 bounding_sphere)
 {
+    if(get_buf(GPUEngConstant).mlt_frust_cull_enable == 0) { return true; }
     // clang-format off
     const vec4 pos = get_buf(GPUEngConstant).prev_view * vec4(bounding_sphere.xyz, 1.0);
     vec4 L = vec4(get_buf(GPUEngConstant).proj[0][3] + get_buf(GPUEngConstant).proj[0][0],
@@ -73,6 +74,8 @@ bool project_sphere_bounds(vec3 c, float r, float znear, float P00, float P11, o
 }
 
 bool occlusion_cull(vec4 bounding_sphere, float P00, float P11) {
+    if(get_buf(GPUEngConstant).mlt_occ_cull_enable == 0) { return true; }
+
     vec3 center = vec3(get_buf(GPUEngConstant).view * vec4(bounding_sphere.xyz, 1.0));
     // -y because projection matrix does that
     // -z here, because algorithm works with -z forward, and glm view matrix waits for proj matrix to negate the z.

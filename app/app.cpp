@@ -56,33 +56,34 @@ void App::start()
 void App::on_init()
 {
     renderer.init();
-    const auto e = Engine::get().scene->load_from_file("occlusion_culling1.glb");
+    const auto e = Engine::get().scene->load_from_file("cyberpunk.glb");
 
     auto* ecs = Engine::get().ecs;
-    const float maxRadius = 10.0f;
-    const uint32_t numLights = 64;
-    const float goldenAngle = 3.14159265359f * (3.0f - std::sqrt(5.0f));
-    srand(0);
-    for (uint32_t i = 0; i < numLights; ++i)
+    glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
+    glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
+    glm::uvec3 resolution(10, 5, 10); // lights per axis
+
+    uint32_t numLights = resolution.x * resolution.y * resolution.z;
+    glm::vec3 step = (aabbMax - aabbMin) / glm::vec3(resolution - 1u);
+
+    for(uint32_t z = 0; z < resolution.z; ++z)
     {
-        float y = 1.0f - (i / float(numLights - 1)) * 2.0f;
-        float r = std::sqrt(1.0f - y * y);
-        float theta = goldenAngle * i;
+        for(uint32_t y = 0; y < resolution.y; ++y)
+        {
+            for(uint32_t x = 0; x < resolution.x; ++x)
+            {
+                uint32_t i = x + y * resolution.x + z * resolution.x * resolution.y;
+                glm::vec3 pos = aabbMin + glm::vec3(x, y, z) * step;
 
-        float x = std::cos(theta) * r;
-        float z = std::sin(theta) * r;
+                auto light = ecs->create();
+                ecs->emplace<ecs::Node>(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) });
+                ecs->emplace<ecs::Transform>(light, ecs::Transform::from(pos));
+                ecs->emplace<ecs::Light>(light, ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
 
-        glm::vec3 dir = glm::normalize(glm::vec3(x, y, z));
-
-        float radius = (float(rand()) / RAND_MAX) * maxRadius;
-        glm::vec3 pos = dir * radius;
-
-        auto light = ecs->create();
-        ecs->emplace<ecs::Node>(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) });
-        ecs->emplace<ecs::Transform>(light, ecs::Transform::from(pos));
-        ecs->emplace<ecs::Light>(light, ecs::Light{ .range = 5.0f, .type = ecs::Light::Type::POINT });
-        Engine::get().scene->scene.push_back(light);
-        Engine::get().renderer->add_light(light);
+                Engine::get().scene->scene.push_back(light);
+                Engine::get().renderer->add_light(light);
+            }
+        }
     }
 
     Engine::get().scene->instance_entity(e);
