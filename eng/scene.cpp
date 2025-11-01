@@ -228,7 +228,7 @@ static void load_mesh(ecs::entity e, const fastgltf::Asset& asset, const fastglt
     if(ctx.meshes.size() <= *node.meshIndex) { ctx.meshes.resize(asset.meshes.size()); }
     if(ctx.meshes.at(*node.meshIndex).meshes.size())
     {
-        ecsr->emplace<ecs::Mesh>(e, ctx.meshes.at(*node.meshIndex));
+        ecsr->emplace(e, ctx.meshes.at(*node.meshIndex));
         return;
     }
 
@@ -241,7 +241,7 @@ static void load_mesh(ecs::entity e, const fastgltf::Asset& asset, const fastglt
         const auto mat = load_material(asset, fm.primitives.at(i), ctx);
         m.meshes.at(i) = Engine::get().renderer->make_mesh(gfx::MeshDescriptor{ .geometry = geom, .material = mat });
     }
-    ecsr->emplace<ecs::Mesh>(e, m);
+    ecsr->emplace(e, m);
 }
 
 static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset& asset, const fastgltf::Node& node,
@@ -249,8 +249,6 @@ static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
 {
     auto* ecsr = Engine::get().ecs;
     auto entity = ecsr->create();
-
-    ecsr->emplace<ecs::Node>(entity, ecs::Node{ node.name.c_str() });
 
     glm::mat4 glm_global = transform;
     glm::mat4 glm_local;
@@ -269,7 +267,7 @@ static ecs::entity load_node(const fastgltf::Scene& scene, const fastgltf::Asset
         memcpy(&glm_local, &trs, sizeof(trs));
         glm_global = glm_local * glm_global;
     }
-    ecsr->emplace<ecs::Transform>(entity, ecs::Transform{ .local = glm_local, .global = glm_global });
+    ecsr->emplace(entity, ecs::Node{ node.name.c_str() }, ecs::Transform{ .local = glm_local, .global = glm_global });
 
     load_mesh(entity, asset, node, ctx);
 
@@ -346,9 +344,8 @@ ecs::entity Scene::load_from_file(const std::filesystem::path& _path)
     else if(fscene.nodeIndices.size() > 1)
     {
         root = ecsr->create();
-        ecsr->emplace<ecs::Node>(root, ecs::Node{ .name = filepath.stem().string() });
-        ecsr->emplace<ecs::Transform>(root, ecs::Transform{ .local = glm::identity<glm::mat4>(),
-                                                            .global = glm::identity<glm::mat4>() });
+        ecsr->emplace(root, ecs::Node{ .name = filepath.stem().string() });
+        ecsr->emplace(root, ecs::Transform{ .local = glm::identity<glm::mat4>(), .global = glm::identity<glm::mat4>() });
         for(const auto& fsni : fscene.nodeIndices)
         {
             ecsr->make_child(root, load_node(fscene, fasset, fasset.nodes.at(fsni), ctx));

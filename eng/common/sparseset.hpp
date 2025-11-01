@@ -22,6 +22,11 @@ class SparseSet
         bool valid{ false };         // Was find, insertion or deletion successful.
     };
 
+    auto begin() { return dense.begin(); }
+    auto end() { return dense.begin() + free_list_head; }
+
+    key_t at(size_t idx) const { return dense.at(idx); }
+
     bool has(key_t e) const
     {
         const auto pi = get_page_index(e);
@@ -39,7 +44,7 @@ class SparseSet
         return dense.at(it.index);
     }
 
-    Iterator get(key_t e)
+    Iterator get(key_t e) const
     {
         if(has(e)) { return make_iterator(e, true); }
         return Iterator{};
@@ -68,14 +73,15 @@ class SparseSet
         return insert(free_list_head);
     }
 
-    // Returns index to element that replaced the moved element.
+    // Returns iterator with index to dense of the element that got replaced with the last element.
+    // Usually used to index accompanying vectors and swap the last element in them too.
     Iterator erase(key_t e)
     {
         if(!has(e)) { return Iterator{}; }
         const auto idx = get_sparse(e);
         std::swap(dense.at(idx), dense.at(--free_list_head));
         get_sparse(dense.at(idx)) = idx;
-        return Iterator{ free_list_head, true };
+        return Iterator{ idx, true };
     }
 
   private:

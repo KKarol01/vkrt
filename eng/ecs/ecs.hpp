@@ -11,11 +11,13 @@
 #include <memory>
 #include <optional>
 #include <bitset>
-#include <span>
+#include <iterator>
+#include <tuple>
 #include <algorithm>
 #include <unordered_map>
 #include <eng/common/sparseset.hpp>
 #include <eng/common/logger.hpp>
+#include <eng/common/callback.hpp>
 
 namespace eng
 {
@@ -25,14 +27,21 @@ using entity = uint32_t;
 using component_id_t = uint32_t;
 inline static constexpr entity INVALID_ENTITY = ~entity{};
 inline static constexpr entity MAX_COMPONENTS = sizeof(component_id_t) * 8;
+using signature_t = std::bitset<MAX_COMPONENTS>;
+
+template <typename... Components> struct View;
 
 struct ComponentIdGenerator
 {
     template <typename Component> static component_id_t generate()
     {
         assert(_id.load() < MAX_COMPONENTS);
-        static component_id_t id = component_id_t{ 1 } << (_id++);
+        static component_id_t id = _id++;
         return id;
+    }
+    template <typename Component> static component_id_t generate_bit()
+    {
+        return component_id_t{ 1 } << generate<Component>();
     }
     inline static std::atomic<component_id_t> _id{};
 };
@@ -84,7 +93,8 @@ template <typename T> class ComponentPool : public IComponentPool
     {
         const auto it = entities.erase(e);
         if(!it) { return; }
-        components.at(it.index) = std::move(components.at(entities.size()));
+        components.at(it.index) = std::move(components.back());
+        components.pop_back();
     }
 
     void clone(entity src, entity dst) final
@@ -111,12 +121,21 @@ class Registry
 {
     struct EntityMetadata
     {
-        std::bitset<MAX_COMPONENTS> components;
+        signature_t signature{};
         entity parent{ INVALID_ENTITY };
         std::vector<entity> children;
     };
 
   public:
+    struct View
+    {
+        using callback_t = void(ecs::entity);
+
+        Registry* registry{};
+        std::vector<ecs::entity> entities;
+        Signal<callback_t> on_add;
+    };
+
     template <typename Component> std::span<const Component> get_components()
     {
         const auto& arr = get_comp_arr<Component>();
@@ -125,14 +144,16 @@ class Registry
 
     entity create()
     {
-        const auto e = entities.get(entities.insert());
+        const auto it = entities.insert();
+        const auto e = entities.get(it);
         if(e == INVALID_ENTITY)
         {
             ENG_WARN("Max entity reached");
             assert(false);
             return e;
         }
-        metadatas.emplace(e, EntityMetadata{});
+        if(it.index < vmetadatas.size()) { vmetadatas.at(it.index) = EntityMetadata{}; }
+        else { vmetadatas.emplace_back(); }
         return e;
     }
 
@@ -143,7 +164,7 @@ class Registry
         if(is_valid(e))
         {
             const auto idx = ComponentIdGenerator::generate<Component>();
-            return metadatas.at(e).components.test(idx);
+            return get_md(e).signature.test(idx);
         }
         return false;
     }
@@ -157,53 +178,59 @@ class Registry
 
     template <typename Component> const Component* get(entity e) const { return const_cast<Registry*>(this)->get(e); }
 
-    template <typename Component, typename... Args> Component* emplace(entity e, Args&&... args)
+    template <typename... Components> void emplace(entity e, Components&&... comps)
     {
-        if(!is_valid(e)) { return nullptr; }
-        const auto cidx = ComponentIdGenerator::generate<Component>();
-        metadatas.at(e).components.set(cidx);
-        auto& comp_arr = get_comp_arr<Component>();
-        return &comp_arr.emplace(e, std::forward<Args>(args)...);
+        if(!is_valid(e)) { return; }
+        const signature_t compids = ((ComponentIdGenerator::generate_bit<std::remove_cvref_t<Components>>()) | ...);
+        get_md(e).signature |= compids;
+        ((get_comp_arr<std::remove_cvref_t<Components>>().emplace(e, std::forward<Components>(comps))), ...);
+        views_on_add(e, compids);
     }
 
     void erase(entity e)
     {
+        assert(false);
+        // todo: erase from views
         if(!is_valid(e)) { return; }
-        auto& md = metadatas.at(e);
+        auto it = entities.get(e);
+        assert(it);
+        auto& md = vmetadatas.at(it.index);
         for(auto i = 0u; i < MAX_COMPONENTS; ++i)
         {
-            if(md.components.test(i)) { component_arrays.at(i)->erase(e); }
+            if(md.signature.test(i)) { component_arrays.at(i)->erase(e); }
         }
         if(md.parent != INVALID_ENTITY) { remove_child(md.parent, e); }
         for(auto c : md.children)
         {
             erase(c);
         }
-        metadatas.erase(e);
-        entities.erase(e);
+        auto eraseit = entities.erase(e);
+        vmetadatas.at(eraseit.index) = std::move(vmetadatas.back());
+        vmetadatas.pop_back();
     }
 
     template <typename Component> void erase(entity e)
     {
+        // todo: remove from views
         if(!is_valid(e)) { return; }
-        auto& md = metadatas.at(e);
+        auto& md = get_md(e);
         const auto idx = ComponentIdGenerator::generate<Component>();
-        if(md.components.test(idx))
+        if(md.signature.test(idx))
         {
             component_arrays.at(idx)->erase(e);
-            md.components.reset(idx);
+            md.signature.reset(idx);
         }
     }
 
     entity get_parent(entity e) const
     {
         if(!is_valid(e)) { return INVALID_ENTITY; }
-        return metadatas.at(e).parent;
+        return get_md(e).parent;
     }
 
     std::span<const entity> get_children(entity e) const
     {
-        if(is_valid(e)) { return metadatas.at(e).children; }
+        if(is_valid(e)) { return get_md(e).children; }
         return {};
     }
 
@@ -211,8 +238,8 @@ class Registry
     {
         if(is_valid(p) && is_valid(c))
         {
-            auto& pmd = metadatas.at(p);
-            auto& cmd = metadatas.at(c);
+            auto& pmd = get_md(p);
+            auto& cmd = get_md(c);
             if(cmd.parent == p) { return; }
             if(cmd.parent != INVALID_ENTITY) { remove_child(cmd.parent, c); }
             cmd.parent = p;
@@ -231,19 +258,20 @@ class Registry
     {
         if(is_valid(p) && is_valid(c))
         {
-            metadatas.at(c).parent = INVALID_ENTITY;
-            auto& ch = metadatas.at(p).children;
+            get_md(c).parent = INVALID_ENTITY;
+            auto& ch = get_md(p).children;
             const auto it = std::lower_bound(ch.begin(), ch.end(), c);
             if(it != ch.end() && *it == c) { ch.erase(it); }
         }
     }
 
+    // preorder traversal
     void traverse_hierarchy(entity e, const auto& callback)
     {
         if(!is_valid(e)) { return; }
         const auto dfs = [this, &callback](const auto& self, entity p, entity e) -> void {
             callback(p, e);
-            auto& ch = metadatas.at(e).children;
+            auto& ch = get_md(e).children;
             for(auto c : ch)
             {
                 self(self, e, c);
@@ -252,36 +280,67 @@ class Registry
         dfs(dfs, INVALID_ENTITY, e);
     }
 
+    // clones entity with it's component and children/parent hierarchy
     entity clone(entity src)
     {
         if(!is_valid(src)) { return INVALID_ENTITY; }
-        std::stack<entity> cparents;
-        entity ret = INVALID_ENTITY;
-        traverse_hierarchy(src, [this, &cparents, &ret](auto p, auto e) {
-            auto clone = create();
-            if(ret == INVALID_ENTITY) { ret = clone; }
-            if(cparents.size())
+        std::stack<entity> cloned_parents;
+        entity root = INVALID_ENTITY;
+        traverse_hierarchy(src, [this, &cloned_parents, &root](auto _, auto src_entity) {
+            auto dst_entity = create();
+            if(root == INVALID_ENTITY) { root = dst_entity; }
+            if(cloned_parents.size())
             {
-                auto pclone = cparents.top();
-                cparents.pop();
-                make_child(pclone, clone);
+                auto cloned_parent = cloned_parents.top();
+                cloned_parents.pop();
+                make_child(cloned_parent, dst_entity);
             }
-            EntityMetadata& emd = metadatas.at(e);
+            EntityMetadata& emd = get_md(src_entity);
             for(auto i = 0u; i < MAX_COMPONENTS; ++i)
             {
-                if(emd.components.test(i))
+                if(emd.signature.test(i))
                 {
-                    metadatas.at(clone).components.set(i, true);
-                    component_arrays.at(i)->clone(e, clone);
+                    get_md(dst_entity).signature.set(i, true);
+                    component_arrays.at(i)->clone(src_entity, dst_entity);
                 }
             }
             for(auto i = 0u; i < emd.children.size(); ++i)
             {
-                cparents.push(clone);
+                cloned_parents.push(dst_entity);
             }
+            views_on_add(dst_entity, emd.signature);
         });
-        assert(cparents.empty());
-        return ret;
+        assert(cloned_parents.empty());
+        return root;
+    }
+
+    template <typename... Components>
+    ecs::View<Components...> get_view(std::optional<Callback<View::callback_t>> on_add = std::nullopt)
+    {
+        const signature_t sig = ((ComponentIdGenerator::generate_bit<Components>()) | ...);
+        View* rview{};
+        for(auto i = 0u; i < viewsigs.size(); ++i)
+        {
+            if(sig == viewsigs.at(i))
+            {
+                rview = &views.at(i);
+                break;
+            }
+        }
+        if(!rview)
+        {
+            viewsigs.push_back(sig);
+            rview = &views.emplace_back();
+            rview->registry = this;
+            for(auto i = 0u; i < entities.size(); ++i)
+            {
+                auto e = entities.at(i);
+                const auto& md = vmetadatas.at(i);
+                if((sig & md.signature) == sig) { rview->entities.push_back(e); }
+            }
+        }
+        if(on_add) { rview->on_add += *on_add; }
+        return ecs::View<Components...>{ rview };
     }
 
   private:
@@ -299,9 +358,67 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*comparr);
     }
 
+    // broadcasts to views new entity or new component.
+    // mask is used to skip views that already contain this entity.
+    // mask should contain bits of newly added components.
+    void views_on_add(entity e, signature_t mask = signature_t{})
+    {
+        if(e == INVALID_ENTITY) { return; }
+        const auto& md = get_md(e);
+        const auto prevsig = md.signature ^ mask;
+        for(auto i = 0u; i < viewsigs.size(); ++i)
+        {
+            const auto sig = viewsigs.at(i);
+            // only add an entity, when before it couldn't pass the view's signature
+            // due to lacking required components, and now it can.
+            if((prevsig & sig) != sig && (md.signature & sig) == sig)
+            {
+                auto& view = views.at(i);
+                view.entities.push_back(e);
+                view.on_add.signal(e);
+            }
+        }
+    }
+
+    EntityMetadata& get_md(entity e) { return vmetadatas.at(entities.get(e).index); }
+    const EntityMetadata& get_md(entity e) const { return vmetadatas.at(entities.get(e).index); }
+
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
-    std::unordered_map<entity, EntityMetadata> metadatas;
+    std::deque<View> views;
+    std::vector<signature_t> viewsigs; // corresponds 1:1 to views
     SparseSet entities;
+    std::vector<EntityMetadata> vmetadatas;
 };
+
+template <typename... Components> struct View
+{
+    struct iterator
+    {
+        using difference_type = ptrdiff_t;
+        using value_type = std::tuple<entity, Components...>;
+        using pointer = std::tuple<entity, std::add_pointer_t<Components>...>;
+        using reference = std::tuple<entity, std::add_lvalue_reference_t<Components>...>;
+        using iterator_category = std::random_access_iterator_tag;
+
+        // clang-format off
+        iterator(Registry::View* rview, ecs::entity* e) : rview(rview), e(e) {}
+        bool operator==(iterator it) const { return rview == it.rview && e == it.e; }
+        bool operator!=(iterator it) const { return !(*this == it); }
+        iterator& operator++() { ++e; return *this; }
+        iterator& operator--() { --e; return *this; }
+        reference operator*() { return reference{ *e, *rview->registry->get<Components>(*e)... }; }
+        reference operator->() { return iterator::operator*(); }
+        // clang-format on
+
+        Registry::View* rview{};
+        entity* e{};
+    };
+
+    auto begin() { return iterator{ rview, rview->entities.data() }; }
+    auto end() { return iterator{ rview, rview->entities.data() + rview->entities.size() }; }
+
+    Registry::View* rview{};
+};
+
 } // namespace ecs
 } // namespace eng

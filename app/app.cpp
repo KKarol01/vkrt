@@ -66,6 +66,24 @@ void App::on_init()
     uint32_t numLights = resolution.x * resolution.y * resolution.z;
     glm::vec3 step = (aabbMax - aabbMin) / glm::vec3(resolution - 1u);
 
+    auto v2 = ecs->create();
+    ecs->emplace(v2, ecs::Node{}, ecs::Transform{}, ecs::Mesh{});
+    auto v = Engine::get().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW {}", e); });
+    for(auto [e, m, t] : v)
+    {
+        ENG_LOG("ENTS IN VIEW {}", e);
+    }
+    auto v1 = ecs->create();
+    struct XX
+    {
+    };
+    ecs->emplace(v1, ecs::Transform{}, ecs::Mesh{});
+    ecs->emplace(v1, XX{});
+    for(auto [e, m, t] : v)
+    {
+        ENG_LOG("ENTS IN VIEW {}", e);
+    }
+
     for(uint32_t z = 0; z < resolution.z; ++z)
     {
         for(uint32_t y = 0; y < resolution.y; ++y)
@@ -76,10 +94,8 @@ void App::on_init()
                 glm::vec3 pos = aabbMin + glm::vec3(x, y, z) * step;
 
                 auto light = ecs->create();
-                ecs->emplace<ecs::Node>(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) });
-                ecs->emplace<ecs::Transform>(light, ecs::Transform::from(pos));
-                ecs->emplace<ecs::Light>(light, ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
-
+                ecs->emplace(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
+                             ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
                 Engine::get().scene->scene.push_back(light);
                 Engine::get().renderer->add_light(light);
             }

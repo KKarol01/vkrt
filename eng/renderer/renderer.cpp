@@ -77,47 +77,50 @@ void Renderer::init(RendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    Engine::get().ui->add_tab(UI::Tab{ "Debug", UI::Location::RIGHT_PANE, [this] {
-                                          if(!Engine::get().ui->show_debug_tab) { return; }
-                                          if(ImGui::Begin("Debug"))
-                                          {
-                                              auto* camera = Engine::get().camera;
-                                              ImGui::SeparatorText("Camera");
-                                              ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y,
-                                                          camera->pos.z);
+    Engine::get().ui->add_tab(UI::Tab{
+        "Debug",
+        UI::Location::RIGHT_PANE,
+        [this] {
+            if(!Engine::get().ui->show_debug_tab) { return; }
+            if(ImGui::Begin("Debug"))
+            {
+                auto* camera = Engine::get().camera;
+                ImGui::SeparatorText("Camera");
+                ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
 
-                                              ImGui::SeparatorText("Forward+");
-                                              ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
-                                              ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
-                                              ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
+                ImGui::SeparatorText("Forward+");
+                ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
+                ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
+                ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
 
-                                              bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
-                                              bool changed = false;
-                                              changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
-                                              if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
-                                              else { debug_output = DebugOutput::COLOR; }
-                                              ImGui::Checkbox("FWDP enable", &fwdp_enable);
+                bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
+                bool changed = false;
+                changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
+                if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
+                else { debug_output = DebugOutput::COLOR; }
+                ImGui::Checkbox("FWDP enable", &fwdp_enable);
 
-                                              ImGui::SeparatorText("Culling");
-                                              const auto& ppf = get_perframe(-1);
-                                              const auto& cullbuf = ppf.culling.ids_buf.get();
-                                              uint32_t mlts = 0;
-                                              for(auto e : render_passes.at((uint32_t)MeshPassType::FORWARD).entity_cache)
-                                              {
-                                                  const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
-                                                  for(auto mmsh : msh->meshes)
-                                                  {
-                                                      mlts += mmsh->geometry->meshlet_range.size;
-                                                  }
-                                              }
-                                              ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
-                                              float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
-                                              ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
-                                              ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
-                                              ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
-                                          }
-                                          ImGui::End();
-                                      } });
+                ImGui::SeparatorText("Culling");
+                const auto& ppf = get_perframe(-1);
+                const auto& cullbuf = ppf.culling.ids_buf.get();
+                uint32_t mlts = 0;
+                for(auto e : render_passes.at((uint32_t)MeshPassType::FORWARD).entity_cache)
+                {
+                    const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
+                    for(auto mmsh : msh->meshes)
+                    {
+                        mlts += mmsh->geometry->meshlet_range.size;
+                    }
+                }
+                ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
+                float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
+                ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
+                ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
+                ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
+            }
+            ImGui::End();
+        },
+    });
 }
 
 void Renderer::init_helper_geom()
@@ -630,6 +633,7 @@ void Renderer::update()
             cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.culling.debug_depth->default_view, ImageLayout::GENERAL, true }));
             cmd->dispatch((rp.id_count + 31) / 32, 1, 1);
         });
+    // todo: culling main pass should render to zbuffer new items from current frame to fill it out.
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
