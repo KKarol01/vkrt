@@ -344,8 +344,8 @@ ecs::entity Scene::load_from_file(const std::filesystem::path& _path)
     else if(fscene.nodeIndices.size() > 1)
     {
         root = ecsr->create();
-        ecsr->emplace(root, ecs::Node{ .name = filepath.stem().string() });
-        ecsr->emplace(root, ecs::Transform{ .local = glm::identity<glm::mat4>(), .global = glm::identity<glm::mat4>() });
+        ecsr->emplace(root, ecs::Node{ .name = filepath.stem().string() },
+                      ecs::Transform{ .local = glm::identity<glm::mat4>(), .global = glm::identity<glm::mat4>() });
         for(const auto& fsni : fscene.nodeIndices)
         {
             ecsr->make_child(root, load_node(fscene, fasset, fasset.nodes.at(fsni), ctx));

@@ -681,7 +681,7 @@ void Renderer::update()
         .signal_sync(pf.ren_fen)
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
-    // gq->wait_idle();
+    gq->wait_idle();
     sbuf->reset();
 }
 
@@ -881,11 +881,19 @@ Handle<Image> Renderer::make_image(const ImageDescriptor& info)
             const Range3D32i dstsz{ { 0, 0, 0 },
                                     { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
                                       std::max(srcsz.size.z >> 1, 1) } };
-            sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
-            sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageSubRange{ { i + 1, 1 }, { 0, 1 } });
+            sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
+            // sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageSubRange{ { i + 1, 1 }, { 0, 1 } });
             sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz });
+            if(i <= info.mips - 2)
+            {
+                sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageLayout::READ_ONLY, ImageSubRange{ { i, 1 }, { 0, 1 } });
+                if(i == info.mips - 2)
+                {
+                    sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageSubRange{ { i + 1, 1 }, { 0, 1 } });
+                }
+            }
         }
-        sbuf->barrier(h, ImageLayout::READ_ONLY);
+        h->current_layout = ImageLayout::READ_ONLY;
     }
     return h;
 }

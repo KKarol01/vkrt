@@ -155,15 +155,18 @@ void StagingBuffer::barrier()
 
 void StagingBuffer::barrier(Handle<Image> image, ImageLayout dstlayout)
 {
-    get_transaction().cmd->barrier(image.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                   PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, image->current_layout, dstlayout);
+    barrier(image, dstlayout, ImageSubRange{ { 0, image->mips }, { 0, image->layers } });
 }
 
 void StagingBuffer::barrier(Handle<Image> image, ImageLayout dstlayout, ImageSubRange range)
 {
+    barrier(image, image->current_layout, dstlayout, range);
+}
+
+void StagingBuffer::barrier(Handle<Image> image, ImageLayout srclayout, ImageLayout dstlayout, ImageSubRange range)
+{
     get_transaction().cmd->barrier(image.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                   PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, image->current_layout,
-                                   dstlayout, range);
+                                   PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, srclayout, dstlayout, range);
 }
 
 // main idea of flush:

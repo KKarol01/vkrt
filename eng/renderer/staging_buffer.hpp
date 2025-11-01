@@ -67,6 +67,7 @@ class StagingBuffer
     void barrier();
     void barrier(Handle<Image> image, ImageLayout dstlayout);
     void barrier(Handle<Image> image, ImageLayout dstlayout, ImageSubRange range);
+    void barrier(Handle<Image> image, ImageLayout srclayout, ImageLayout dstlayout, ImageSubRange range);
     Sync* flush();
     void reset();
 
