@@ -84,6 +84,26 @@ void App::on_init()
         ENG_LOG("ENTS IN VIEW {}", e);
     }
 
+    {
+    
+    SparseSet s;
+    auto it = s.erase(2);
+    it = s.insert(1);
+    it = s.erase(2);
+    it = s.erase(1);
+    it = s.insert(2);
+    it = s.insert(3);
+    it = s.insert(1);
+    it = s.insert(2);
+    it = s.insert(3);
+    it = s.insert(1);
+    it = s.insert(2);
+    it = s.insert(3);
+    it = s.erase(1);
+    it = s.insert();
+    auto x = s.get(it);
+    }
+
     for(uint32_t z = 0; z < resolution.z; ++z)
     {
         for(uint32_t y = 0; y < resolution.y; ++y)

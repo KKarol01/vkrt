@@ -136,12 +136,14 @@ class Registry
         Signal<callback_t> on_add;
     };
 
-    template <typename Component> std::span<const Component> get_components()
+    // get the components vector to iterate over
+    template <typename Component> std::span<const Component> get_components() const
     {
         const auto& arr = get_comp_arr<Component>();
         return std::span{ arr.begin(), arr.end() };
     }
 
+    // creates new entity
     entity create()
     {
         const auto it = entities.insert();
@@ -152,23 +154,26 @@ class Registry
             assert(false);
             return e;
         }
-        if(it.index < vmetadatas.size()) { vmetadatas.at(it.index) = EntityMetadata{}; }
-        else { vmetadatas.emplace_back(); }
+        if(it.index < metadatas.size()) { metadatas.at(it.index) = EntityMetadata{}; }
+        else { metadatas.emplace_back(); }
         return e;
     }
 
-    bool has(entity e) const { return entities.has(e); }
+    // check if registry has the entity
+    bool has(entity e) const { return e != INVALID_ENTITY && entities.has(e); }
 
-    template <typename Component> bool has(entity e) const
+    // check if the entity has the components
+    template <typename... Components> bool has(entity e) const
     {
         if(is_valid(e))
         {
-            const auto idx = ComponentIdGenerator::generate<Component>();
-            return get_md(e).signature.test(idx);
+            const auto mask = signature_t{ (ComponentIdGenerator::generate_bit<std::remove_cvref_t<Components>>() | ...) };
+            return (get_md(e).signature & mask) == mask;
         }
         return false;
     }
 
+    // get the component from the entity. may return nullptr
     template <typename Component> Component* get(entity e)
     {
         if(!is_valid(e) || !has<Component>(e)) { return nullptr; }
@@ -176,8 +181,10 @@ class Registry
         return static_cast<Component*>(component_arrays.at(idx)->get(e));
     }
 
+    // get the component from the entity. may return nullptr
     template <typename Component> const Component* get(entity e) const { return const_cast<Registry*>(this)->get(e); }
 
+    // attach compontents to the entity
     template <typename... Components> void emplace(entity e, Components&&... comps)
     {
         if(!is_valid(e)) { return; }
@@ -187,6 +194,7 @@ class Registry
         views_on_add(e, compids);
     }
 
+    // removes the entity, and all of it's children, and all of their components.
     void erase(entity e)
     {
         assert(false);
@@ -194,7 +202,7 @@ class Registry
         if(!is_valid(e)) { return; }
         auto it = entities.get(e);
         assert(it);
-        auto& md = vmetadatas.at(it.index);
+        auto& md = metadatas.at(it.index);
         for(auto i = 0u; i < MAX_COMPONENTS; ++i)
         {
             if(md.signature.test(i)) { component_arrays.at(i)->erase(e); }
@@ -205,16 +213,17 @@ class Registry
             erase(c);
         }
         auto eraseit = entities.erase(e);
-        vmetadatas.at(eraseit.index) = std::move(vmetadatas.back());
-        vmetadatas.pop_back();
+        metadatas.at(eraseit.index) = std::move(metadatas.back());
+        metadatas.pop_back();
     }
 
+    // remove the component from the entity.
     template <typename Component> void erase(entity e)
     {
         // todo: remove from views
         if(!is_valid(e)) { return; }
         auto& md = get_md(e);
-        const auto idx = ComponentIdGenerator::generate<Component>();
+        const auto idx = ComponentIdGenerator::generate<std::remove_cvref_t<Component>>();
         if(md.signature.test(idx))
         {
             component_arrays.at(idx)->erase(e);
@@ -222,18 +231,21 @@ class Registry
         }
     }
 
+    // get the parent of the entity. INVALID_ENTITY if there is no parent.
     entity get_parent(entity e) const
     {
         if(!is_valid(e)) { return INVALID_ENTITY; }
         return get_md(e).parent;
     }
 
+    // get children of the entity.
     std::span<const entity> get_children(entity e) const
     {
         if(is_valid(e)) { return get_md(e).children; }
         return {};
     }
 
+    // attach a child to a to-be-parent node.
     void make_child(entity p, entity c)
     {
         if(is_valid(p) && is_valid(c))
@@ -254,6 +266,7 @@ class Registry
         }
     }
 
+    // remove a child from a parent.
     void remove_child(entity p, entity c)
     {
         if(is_valid(p) && is_valid(c))
@@ -314,6 +327,8 @@ class Registry
         return root;
     }
 
+    // obtains a view of the only entities that have the specified components.
+    // optionally, takes callbacks that are called when entities get removed or added.
     template <typename... Components>
     ecs::View<Components...> get_view(std::optional<Callback<View::callback_t>> on_add = std::nullopt)
     {
@@ -335,7 +350,7 @@ class Registry
             for(auto i = 0u; i < entities.size(); ++i)
             {
                 auto e = entities.at(i);
-                const auto& md = vmetadatas.at(i);
+                const auto& md = metadatas.at(i);
                 if((sig & md.signature) == sig) { rview->entities.push_back(e); }
             }
         }
@@ -344,12 +359,8 @@ class Registry
     }
 
   private:
-    bool is_valid(entity e) const
-    {
-        const auto res = e != INVALID_ENTITY && has(e);
-        if(!res) { ENG_ERROR("Entity {} is invalid.", e); }
-        return res;
-    }
+    // checks if entity is valid and is registered.
+    bool is_valid(entity e) const { return e != INVALID_ENTITY && has(e); }
 
     template <typename Component> auto& get_comp_arr()
     {
@@ -360,7 +371,7 @@ class Registry
 
     // broadcasts to views new entity or new component.
     // mask is used to skip views that already contain this entity.
-    // mask should contain bits of newly added components.
+    // mask should only contain bits of newly added components.
     void views_on_add(entity e, signature_t mask = signature_t{})
     {
         if(e == INVALID_ENTITY) { return; }
@@ -380,14 +391,14 @@ class Registry
         }
     }
 
-    EntityMetadata& get_md(entity e) { return vmetadatas.at(entities.get(e).index); }
-    const EntityMetadata& get_md(entity e) const { return vmetadatas.at(entities.get(e).index); }
+    EntityMetadata& get_md(entity e) { return metadatas.at(entities.get(e).index); }
+    const EntityMetadata& get_md(entity e) const { return metadatas.at(entities.get(e).index); }
 
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
     std::deque<View> views;
     std::vector<signature_t> viewsigs; // corresponds 1:1 to views
     SparseSet entities;
-    std::vector<EntityMetadata> vmetadatas;
+    std::vector<EntityMetadata> metadatas; // corresponds 1:1 to entities in dense array
 };
 
 template <typename... Components> struct View
