@@ -55,10 +55,53 @@ void App::start()
 
 void App::on_init()
 {
+    auto* ecs = Engine::get().ecs;
+
+    auto e1 = ecs->create();
+    ecs->emplace(e1, ecs::Node{}, ecs::Transform{});
+    auto v1 =
+        Engine::get().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 1 {}", e); },
+                                                               [](auto e, auto sig) {
+                                                                   ENG_LOG("ENTS UPDATED 1 {} {}", e, sig.to_string());
+                                                               });
+    auto v2 = Engine::get().ecs->get_view<ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 2 {}", e); },
+                                                          [](auto e, auto sig) {
+                                                              ENG_LOG("ENTS UPDATED 2 {} {}", e, sig.to_string());
+                                                          });
+    for(auto [e, m, t] : v1)
+    {
+        ENG_LOG("ENTS IN VIEW 1 {}", e);
+    }
+    for(auto [e, t] : v2)
+    {
+        ENG_LOG("ENTS IN VIEW 2 {}", e);
+    }
+    auto e2 = ecs->create();
+    struct XX
+    {
+    };
+    ecs->emplace(e2, ecs::Transform{}, ecs::Mesh{});
+    ecs->emplace(e2, XX{});
+
+    for(auto [e, m, t] : v1)
+    {
+        ENG_LOG("ENTS IN VIEW 1 {}", e);
+    }
+    for(auto [e, t] : v2)
+    {
+        ENG_LOG("ENTS IN VIEW 2 {}", e);
+    }
+
+    auto* e1t = ecs->get<ecs::Transform>(e1);
+    auto* e2m = ecs->get<ecs::Mesh>(e2);
+
+    e2m->name = "sdafsdf";
+    ecs->update<ecs::Mesh>(e2);
+    ecs->update<ecs::Transform>(e1);
+
     renderer.init();
     const auto e = Engine::get().scene->load_from_file("cyberpunk.glb");
 
-    auto* ecs = Engine::get().ecs;
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
     glm::uvec3 resolution(10, 5, 10); // lights per axis
@@ -66,42 +109,23 @@ void App::on_init()
     uint32_t numLights = resolution.x * resolution.y * resolution.z;
     glm::vec3 step = (aabbMax - aabbMin) / glm::vec3(resolution - 1u);
 
-    auto v2 = ecs->create();
-    ecs->emplace(v2, ecs::Node{}, ecs::Transform{}, ecs::Mesh{});
-    auto v = Engine::get().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW {}", e); });
-    for(auto [e, m, t] : v)
     {
-        ENG_LOG("ENTS IN VIEW {}", e);
-    }
-    auto v1 = ecs->create();
-    struct XX
-    {
-    };
-    ecs->emplace(v1, ecs::Transform{}, ecs::Mesh{});
-    ecs->emplace(v1, XX{});
-    for(auto [e, m, t] : v)
-    {
-        ENG_LOG("ENTS IN VIEW {}", e);
-    }
-
-    {
-    
-    SparseSet s;
-    auto it = s.erase(2);
-    it = s.insert(1);
-    it = s.erase(2);
-    it = s.erase(1);
-    it = s.insert(2);
-    it = s.insert(3);
-    it = s.insert(1);
-    it = s.insert(2);
-    it = s.insert(3);
-    it = s.insert(1);
-    it = s.insert(2);
-    it = s.insert(3);
-    it = s.erase(1);
-    it = s.insert();
-    auto x = s.get(it);
+        SparseSet s;
+        auto it = s.erase(2);
+        it = s.insert(1);
+        it = s.erase(2);
+        it = s.erase(1);
+        it = s.insert(2);
+        it = s.insert(3);
+        it = s.insert(1);
+        it = s.insert(2);
+        it = s.insert(3);
+        it = s.insert(1);
+        it = s.insert(2);
+        it = s.insert(3);
+        it = s.erase(1);
+        it = s.insert();
+        auto x = s.get(it);
     }
 
     for(uint32_t z = 0; z < resolution.z; ++z)

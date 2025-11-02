@@ -25,12 +25,12 @@ struct Transform
     static Transform from(const glm::vec3& pos)
     {
         Transform t;
-        t.local = glm::translate(pos);
-        t.global = t.local;
+        t.local = glm::identity<glm::mat4>();
+        t.global = glm::translate(pos);
         return t;
     }
 
-    glm::vec3 pos() const { return glm::vec{ global[3] }; }
+    glm::vec3 pos() const { return glm::vec3{ global[3] }; }
 
     glm::mat4 local{ 1.0f };
     glm::mat4 global{ 1.0f };

@@ -35,16 +35,19 @@ struct ComponentIdGenerator
 {
     template <typename Component> static component_id_t generate()
     {
-        assert(_id.load() < MAX_COMPONENTS);
-        static component_id_t id = _id++;
+        static component_id_t id = _id.fetch_add(1);
+        assert(id < MAX_COMPONENTS);
         return id;
-    }
-    template <typename Component> static component_id_t generate_bit()
-    {
-        return component_id_t{ 1 } << generate<Component>();
     }
     inline static std::atomic<component_id_t> _id{};
 };
+
+template <typename Component> component_id_t get_id()
+{
+    return ComponentIdGenerator::generate<std::remove_cvref_t<Component>>();
+}
+
+template <typename Component> component_id_t get_id_bit() { return component_id_t{ 1 } << get_id<Component>(); }
 
 class IComponentPool
 {
@@ -66,7 +69,7 @@ template <typename T> class ComponentPool : public IComponentPool
         const auto it = entities.get(e);
         if(!it)
         {
-            ENG_ERROR("Invalid entity {} for component {}", e, ComponentIdGenerator::generate<T>());
+            ENG_ERROR("Invalid entity {} for component {}", e, get_id<T>());
             return nullptr;
         }
         return &components.at(it.index);
@@ -129,11 +132,13 @@ class Registry
   public:
     struct View
     {
-        using callback_t = void(ecs::entity);
+        using on_add_callback_t = void(ecs::entity);
+        using on_update_callback_t = void(ecs::entity, signature_t);
 
         Registry* registry{};
         std::vector<ecs::entity> entities;
-        Signal<callback_t> on_add;
+        Signal<on_add_callback_t> on_add;
+        Signal<on_update_callback_t> on_update;
     };
 
     // get the components vector to iterate over
@@ -167,7 +172,7 @@ class Registry
     {
         if(is_valid(e))
         {
-            const auto mask = signature_t{ (ComponentIdGenerator::generate_bit<std::remove_cvref_t<Components>>() | ...) };
+            const auto mask = signature_t{ (get_id_bit<Components>() | ...) };
             return (get_md(e).signature & mask) == mask;
         }
         return false;
@@ -177,8 +182,7 @@ class Registry
     template <typename Component> Component* get(entity e)
     {
         if(!is_valid(e) || !has<Component>(e)) { return nullptr; }
-        const auto idx = ComponentIdGenerator::generate<Component>();
-        return static_cast<Component*>(component_arrays.at(idx)->get(e));
+        return static_cast<Component*>(component_arrays.at(get_id<Component>())->get(e));
     }
 
     // get the component from the entity. may return nullptr
@@ -188,9 +192,9 @@ class Registry
     template <typename... Components> void emplace(entity e, Components&&... comps)
     {
         if(!is_valid(e)) { return; }
-        const signature_t compids = ((ComponentIdGenerator::generate_bit<std::remove_cvref_t<Components>>()) | ...);
+        const signature_t compids = (get_id_bit<Components>() | ...);
         get_md(e).signature |= compids;
-        ((get_comp_arr<std::remove_cvref_t<Components>>().emplace(e, std::forward<Components>(comps))), ...);
+        ((get_comp_arr<Components>().emplace(e, std::forward<Components>(comps))), ...);
         views_on_add(e, compids);
     }
 
@@ -223,7 +227,7 @@ class Registry
         // todo: remove from views
         if(!is_valid(e)) { return; }
         auto& md = get_md(e);
-        const auto idx = ComponentIdGenerator::generate<std::remove_cvref_t<Component>>();
+        const auto idx = get_id<Component>();
         if(md.signature.test(idx))
         {
             component_arrays.at(idx)->erase(e);
@@ -308,31 +312,42 @@ class Registry
                 cloned_parents.pop();
                 make_child(cloned_parent, dst_entity);
             }
-            EntityMetadata& emd = get_md(src_entity);
+            EntityMetadata& srcmd = get_md(src_entity);
             for(auto i = 0u; i < MAX_COMPONENTS; ++i)
             {
-                if(emd.signature.test(i))
+                if(srcmd.signature.test(i))
                 {
                     get_md(dst_entity).signature.set(i, true);
                     component_arrays.at(i)->clone(src_entity, dst_entity);
                 }
             }
-            for(auto i = 0u; i < emd.children.size(); ++i)
+            for(auto i = 0u; i < srcmd.children.size(); ++i)
             {
                 cloned_parents.push(dst_entity);
             }
-            views_on_add(dst_entity, emd.signature);
+            views_on_add(dst_entity, srcmd.signature);
         });
         assert(cloned_parents.empty());
         return root;
     }
 
+    template <typename... Components> void update(entity e)
+    {
+        const auto sig = signature_t{ (get_id_bit<Components>() | ...) };
+        for(auto i = 0u; i < viewsigs.size(); ++i)
+        {
+            const auto& vsig = viewsigs.at(i);
+            if((sig & vsig).any()) { views.at(i).on_update.signal(e, sig); }
+        }
+    }
+
     // obtains a view of the only entities that have the specified components.
     // optionally, takes callbacks that are called when entities get removed or added.
     template <typename... Components>
-    ecs::View<Components...> get_view(std::optional<Callback<View::callback_t>> on_add = std::nullopt)
+    ecs::View<Components...> get_view(std::optional<Callback<View::on_add_callback_t>> on_add = std::nullopt,
+                                      std::optional<Callback<View::on_update_callback_t>> on_update = std::nullopt)
     {
-        const signature_t sig = ((ComponentIdGenerator::generate_bit<Components>()) | ...);
+        const auto sig = signature_t{ (get_id_bit<Components>() | ...) };
         View* rview{};
         for(auto i = 0u; i < viewsigs.size(); ++i)
         {
@@ -355,6 +370,7 @@ class Registry
             }
         }
         if(on_add) { rview->on_add += *on_add; }
+        if(on_update) { rview->on_update += *on_update; }
         return ecs::View<Components...>{ rview };
     }
 
@@ -362,11 +378,11 @@ class Registry
     // checks if entity is valid and is registered.
     bool is_valid(entity e) const { return e != INVALID_ENTITY && has(e); }
 
-    template <typename Component> auto& get_comp_arr()
+    template <typename Component, typename CompNoRef = std::remove_cvref_t<Component>> auto& get_comp_arr()
     {
-        auto& comparr = component_arrays.at(ComponentIdGenerator::generate<Component>());
-        if(!comparr) { comparr = std::make_unique<ComponentPool<Component>>(); }
-        return *static_cast<ComponentPool<Component>*>(&*comparr);
+        auto& comparr = component_arrays.at(get_id<CompNoRef>());
+        if(!comparr) { comparr = std::make_unique<ComponentPool<CompNoRef>>(); }
+        return *static_cast<ComponentPool<CompNoRef>*>(&*comparr);
     }
 
     // broadcasts to views new entity or new component.
