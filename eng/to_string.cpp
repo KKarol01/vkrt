@@ -60,12 +60,12 @@ std::string to_string(const gfx::SyncType& a)
     }
 }
 
-std::string to_string(const gfx::MeshPassType& a)
+std::string to_string(const gfx::RenderPassType& a)
 {
     switch(a)
     {
-        case gfx::MeshPassType::FORWARD: { return "FORWARD"; }
-        case gfx::MeshPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
+        case gfx::RenderPassType::FORWARD: { return "FORWARD"; }
+        case gfx::RenderPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }

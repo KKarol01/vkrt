@@ -28,12 +28,12 @@ void Renderer::update()
 {
     for(auto e : Engine::get().scene->scene)
     {
-        Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
-            if(Engine::get().ecs->has<ecs::Mesh>(e))
-            {
-                Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
-            };
-        });
+        //Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
+        //    if(Engine::get().ecs->has<ecs::Mesh>(e))
+        //    {
+        //        Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
+        //    };
+        //});
     }
 
     // Engine::get().renderer->rgraph->add_pass(
@@ -57,47 +57,47 @@ void App::on_init()
 {
     auto* ecs = Engine::get().ecs;
 
-    auto e1 = ecs->create();
-    ecs->emplace(e1, ecs::Node{}, ecs::Transform{});
-    auto v1 =
-        Engine::get().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 1 {}", e); },
-                                                               [](auto e, auto sig) {
-                                                                   ENG_LOG("ENTS UPDATED 1 {} {}", e, sig.to_string());
-                                                               });
-    auto v2 = Engine::get().ecs->get_view<ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 2 {}", e); },
-                                                          [](auto e, auto sig) {
-                                                              ENG_LOG("ENTS UPDATED 2 {} {}", e, sig.to_string());
-                                                          });
-    for(auto [e, m, t] : v1)
-    {
-        ENG_LOG("ENTS IN VIEW 1 {}", e);
-    }
-    for(auto [e, t] : v2)
-    {
-        ENG_LOG("ENTS IN VIEW 2 {}", e);
-    }
-    auto e2 = ecs->create();
-    struct XX
-    {
-    };
-    ecs->emplace(e2, ecs::Transform{}, ecs::Mesh{});
-    ecs->emplace(e2, XX{});
+    //auto e1 = ecs->create();
+    //ecs->emplace(e1, ecs::Node{}, ecs::Transform{});
+    //auto v1 =
+    //    Engine::get().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 1 {}", e); },
+    //                                                           [](auto e, auto sig) {
+    //                                                               ENG_LOG("ENTS UPDATED 1 {} {}", e, sig.to_string());
+    //                                                           });
+    //auto v2 = Engine::get().ecs->get_view<ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 2 {}", e); },
+    //                                                      [](auto e, auto sig) {
+    //                                                          ENG_LOG("ENTS UPDATED 2 {} {}", e, sig.to_string());
+    //                                                      });
+    //for(auto [e, m, t] : v1)
+    //{
+    //    ENG_LOG("ENTS IN VIEW 1 {}", e);
+    //}
+    //for(auto [e, t] : v2)
+    //{
+    //    ENG_LOG("ENTS IN VIEW 2 {}", e);
+    //}
+    //auto e2 = ecs->create();
+    //struct XX
+    //{
+    //};
+    //ecs->emplace(e2, ecs::Transform{}, ecs::Mesh{});
+    //ecs->emplace(e2, XX{});
 
-    for(auto [e, m, t] : v1)
-    {
-        ENG_LOG("ENTS IN VIEW 1 {}", e);
-    }
-    for(auto [e, t] : v2)
-    {
-        ENG_LOG("ENTS IN VIEW 2 {}", e);
-    }
+    //for(auto [e, m, t] : v1)
+    //{
+    //    ENG_LOG("ENTS IN VIEW 1 {}", e);
+    //}
+    //for(auto [e, t] : v2)
+    //{
+    //    ENG_LOG("ENTS IN VIEW 2 {}", e);
+    //}
 
-    auto* e1t = ecs->get<ecs::Transform>(e1);
-    auto* e2m = ecs->get<ecs::Mesh>(e2);
+    //auto* e1t = ecs->get<ecs::Transform>(e1);
+    //auto* e2m = ecs->get<ecs::Mesh>(e2);
 
-    e2m->name = "sdafsdf";
-    ecs->update<ecs::Mesh>(e2);
-    ecs->update<ecs::Transform>(e1);
+    //e2m->name = "sdafsdf";
+    //ecs->update<ecs::Mesh>(e2);
+    //ecs->update<ecs::Transform>(e1);
 
     renderer.init();
     const auto e = Engine::get().scene->load_from_file("cyberpunk.glb");
@@ -109,24 +109,24 @@ void App::on_init()
     uint32_t numLights = resolution.x * resolution.y * resolution.z;
     glm::vec3 step = (aabbMax - aabbMin) / glm::vec3(resolution - 1u);
 
-    {
-        SparseSet s;
-        auto it = s.erase(2);
-        it = s.insert(1);
-        it = s.erase(2);
-        it = s.erase(1);
-        it = s.insert(2);
-        it = s.insert(3);
-        it = s.insert(1);
-        it = s.insert(2);
-        it = s.insert(3);
-        it = s.insert(1);
-        it = s.insert(2);
-        it = s.insert(3);
-        it = s.erase(1);
-        it = s.insert();
-        auto x = s.get(it);
-    }
+    //{
+    //    SparseSet s;
+    //    auto it = s.erase(2);
+    //    it = s.insert(1);
+    //    it = s.erase(2);
+    //    it = s.erase(1);
+    //    it = s.insert(2);
+    //    it = s.insert(3);
+    //    it = s.insert(1);
+    //    it = s.insert(2);
+    //    it = s.insert(3);
+    //    it = s.insert(1);
+    //    it = s.insert(2);
+    //    it = s.insert(3);
+    //    it = s.erase(1);
+    //    it = s.insert();
+    //    auto x = s.get(it);
+    //}
 
     for(uint32_t z = 0; z < resolution.z; ++z)
     {
@@ -141,7 +141,7 @@ void App::on_init()
                 ecs->emplace(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
                              ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
                 Engine::get().scene->scene.push_back(light);
-                Engine::get().renderer->add_light(light);
+                //Engine::get().renderer->add_light(light);
             }
         }
     }

@@ -77,6 +77,38 @@ void Renderer::init(RendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
+    ecs_mesh_view = Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>(
+        [this](ecs::entity e) {
+            new_transforms.push_back(e);
+            const auto* mesh = Engine::get().ecs->get<ecs::Mesh>(e);
+            for(const auto& rmesh : mesh->meshes)
+            {
+                const auto& eff = rmesh->material->mesh_pass->effects;
+                for(auto i = 0u; i < eff.size(); ++i)
+                {
+                    const auto rpt = (RenderPassType)i;
+                    if(eff.at(i))
+                    {
+                        render_passes.at(rpt).entities.push_back(e);
+                        render_passes.at(rpt).redo = true;
+                    }
+                }
+            }
+        },
+        [this](ecs::entity e, ecs::signature_t sig) {
+            if(sig.test(ecs::get_id<ecs::Transform>())) { new_transforms.push_back(e); }
+            if(sig.test(ecs::get_id<ecs::Mesh>()))
+            {
+                ENG_TODO();
+                assert(false);
+            }
+        });
+    ecs_light_view = Engine::get().ecs->get_view<ecs::Light>(
+        [this](auto e) {
+            new_lights.push_back(e);
+        },
+        [this](auto e, auto sig) { new_lights.push_back(e); });
+
     Engine::get().ui->add_tab(UI::Tab{
         "Debug",
         UI::Location::RIGHT_PANE,
@@ -102,9 +134,9 @@ void Renderer::init(RendererBackend* backend)
 
                 ImGui::SeparatorText("Culling");
                 const auto& ppf = get_perframe(-1);
-                const auto& cullbuf = ppf.culling.ids_buf.get();
+                const auto& cullbuf = ppf.culling.batch.ids_buf.get();
                 uint32_t mlts = 0;
-                for(auto e : render_passes.at((uint32_t)MeshPassType::FORWARD).entity_cache)
+                for(auto [e, t, m] : ecs_mesh_view)
                 {
                     const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
                     for(auto mmsh : msh->meshes)
@@ -257,7 +289,7 @@ void Renderer::init_pipelines()
         .culling = CullFace::BACK,
     });
     MeshPassCreateInfo info{ .name = "default_unlit" };
-    info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline });
+    info.effects[(uint32_t)RenderPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline });
     default_meshpass = make_mesh_pass(info);
     default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
 }
@@ -317,9 +349,9 @@ void Renderer::init_perframes()
                                                 ImageLayout::GENERAL, true });
         }
 
-        pf.culling.cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("cull cmds {}", i), 1024,
-                                                           BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
-        pf.culling.ids_buf = make_buffer(BufferDescriptor{
+        pf.culling.batch.cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("cull cmds {}", i), 1024,
+                                                                 BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
+        pf.culling.batch.ids_buf = make_buffer(BufferDescriptor{
             ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT | BufferUsage::CPU_ACCESS });
         pf.culling.debug_bsphere = make_image(ImageDescriptor{
             .name = ENG_FMT("debug_bsphere{}", i),
@@ -364,12 +396,13 @@ void Renderer::init_bufs()
         bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
         bufs.lights_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("lights {}", i), 256, BufferUsage::STORAGE_BIT });
     }
-    for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
+    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
-        render_passes.at(i).cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("{}_cmds", to_string((MeshPassType)i)), 1024,
-                                                                    BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
-        render_passes.at(i).ids_buf =
-            make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
+        const auto rpt = (RenderPassType)i;
+        render_passes[rpt].batch.cmd_buf = make_buffer(BufferDescriptor{
+            ENG_FMT("{}_cmds", to_string(rpt)), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
+        render_passes[rpt].batch.ids_buf =
+            make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string(rpt)), 1024, BufferUsage::STORAGE_BIT });
     }
     {
         const auto* w = Engine::get().window;
@@ -386,6 +419,16 @@ void Renderer::update()
     const auto pfi = Engine::get().frame_num % Renderer::frame_count;
     auto& pf = get_perframe();
     const auto& ppf = perframe.at((Engine::get().frame_num + perframe.size() - 1) % perframe.size()); // get previous frame res
+
+    pf.ren_fen->wait_cpu(~0ull);
+    pf.ren_fen->reset();
+    pf.acq_sem->reset();
+    pf.ren_sem->reset();
+    pf.swp_sem->reset();
+    pf.cmdpool->reset();
+    swapchain->acquire(~0ull, pf.acq_sem);
+
+    build_renderpasses();
 
     if(new_shaders.size())
     {
@@ -433,27 +476,14 @@ void Renderer::update()
         {
             auto* l = Engine::get().ecs->get<ecs::Light>(new_lights.at(i));
             const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights.at(i));
-            if(l->gpu_index == ~0u)
-            {
-                l->gpu_index = lights.size();
-                lights.push_back(new_lights.at(i));
-            }
+            if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate_slot(); }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
-            sbuf->copy(bufs.lights_bufs[0], &gpul,
-                       offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
+            sbuf->copy(bufs.lights_bufs[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
         }
-        const auto lc = (uint32_t)lights.size();
+        const auto lc = (uint32_t)ecs_light_view.size();
         sbuf->copy(bufs.lights_bufs[0], &lc, 0, 4);
         new_lights.clear();
     }
-
-    pf.ren_fen->wait_cpu(~0ull);
-    pf.ren_fen->reset();
-    pf.acq_sem->reset();
-    pf.ren_sem->reset();
-    pf.swp_sem->reset();
-    pf.cmdpool->reset();
-    swapchain->acquire(~0ull, pf.acq_sem);
 
     const auto view = Engine::get().camera->get_view();
     const auto proj = Engine::get().camera->get_projection();
@@ -487,39 +517,37 @@ void Renderer::update()
         .mlt_occ_cull_enable = (uint32_t)mlt_occ_cull_enable,
     };
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
+    sbuf->flush()->wait_cpu(~0ull);
 
-    for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
-    {
-        process_meshpass((MeshPassType)i);
-    }
-    auto& fwdrp = render_passes[(uint32_t)MeshPassType::FORWARD];
+    auto& fwdrp = render_passes[RenderPassType::FORWARD];
     const auto ZERO = 0u;
-    sbuf->copy(pf.culling.cmd_buf, fwdrp.cmd_buf, 0, { 0, fwdrp.cmd_buf->size });
-    sbuf->copy(pf.culling.ids_buf, &ZERO, 0, 4);
+    sbuf->copy(pf.culling.batch.cmd_buf, fwdrp.batch.cmd_buf, 0, { 0, fwdrp.batch.cmd_buf->size });
+    sbuf->copy(pf.culling.batch.ids_buf, &ZERO, 0, 4);
 
-    if(pf.culling.ids_buf->capacity < render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size)
+    if(pf.culling.batch.ids_buf->capacity < render_passes.at(RenderPassType::FORWARD).batch.ids_buf->size)
     {
-        sbuf->resize(pf.culling.ids_buf, render_passes.at((uint32_t)MeshPassType::FORWARD).ids_buf->size);
+        sbuf->resize(pf.culling.batch.ids_buf, render_passes.at(RenderPassType::FORWARD).batch.ids_buf->size);
     }
 
     {
         const uint32_t zero = 0u;
         sbuf->copy(pf.fwdp.light_list_buf, &zero, 0ull, 4);
     }
+    sbuf->flush()->wait_cpu(~0ull);
 
     if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS)
     {
         rgraph->add_pass(
             RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::DEFAULT_UNLIT },
             [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
-                const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-                b.access(ppf.culling.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-                b.access(ppf.culling.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+                const auto& rp = render_passes.at(RenderPassType::FORWARD);
+                b.access(ppf.culling.batch.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+                b.access(ppf.culling.batch.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
                 b.access(pf.gbuffer.depth->default_view, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW,
                          ImageLayout::ATTACHMENT, true);
             },
             [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
-                const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+                const auto& rp = render_passes.at(RenderPassType::FORWARD);
                 VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
                 VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
                 const auto vkdep =
@@ -534,10 +562,9 @@ void Renderer::update()
                 cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
                 cmd->bind_pipeline(cullzout_pipeline.get());
                 cmd->bind_resource(0, pf.constants);
-                cmd->bind_resource(1, ppf.culling.ids_buf);
+                cmd->bind_resource(1, ppf.culling.batch.ids_buf);
                 cmd->begin_rendering(vkreninfo);
-                render_mbatches(cmd, ppf.culling.mbatches, ppf.culling.cmd_buf, ppf.culling.cmd_buf,
-                                ppf.culling.cmd_start, 0ull, {}, false);
+                render_ibatch(cmd, ppf.culling.batch, {}, false);
                 cmd->end_rendering();
             });
     }
@@ -550,7 +577,7 @@ void Renderer::update()
                      ImageLayout::GENERAL, true);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
+            const auto& rp = render_passes.at(RenderPassType::FORWARD);
             auto& hizp = pf.culling.hizpyramid.get();
             cmd->bind_pipeline(hiz_pipeline.get());
             cmd->bind_resource(4, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::READ_ONLY, false }));
@@ -598,12 +625,12 @@ void Renderer::update()
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(rp.ids_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(rp.cmd_buf, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
-            b.access(pf.culling.cmd_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
+            const auto& rp = render_passes.at(RenderPassType::FORWARD);
+            b.access(rp.batch.ids_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(rp.batch.cmd_buf, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+            b.access(pf.culling.batch.cmd_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                      PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(pf.culling.ids_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
+            b.access(pf.culling.batch.ids_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                      PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
             b.access(pf.culling.hizptex->view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
             b.access(pf.culling.debug_bsphere->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
@@ -612,11 +639,11 @@ void Renderer::update()
                      PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
         },
         [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            pf.culling.mbatches = rp.mbatches;
-            pf.culling.cmd_start = rp.cmd_start;
-            pf.culling.cmd_count = rp.cmd_count;
-            pf.culling.id_count = rp.id_count;
+            const auto& rp = render_passes.at(RenderPassType::FORWARD);
+            pf.culling.batch.batches = rp.batch.batches;
+            pf.culling.batch.cmd_count = rp.batch.cmd_count;
+            pf.culling.batch.cmd_start = rp.batch.cmd_start;
+            pf.culling.batch.ids_count = rp.batch.ids_count;
 
             cmd->clear_color(pf.culling.debug_bsphere.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
             cmd->clear_color(pf.culling.debug_depth.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
@@ -625,28 +652,28 @@ void Renderer::update()
 
             cmd->bind_pipeline(cull_pipeline.get());
             cmd->bind_resource(0, pf.constants);
-            cmd->bind_resource(1, rp.ids_buf);
-            cmd->bind_resource(2, pf.culling.ids_buf);
-            cmd->bind_resource(3, pf.culling.cmd_buf, { pf.culling.cmd_start, ~0ull });
+            cmd->bind_resource(1, rp.batch.ids_buf);
+            cmd->bind_resource(2, pf.culling.batch.ids_buf);
+            cmd->bind_resource(3, pf.culling.batch.cmd_buf, { pf.culling.batch.cmd_start, ~0ull });
             cmd->bind_resource(4, pf.culling.hizptex);
             cmd->bind_resource(6, make_texture(TextureDescriptor{ pf.culling.debug_bsphere->default_view, ImageLayout::GENERAL, true }));
             cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.culling.debug_depth->default_view, ImageLayout::GENERAL, true }));
-            cmd->dispatch((rp.id_count + 31) / 32, 1, 1);
+            cmd->dispatch((rp.batch.ids_count + 31) / 32, 1, 1);
         });
     // todo: culling main pass should render to zbuffer new items from current frame to fill it out.
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            const auto& rp = render_passes.at((uint32_t)MeshPassType::FORWARD);
-            b.access(pf.culling.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.culling.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            const auto& rp = render_passes.at(RenderPassType::FORWARD);
+            b.access(pf.culling.batch.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
+            b.access(pf.culling.batch.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
             b.access(pf.gbuffer.color->default_view, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT,
                      ImageLayout::ATTACHMENT, true);
             b.access(pf.gbuffer.depth->default_view, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
             b.access(pf.fwdp.light_grid_buf, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
             b.access(pf.fwdp.light_list_buf, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
         },
-        [this](SubmitQueue* q, CommandBuffer* cmd) { render(MeshPassType::FORWARD, q, cmd); });
+        [this](SubmitQueue* q, CommandBuffer* cmd) { render(RenderPassType::FORWARD, q, cmd); });
     rgraph->add_pass(
         RenderGraph::PassCreateInfo{ "imgui", RenderOrder::PRESENT },
         [&pf, this](RenderGraph::PassResourceBuilder& b) {
@@ -685,11 +712,11 @@ void Renderer::update()
     sbuf->reset();
 }
 
-void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
+void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
 {
     auto* ew = Engine::get().window;
     auto& pf = get_perframe();
-    auto& rp = render_passes.at((uint32_t)pass);
+    auto& rp = render_passes.at(pass);
 
     const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
         .imageView = pf.gbuffer.color->default_view->md.vk->view,
@@ -711,14 +738,13 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
     cmd->set_scissors(&vksciss, 1);
     cmd->set_viewports(&vkview, 1);
     cmd->begin_rendering(vkreninfo);
-    render_mbatches(cmd, rp.mbatches, pf.culling.cmd_buf, pf.culling.cmd_buf, pf.culling.cmd_start, 0ull,
-                    [this, &pf](CommandBuffer* cmd) {
-                        const auto outputmode = (uint32_t)debug_output;
-                        cmd->bind_resource(0, pf.constants);
-                        cmd->bind_resource(1, pf.culling.ids_buf);
-                        cmd->bind_resource(2, pf.fwdp.light_grid_buf);
-                        cmd->bind_resource(3, pf.fwdp.light_list_buf);
-                    });
+    render_ibatch(cmd, pf.culling.batch, [this, &pf](CommandBuffer* cmd) {
+        const auto outputmode = (uint32_t)debug_output;
+        cmd->bind_resource(0, pf.constants);
+        cmd->bind_resource(1, pf.culling.batch.ids_buf);
+        cmd->bind_resource(2, pf.fwdp.light_grid_buf);
+        cmd->bind_resource(3, pf.fwdp.light_list_buf);
+    });
     if(0)
     {
         const auto& geom = helpergeom.uvsphere.get();
@@ -730,129 +756,130 @@ void Renderer::render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
         }
     }
     cmd->end_rendering();
-    rp.entities.clear();
 }
 
-void Renderer::process_meshpass(MeshPassType pass)
+void Renderer::build_renderpasses()
 {
-    // todo: maybe sort entities before actually deeming the batch as to-be-sorted; or make the scene order.
-    auto& rp = render_passes.at((uint32_t)pass);
-    // if(!rp.redo) { return; }
-    rp.entity_cache = rp.entities;
-
-    std::vector<MeshletInstance> insts;
-    std::vector<ecs::entity> newinsts;
-    newinsts.reserve(rp.entities.size());
-    for(auto i = 0u; i < rp.entities.size(); ++i)
+    struct MeshInstance
     {
-        const auto& ent = rp.entities.at(i);
-        auto* entmsh = Engine::get().ecs->get<ecs::Mesh>(ent);
-        if(entmsh->gpu_resource == ~0u)
+        Handle<Geometry> geom;
+        Handle<Material> material;
+        uint32_t id;
+        uint32_t mlti;
+    };
+    struct RPassData
+    {
+        std::vector<MeshInstance> minsts;
+    };
+    std::unordered_map<RenderPassType, RPassData> rpdatas;
+
+    for(const auto& [rpt, rp] : render_passes)
+    {
+        if(!rp.redo) { continue; }
+
+        for(const auto& e : rp.entities)
         {
-            entmsh->gpu_resource = gpu_resource_allocator.allocate_slot();
-            newinsts.push_back(ent);
-            new_transforms.push_back(ent);
-        }
-        for(auto i = 0u; i < entmsh->meshes.size(); ++i)
-        {
-            const auto& msh = entmsh->meshes.at(i).get();
-            const auto& geom = msh.geometry.get();
-            for(auto j = 0u; j < geom.meshlet_range.size; ++j)
+            auto& m = *Engine::get().ecs->get<ecs::Mesh>(e);
+            if(m.gpu_resource == ~0u) { m.gpu_resource = gpu_resource_allocator.allocate_slot(); }
+            for(auto i = 0u; i < m.meshes.size(); ++i)
             {
-                insts.push_back(MeshletInstance{ msh.geometry, msh.material, entmsh->gpu_resource, geom.meshlet_range.offset + j });
+                const auto& mesh = m.meshes.at(i).get();
+                const auto& geom = mesh.geometry.get();
+                const auto& meshpass = mesh.material->mesh_pass.get();
+                for(auto j = 0u; j < geom.meshlet_range.size; ++j)
+                {
+                    rpdatas[rpt].minsts.push_back(MeshInstance{ mesh.geometry, mesh.material, m.gpu_resource,
+                                                                geom.meshlet_range.offset + j });
+                }
             }
         }
     }
 
-    rp.mbatches.resize(insts.size());
-    std::vector<DrawIndexedIndirectCommand> cmds(insts.size());
-    std::vector<uint32_t> cmdcnts(insts.size());
-    std::vector<GPUInstanceId> gpuids(insts.size());
-    // std::vector<glm::vec4> gpubbs(insts.size());
-    Handle<Pipeline> ppp;
-    uint32_t cmdi = ~0u;
-    uint32_t mlti = ~0u;
-    uint32_t batchi = ~0u;
-    std::sort(insts.begin(), insts.end(), [this](const auto& a, const auto& b) {
-        if(a.material >= b.material) { return false; } // first sort by material
-        if(a.meshlet >= b.meshlet) { return false; }   // then sort by geometry
-        return true;
-    });
-    for(auto i = 0u; i < insts.size(); ++i)
+    for(auto& [rpt, rpd] : rpdatas)
     {
-        const auto& inst = insts.at(i);
-        const auto& geom = inst.geometry.get();
-        const auto& mlt = meshlets.at(inst.meshlet);
-        const auto& mat = inst.material.get();
-        const auto& pp = mat.mesh_pass->effects.at((uint32_t)pass)->pipeline;
-        if(pp != ppp)
+        auto& rp = render_passes.at(rpt);
+        rp.redo = false;
+
+        // first sort by material, so pipelines can be the same (batch by pipelines)
+        // then sort by meshlet so indirect command struct can be the same (batch by instances)
+        std::sort(rpd.minsts.begin(), rpd.minsts.end(), [](const MeshInstance& a, const MeshInstance& b) {
+            if(a.material >= b.material) { return false; }
+            if(a.mlti >= b.mlti) { return false; }
+            return true;
+        });
+
+        Handle<Pipeline> pp;
+        uint32_t cmdi = ~0u;
+        uint32_t mlti = ~0u;
+        uint32_t batchi = ~0u;
+        rp.batch.batches.clear();
+        rp.batch.batches.resize(rpd.minsts.size());
+        std::vector<DrawIndexedIndirectCommand> cmds(rpd.minsts.size());
+        std::vector<uint32_t> cmdcnts(rpd.minsts.size());
+        std::vector<GPUInstanceId> gpuids(rpd.minsts.size());
+        for(auto i = 0u; i < rpd.minsts.size(); ++i)
         {
-            ppp = pp;
-            ++batchi;
-            rp.mbatches.at(batchi).pipeline = pp;
+            const auto& minst = rpd.minsts.at(i);
+            const auto& geom = minst.geom.get();
+            const auto& mlt = meshlets.at(minst.mlti);
+            const auto& mat = minst.material.get();
+            const auto& mpp = mat.mesh_pass->effects.at((uint32_t)rpt)->pipeline;
+            // pipeline changed
+            if(mpp != pp)
+            {
+                pp = mpp;
+                rp.batch.batches.at(++batchi).pipeline = pp;
+            }
+            // indirect command changed
+            if(minst.mlti != mlti)
+            {
+                mlti = minst.mlti;
+                cmds.at(++cmdi) = DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
+                                                              .instanceCount = 0,
+                                                              .firstIndex = mlt.index_offset,
+                                                              .vertexOffset = mlt.vertex_offset,
+                                                              .firstInstance = i };
+            }
+            gpuids.at(i) = GPUInstanceId{ cmdi, minst.mlti, minst.id, *minst.material };
+            // don't increment the indirect command instcount here - this the culling stage handles
+            ++rp.batch.batches.at(batchi).inst_count;
+            rp.batch.batches.at(batchi).cmd_count = cmdi + 1;
+            -(batchi > 0 ? rp.batch.batches.at(batchi - 1).cmd_count : 0);
+            ++cmdcnts.at(batchi); // = rp.batch.batches.at(batchi).cmd_count;
         }
-        if(inst.meshlet != mlti)
-        {
-            mlti = inst.meshlet;
-            ++cmdi;
-            cmds.at(cmdi) = DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
-                                                        .instanceCount = 0,
-                                                        .firstIndex = mlt.index_offset,
-                                                        .vertexOffset = mlt.vertex_offset,
-                                                        .firstInstance = i };
-        }
-        gpuids.at(i) = GPUInstanceId{ .cmdi = cmdi, .resi = inst.meshlet, .insti = inst.gpu_resource, .mati = *inst.material };
-        // gpubbs.at(i) = mlt.bounding_sphere; // fix bbs to be per meshlet and indexable by gpuinstance id - or not...
-        ++rp.mbatches.at(batchi).instcount;
-        // cmds.at(cmdi).instanceCount++;
-        rp.mbatches.at(batchi).cmdcount = cmdi + 1;
-        ++cmdcnts.at(batchi);
+
+        ++cmdi;
+        ++batchi;
+        cmds.resize(cmdi);
+        cmdcnts.resize(batchi);
+        const auto cmdoff = align_up2((batchi + 1) * sizeof(uint32_t), 16ull);
+        rp.batch.batches.resize(batchi);
+        rp.batch.cmd_count = cmdi;
+        rp.batch.cmd_start = cmdoff;
+        rp.batch.ids_count = gpuids.size();
+        rp.redo = false;
+
+        sbuf->copy(rp.batch.cmd_buf, cmdcnts, 0);
+        sbuf->copy(rp.batch.cmd_buf, cmds, cmdoff);
+        sbuf->copy(rp.batch.ids_buf, &rp.batch.ids_count, 0, 4);
+        sbuf->copy(rp.batch.ids_buf, gpuids, 4);
     }
-    ++cmdi;
-    ++batchi;
-    cmds.resize(cmdi);
-    cmdcnts.resize(batchi);
-    rp.mbatches.resize(batchi);
-    const auto post_cull_tri_count = 0u;
-    const auto mltcount = (uint32_t)insts.size();
-    const auto cmdoff = align_up2(cmdcnts.size() * sizeof(uint32_t), 16ull);
-    rp.cmd_count = cmdi;
-    rp.id_count = gpuids.size();
-    rp.redo = false;
-    rp.cmd_start = cmdoff;
-    // sbuf->copy(rp.cmd_buf, &rp.cmd_count, 0, 4);
-    sbuf->copy(rp.cmd_buf, cmdcnts, 0);
-    sbuf->copy(rp.cmd_buf, cmds, cmdoff);
-    sbuf->copy(rp.ids_buf, &rp.id_count, 0, 4);
-    sbuf->copy(rp.ids_buf, gpuids, 4);
-    // sbuf->copy(bufs.bsphere_buf, gpubbs, 0);
 }
 
-void Renderer::submit_mesh(const SubmitInfo& info)
-{
-    auto& rp = render_passes.at((uint32_t)info.type);
-    const auto idx = rp.entities.size();
-    rp.entities.push_back(info.entity);
-    // if any entity at any position is mismatched - redo.
-    rp.redo |= rp.entity_cache.size() <= idx || rp.entities.at(idx) != rp.entity_cache.at(idx);
-}
-
-void Renderer::add_light(ecs::entity light) { new_lights.push_back(light); }
-
-void Renderer::render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>& mbatches, Handle<Buffer> indirect,
-                               Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
-                               const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps)
+void Renderer::render_ibatch(CommandBuffer* cmd, const IndirectBatch& ibatch,
+                             const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps)
 {
     auto cmdoffacc = 0u;
-    for(auto i = 0u; i < mbatches.size(); ++i)
+    for(auto i = 0u; i < ibatch.batches.size(); ++i)
     {
-        const auto& mb = mbatches.at(i);
-        const auto cntoff = sizeof(uint32_t) * i + cntoffset;
-        const auto cmdoff = sizeof(DrawIndexedIndirectCommand) * cmdoffacc + cmdoffset;
+        const auto& mb = ibatch.batches.at(i);
+        const auto cntoff = sizeof(uint32_t) * i;
+        const auto cmdoff = sizeof(DrawIndexedIndirectCommand) * cmdoffacc + ibatch.cmd_start;
         if(bind_pps) { cmd->bind_pipeline(mb.pipeline.get()); }
         if(i == 0 && setup_resources) { setup_resources(cmd); }
-        cmd->draw_indexed_indirect_count(indirect.get(), cmdoff, count.get(), cntoff, mb.cmdcount, sizeof(DrawIndexedIndirectCommand));
-        cmdoffacc += mb.cmdcount;
+        cmd->draw_indexed_indirect_count(ibatch.cmd_buf.get(), cmdoff, ibatch.cmd_buf.get(), cntoff, mb.cmd_count,
+                                         sizeof(DrawIndexedIndirectCommand));
+        cmdoffacc += mb.cmd_count;
     }
 }
 

@@ -18,6 +18,7 @@
 #include <eng/common/handleflatset.hpp>
 #include <eng/common/callback.hpp>
 #include <eng/common/slotallocator.hpp>
+#include <eng/ecs/components.hpp>
 
 namespace eng
 {
@@ -219,7 +220,7 @@ enum class ImageAddressing
     CLAMP_EDGE
 };
 
-enum class MeshPassType : uint32_t
+enum class RenderPassType : uint32_t
 {
     FORWARD,
     DIRECTIONAL_SHADOW,
@@ -538,14 +539,14 @@ struct ShaderEffect
 struct MeshPassCreateInfo
 {
     std::string name;
-    std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM> effects;
+    std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM> effects;
 };
 
 struct MeshPass
 {
     bool operator==(const MeshPass& o) const { return name == o.name; }
     std::string name;
-    std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM> effects;
+    std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM> effects;
 };
 
 struct Material
@@ -921,13 +922,6 @@ enum class SubmitFlags : uint32_t
 };
 ENG_ENABLE_FLAGS_OPERATORS(SubmitFlags);
 
-struct SubmitInfo
-{
-    // Flags<SubmitFlags> flags{};
-    ecs::entity entity;
-    MeshPassType type;
-};
-
 namespace RenderOrder
 {
 inline constexpr uint32_t DEFAULT_UNLIT = 50;
@@ -939,32 +933,28 @@ class Renderer
   public:
     static inline uint32_t frame_count = 2;
 
-    struct MultiBatch
+    struct InstanceBatch
     {
         Handle<Pipeline> pipeline;
-        uint32_t instcount;
-        uint32_t cmdcount;
+        uint32_t inst_count{};
+        uint32_t cmd_count{};
     };
 
-    struct MeshletInstance
+    struct IndirectBatch
     {
-        Handle<Geometry> geometry;
-        Handle<Material> material;
-        uint32_t gpu_resource;
-        uint32_t meshlet;
-    };
-
-    struct MeshPassRenderData
-    {
-        std::vector<ecs::entity> entities;
-        std::vector<ecs::entity> entity_cache;
-        std::vector<MultiBatch> mbatches;
+        std::vector<InstanceBatch> batches;
         Handle<Buffer> cmd_buf;
         Handle<Buffer> ids_buf;
-        uint32_t cmd_count;
-        uint32_t id_count;
-        uint32_t cmd_start;
-        bool redo{ false };
+        uint32_t cmd_count{};
+        uint32_t cmd_start{};
+        uint32_t ids_count{};
+    };
+
+    struct RenderPass
+    {
+        std::vector<ecs::entity> entities;
+        IndirectBatch batch{};
+        bool redo{ true };
     };
 
     struct GBuffer
@@ -977,17 +967,12 @@ class Renderer
 
     struct Culling
     {
-        std::vector<MultiBatch> mbatches;
+        IndirectBatch batch;
         Handle<Image> hizpyramid;
         Handle<Texture> hizptex;
         std::vector<Handle<Texture>> hizpmiptexs;
         Handle<Image> debug_bsphere;
         Handle<Image> debug_depth;
-        Handle<Buffer> cmd_buf;
-        Handle<Buffer> ids_buf;
-        uint32_t cmd_count;
-        uint32_t id_count;
-        uint32_t cmd_start;
     };
 
     struct ForwardPlus
@@ -1043,13 +1028,10 @@ class Renderer
     void init_bufs();
 
     void update();
-    void render(MeshPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
-    void process_meshpass(MeshPassType pass);
-    void submit_mesh(const SubmitInfo& info);
-    void add_light(ecs::entity light);
-    void render_mbatches(CommandBuffer* cmd, const std::vector<MultiBatch>& mbatches, Handle<Buffer> indirect,
-                         Handle<Buffer> count, size_t cmdoffset, size_t cntoffset,
-                         const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
+    void render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
+    void build_renderpasses();
+    void render_ibatch(CommandBuffer* cmd, const IndirectBatch& ibatch,
+                       const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
 
     Handle<Buffer> make_buffer(const BufferDescriptor& info);
     Handle<Image> make_image(const ImageDescriptor& info);
@@ -1118,12 +1100,14 @@ class Renderer
     std::vector<DescriptorPool> descpools;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::entity> new_transforms;
-    std::array<MeshPassRenderData, (uint32_t)MeshPassType::LAST_ENUM> render_passes;
-    std::vector<ecs::entity> lights;
+    ecs::View<ecs::Transform, ecs::Mesh> ecs_mesh_view;
+    ecs::View<ecs::Light> ecs_light_view;
+    std::unordered_map<RenderPassType, RenderPass> render_passes;
     std::vector<ecs::entity> new_lights;
 
     GeometryBuffers bufs;
     SlotAllocator gpu_resource_allocator;
+    SlotAllocator gpu_light_allocator;
     std::vector<Sync*> syncs;
     Handle<DescriptorPool> bindless_pool;
     Handle<DescriptorSet> bindless_set;

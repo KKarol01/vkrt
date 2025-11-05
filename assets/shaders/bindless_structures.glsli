@@ -89,6 +89,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndexedIndirectCommandsBuffer) {
     ENG_TYPE_UNSIZED(DrawIndexedIndirectCommand, commands);
 } ENG_DECLARE_BINDLESS(GPUDrawIndexedIndirectCommandsBuffer);
 ENG_DECLARE_STORAGE_BUFFER(GPUIndirectCountsBuffer) {
+    ENG_TYPE_UINT count;
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, counts);
 } ENG_DECLARE_BINDLESS(GPUIndirectCountsBuffer);
 

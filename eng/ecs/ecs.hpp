@@ -443,6 +443,7 @@ template <typename... Components> struct View
 
     auto begin() { return iterator{ rview, rview->entities.data() }; }
     auto end() { return iterator{ rview, rview->entities.data() + rview->entities.size() }; }
+    auto size() const { return rview->entities.size(); }
 
     Registry::View* rview{};
 };
