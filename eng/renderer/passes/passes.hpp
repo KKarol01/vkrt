@@ -29,10 +29,13 @@ class ZPrepass : public v2::RenderGraph::Pass
         auto* r = Engine::get().renderer;
         auto* w = Engine::get().window;
         zbufs = info.zbufs;
-        culled_id_bufs = g->make_resource(BufferDescriptor{ "cull ids", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT },
-                                          r->frame_count);
+        culled_id_bufs =
+            g->make_resource(BufferDescriptor{ "cull ids", 1024,
+                                               BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT | BufferUsage::CPU_ACCESS },
+                             r->frame_count);
         culled_cmd_bufs =
-            g->make_resource(BufferDescriptor{ "cull cmds", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT }, r->frame_count);
+            g->make_resource(BufferDescriptor{ "cull cmds", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT },
+                             r->frame_count);
         cullzout_pipeline = r->make_pipeline(PipelineCreateInfo{
             .shaders = { r->make_shader("common/zoutput.vert.glsl"), r->make_shader("common/zoutput.frag.glsl") },
             .layout = r->bindless_pplayout,
