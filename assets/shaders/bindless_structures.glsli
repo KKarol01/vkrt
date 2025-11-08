@@ -193,6 +193,7 @@ ENG_DECLARE_STORAGE_BUFFER(GPUEngConstantsBuffer) {
     ENG_TYPE_UINT output_mode;
    
     ENG_TYPE_UINT fwdp_enable;
+    ENG_TYPE_UINT fwdp_max_lights_per_tile;
 
     ENG_TYPE_UINT mlt_frust_cull_enable;
     ENG_TYPE_UINT mlt_occ_cull_enable;
@@ -215,7 +216,6 @@ ENG_DECLARE_STORAGE_BUFFER(GPULightsBuffer) {
 
 ENG_DECLARE_STORAGE_BUFFER(GPUFWDPLightListsBuffer) { 
     ENG_TYPE_UINT head;
-    ENG_TYPE_UINT max_lights_per_tile;
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, lights);
 } ENG_DECLARE_BINDLESS(GPUFWDPLightListsBuffer);
 

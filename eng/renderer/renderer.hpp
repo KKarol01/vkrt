@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 #include <compare>
+#include <memory>
 #include <utility>
 #include <array>
 #include <filesystem>
@@ -38,7 +39,11 @@ class CommandBuffer;
 class CommandPool;
 class StagingBuffer;
 class SubmitQueue;
+namespace v2
+{
 class RenderGraph;
+}
+struct RenderGraphPasses;
 class DescriptorSet;
 class PipelineLayout;
 
@@ -808,8 +813,8 @@ struct Swapchain
     using acquire_impl_fptr = uint32_t (*)(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence);
     static inline acquire_impl_fptr acquire_impl{};
     uint32_t acquire(uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* fence = nullptr);
-    Handle<Image> get_image();
-    Handle<ImageView> get_view();
+    Handle<Image> get_image() const;
+    Handle<ImageView> get_view() const;
     void* metadata{};
     std::vector<Handle<Image>> images;
     std::vector<Handle<ImageView>> views;
@@ -965,27 +970,9 @@ class Renderer
         Handle<Image> hiz_debug_output;
     };
 
-    struct Culling
-    {
-        IndirectBatch batch;
-        Handle<Image> hizpyramid;
-        Handle<Texture> hizptex;
-        std::vector<Handle<Texture>> hizpmiptexs;
-        Handle<Image> debug_bsphere;
-        Handle<Image> debug_depth;
-    };
-
-    struct ForwardPlus
-    {
-        Handle<Buffer> light_list_buf; // assume 50 lights per fwdp frustum
-        Handle<Buffer> light_grid_buf; // (offset 4B, light count 4B) per tile
-    };
-
     struct PerFrame
     {
-        Culling culling;
         GBuffer gbuffer;
-        ForwardPlus fwdp;
 
         CommandPool* cmdpool{};
         Sync* acq_sem{};
@@ -1026,6 +1013,7 @@ class Renderer
     void init_pipelines();
     void init_perframes();
     void init_bufs();
+    void init_rgraph_passes();
 
     void update();
     void render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
@@ -1059,6 +1047,7 @@ class Renderer
     uint32_t get_bindless(Handle<Texture> texture);
     uint32_t get_bindless(Handle<Sampler> sampler);
 
+    uint32_t get_perframe_index(int32_t offset = 0);
     PerFrame& get_perframe(int32_t offset = 0);
 
     SubmitQueue* gq{};
@@ -1066,7 +1055,8 @@ class Renderer
     RendererBackend* backend{};
     StagingBuffer* sbuf{};
     BindlessPool* bindless{};
-    RenderGraph* rgraph{};
+    v2::RenderGraph* rgraph{};
+    RenderGraphPasses* rgraphpasses{};
 
     enum class DebugOutput
     {

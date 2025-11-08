@@ -4,6 +4,7 @@
 #include <fmt/format.h>
 
 #define ENG_FMT(str, ...) fmt::format(str, __VA_ARGS__)
+#define ENG_FMT_STR(str, ...) ENG_FMT(fmt::runtime(str), __VA_ARGS__)
 
 #ifndef NDEBUG
 #include <iostream>

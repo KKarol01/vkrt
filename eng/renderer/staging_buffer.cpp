@@ -281,22 +281,22 @@ StagingBuffer::Allocation StagingBuffer::allocate(size_t size)
         auto free_space = CAPACITY - head;
         if(free_space == 0)
         {
+            if(free_allocs.empty())
+            {
+                reset();
+                continue;
+            }
             auto it = std::upper_bound(free_allocs.begin(), free_allocs.end(), size,
                                        [](const auto size, const auto& iter) { return size < iter.realsize; });
-            if(it == free_allocs.end() && free_allocs.size() > 0) { it = it - 1; }
-            if(it != free_allocs.end())
-            {
-                auto fa = free_allocs.back();
-                free_allocs.pop_back();
-                fa.transaction = &get_transaction();
-                fa.size = std::min(size, fa.realsize);
+            if(it == free_allocs.end()) { it = it - 1; }
+            auto fa = *it;
+            free_allocs.erase(it);
+            fa.transaction = &get_transaction();
+            fa.size = std::min(size, fa.realsize);
 #ifdef ENG_SBUF_DEBUG_STATS
-                ++debugstats.freealloc_count;
+            ++debugstats.freealloc_count;
 #endif
-                return fa;
-            }
-            reset();
-            continue;
+            return fa;
         }
         assert(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
         const auto aligned_size = std::min(align_up2(size, ALIGNMENT), free_space);

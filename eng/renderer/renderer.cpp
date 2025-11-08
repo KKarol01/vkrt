@@ -15,6 +15,7 @@
 #include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/ui.hpp>
+#include <eng/renderer/passes/passes.hpp>
 #include <assets/shaders/bindless_structures.glsli>
 
 namespace eng
@@ -22,6 +23,21 @@ namespace eng
 
 namespace gfx
 {
+
+struct RenderGraphPasses
+{
+    v2::RenderGraph::ResourceView zbufsview;
+    v2::RenderGraph::ResourceView cbufsview;
+    v2::RenderGraph::ResourceView swapcbufsview;
+
+    std::unique_ptr<pass::culling::ZPrepass> cull_zprepass;
+    std::unique_ptr<pass::culling::Hiz> cull_hiz;
+    std::unique_ptr<pass::culling::MainPass> cull_main;
+    std::unique_ptr<pass::fwdp::LightCulling> fwdp_lightcull;
+    std::unique_ptr<pass::DefaultUnlit> default_unlit;
+    std::unique_ptr<pass::ImGui> imgui;
+    std::unique_ptr<pass::PresentCopy> present_copy;
+};
 
 ImageBlockData GetBlockData(ImageFormat format)
 {
@@ -66,13 +82,14 @@ void Renderer::init(RendererBackend* backend)
     swapchain = backend->make_swapchain();
     sbuf = new StagingBuffer{};
     sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
-    rgraph = new RenderGraph{};
+    rgraph = new v2::RenderGraph{};
     rgraph->init(this);
 
     init_bufs();
     init_perframes();
     init_pipelines();
     init_helper_geom();
+    init_rgraph_passes();
 
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
@@ -103,11 +120,8 @@ void Renderer::init(RendererBackend* backend)
                 assert(false);
             }
         });
-    ecs_light_view = Engine::get().ecs->get_view<ecs::Light>(
-        [this](auto e) {
-            new_lights.push_back(e);
-        },
-        [this](auto e, auto sig) { new_lights.push_back(e); });
+    ecs_light_view = Engine::get().ecs->get_view<ecs::Light>([this](auto e) { new_lights.push_back(e); },
+                                                             [this](auto e, auto sig) { new_lights.push_back(e); });
 
     Engine::get().ui->add_tab(UI::Tab{
         "Debug",
@@ -116,39 +130,39 @@ void Renderer::init(RendererBackend* backend)
             if(!Engine::get().ui->show_debug_tab) { return; }
             if(ImGui::Begin("Debug"))
             {
-                auto* camera = Engine::get().camera;
-                ImGui::SeparatorText("Camera");
-                ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
+                // auto* camera = Engine::get().camera;
+                // ImGui::SeparatorText("Camera");
+                // ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
 
-                ImGui::SeparatorText("Forward+");
-                ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
-                ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
-                ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
+                // ImGui::SeparatorText("Forward+");
+                // ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
+                // ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
+                // ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
 
-                bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
-                bool changed = false;
-                changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
-                if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
-                else { debug_output = DebugOutput::COLOR; }
-                ImGui::Checkbox("FWDP enable", &fwdp_enable);
+                // bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
+                // bool changed = false;
+                // changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
+                // if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
+                // else { debug_output = DebugOutput::COLOR; }
+                // ImGui::Checkbox("FWDP enable", &fwdp_enable);
 
-                ImGui::SeparatorText("Culling");
-                const auto& ppf = get_perframe(-1);
-                const auto& cullbuf = ppf.culling.batch.ids_buf.get();
-                uint32_t mlts = 0;
-                for(auto [e, t, m] : ecs_mesh_view)
-                {
-                    const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
-                    for(auto mmsh : msh->meshes)
-                    {
-                        mlts += mmsh->geometry->meshlet_range.size;
-                    }
-                }
-                ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
-                float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
-                ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
-                ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
-                ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
+                // ImGui::SeparatorText("Culling");
+                // const auto& ppf = get_perframe(-1);
+                // const auto& cullbuf = ppf.culling.batch.ids_buf.get();
+                // uint32_t mlts = 0;
+                // for(auto [e, t, m] : ecs_mesh_view)
+                //{
+                //     const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
+                //     for(auto mmsh : msh->meshes)
+                //     {
+                //         mlts += mmsh->geometry->meshlet_range.size;
+                //     }
+                // }
+                // ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
+                // float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
+                // ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
+                // ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
+                // ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
             }
             ImGui::End();
         },
@@ -323,64 +337,6 @@ void Renderer::init_perframes()
         pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         pf.constants =
             make_buffer(BufferDescriptor{ ENG_FMT("constants_{}", i), sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT });
-
-        const auto hizpmips = (uint32_t)(std::log2f(std::max(ew->width, ew->height)) + 1);
-        pf.culling.hizpyramid = make_image(ImageDescriptor{
-            .name = ENG_FMT("hizpyramid{}", i),
-            .width = (uint32_t)ew->width,
-            .height = (uint32_t)ew->height,
-            .mips = (uint32_t)(hizpmips),
-            .format = ImageFormat::R32F,
-            .usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT,
-        });
-        pf.culling.hizptex = make_texture(TextureDescriptor{ pf.culling.hizpyramid->default_view, ImageLayout::GENERAL });
-        pf.culling.hizpmiptexs.resize(hizpmips);
-        for(auto i = 0u; i < hizpmips; ++i)
-        {
-            pf.culling.hizpmiptexs.at(i) =
-                make_texture(TextureDescriptor{ make_view(ImageViewDescriptor{ ENG_FMT("hizpmip{}", i),
-                                                                               pf.culling.hizpyramid,
-                                                                               ImageViewType::TYPE_2D,
-                                                                               pf.culling.hizpyramid->format,
-                                                                               ImageAspect::COLOR,
-                                                                               { i, 1 },
-                                                                               { 0, 1 } }),
-
-                                                ImageLayout::GENERAL, true });
-        }
-
-        pf.culling.batch.cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("cull cmds {}", i), 1024,
-                                                                 BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
-        pf.culling.batch.ids_buf = make_buffer(BufferDescriptor{
-            ENG_FMT("cull ids {}", i), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT | BufferUsage::CPU_ACCESS });
-        pf.culling.debug_bsphere = make_image(ImageDescriptor{
-            .name = ENG_FMT("debug_bsphere{}", i),
-            .width = (uint32_t)ew->width,
-            .height = (uint32_t)ew->height,
-            .mips = 1,
-            .format = ImageFormat::R32FG32FB32FA32F,
-            .usage = ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT,
-        });
-        pf.culling.debug_depth = make_image(ImageDescriptor{
-            .name = ENG_FMT("debug_depth{}", i),
-            .width = (uint32_t)ew->width,
-            .height = (uint32_t)ew->height,
-            .mips = 1,
-            .format = ImageFormat::R32FG32FB32FA32F,
-            .usage = ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT,
-        });
-
-        {
-            const auto* w = Engine::get().window;
-            const auto light_list_size = bufs.fwdp_num_tiles * bufs.fwdp_lights_per_tile * sizeof(uint32_t) + 128;
-            const auto light_grid_size = bufs.fwdp_num_tiles * 2 * sizeof(uint32_t);
-            pf.fwdp.light_list_buf =
-                make_buffer(BufferDescriptor{ ENG_FMT("fwdp light list {}", i), light_list_size, BufferUsage::STORAGE_BIT });
-            pf.fwdp.light_grid_buf =
-                make_buffer(BufferDescriptor{ ENG_FMT("fwdp light grid {}", i), light_grid_size, BufferUsage::STORAGE_BIT });
-            sbuf->copy(pf.fwdp.light_list_buf, &bufs.fwdp_lights_per_tile,
-                       offsetof(GPUFWDPLightListsBuffer, max_lights_per_tile), 4);
-        }
     }
 }
 
@@ -413,6 +369,47 @@ void Renderer::init_bufs()
     }
 }
 
+void Renderer::init_rgraph_passes()
+{
+    rgraphpasses = new RenderGraphPasses{};
+    std::vector<Handle<Image>> zbufs(frame_count);
+    std::vector<Handle<Image>> cbufs(frame_count);
+    std::vector<Handle<Image>> swapcbufs(frame_count);
+    for(auto i = 0u; i < frame_count; ++i)
+    {
+        zbufs[i] = perframe[i].gbuffer.depth;
+        cbufs[i] = perframe[i].gbuffer.color;
+        swapcbufs[i] = swapchain->images[i];
+    }
+    rgraphpasses->zbufsview = rgraph->import_resource(std::span{ zbufs });
+    rgraphpasses->cbufsview = rgraph->import_resource(std::span{ cbufs });
+    rgraphpasses->swapcbufsview = rgraph->import_resource(std::span{ swapcbufs });
+
+    rgraphpasses->cull_zprepass =
+        std::make_unique<pass::culling::ZPrepass>(rgraph, pass::culling::ZPrepass::CreateInfo{ rgraphpasses->zbufsview });
+    rgraphpasses->cull_hiz =
+        std::make_unique<pass::culling::Hiz>(rgraph, pass::culling::Hiz::CreateInfo{ rgraphpasses->zbufsview });
+    rgraphpasses->cull_main =
+        std::make_unique<pass::culling::MainPass>(rgraph, pass::culling::MainPass::CreateInfo{
+                                                              &render_passes.at(RenderPassType::FORWARD),
+                                                              &*rgraphpasses->cull_zprepass, &*rgraphpasses->cull_hiz });
+
+    rgraphpasses->cull_zprepass->ibatches = &rgraphpasses->cull_main->batches; // todo: don't like this
+
+    rgraphpasses->fwdp_lightcull =
+        std::make_unique<pass::fwdp::LightCulling>(rgraph, pass::fwdp::LightCulling::CreateInfo{
+                                                               rgraphpasses->zbufsview, bufs.fwdp_num_tiles,
+                                                               bufs.fwdp_lights_per_tile, bufs.fwdp_tile_pixels });
+    rgraphpasses->default_unlit =
+        std::make_unique<pass::DefaultUnlit>(rgraph, pass::DefaultUnlit::CreateInfo{
+                                                         &*rgraphpasses->cull_zprepass, &*rgraphpasses->fwdp_lightcull,
+                                                         rgraphpasses->cbufsview, rgraphpasses->zbufsview });
+    rgraphpasses->imgui = std::make_unique<pass::ImGui>(rgraph, pass::ImGui::CreateInfo{ rgraphpasses->cbufsview });
+    rgraphpasses->present_copy =
+        std::make_unique<pass::PresentCopy>(rgraph, pass::PresentCopy::CreateInfo{ rgraphpasses->cbufsview,
+                                                                                   rgraphpasses->swapcbufsview, swapchain });
+}
+
 void Renderer::update()
 {
     auto* ew = Engine::get().window;
@@ -426,6 +423,7 @@ void Renderer::update()
     pf.ren_sem->reset();
     pf.swp_sem->reset();
     pf.cmdpool->reset();
+    sbuf->reset();
     swapchain->acquire(~0ull, pf.acq_sem);
 
     build_renderpasses();
@@ -478,7 +476,8 @@ void Renderer::update()
             const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights.at(i));
             if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate_slot(); }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
-            sbuf->copy(bufs.lights_bufs[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
+            sbuf->copy(bufs.lights_bufs[0], &gpul,
+                       offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
         }
         const auto lc = (uint32_t)ecs_light_view.size();
         sbuf->copy(bufs.lights_bufs[0], &lc, 0, 4);
@@ -513,186 +512,26 @@ void Renderer::update()
 
         .output_mode = (uint32_t)debug_output,
         .fwdp_enable = (uint32_t)fwdp_enable,
+        .fwdp_max_lights_per_tile = bufs.fwdp_lights_per_tile,
         .mlt_frust_cull_enable = (uint32_t)mlt_frust_cull_enable,
         .mlt_occ_cull_enable = (uint32_t)mlt_occ_cull_enable,
     };
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
-    sbuf->flush()->wait_cpu(~0ull);
+    // sbuf->flush()->wait_cpu(~0ull);
 
-    auto& fwdrp = render_passes[RenderPassType::FORWARD];
-    const auto ZERO = 0u;
-    sbuf->copy(pf.culling.batch.cmd_buf, fwdrp.batch.cmd_buf, 0, { 0, fwdrp.batch.cmd_buf->size });
-    sbuf->copy(pf.culling.batch.ids_buf, &ZERO, 0, 4);
+    //{
+    //    const uint32_t zero = 0u;
+    //    sbuf->copy(pf.fwdp.light_list_buf, &zero, 0ull, 4);
+    //}
+    // sbuf->flush()->wait_cpu(~0ull);
 
-    if(pf.culling.batch.ids_buf->capacity < render_passes.at(RenderPassType::FORWARD).batch.ids_buf->size)
-    {
-        sbuf->resize(pf.culling.batch.ids_buf, render_passes.at(RenderPassType::FORWARD).batch.ids_buf->size);
-    }
-
-    {
-        const uint32_t zero = 0u;
-        sbuf->copy(pf.fwdp.light_list_buf, &zero, 0ull, 4);
-    }
-    sbuf->flush()->wait_cpu(~0ull);
-
-    if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS)
-    {
-        rgraph->add_pass(
-            RenderGraph::PassCreateInfo{ "culling prepass", RenderOrder::DEFAULT_UNLIT },
-            [&pf, &ppf, this](RenderGraph::PassResourceBuilder& b) {
-                const auto& rp = render_passes.at(RenderPassType::FORWARD);
-                b.access(ppf.culling.batch.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-                b.access(ppf.culling.batch.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-                b.access(pf.gbuffer.depth->default_view, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW,
-                         ImageLayout::ATTACHMENT, true);
-            },
-            [&pf, &ppf, this](SubmitQueue* q, CommandBuffer* cmd) {
-                const auto& rp = render_passes.at(RenderPassType::FORWARD);
-                VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
-                VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
-                const auto vkdep =
-                    Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
-                                                   .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                                                   .clearValue = { .depthStencil = { .depth = 0.0f, .stencil = 0u } } });
-                const auto vkreninfo = Vks(VkRenderingInfo{ .renderArea = vksciss, .layerCount = 1, .pDepthAttachment = &vkdep });
-                cmd->set_scissors(&vksciss, 1);
-                cmd->set_viewports(&vkview, 1);
-                cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
-                cmd->bind_pipeline(cullzout_pipeline.get());
-                cmd->bind_resource(0, pf.constants);
-                cmd->bind_resource(1, ppf.culling.batch.ids_buf);
-                cmd->begin_rendering(vkreninfo);
-                render_ibatch(cmd, ppf.culling.batch, {}, false);
-                cmd->end_rendering();
-            });
-    }
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "culling hizpyramid", RenderOrder::DEFAULT_UNLIT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT,
-                     ImageLayout::READ_ONLY);
-            b.access(pf.culling.hizpyramid->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW,
-                     ImageLayout::GENERAL, true);
-        },
-        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            const auto& rp = render_passes.at(RenderPassType::FORWARD);
-            auto& hizp = pf.culling.hizpyramid.get();
-            cmd->bind_pipeline(hiz_pipeline.get());
-            cmd->bind_resource(4, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::READ_ONLY, false }));
-            cmd->bind_resource(5, make_texture(TextureDescriptor{
-                                      make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { 0, 1 } }),
-                                      ImageLayout::GENERAL, true }));
-            cmd->dispatch((hizp.width + 31) / 32, (hizp.height + 31) / 32, 1);
-            cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-            for(auto i = 1u; i < hizp.mips; ++i)
-            {
-                cmd->bind_resource(4, make_texture(TextureDescriptor{
-                                          make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i - 1, 1 } }),
-                                          ImageLayout::GENERAL, false }));
-                cmd->bind_resource(5, make_texture(TextureDescriptor{
-                                          make_view(ImageViewDescriptor{ .image = pf.culling.hizpyramid, .mips = { i, 1 } }),
-                                          ImageLayout::GENERAL, true }));
-                const auto sx = ((hizp.width >> i) + 31) / 32;
-                const auto sy = ((hizp.height >> i) + 31) / 32;
-                cmd->dispatch(sx, sy, 1);
-                cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT,
-                             PipelineAccess::SHADER_RW);
-            }
-        });
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "fwdp cull lights", RenderOrder::DEFAULT_UNLIT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.fwdp.light_list_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-            b.access(pf.fwdp.light_grid_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
-            b.access(pf.gbuffer.depth->default_view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT,
-                     ImageLayout::GENERAL);
-        },
-        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            cmd->bind_pipeline(fwdp_cull_lights_pipeline.get());
-            cmd->bind_resource(0, pf.constants);
-            cmd->bind_resource(1, pf.fwdp.light_grid_buf);
-            cmd->bind_resource(2, pf.fwdp.light_list_buf);
-            cmd->bind_resource(3, make_texture(TextureDescriptor{ pf.gbuffer.depth->default_view, ImageLayout::GENERAL, true }));
-            const auto* w = Engine::get().window;
-            auto dx = (uint32_t)w->width;
-            auto dy = (uint32_t)w->height;
-            dx = (dx + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-            dy = (dy + bufs.fwdp_tile_pixels - 1) / bufs.fwdp_tile_pixels;
-            cmd->dispatch(dx, dy, 1);
-        });
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "culling main pass", RenderOrder::DEFAULT_UNLIT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            const auto& rp = render_passes.at(RenderPassType::FORWARD);
-            b.access(rp.batch.ids_buf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(rp.batch.cmd_buf, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
-            b.access(pf.culling.batch.cmd_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(pf.culling.batch.ids_buf, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
-            b.access(pf.culling.hizptex->view, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
-            b.access(pf.culling.debug_bsphere->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
-            b.access(pf.culling.debug_depth->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
-                     PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
-        },
-        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            const auto& rp = render_passes.at(RenderPassType::FORWARD);
-            pf.culling.batch.batches = rp.batch.batches;
-            pf.culling.batch.cmd_count = rp.batch.cmd_count;
-            pf.culling.batch.cmd_start = rp.batch.cmd_start;
-            pf.culling.batch.ids_count = rp.batch.ids_count;
-
-            cmd->clear_color(pf.culling.debug_bsphere.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
-            cmd->clear_color(pf.culling.debug_depth.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
-            cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
-                         PipelineAccess::SHADER_RW);
-
-            cmd->bind_pipeline(cull_pipeline.get());
-            cmd->bind_resource(0, pf.constants);
-            cmd->bind_resource(1, rp.batch.ids_buf);
-            cmd->bind_resource(2, pf.culling.batch.ids_buf);
-            cmd->bind_resource(3, pf.culling.batch.cmd_buf, { pf.culling.batch.cmd_start, ~0ull });
-            cmd->bind_resource(4, pf.culling.hizptex);
-            cmd->bind_resource(6, make_texture(TextureDescriptor{ pf.culling.debug_bsphere->default_view, ImageLayout::GENERAL, true }));
-            cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.culling.debug_depth->default_view, ImageLayout::GENERAL, true }));
-            cmd->dispatch((rp.batch.ids_count + 31) / 32, 1, 1);
-        });
-    // todo: culling main pass should render to zbuffer new items from current frame to fill it out.
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "default_unlit", RenderOrder::DEFAULT_UNLIT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            const auto& rp = render_passes.at(RenderPassType::FORWARD);
-            b.access(pf.culling.batch.cmd_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.culling.batch.ids_buf, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.gbuffer.color->default_view, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT,
-                     ImageLayout::ATTACHMENT, true);
-            b.access(pf.gbuffer.depth->default_view, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
-            b.access(pf.fwdp.light_grid_buf, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
-            b.access(pf.fwdp.light_list_buf, PipelineStage::FRAGMENT, PipelineAccess::SHADER_READ_BIT);
-        },
-        [this](SubmitQueue* q, CommandBuffer* cmd) { render(RenderPassType::FORWARD, q, cmd); });
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "imgui", RenderOrder::PRESENT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.gbuffer.color->default_view, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT,
-                     ImageLayout::ATTACHMENT);
-        },
-        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) { imgui_renderer->update(cmd, pf.gbuffer.color->default_view); });
-    rgraph->add_pass(
-        RenderGraph::PassCreateInfo{ "present copy", RenderOrder::PRESENT },
-        [&pf, this](RenderGraph::PassResourceBuilder& b) {
-            b.access(pf.gbuffer.color->default_view, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT,
-                     ImageLayout::TRANSFER_SRC);
-            b.access(swapchain->get_view(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::TRANSFER_DST);
-        },
-        [&pf, this](SubmitQueue* q, CommandBuffer* cmd) {
-            cmd->copy(swapchain->get_image().get(), pf.gbuffer.color.get());
-            // cmd->copy(swapchain->get_image().get(), pf.culling.debug_bsphere.get());
-        });
-
+    rgraph->add_pass(&*rgraphpasses->cull_zprepass);
+    rgraph->add_pass(&*rgraphpasses->cull_hiz);
+    rgraph->add_pass(&*rgraphpasses->cull_main);
+    rgraph->add_pass(&*rgraphpasses->fwdp_lightcull);
+    rgraph->add_pass(&*rgraphpasses->default_unlit);
+    rgraph->add_pass(&*rgraphpasses->imgui);
+    rgraph->add_pass(&*rgraphpasses->present_copy);
     rgraph->compile();
     auto* rgsync = rgraph->execute(sbuf->flush());
 
@@ -709,7 +548,6 @@ void Renderer::update()
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
     gq->wait_idle();
-    sbuf->reset();
 }
 
 void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
@@ -738,12 +576,15 @@ void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cm
     cmd->set_scissors(&vksciss, 1);
     cmd->set_viewports(&vkview, 1);
     cmd->begin_rendering(vkreninfo);
-    render_ibatch(cmd, pf.culling.batch, [this, &pf](CommandBuffer* cmd) {
+    const auto& maincullpass = rgraph->get_pass<pass::culling::MainPass>("culling::MainPass");
+    const auto& ib = maincullpass.batches[get_perframe_index()];
+    render_ibatch(cmd, ib, [this, &ib, &pf](CommandBuffer* cmd) {
         const auto outputmode = (uint32_t)debug_output;
         cmd->bind_resource(0, pf.constants);
-        cmd->bind_resource(1, pf.culling.batch.ids_buf);
-        cmd->bind_resource(2, pf.fwdp.light_grid_buf);
-        cmd->bind_resource(3, pf.fwdp.light_list_buf);
+        cmd->bind_resource(1, ib.ids_buf);
+        const auto& fwd = rgraph->get_pass<pass::fwdp::LightCulling>("fwdp::LightCulling");
+        cmd->bind_resource(2, rgraph->get_resource(fwd.culled_light_grid_bufs).buffer);
+        cmd->bind_resource(3, rgraph->get_resource(fwd.culled_light_list_bufs).buffer);
     });
     if(0)
     {
@@ -843,8 +684,7 @@ void Renderer::build_renderpasses()
             gpuids.at(i) = GPUInstanceId{ cmdi, minst.mlti, minst.id, *minst.material };
             // don't increment the indirect command instcount here - this the culling stage handles
             ++rp.batch.batches.at(batchi).inst_count;
-            rp.batch.batches.at(batchi).cmd_count = cmdi + 1;
-            -(batchi > 0 ? rp.batch.batches.at(batchi - 1).cmd_count : 0);
+            rp.batch.batches.at(batchi).cmd_count = cmdi + 1 - (batchi > 0 ? rp.batch.batches.at(batchi - 1).cmd_count : 0);
             ++cmdcnts.at(batchi); // = rp.batch.batches.at(batchi).cmd_count;
         }
 
@@ -909,17 +749,10 @@ Handle<Image> Renderer::make_image(const ImageDescriptor& info)
                                     { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
                                       std::max(srcsz.size.z >> 1, 1) } };
             sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
-            // sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageSubRange{ { i + 1, 1 }, { 0, 1 } });
             sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz });
-            if(i <= info.mips - 2)
-            {
-                sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageLayout::READ_ONLY, ImageSubRange{ { i, 1 }, { 0, 1 } });
-                if(i == info.mips - 2)
-                {
-                    sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageSubRange{ { i + 1, 1 }, { 0, 1 } });
-                }
-            }
         }
+        sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageLayout::READ_ONLY, ImageSubRange{ { 0, info.mips - 1 }, { 0, 1 } });
+        sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY, ImageSubRange{ { info.mips - 1, 1 }, { 0, 1 } });
         h->current_layout = ImageLayout::READ_ONLY;
     }
     return h;
@@ -1130,11 +963,12 @@ uint32_t Renderer::get_bindless(Handle<Texture> texture) { return bindless->get_
 
 uint32_t Renderer::get_bindless(Handle<Sampler> sampler) { return bindless->get_index(sampler); }
 
-Renderer::PerFrame& Renderer::get_perframe(int32_t offset)
+uint32_t Renderer::get_perframe_index(int32_t offset)
 {
-    const int32_t idx = Engine::get().frame_num + perframe.size() + offset;
-    return perframe.at(idx % perframe.size());
+    return (Engine::get().frame_num + perframe.size() + offset) % perframe.size();
 }
+
+Renderer::PerFrame& Renderer::get_perframe(int32_t offset) { return perframe.at(get_perframe_index(offset)); }
 
 bool PipelineLayout::is_compatible(const PipelineLayout& a) const
 {

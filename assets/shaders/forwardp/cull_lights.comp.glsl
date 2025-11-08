@@ -90,7 +90,7 @@ void main()
 	if(glidxy.x == 0 && glidxy.y == 0)
 	{
 		const uint list_offset = atomicAdd(get_buf(GPUFWDPLightList).head, sh_lightcnt);
-		const uint lightcnt = min(sh_lightcnt, get_buf(GPUFWDPLightList).max_lights_per_tile);
+		const uint lightcnt = min(sh_lightcnt, get_buf(GPUEngConstant).fwdp_max_lights_per_tile);
 		for(int i=0; i<lightcnt; ++i)
 		{
 			get_buf(GPUFWDPLightList).lights_us[list_offset + i] = sh_lights[i];

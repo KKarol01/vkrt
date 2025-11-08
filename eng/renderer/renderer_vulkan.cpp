@@ -1518,9 +1518,9 @@ uint32_t Swapchain::acquire(uint64_t timeout, Sync* semaphore, Sync* fence)
     return current_index;
 }
 
-Handle<Image> Swapchain::get_image() { return images.at(current_index); }
+Handle<Image> Swapchain::get_image() const { return images.at(current_index); }
 
-Handle<ImageView> Swapchain::get_view() { return views.at(current_index); }
+Handle<ImageView> Swapchain::get_view() const { return views.at(current_index); }
 
 // Handle<Mesh> RendererBackendVulkan::instance_mesh(const InstanceSettings& settings)
 //{
