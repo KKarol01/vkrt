@@ -5,7 +5,8 @@
 #include <deque>
 #include <vector>
 #include <cstdint>
-#include <eng/renderer/renderer_vulkan.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
+#include <eng/common/handle.hpp>
+#include <eng/renderer/renderer.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
 #include <eng/common/slotallocator.hpp>
 #include <eng/common/hash.hpp>
 
@@ -16,6 +17,12 @@ namespace gfx
 
 struct Pipeline;
 struct CommandBuffer;
+struct Buffer;
+struct Image;
+struct Texture;
+struct Sampler;
+struct DescriptorPool;
+struct DescriptorSet;
 
 // todo: probably wanna move it to image view
 struct BufferView

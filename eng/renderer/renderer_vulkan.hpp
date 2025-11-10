@@ -122,10 +122,8 @@ struct VkPipelineLayoutMetadata
 
 struct VkPipelineMetadata
 {
-    static void init(Pipeline& a);
+    static void init(const Pipeline& a);
     static void destroy(Pipeline& a);
-    static VkPipelineMetadata& get(Pipeline& a);
-    static const VkPipelineMetadata& get(const Pipeline& a);
     VkPipeline pipeline{};
 };
 
@@ -211,9 +209,11 @@ class RendererBackendVulkan : public RendererBackend
     Image make_image(const ImageDescriptor& info) final;
     void make_view(ImageView& view) final;
     Sampler make_sampler(const SamplerDescriptor& info) final;
-    bool compile_shader(Shader& shader) final;
+    void make_shader(Shader& shader) final;
+    bool compile_shader(const Shader& shader) final;
     bool compile_pplayout(PipelineLayout& layout) final;
-    bool compile_pipeline(Pipeline& pipeline) final;
+    void make_pipeline(Pipeline& pipeline) final;
+    bool compile_pipeline(const Pipeline& pipeline) final;
     Sync* make_sync(const SyncCreateInfo& info) final;
     Swapchain* make_swapchain() final;
     SubmitQueue* get_queue(QueueType type) final;

@@ -4,6 +4,7 @@
 #include <functional>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
+#include <eng/renderer/renderer.hpp>
 
 struct ImTextureData;
 
@@ -11,15 +12,6 @@ namespace eng
 {
 namespace gfx
 {
-
-class CommandPool;
-class CommandBuffer;
-struct Buffer;
-struct Pipeline;
-struct Sampler;
-struct Texture;
-struct Image;
-struct ImageView;
 
 class ImGuiRenderer
 {

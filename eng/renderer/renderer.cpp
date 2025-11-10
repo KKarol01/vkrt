@@ -59,20 +59,20 @@ ImageBlockData GetBlockData(ImageFormat format)
 void Renderer::init(RendererBackend* backend)
 {
     // clang-format off
-    ENG_SET_HANDLE_DISPATCHER(Buffer,           { return &::eng::Engine::get().renderer->buffers.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Image,            { return &::eng::Engine::get().renderer->images.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(ImageView,        { return &::eng::Engine::get().renderer->image_views.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Geometry,         { return &::eng::Engine::get().renderer->geometries.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Mesh,             { return &::eng::Engine::get().renderer->meshes.at(*handle); });
-    ENG_SET_HANDLE_DISPATCHER(Texture,          { return &::eng::Engine::get().renderer->textures.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Material,         { return &::eng::Engine::get().renderer->materials.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Shader,           { return &::eng::Engine::get().renderer->shaders.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(PipelineLayout,   { return &::eng::Engine::get().renderer->pplayouts.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Pipeline,         { return &::eng::Engine::get().renderer->pipelines.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(Sampler,          { return &::eng::Engine::get().renderer->samplers.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(MeshPass,         { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(ShaderEffect,     { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
-    ENG_SET_HANDLE_DISPATCHER(DescriptorPool,   { return &::eng::Engine::get().renderer->descpools.at(*handle); });
+    ENG_SET_HANDLE_GETTERS(Buffer,           { return &::eng::Engine::get().renderer->buffers.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Image,            { return &::eng::Engine::get().renderer->images.at(handle); });
+    ENG_SET_HANDLE_GETTERS(ImageView,        { return &::eng::Engine::get().renderer->image_views.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Geometry,         { return &::eng::Engine::get().renderer->geometries.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Mesh,             { return &::eng::Engine::get().renderer->meshes.at(*handle); });
+    ENG_SET_HANDLE_GETTERS(Texture,          { return &::eng::Engine::get().renderer->textures.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Material,         { return &::eng::Engine::get().renderer->materials.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Shader,           { return &::eng::Engine::get().renderer->shaders.at(handle); });
+    ENG_SET_HANDLE_GETTERS(PipelineLayout,   { return &::eng::Engine::get().renderer->pplayouts.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Pipeline,         { return &::eng::Engine::get().renderer->pipelines.at(handle); });
+    ENG_SET_HANDLE_GETTERS(Sampler,          { return &::eng::Engine::get().renderer->samplers.at(handle); });
+    ENG_SET_HANDLE_GETTERS(MeshPass,         { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
+    ENG_SET_HANDLE_GETTERS(ShaderEffect,     { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
+    ENG_SET_HANDLE_GETTERS(DescriptorPool,   { return &::eng::Engine::get().renderer->descpools.at(*handle); });
     // clang-format on
 
     this->backend = backend;
@@ -768,9 +768,10 @@ Handle<ImageView> Renderer::make_view(const ImageViewDescriptor& info)
                            .aspect = info.aspect ? *info.aspect : img.deduce_aspect(),
                            .mips = info.mips,
                            .layers = info.layers };
+    const auto found_handle = image_views.find(view);
+    if(!found_handle) { backend->make_view(view); }
     auto it = image_views.insert(view);
-    if(it.success) { backend->make_view(it.handle.get()); }
-    info.image->views.push_back(it.handle);
+    if(!found_handle) { image_views_cache[info.image].push_back(it.handle); }
     return it.handle;
 }
 
@@ -791,25 +792,30 @@ Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
         ENG_ERROR("Unrecognized shader extension: {}", ext.string());
         return {};
     }
-
-    auto it = shaders.insert(Shader{ eng::paths::canonize_path(eng::paths::SHADERS_DIR / path), stage });
-    if(it.success) { new_shaders.push_back(it.handle); }
+    Shader shader{ eng::paths::canonize_path(eng::paths::SHADERS_DIR / path), stage };
+    const auto found_handle = shaders.find(shader);
+    if(!found_handle) { backend->make_shader(shader); }
+    auto it = shaders.insert(std::move(shader));
+    if(!found_handle) { new_shaders.push_back(it.handle); }
     return it.handle;
 }
 
 Handle<PipelineLayout> Renderer::make_pplayout(const PipelineLayoutCreateInfo& info)
 {
     PipelineLayout layout{ .info = info };
+    const auto found_handle = pplayouts.find(layout);
+    if(!found_handle) { backend->compile_pplayout(layout); }
     auto it = pplayouts.insert(std::move(layout));
-    if(it.success) { backend->compile_pplayout(it.handle.get()); }
     return it.handle;
 }
 
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
+    const auto found_handle = pipelines.find(p);
+    if(!found_handle) { backend->make_pipeline(p); }
     auto it = pipelines.insert(std::move(p));
-    if(it.success) { new_pipelines.push_back(it.handle); }
+    if(!found_handle) { new_pipelines.push_back(it.handle); }
     return it.handle;
 }
 

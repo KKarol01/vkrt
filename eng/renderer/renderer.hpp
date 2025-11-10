@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 
 #include <cstdint>
 #include <span>
@@ -27,11 +26,6 @@ namespace gfx
 {
 class ImGuiRenderer;
 
-struct Buffer;
-struct Image;
-struct ImageView;
-struct Sampler;
-struct Texture;
 struct Sync;
 struct SyncCreateInfo;
 class BindlessPool;
@@ -39,17 +33,113 @@ class CommandBuffer;
 class CommandPool;
 class StagingBuffer;
 class SubmitQueue;
+struct VkImageMetadata;
+struct VkImageViewMetadata;
+struct VkShaderMetadata;
+struct VkPipelineMetadata;
 namespace v2
 {
 class RenderGraph;
 }
 struct RenderGraphPasses;
-class DescriptorSet;
-class PipelineLayout;
 
-struct VkImageMetadata;
-struct VkImageViewMetadata;
+// forward declarations defined in this file.
 
+enum class CullFace;
+enum class VertexFormat;
+enum class DepthCompare;
+enum class PolygonMode;
+enum class StencilOp;
+enum class CompareOp;
+enum class BlendFactor;
+enum class BlendOp;
+enum class PipelineType;
+enum class GeometryFlags;
+enum class InstanceFlags;
+enum class BufferUsage;
+enum class ImageFormat;
+enum class ImageAspect;
+enum class ImageUsage;
+enum class ImageLayout;
+enum class ImageType;
+enum class ImageViewType;
+enum class ImageFilter;
+enum class ImageAddressing;
+enum class RenderPassType : uint32_t;
+enum class PipelineStage : uint32_t;
+enum class PipelineAccess : uint32_t;
+enum class ShaderStage : uint32_t;
+enum class PipelineSetFlags : uint32_t;
+enum class PipelineBindingFlags : uint32_t;
+enum class PipelineBindingType;
+enum class DescriptorPoolFlags;
+enum class QueueType;
+enum class SamplerReductionMode;
+enum class SamplerMipmapMode;
+struct ImageBlockData;
+struct Shader;
+struct PipelineLayoutCreateInfo;
+struct DescriptorPoolCreateInfo;
+struct DescriptorPool;
+struct DescriptorSet;
+struct PipelineLayout;
+struct PipelineCreateInfo;
+struct Pipeline;
+struct Geometry;
+struct ShaderEffect;
+struct MeshPassCreateInfo;
+struct MeshPass;
+struct Material;
+struct Mesh;
+struct Vertex;
+struct Meshlet;
+struct GeometryDescriptor;
+struct BufferDescriptor;
+struct Buffer;
+struct ImageDescriptor;
+struct Image;
+struct ImageViewDescriptor;
+struct ImageView;
+struct ImageSubRange;
+struct ImageSubLayers;
+struct ImageBlit;
+struct ImageCopy;
+struct SamplerDescriptor;
+struct Sampler;
+struct TextureDescriptor;
+struct Texture;
+struct MaterialDescriptor;
+struct MeshDescriptor;
+struct InstanceSettings;
+struct BLASInstanceSettings;
+struct VsmData;
+struct Swapchain;
+} // namespace gfx
+} // namespace eng
+
+// note: i did forward declarations, but only the shader requires one,
+// as it's handle getter is getting instantiated by the pipeline struct, which defines
+// Handle<Shader> member, and you cannot specialize the template (to introduce getters)
+// after the first use.
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer);
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image);
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Sampler);
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry);
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh);
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::DescriptorPool);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Pipeline);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect);
+
+namespace eng
+{
+namespace gfx
+{
 enum class CullFace
 {
     NONE,
@@ -149,6 +239,18 @@ enum class InstanceFlags
 {
     RAY_TRACED_BIT = 0x1
 };
+
+enum class BufferUsage
+{
+    NONE = 0x0,
+    INDEX_BIT = 0x1,
+    STORAGE_BIT = 0x2,
+    INDIRECT_BIT = 0x4,
+    TRANSFER_SRC_BIT = 0x8,
+    TRANSFER_DST_BIT = 0x10,
+    CPU_ACCESS = 0x20,
+};
+ENG_ENABLE_FLAGS_OPERATORS(BufferUsage);
 
 enum class ImageFormat
 {
@@ -332,16 +434,6 @@ enum class SamplerMipmapMode
     LINEAR,
 };
 
-} // namespace gfx
-} // namespace eng
-
-// ENG_DEFINE_HANDLE_STORAGE(::eng::gfx::DescriptorSet, uintptr_t);
-
-namespace eng
-{
-namespace gfx
-{
-
 struct ImageBlockData
 {
     uint32_t size;
@@ -355,7 +447,9 @@ struct Shader
     auto operator==(const Shader& o) const { return path == o.path; }
     std::filesystem::path path;
     ShaderStage stage{ ShaderStage::NONE };
-    void* metadata{};
+    union Metadata {
+        VkShaderMetadata* vk{};
+    } md;
 };
 
 // todo: make sure when the user passes it, it gets checked for compatibility (i think it does -- see pplayouts)
@@ -524,7 +618,9 @@ struct Pipeline
     bool operator==(const Pipeline& a) const { return info == a.info; }
     PipelineCreateInfo info;
     PipelineType type{};
-    void* metadata{};
+    union Metadata {
+        VkPipelineMetadata* vk{};
+    } md;
 };
 
 struct Geometry
@@ -591,18 +687,6 @@ struct GeometryDescriptor
     std::span<const Vertex> vertices;
     std::span<uint32_t> indices;
 };
-
-enum class BufferUsage
-{
-    NONE = 0x0,
-    INDEX_BIT = 0x1,
-    STORAGE_BIT = 0x2,
-    INDIRECT_BIT = 0x4,
-    TRANSFER_SRC_BIT = 0x8,
-    TRANSFER_DST_BIT = 0x10,
-    CPU_ACCESS = 0x20,
-};
-ENG_ENABLE_FLAGS_OPERATORS(BufferUsage);
 
 struct BufferDescriptor
 {
@@ -674,7 +758,6 @@ struct Image
     Flags<ImageUsage> usage{ ImageUsage::NONE };
     ImageLayout current_layout{ ImageLayout::UNDEFINED };
     Handle<ImageView> default_view;
-    std::vector<Handle<ImageView>> views;
     union Metadata {
         VkImageMetadata* vk{};
     } md;
@@ -832,9 +915,11 @@ class RendererBackend
     virtual Image make_image(const ImageDescriptor& info) = 0;
     virtual void make_view(ImageView& view) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
-    virtual bool compile_shader(Shader& shader) = 0;
+    virtual void make_shader(Shader& shader) = 0;
+    virtual bool compile_shader(const Shader& shader) = 0;
     virtual bool compile_pplayout(PipelineLayout& layout) = 0;
-    virtual bool compile_pipeline(Pipeline& pipeline) = 0;
+    virtual void make_pipeline(Pipeline& pipeline) = 0;
+    virtual bool compile_pipeline(const Pipeline& pipeline) = 0;
     virtual Sync* make_sync(const SyncCreateInfo& info) = 0;
     virtual Swapchain* make_swapchain() = 0;
     virtual SubmitQueue* get_queue(QueueType type) = 0;
@@ -900,26 +985,10 @@ ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect.flags, t.mips, t.layers));
 
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Shader);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Buffer);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Image);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::ImageView);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Sampler);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Texture);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Material);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Geometry);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Mesh);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::PipelineLayout);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::Pipeline);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::MeshPass);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::ShaderEffect);
-ENG_DEFINE_HANDLE_DISPATCHER(eng::gfx::DescriptorPool);
-
 namespace eng
 {
 namespace gfx
 {
-
 enum class SubmitFlags : uint32_t
 {
     STATIC_MESH,
@@ -1072,6 +1141,7 @@ class Renderer
     HandleSparseVec<Image> images;
     HandleSparseVec<Sampler> samplers;
     HandleFlatSet<ImageView> image_views;
+    std::unordered_map<Handle<Image>, std::vector<Handle<ImageView>>> image_views_cache;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
     HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>,
@@ -1114,6 +1184,5 @@ class Renderer
     std::vector<PerFrame> perframe;
     HelperGeometry helpergeom;
 };
-
 } // namespace gfx
 } // namespace eng

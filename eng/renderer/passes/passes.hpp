@@ -1,8 +1,10 @@
 #pragma once
 
-#include <eng/engine.hpp>
 #include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_vulkan.hpp> // todo: remove this
+#include <eng/engine.hpp>
 #include <eng/renderer/rendergraph.hpp>
+#include <eng/renderer/vulkan_structs.hpp>
 
 namespace eng
 {

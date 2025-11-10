@@ -47,7 +47,6 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     auto begin() { return data.begin(); }
     auto end() { return data.begin() + size(); }
 
-    T& at(index_t i) { return data.at(offsets.at(i)); }
     const T& at(index_t i) const { return data.at(offsets.at(i)); }
     size_t size() const { return head; }
 
@@ -154,6 +153,9 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     }
 
   private:
+    // used only on deleted items
+    T& at(index_t i) { return data.at(offsets.at(i)); }
+
     bool erase(Bucket* b)
     {
         if(!b) { return false; }
@@ -205,8 +207,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     std::vector<Bucket> buckets;
 };
 
-template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>>
-class HandleFlatSet
+template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>> class HandleFlatSet
 {
     using handle_t = Handle<T>;
     using set_t = FlatSet<T, Hash, EqualTo>;
@@ -221,7 +222,6 @@ class HandleFlatSet
   public:
     auto begin() { return set.begin(); }
     auto end() { return set.end(); }
-    T& at(handle_t h) { return set.at(*h); }
     const T& at(handle_t h) const { return set.at(*h); }
     handle_t find(const T& t)
     {

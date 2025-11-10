@@ -1,8 +1,8 @@
 #pragma once
 
+#include <eng/renderer/renderer.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
-#include <eng/renderer/renderer.hpp>
 #include <vulkan/vulkan.h>
 #include <cstdint>
 #include <vector>
@@ -12,11 +12,6 @@ namespace eng
 {
 namespace gfx
 {
-
-struct Buffer;
-struct Image;
-struct Pipeline;
-struct Swapchain;
 
 class CommandPool;
 
@@ -42,9 +37,9 @@ class CommandBuffer
     void clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil,
                              ImageLayout layout = ImageLayout::UNDEFINED, Range mips = { 0, ~0u }, Range layers = { 0, ~0u });
 
-    void bind_index(Buffer& index, uint32_t offset, VkIndexType type);
+    void bind_index(const Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);
-    void bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32u range);
+    void bind_descriptors(const DescriptorPool* ps, DescriptorSet* ds, Range32u range);
 
     void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range);
     void bind_resource(uint32_t slot, Handle<Buffer> resource, Range range = { 0, ~0ull });
@@ -61,8 +56,8 @@ class CommandBuffer
 
     void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset, uint32_t vertex_offset,
                       uint32_t instance_offset);
-    void draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count, size_t count_offset,
-                                     uint32_t max_draw_count, uint32_t stride);
+    void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
+                                     size_t count_offset, uint32_t max_draw_count, uint32_t stride);
     void dispatch(uint32_t x, uint32_t y, uint32_t z);
 
     VkCommandBuffer cmd{};

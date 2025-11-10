@@ -144,19 +144,19 @@ void CommandBuffer::clear_depth_stencil(Image& image, float clear_depth, uint32_
     vkCmdClearDepthStencilImage(cmd, image.md.vk->image, to_vk(layout), &clear, 1, &range);
 }
 
-void CommandBuffer::bind_index(Buffer& index, uint32_t offset, VkIndexType type)
+void CommandBuffer::bind_index(const Buffer& index, uint32_t offset, VkIndexType type)
 {
     vkCmdBindIndexBuffer(cmd, VkBufferMetadata::get(index).buffer, offset, type);
 }
 
 void CommandBuffer::bind_pipeline(const Pipeline& pipeline)
 {
-    const auto& md = VkPipelineMetadata::get(pipeline);
+    const auto& md = *pipeline.md.vk;
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
 }
 
-void CommandBuffer::bind_descriptors(DescriptorPool* ps, DescriptorSet* ds, Range32u range)
+void CommandBuffer::bind_descriptors(const DescriptorPool* ps, DescriptorSet* ds, Range32u range)
 {
     const auto* md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
     std::array<VkDescriptorSet, 8> vksets{};
@@ -229,7 +229,7 @@ void CommandBuffer::draw_indexed(uint32_t index_count, uint32_t instance_count, 
     vkCmdDrawIndexed(cmd, index_count, instance_count, index_offset, vertex_offset, instance_offset);
 }
 
-void CommandBuffer::draw_indexed_indirect_count(Buffer& indirect, size_t indirect_offset, Buffer& count,
+void CommandBuffer::draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
                                                 size_t count_offset, uint32_t max_draw_count, uint32_t stride)
 {
     before_draw_dispatch();

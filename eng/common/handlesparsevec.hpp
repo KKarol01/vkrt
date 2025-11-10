@@ -10,7 +10,7 @@ namespace eng
 template <typename T> class HandleSparseVec
 {
     using handle_t = Handle<T>;
-    using Storage = typename handle_t::Storage_T;
+    using Storage = typename handle_t::storage_type;
 
   public:
     auto size() const { return data.size() - free_list.size(); }

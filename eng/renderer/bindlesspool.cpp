@@ -1,3 +1,5 @@
+#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
 #include "./bindlesspool.hpp"
 #include <eng/renderer/vulkan_structs.hpp>
 #include <assets/shaders/bindless_structures.glsli>

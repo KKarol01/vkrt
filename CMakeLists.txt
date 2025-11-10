@@ -116,6 +116,9 @@ add_executable(eng
     "eng/engine.cpp"  
     "eng/camera.cpp"
     "eng/scene.cpp"
+    "eng/renderer/renderer.cpp"
+    "eng/renderer/imgui/imgui_renderer.cpp"
+    "eng/renderer/to_vk.cpp"
     "eng/renderer/renderer_vulkan.cpp" 
     "eng/renderer/bindlesspool.cpp"
     "eng/renderer/staging_buffer.cpp" 
@@ -123,9 +126,7 @@ add_executable(eng
     
     "eng/ui.cpp"
     "eng/to_string.cpp" 
-    "eng/renderer/imgui/imgui_renderer.cpp"
-    "eng/renderer/to_vk.cpp"
-  "eng/renderer/renderer.cpp")
+)
 
 target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(eng PRIVATE cxx_std_23)

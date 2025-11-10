@@ -27,7 +27,7 @@ uint64_t combine_fnv1a(const auto&... args)
 } // namespace hash
 } // namespace eng
 
-#define ENG_DEFINE_STD_HASH(type, code)                                                                                    \
+#define ENG_DEFINE_STD_HASH(type, code)                                                                                \
     namespace std                                                                                                      \
     {                                                                                                                  \
     template <> struct hash<type>                                                                                      \

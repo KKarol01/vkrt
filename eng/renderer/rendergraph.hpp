@@ -211,6 +211,8 @@ class RenderGraph
                 }
                 return hist.last_write_stage + 1;
             }
+            assert(false);
+            return ~0u;
         };
 
         const auto update_history = [this, &reshists](const Pass::ResourceAccess& a, uint32_t stage) {
@@ -276,7 +278,7 @@ class RenderGraph
                 auto* cmd = gcmdpool->begin();
                 if(i == 0)
                 {
-                    for(const auto& e : g.layout_transitions)
+                    for(auto& e : g.layout_transitions)
                     {
                         cmd->barrier(e.image.get(), PipelineStage::ALL, PipelineAccess::NONE, e.stage, e.access, e.from, e.to);
                     }
@@ -553,7 +555,7 @@ class RenderGraph
                 auto* cmd = gcmdpool->begin();
                 if(i == 0)
                 {
-                    for(const auto& ib : s.imgbarriers)
+                    for(auto& ib : s.imgbarriers)
                     {
                         cmd->barrier(ib.image.get(), PipelineStage::ALL, PipelineAccess::NONE, ib.stage, ib.access, ib.from, ib.to);
                     }

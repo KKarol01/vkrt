@@ -123,32 +123,22 @@ void VkPipelineLayoutMetadata::destroy(PipelineLayout& a)
     assert(false);
 }
 
-void VkPipelineMetadata::init(Pipeline& a)
+void VkPipelineMetadata::init(const Pipeline& a)
 {
-    if(a.metadata) { return; }
-    auto* md = new VkPipelineMetadata{};
-    a.metadata = md;
+    if(!a.md.vk)
     {
-        const auto stage = a.info.shaders[0]->stage;
-        if(stage == ShaderStage::VERTEX_BIT) { a.type = PipelineType::GRAPHICS; }
-        else if(stage == ShaderStage::COMPUTE_BIT) { a.type = PipelineType::COMPUTE; }
-        else
-        {
-            assert(false);
-            delete md;
-            a.metadata = nullptr;
-            return;
-        }
+        assert(false);
+        return;
     }
 
     auto* r = RendererBackendVulkan::get_instance();
+    auto* md = a.md.vk;
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     stages.reserve(a.info.shaders.size());
     for(const auto& e : a.info.shaders)
     {
-        stages.push_back(Vks(VkPipelineShaderStageCreateInfo{
-            .stage = gfx::to_vk(e->stage), .module = ((VkShaderMetadata*)e->metadata)->shader, .pName = "main" }));
+        stages.push_back(Vks(VkPipelineShaderStageCreateInfo{ .stage = gfx::to_vk(e->stage), .module = e->md.vk->shader, .pName = "main" }));
     }
 
     if(a.type == PipelineType::COMPUTE)
@@ -279,12 +269,12 @@ void VkPipelineMetadata::init(Pipeline& a)
 
 void VkPipelineMetadata::destroy(Pipeline& a)
 {
-    if(!a.metadata) { return; }
-    auto* md = (VkPipelineMetadata*)a.metadata;
+    if(!a.md.vk) { return; }
+    auto* md = a.md.vk;
     assert(md->pipeline);
     vkDestroyPipeline(RendererBackendVulkan::get_instance()->dev, md->pipeline, nullptr);
-    delete a.metadata;
-    a.metadata = nullptr;
+    delete a.md.vk;
+    a.md.vk = nullptr;
 }
 
 void VkDescriptorPoolMetadata::init(DescriptorPool& a)
@@ -313,18 +303,6 @@ void VkDescriptorPoolMetadata::destroy(DescriptorPool& a)
 {
     ENG_TODO();
     assert(false);
-}
-
-VkPipelineMetadata& VkPipelineMetadata::get(Pipeline& a)
-{
-    assert(a.metadata);
-    return *(VkPipelineMetadata*)a.metadata;
-}
-
-const VkPipelineMetadata& VkPipelineMetadata::get(const Pipeline& a)
-{
-    assert(a.metadata);
-    return *(const VkPipelineMetadata*)a.metadata;
 }
 
 void VkBufferMetadata::init(Buffer& a)
@@ -1370,10 +1348,12 @@ Sampler RendererBackendVulkan::make_sampler(const SamplerDescriptor& info)
     return s;
 }
 
-bool RendererBackendVulkan::compile_shader(Shader& shader)
+void RendererBackendVulkan::make_shader(Shader& shader) { shader.md.vk = new VkShaderMetadata{}; }
+
+bool RendererBackendVulkan::compile_shader(const Shader& shader)
 {
-    shader.metadata = new VkShaderMetadata{};
-    VkShaderMetadata* shmd = (VkShaderMetadata*)shader.metadata;
+    auto* shmd = shader.md.vk;
+    assert(shmd);
     static const auto read_file = [](const std::filesystem::path& file_path) {
         std::string file_path_str = file_path.string();
         std::string include_paths = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
@@ -1463,7 +1443,20 @@ bool RendererBackendVulkan::compile_pplayout(PipelineLayout& layout)
     return true;
 }
 
-bool RendererBackendVulkan::compile_pipeline(Pipeline& pipeline)
+void RendererBackendVulkan::make_pipeline(Pipeline& pipeline)
+{
+    const auto stage = pipeline.info.shaders[0]->stage;
+    if(stage == ShaderStage::VERTEX_BIT) { pipeline.type = PipelineType::GRAPHICS; }
+    else if(stage == ShaderStage::COMPUTE_BIT) { pipeline.type = PipelineType::COMPUTE; }
+    else
+    {
+        ENG_ERROR("Unrecognized pipeline type");
+        return;
+    }
+    pipeline.md.vk = new VkPipelineMetadata{};
+}
+
+bool RendererBackendVulkan::compile_pipeline(const Pipeline& pipeline)
 {
     VkPipelineMetadata::init(pipeline);
     return true;
