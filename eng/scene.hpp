@@ -10,7 +10,7 @@
 #include <eng/ecs/components.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
-#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/common/handlemap.hpp>
 
 namespace eng

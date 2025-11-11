@@ -203,4 +203,5 @@ target_precompile_headers(eng
         <eng/common/to_vk.hpp>
         <eng/common/to_string.hpp>
         <eng/common/types.hpp>
+        <eng/renderer/renderer_fwd.hpp>
 )

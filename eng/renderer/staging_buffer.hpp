@@ -4,16 +4,16 @@
 
 #include <vector>
 #include <deque>
+#include <memory>
 #include <eng/common/types.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
-#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 
 namespace eng
 {
 namespace gfx
 {
-
 static constexpr auto STAGING_APPEND = ~0ull;
 
 class StagingBuffer
@@ -48,7 +48,7 @@ class StagingBuffer
     struct RetiredBuffer
     {
         Transaction* transaction{};
-        Buffer buf;
+        std::unique_ptr<Buffer> buf{};
     };
 
   public:
@@ -78,7 +78,7 @@ class StagingBuffer
     Sync* get_sync();
 
     size_t head{};
-    Buffer buffer;
+    Handle<Buffer> buffer;
     SubmitQueue* queue{};
     Callback<void(Handle<Buffer>)> on_buffer_resize;
 
@@ -106,6 +106,5 @@ class StagingBuffer
     } debugstats;
 #endif
 };
-
 } // namespace gfx
 } // namespace eng

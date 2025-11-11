@@ -18,15 +18,15 @@ namespace pass
 namespace culling
 {
 
-class ZPrepass : public v2::RenderGraph::Pass
+class ZPrepass : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
     {
-        v2::RenderGraph::ResourceView zbufs;
+        RenderGraph::ResourceView zbufs;
         const std::vector<gfx::Renderer::IndirectBatch>* ibatches;
     };
-    ZPrepass(v2::RenderGraph* g, const CreateInfo& info) : Pass("culling::ZPrepass", RenderOrder::DEFAULT_UNLIT)
+    ZPrepass(RenderGraph* g, const CreateInfo& info) : Pass("culling::ZPrepass", RenderOrder::DEFAULT_UNLIT)
     {
         auto* r = Engine::get().renderer;
         auto* w = Engine::get().window;
@@ -54,7 +54,7 @@ class ZPrepass : public v2::RenderGraph::Pass
         access(culled_id_bufs, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
         access(culled_cmd_bufs, PipelineStage::VERTEX_BIT, PipelineAccess::SHADER_READ_BIT);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         auto* r = Engine::get().renderer;
         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
@@ -77,21 +77,21 @@ class ZPrepass : public v2::RenderGraph::Pass
         r->render_ibatch(cmd, (*ibatches)[r->get_perframe_index(-1)], nullptr, false);
         cmd->end_rendering();
     }
-    v2::RenderGraph::ResourceView zbufs;
-    v2::RenderGraph::ResourceView culled_id_bufs;
-    v2::RenderGraph::ResourceView culled_cmd_bufs;
+    RenderGraph::ResourceView zbufs;
+    RenderGraph::ResourceView culled_id_bufs;
+    RenderGraph::ResourceView culled_cmd_bufs;
     const std::vector<gfx::Renderer::IndirectBatch>* ibatches; // todo: this shouldn't be here
     Handle<Pipeline> cullzout_pipeline;
 };
 
-class Hiz : public v2::RenderGraph::Pass
+class Hiz : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
     {
-        v2::RenderGraph::ResourceView zbufs;
+        RenderGraph::ResourceView zbufs;
     };
-    Hiz(v2::RenderGraph* g, const CreateInfo& info) : Pass("culling::Hiz", RenderOrder::DEFAULT_UNLIT)
+    Hiz(RenderGraph* g, const CreateInfo& info) : Pass("culling::Hiz", RenderOrder::DEFAULT_UNLIT)
     {
         auto* r = Engine::get().renderer;
         auto* w = Engine::get().window;
@@ -112,7 +112,7 @@ class Hiz : public v2::RenderGraph::Pass
         access(zbuf, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
         access(hiz, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, ImageLayout::GENERAL, true);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         auto* r = Engine::get().renderer;
         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
@@ -139,12 +139,12 @@ class Hiz : public v2::RenderGraph::Pass
             cmd->barrier(PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
         }
     }
-    v2::RenderGraph::ResourceView zbuf;
-    v2::RenderGraph::ResourceView hiz;
+    RenderGraph::ResourceView zbuf;
+    RenderGraph::ResourceView hiz;
     Handle<Pipeline> hiz_pipeline;
 };
 
-class MainPass : public v2::RenderGraph::Pass
+class MainPass : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
@@ -153,7 +153,7 @@ class MainPass : public v2::RenderGraph::Pass
         const ZPrepass* pzprepass;
         const Hiz* phiz;
     };
-    MainPass(v2::RenderGraph* g, const CreateInfo& info) : Pass("culling::MainPass", RenderOrder::DEFAULT_UNLIT)
+    MainPass(RenderGraph* g, const CreateInfo& info) : Pass("culling::MainPass", RenderOrder::DEFAULT_UNLIT)
     {
         auto* r = Engine::get().renderer;
         fwd = info.fwd;
@@ -186,12 +186,8 @@ class MainPass : public v2::RenderGraph::Pass
         access(culled_cmd_bufs, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
                PipelineAccess::SHADER_RW | PipelineAccess::TRANSFER_WRITE_BIT);
         access(hiz, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
-        // access(pf.culling.debug_bsphere->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
-        //        PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
-        // access(pf.culling.debug_depth->default_view, PipelineStage::COMPUTE_BIT | PipelineStage::TRANSFER_BIT,
-        //        PipelineAccess::SHADER_READ_BIT | PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::GENERAL);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         auto* r = Engine::get().renderer;
         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
@@ -202,18 +198,10 @@ class MainPass : public v2::RenderGraph::Pass
         batches[pfi].ids_count = rp.batch.ids_count;
 
         const auto ZERO = 0u;
+        r->sbuf->resize(rg->get_resource(culled_id_bufs).buffer, rp.batch.ids_buf->size);
         r->sbuf->copy(rg->get_resource(culled_cmd_bufs).buffer, rp.batch.cmd_buf, 0, { 0, rp.batch.cmd_buf->size });
         r->sbuf->copy(rg->get_resource(culled_id_bufs).buffer, &ZERO, 0, 4);
-        if(rg->get_resource(culled_id_bufs).buffer->capacity < rp.batch.ids_buf->size)
-        {
-            r->sbuf->resize(rg->get_resource(culled_id_bufs).buffer, rp.batch.ids_buf->size);
-        }
         q->wait_sync(r->sbuf->flush(), PipelineStage::COMPUTE_BIT);
-
-        // cmd->clear_color(pf.culling.debug_bsphere.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
-        // cmd->clear_color(pf.culling.debug_depth.get(), ImageLayout::GENERAL, { 0, 1 }, { 0, 1 }, 0.0f);
-        // cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
-        //              PipelineAccess::SHADER_RW);
 
         cmd->bind_pipeline(cull_pipeline.get());
         cmd->bind_resource(0, r->get_perframe().constants);
@@ -221,16 +209,14 @@ class MainPass : public v2::RenderGraph::Pass
         cmd->bind_resource(2, rg->get_resource(culled_id_bufs).buffer);
         cmd->bind_resource(3, rg->get_resource(culled_cmd_bufs).buffer, { batches[pfi].cmd_start, ~0ull });
         cmd->bind_resource(4, r->make_texture(TextureDescriptor{ rg->get_resource(hiz).image->default_view, ImageLayout::GENERAL }));
-        // cmd->bind_resource(6, make_texture(TextureDescriptor{ pf.culling.debug_bsphere->default_view, ImageLayout::GENERAL, true }));
-        // cmd->bind_resource(7, make_texture(TextureDescriptor{ pf.culling.debug_depth->default_view, ImageLayout::GENERAL, true }));
         cmd->dispatch((rp.batch.ids_count + 31) / 32, 1, 1);
     }
     std::vector<gfx::Renderer::IndirectBatch> batches;
-    v2::RenderGraph::ResourceView fwd_id_bufs;
-    v2::RenderGraph::ResourceView fwd_cmd_bufs;
-    v2::RenderGraph::ResourceView culled_id_bufs;
-    v2::RenderGraph::ResourceView culled_cmd_bufs;
-    v2::RenderGraph::ResourceView hiz;
+    RenderGraph::ResourceView fwd_id_bufs;
+    RenderGraph::ResourceView fwd_cmd_bufs;
+    RenderGraph::ResourceView culled_id_bufs;
+    RenderGraph::ResourceView culled_cmd_bufs;
+    RenderGraph::ResourceView hiz;
     const gfx::Renderer::RenderPass* fwd{};
     Handle<Pipeline> cull_pipeline;
 };
@@ -238,17 +224,17 @@ class MainPass : public v2::RenderGraph::Pass
 
 namespace fwdp
 {
-class LightCulling : public v2::RenderGraph::Pass
+class LightCulling : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
     {
-        v2::RenderGraph::ResourceView zbufs;
+        RenderGraph::ResourceView zbufs;
         uint32_t num_tiles;
         uint32_t lights_per_tile;
         uint32_t tile_pixels;
     };
-    LightCulling(v2::RenderGraph* g, const CreateInfo& info) : Pass("fwdp::LightCulling", RenderOrder::DEFAULT_UNLIT)
+    LightCulling(RenderGraph* g, const CreateInfo& info) : Pass("fwdp::LightCulling", RenderOrder::DEFAULT_UNLIT)
     {
         num_tiles = info.num_tiles;
         lights_per_tile = info.lights_per_tile;
@@ -272,7 +258,7 @@ class LightCulling : public v2::RenderGraph::Pass
         access(culled_light_grid_bufs, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_RW);
         access(zbufs, PipelineStage::COMPUTE_BIT, PipelineAccess::SHADER_READ_BIT, ImageLayout::GENERAL);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         auto* r = Engine::get().renderer;
         cmd->bind_pipeline(light_culling_pipeline.get());
@@ -296,25 +282,25 @@ class LightCulling : public v2::RenderGraph::Pass
     uint32_t num_tiles;
     uint32_t lights_per_tile;
     uint32_t tile_pixels;
-    v2::RenderGraph::ResourceView zbufs;
-    v2::RenderGraph::ResourceView culled_light_list_bufs;
-    v2::RenderGraph::ResourceView culled_light_grid_bufs;
+    RenderGraph::ResourceView zbufs;
+    RenderGraph::ResourceView culled_light_list_bufs;
+    RenderGraph::ResourceView culled_light_grid_bufs;
     Handle<Pipeline> light_culling_pipeline;
 };
 
 } // namespace fwdp
 
-class DefaultUnlit : public v2::RenderGraph::Pass
+class DefaultUnlit : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
     {
         const culling::ZPrepass* pzprepass;
         const fwdp::LightCulling* plightculling;
-        v2::RenderGraph::ResourceView cbufs;
-        v2::RenderGraph::ResourceView zbufs;
+        RenderGraph::ResourceView cbufs;
+        RenderGraph::ResourceView zbufs;
     };
-    DefaultUnlit(v2::RenderGraph* g, const CreateInfo& info) : Pass("DefaultUnlit", RenderOrder::DEFAULT_UNLIT)
+    DefaultUnlit(RenderGraph* g, const CreateInfo& info) : Pass("DefaultUnlit", RenderOrder::DEFAULT_UNLIT)
     {
         auto* r = Engine::get().renderer;
         culled_id_bufs = info.pzprepass->culled_id_bufs;
@@ -333,52 +319,49 @@ class DefaultUnlit : public v2::RenderGraph::Pass
         access(zbufs, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
         access(cbufs, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT, true);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         auto* r = Engine::get().renderer;
         r->render(RenderPassType::FORWARD, q, cmd);
     }
-    v2::RenderGraph::ResourceView culled_id_bufs;
-    v2::RenderGraph::ResourceView culled_cmd_bufs;
-    v2::RenderGraph::ResourceView culled_light_list_bufs;
-    v2::RenderGraph::ResourceView culled_light_grid_bufs;
-    v2::RenderGraph::ResourceView zbufs;
-    v2::RenderGraph::ResourceView cbufs;
+    RenderGraph::ResourceView culled_id_bufs;
+    RenderGraph::ResourceView culled_cmd_bufs;
+    RenderGraph::ResourceView culled_light_list_bufs;
+    RenderGraph::ResourceView culled_light_grid_bufs;
+    RenderGraph::ResourceView zbufs;
+    RenderGraph::ResourceView cbufs;
 };
 
-class ImGui : public v2::RenderGraph::Pass
+class ImGui : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
     {
-        v2::RenderGraph::ResourceView cbufs;
+        RenderGraph::ResourceView cbufs;
     };
-    ImGui(v2::RenderGraph* g, const CreateInfo& info) : Pass("ImGui", RenderOrder::DEFAULT_UNLIT)
-    {
-        cbufs = info.cbufs;
-    }
+    ImGui(RenderGraph* g, const CreateInfo& info) : Pass("ImGui", RenderOrder::DEFAULT_UNLIT) { cbufs = info.cbufs; }
     void setup() override
     {
         access(cbufs, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         auto* r = Engine::get().renderer;
         r->imgui_renderer->update(cmd, rg->get_resource(cbufs).image->default_view);
     }
-    v2::RenderGraph::ResourceView cbufs;
+    RenderGraph::ResourceView cbufs;
 };
 
-class PresentCopy : public v2::RenderGraph::Pass
+class PresentCopy : public RenderGraph::Pass
 {
   public:
     struct CreateInfo
     {
-        v2::RenderGraph::ResourceView cbufs;
-        v2::RenderGraph::ResourceView swapcbufs;
+        RenderGraph::ResourceView cbufs;
+        RenderGraph::ResourceView swapcbufs;
         const gfx::Swapchain* swapchain;
     };
-    PresentCopy(v2::RenderGraph* g, const CreateInfo& info) : Pass("PresentCopy", RenderOrder::DEFAULT_UNLIT)
+    PresentCopy(RenderGraph* g, const CreateInfo& info) : Pass("PresentCopy", RenderOrder::DEFAULT_UNLIT)
     {
         cbufs = info.cbufs;
         swapcbufs = info.swapcbufs;
@@ -390,12 +373,12 @@ class PresentCopy : public v2::RenderGraph::Pass
         swapcbufs.set(swapchain->current_index);
         access(swapcbufs, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, ImageLayout::TRANSFER_DST);
     }
-    void execute(v2::RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
     {
         cmd->copy(swapchain->get_image().get(), rg->get_resource(cbufs).image.get());
     }
-    v2::RenderGraph::ResourceView cbufs;
-    v2::RenderGraph::ResourceView swapcbufs;
+    RenderGraph::ResourceView cbufs;
+    RenderGraph::ResourceView swapcbufs;
     const gfx::Swapchain* swapchain;
 };
 

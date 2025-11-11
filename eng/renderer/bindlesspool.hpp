@@ -6,7 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <eng/common/handle.hpp>
-#include <eng/renderer/renderer.hpp> // required in the header, cause buffer/handle<buffer> only causes linktime error on MSVC (clang links)
+#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/common/slotallocator.hpp>
 #include <eng/common/hash.hpp>
 
@@ -14,15 +14,6 @@ namespace eng
 {
 namespace gfx
 {
-
-struct Pipeline;
-struct CommandBuffer;
-struct Buffer;
-struct Image;
-struct Texture;
-struct Sampler;
-struct DescriptorPool;
-struct DescriptorSet;
 
 // todo: probably wanna move it to image view
 struct BufferView
@@ -35,7 +26,7 @@ struct BufferView
 } // namespace gfx
 } // namespace eng
 
-ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range.offset, t.range.size));
+//ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range.offset, t.range.size));
 
 namespace eng
 {

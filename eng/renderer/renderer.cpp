@@ -26,9 +26,9 @@ namespace gfx
 
 struct RenderGraphPasses
 {
-    v2::RenderGraph::ResourceView zbufsview;
-    v2::RenderGraph::ResourceView cbufsview;
-    v2::RenderGraph::ResourceView swapcbufsview;
+    RenderGraph::ResourceView zbufsview;
+    RenderGraph::ResourceView cbufsview;
+    RenderGraph::ResourceView swapcbufsview;
 
     std::unique_ptr<pass::culling::ZPrepass> cull_zprepass;
     std::unique_ptr<pass::culling::Hiz> cull_hiz;
@@ -82,7 +82,7 @@ void Renderer::init(RendererBackend* backend)
     swapchain = backend->make_swapchain();
     sbuf = new StagingBuffer{};
     sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
-    rgraph = new v2::RenderGraph{};
+    rgraph = new RenderGraph{};
     rgraph->init(this);
 
     init_bufs();

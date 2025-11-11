@@ -66,43 +66,45 @@ void VkPipelineLayoutMetadata::init(PipelineLayout& a)
     a.metadata = md;
 
     md->dlayouts.resize(a.info.sets.size());
-    std::vector<VkDescriptorSetLayoutCreateInfo> dslis(a.info.sets.size());
-    std::vector<std::vector<VkDescriptorSetLayoutBinding>> dslbis(a.info.sets.size());
-    std::vector<std::vector<VkDescriptorBindingFlags>> dslbifs(a.info.sets.size());
-    std::vector<std::vector<VkSampler>> dslbisamps(a.info.sets.size());
-    for(auto i = 0u; i < dslis.size(); ++i)
+    std::vector<VkDescriptorSetLayoutCreateInfo> dsl_cinfos(a.info.sets.size());
+    std::vector<std::vector<VkDescriptorSetLayoutBinding>> dsl_bindings(a.info.sets.size());
+    std::vector<std::vector<VkDescriptorBindingFlags>> db_flags(a.info.sets.size());
+    std::vector<std::vector<VkSampler>> immsamps(a.info.sets.size());
+    for(auto dslidx = 0u; dslidx < dsl_cinfos.size(); ++dslidx)
     {
-        const auto& s = a.info.sets.at(i);
-        dslbis.at(i).resize(s.bindings.size());
-        dslbifs.at(i).resize(s.bindings.size());
-        auto& d = dslis.at(i);
-        d = Vks(VkDescriptorSetLayoutCreateInfo{
-            .flags = gfx::to_vk(s.flags),
-            .bindingCount = (uint32_t)s.bindings.size(),
-            .pBindings = dslbis.at(i).data(),
+        const auto& aset = a.info.sets.at(dslidx);
+        dsl_bindings.at(dslidx).resize(aset.bindings.size());
+        db_flags.at(dslidx).resize(aset.bindings.size());
+        auto& dsl_cinfo = dsl_cinfos.at(dslidx);
+        dsl_cinfo = Vks(VkDescriptorSetLayoutCreateInfo{
+            .flags = gfx::to_vk(aset.flags),
+            .bindingCount = (uint32_t)aset.bindings.size(),
+            .pBindings = dsl_bindings.at(dslidx).data(),
         });
-        auto dslbfi = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{ .bindingCount = (uint32_t)s.bindings.size(),
-                                                                       .pBindingFlags = dslbifs.at(i).data() });
-        d.pNext = &dslbfi;
-        for(auto j = 0u; j < s.bindings.size(); ++j)
+        auto dslbf_cinfo = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{ .bindingCount = (uint32_t)aset.bindings.size(),
+                                                                            .pBindingFlags = db_flags.at(dslidx).data() });
+        dsl_cinfo.pNext = &dslbf_cinfo;
+        for(auto bidx = 0u; bidx < aset.bindings.size(); ++bidx)
         {
-            const auto& sb = s.bindings.at(j);
-            if(sb.immutable_samplers)
+            const auto& abinding = aset.bindings.at(bidx);
+            if(abinding.immutable_samplers)
             {
-                dslbisamps.at(i).resize(sb.size);
-                for(auto j = 0u; j < sb.size; ++j)
+                immsamps.at(dslidx).resize(abinding.size);
+                for(auto j = 0u; j < abinding.size; ++j)
                 {
-                    dslbisamps.at(i).at(j) = VkSamplerMetadata::get(sb.immutable_samplers[j].get()).sampler;
+                    immsamps.at(dslidx).at(j) = VkSamplerMetadata::get(abinding.immutable_samplers[j].get()).sampler;
                 }
             }
-            dslbis.at(i).at(j) = Vks(VkDescriptorSetLayoutBinding{ .binding = sb.slot,
-                                                                   .descriptorType = gfx::to_vk(sb.type),
-                                                                   .descriptorCount = sb.size,
-                                                                   .stageFlags = gfx::to_vk(sb.stages),
-                                                                   .pImmutableSamplers = dslbisamps.at(i).data() });
-            dslbifs.at(i).at(j) = gfx::to_vk(sb.flags);
+            dsl_bindings.at(dslidx).at(bidx) =
+                Vks(VkDescriptorSetLayoutBinding{ .binding = abinding.slot,
+                                                  .descriptorType = gfx::to_vk(abinding.type),
+                                                  .descriptorCount = abinding.size,
+                                                  .stageFlags = gfx::to_vk(abinding.stages),
+                                                  .pImmutableSamplers = immsamps.at(dslidx).data() });
+            db_flags.at(dslidx).at(bidx) = gfx::to_vk(abinding.flags);
         }
-        VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &d, nullptr, &md->dlayouts.at(i)));
+        if(md->dlayouts.at(dslidx)) { vkDestroyDescriptorSetLayout(r->dev, md->dlayouts.at(dslidx), nullptr); }
+        VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &dsl_cinfo, nullptr, &md->dlayouts.at(dslidx)));
     }
 
     VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.info.range.stages), .offset = 0ull, .size = a.info.range.size };
@@ -127,12 +129,14 @@ void VkPipelineMetadata::init(const Pipeline& a)
 {
     if(!a.md.vk)
     {
-        assert(false);
+        ENG_ERROR("Pipeline metadata null.");
         return;
     }
 
     auto* r = RendererBackendVulkan::get_instance();
     auto* md = a.md.vk;
+
+    if(md->pipeline) { vkDestroyPipeline(r->dev, md->pipeline, nullptr); }
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     stages.reserve(a.info.shaders.size());
@@ -1432,6 +1436,8 @@ bool RendererBackendVulkan::compile_shader(const Shader& shader)
         .codeSize = out_spv.size() * sizeof(uint32_t),
         .pCode = out_spv.data(),
     });
+
+    if(shmd->shader) { vkDestroyShaderModule(dev, shmd->shader, nullptr); }
     VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
 
     return true;

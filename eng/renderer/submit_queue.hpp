@@ -12,7 +12,6 @@ namespace eng
 {
 namespace gfx
 {
-
 class CommandPool;
 
 class CommandBuffer
