@@ -63,6 +63,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     {
         if(size() == MAX_INDEX)
         {
+            // can't insert anymore buckets. try searching instead and fail.
             auto* b = find_bucket(t);
             if(b) { return { b->index, false }; }
             return { MAX_INDEX, false };
@@ -73,25 +74,38 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
         const auto hash8 = uint8_t{ hash & 0xFF };
         auto idx = hash & (buckets.size() - 1);
         Bucket nb{ hash8, 0u, (index_t)offsets.size() };
-        Bucket* ob{};
+        Bucket* ob{}; // pointer to new bucket with new item after insertion to update index
         while(true)
         {
+            // go over buckets, starting from index calculated from hash
+            // and each time increment offset value for robin hood.
             auto& b = buckets.at(idx);
             if(b.empty())
             {
                 index_t ret_index{ MAX_INDEX };
+                // if the current bucket never had an index allocated.
+                // that only happens when the bucket was never used, and
+                // will happen only once for each bucket.
                 if(b.index == MAX_INDEX)
                 {
+                    // allocate new index. each bucket has it's own and always keeps it
+                    // even after erasing an element from it.
+                    // we don't need to set anything for the original bucket,
+                    // because it already has the index set to offsets.size()
+                    // from before insertion here.
                     offsets.push_back(head);
                     assert(head <= data.size());
-                    (head < data.size() ? data.at(head) : data.emplace_back()) = std::forward<Arg>(t);
+                    if(head < data.size()) { data.at(head) = std::forward<Arg>(t); }
+                    else { data.emplace_back(std::forward<Arg>(t)); }
                     ret_index = (index_t)offsets.size() - 1;
                 }
+                // if the bucket already has an index allocated
                 else if(b.index < MAX_INDEX)
                 {
-                    if(!ob) { ob = &nb; }
+                    if(!ob) { ob = &nb; } // if not set, we found an empty bucket on the first try.
+                    // reuse the index of the found empty bucket.
                     ob->index = b.index;
-                    offsets.at(b.index) = head;
+                    offsets.at(b.index) = head; // point the reused offset at the index to the correct data
                     data.at(head) = std::forward<Arg>(t);
                     ret_index = ob->index;
                 }
@@ -104,10 +118,15 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
                 ++head;
                 return { ret_index, true };
             }
+            // if hash collision, actually compare the items
             if(b.hash == hash8 && EqualTo{}(at(b.index), t)) { return { b.index, false }; }
+            // if current bucket has lower offset than ours, swap them
+            // and start moving the other one.
             if(b.offset < nb.offset)
             {
                 std::swap(b, nb);
+                // remember the new bucket with the new element to update the index later
+                // as we might find some free bucket with already allocated index.
                 if(!ob) { ob = &b; }
             }
             if(nb.offset == MAX_OFFSET)
@@ -201,9 +220,9 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
         }
     }
 
-    index_t head{};
+    index_t head{}; // linear allocator head for data vector
     std::vector<T> data;
-    std::vector<index_t> offsets;
+    std::vector<index_t> offsets; // one offset per bucket to index data for stable addressing when deleting items.
     std::vector<Bucket> buckets;
 };
 
