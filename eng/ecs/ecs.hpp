@@ -186,7 +186,7 @@ class Registry
     }
 
     // get the component from the entity. may return nullptr
-    template <typename Component> const Component* get(entity e) const { return const_cast<Registry*>(this)->get(e); }
+    template <typename Component> const Component* get(entity e) const { return const_cast<Registry*>(this)->get<Component>(e); }
 
     // attach compontents to the entity
     template <typename... Components> void emplace(entity e, Components&&... comps)

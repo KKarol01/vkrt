@@ -1,5 +1,3 @@
-#pragma once
-
 #include <meshoptimizer/src/meshoptimizer.h>
 #include "renderer.hpp"
 #include <eng/renderer/staging_buffer.hpp>
@@ -1015,6 +1013,8 @@ Handle<DescriptorSet> DescriptorPool::allocate(Handle<PipelineLayout> playout, u
     sets.push_back(Engine::get().renderer->backend->allocate_set(*this, playout.get(), dset_idx));
     return Handle<DescriptorSet>{ (uint32_t)sets.size() - 1 };
 }
+
+DescriptorSet& DescriptorPool::get_dset(Handle<DescriptorSet> set) { return sets.at(*set); }
 
 } // namespace gfx
 } // namespace eng

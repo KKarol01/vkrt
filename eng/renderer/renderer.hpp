@@ -109,7 +109,7 @@ struct DescriptorPoolCreateInfo
 struct DescriptorPool
 {
     Handle<DescriptorSet> allocate(Handle<PipelineLayout> playout, uint32_t dset_idx);
-    DescriptorSet& get_dset(Handle<DescriptorSet> set) { return sets.at(*set); }
+    DescriptorSet& get_dset(Handle<DescriptorSet> set);
     DescriptorPoolCreateInfo info{};
     std::vector<DescriptorSet> sets;
     void* metadata{};
