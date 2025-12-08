@@ -255,7 +255,7 @@ class RenderGraph
         uint64_t wait_sync_val{ 0 };
         gcmdpool->reset();
         sync_sem->reset(wait_sync_val);
-        if(wait_sync) { gq->wait_sync(wait_sync, PipelineStage::ALL, wait_sync->wait_gpu()); }
+        if(wait_sync) { gq->wait_sync(wait_sync, PipelineStage::ALL); }
         std::string passnames;
         ENG_LOG("[RGRAPH] Start");
         for(auto si = 0u; si < groups.size(); ++si)
@@ -290,9 +290,8 @@ class RenderGraph
                 gcmdpool->end(cmd);
                 gq->with_cmd_buf(cmd);
             }
-            gq->wait_sync(sync_sem, g.stages, wait_sync_val);
-            wait_sync_val = sync_sem->signal_gpu();
-            gq->signal_sync(sync_sem, g.stages, wait_sync_val);
+            gq->wait_sync(sync_sem, g.stages);
+            gq->signal_sync(sync_sem, g.stages);
             gq->submit();
         }
         ENG_LOG("[RGRAPH] End");

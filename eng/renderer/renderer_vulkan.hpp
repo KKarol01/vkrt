@@ -206,6 +206,7 @@ class RendererBackendVulkan : public RendererBackend
     void initialize_vulkan();
 
     Buffer make_buffer(const BufferDescriptor& info) final;
+    void destroy_buffer(Buffer& b) final;
     Image make_image(const ImageDescriptor& info) final;
     void make_view(ImageView& view) final;
     Sampler make_sampler(const SamplerDescriptor& info) final;
@@ -215,6 +216,7 @@ class RendererBackendVulkan : public RendererBackend
     void make_pipeline(Pipeline& pipeline) final;
     bool compile_pipeline(const Pipeline& pipeline) final;
     Sync* make_sync(const SyncCreateInfo& info) final;
+    void destory_sync(Sync* sync) final;
     Swapchain* make_swapchain() final;
     SubmitQueue* get_queue(QueueType type) final;
     DescriptorPool make_descpool(const DescriptorPoolCreateInfo& info) final;

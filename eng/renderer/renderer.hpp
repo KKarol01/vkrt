@@ -518,6 +518,7 @@ class RendererBackend
     virtual void init() = 0;
 
     virtual Buffer make_buffer(const BufferDescriptor& info) = 0;
+    virtual void destroy_buffer(Buffer& b) = 0;
     virtual Image make_image(const ImageDescriptor& info) = 0;
     virtual void make_view(ImageView& view) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
@@ -527,6 +528,7 @@ class RendererBackend
     virtual void make_pipeline(Pipeline& pipeline) = 0;
     virtual bool compile_pipeline(const Pipeline& pipeline) = 0;
     virtual Sync* make_sync(const SyncCreateInfo& info) = 0;
+    virtual void destory_sync(Sync*) = 0;
     virtual Swapchain* make_swapchain() = 0;
     virtual SubmitQueue* get_queue(QueueType type) = 0;
     virtual DescriptorPool make_descpool(const DescriptorPoolCreateInfo& info) = 0;
@@ -701,6 +703,7 @@ class Renderer
     Handle<PipelineLayout> make_pplayout(const PipelineLayoutCreateInfo& info);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Sync* make_sync(const SyncCreateInfo& info);
+    void destroy_sync(Sync* sync);
     Handle<Texture> make_texture(const TextureDescriptor& info);
     Handle<Material> make_material(const MaterialDescriptor& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);

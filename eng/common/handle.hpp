@@ -66,12 +66,6 @@ template <typename T> struct Handle
     using storage_type = typename HandleStorage<T>::type;
     constexpr Handle() = default;
     constexpr explicit Handle(storage_type handle) : handle{ handle } {}
-    constexpr Handle(const Handle& handle) { *this = handle; }
-    constexpr Handle& operator=(const Handle& handle)
-    {
-        this->handle = *handle;
-        return *this;
-    }
     explicit Handle(GenerateHandle) : handle{ HandleGenerator<T>::gen() } {}
     constexpr storage_type operator*() const { return handle; }
     constexpr auto operator<=>(const Handle& h) const = default;

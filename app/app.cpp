@@ -9,7 +9,6 @@
 #include <assets/shaders/bindless_structures.glsli>
 #include <eng/common/handle.hpp>
 #include <eng/renderer/submit_queue.hpp>
-#include <eng/utils.hpp>
 
 // todo: :(
 #include <eng/renderer/vulkan_structs.hpp>
@@ -146,7 +145,7 @@ void App::on_init()
         }
     }
 
-    Engine::get().scene->instance_entity(e);
+    //Engine::get().scene->instance_entity(e);
     // Engine::get().scene->instance_entity(e);
 }
 

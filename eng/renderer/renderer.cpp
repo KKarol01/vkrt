@@ -2,7 +2,6 @@
 #include "renderer.hpp"
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/engine.hpp>
-#include <eng/utils.hpp>
 #include <eng/camera.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/rendergraph.hpp>
@@ -98,11 +97,11 @@ void Renderer::init(RendererBackend* backend)
             const auto* mesh = Engine::get().ecs->get<ecs::Mesh>(e);
             for(const auto& rmesh : mesh->meshes)
             {
-                const auto& eff = rmesh->material->mesh_pass->effects;
-                for(auto i = 0u; i < eff.size(); ++i)
+                const auto& mpeffect = rmesh->material->mesh_pass->effects;
+                for(auto i = 0u; i < mpeffect.size(); ++i)
                 {
                     const auto rpt = (RenderPassType)i;
-                    if(eff.at(i))
+                    if(mpeffect.at(i))
                     {
                         render_passes.at(rpt).entities.push_back(e);
                         render_passes.at(rpt).redo = true;
@@ -456,6 +455,7 @@ void Renderer::update()
     {
         std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
         sbuf->copy(bufs.trs_bufs[0], bufs.trs_bufs[1], 0, { 0, bufs.trs_bufs[1]->size });
+        sbuf->barrier();
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto* trs = Engine::get().ecs->get<ecs::Transform>(new_transforms.at(i));
@@ -468,6 +468,7 @@ void Renderer::update()
     {
         std::swap(bufs.lights_bufs[0], bufs.lights_bufs[1]);
         sbuf->copy(bufs.lights_bufs[0], bufs.lights_bufs[1], 0, { 0, bufs.lights_bufs[1]->size });
+        sbuf->barrier();
         for(auto i = 0u; i < new_lights.size(); ++i)
         {
             auto* l = Engine::get().ecs->get<ecs::Light>(new_lights.at(i));
@@ -478,7 +479,7 @@ void Renderer::update()
                        offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
         }
         const auto lc = (uint32_t)ecs_light_view.size();
-        sbuf->copy(bufs.lights_bufs[0], &lc, 0, 4);
+        sbuf->copy(bufs.lights_bufs[0], &lc, offsetof(GPULightsBuffer, count), 4);
         new_lights.clear();
     }
 
@@ -515,13 +516,6 @@ void Renderer::update()
         .mlt_occ_cull_enable = (uint32_t)mlt_occ_cull_enable,
     };
     sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
-    // sbuf->flush()->wait_cpu(~0ull);
-
-    //{
-    //    const uint32_t zero = 0u;
-    //    sbuf->copy(pf.fwdp.light_list_buf, &zero, 0ull, 4);
-    //}
-    // sbuf->flush()->wait_cpu(~0ull);
 
     rgraph->add_pass(&*rgraphpasses->cull_zprepass);
     rgraph->add_pass(&*rgraphpasses->cull_hiz);
@@ -818,6 +812,8 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 }
 
 Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_sync(info); }
+
+void Renderer::destroy_sync(Sync* sync) { backend->destory_sync(sync); }
 
 Handle<Texture> Renderer::make_texture(const TextureDescriptor& batch)
 {

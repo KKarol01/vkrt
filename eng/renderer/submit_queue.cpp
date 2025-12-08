@@ -53,6 +53,7 @@ void CommandBuffer::barrier(Image& image, Flags<PipelineStage> src_stage, Flags<
 
 void CommandBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range)
 {
+    assert(dst.capacity >= dst_offset + range.size && src.capacity >= range.offset + range.size);
     VkBufferCopy region{ range.offset, dst_offset, range.size };
     vkCmdCopyBuffer(cmd, VkBufferMetadata::get(src).buffer, VkBufferMetadata::get(dst).buffer, 1, &region);
 }

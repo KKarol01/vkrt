@@ -91,12 +91,14 @@ void ImGuiRenderer::update(CommandBuffer* cmd, Handle<ImageView> output)
     for(int n = 0; n < draw_data->CmdListsCount; n++)
     {
         const ImDrawList* draw_list = draw_data->CmdLists[n];
-        sbuf->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
-        sbuf->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
+        r->sbuf->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
+        r->sbuf->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
         vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
         idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
     }
-    sbuf->flush()->wait_cpu(~0ull); // todo: this shouldn't be here.
+    auto* sbufs = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "imguisbuf" });
+    sbuf->flush()->wait_cpu(~0ull);
+    r->destroy_sync(sbufs);
 
     VkRenderingAttachmentInfo r_col_atts[]{
         Vks(VkRenderingAttachmentInfo{
@@ -207,7 +209,8 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
         assert(image);
         assert(upload_w == imtex->Width && upload_h == imtex->Height);
-        r->sbuf->copy(image, imtex->Pixels, ImageLayout::READ_ONLY);
+        r->sbuf->copy(image, imtex->Pixels);
+        r->sbuf->barrier(image, ImageLayout::READ_ONLY);
         imtex->SetStatus(ImTextureStatus_OK);
     }
 }

@@ -24,7 +24,6 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/renderer/set_debug_name.hpp>
-#include <eng/utils.hpp>
 #include <assets/shaders/bindless_structures.glsli>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
@@ -325,7 +324,7 @@ void VkBufferMetadata::init(Buffer& a)
         ENG_WARN("Capacity cannot be 0");
         return;
     }
-    if(!cpu_map) { a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT; }
+    a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
 
     auto* r = RendererBackendVulkan::get_instance();
     const auto vkinfo = Vks(VkBufferCreateInfo{ .size = a.capacity, .usage = to_vk(a.usage) });
@@ -1336,6 +1335,8 @@ Buffer RendererBackendVulkan::make_buffer(const BufferDescriptor& info)
     return b;
 }
 
+void RendererBackendVulkan::destroy_buffer(Buffer& b) { VkBufferMetadata::destroy(b); }
+
 Image RendererBackendVulkan::make_image(const ImageDescriptor& info)
 {
     Image i{ info };
@@ -1473,6 +1474,13 @@ Sync* RendererBackendVulkan::make_sync(const SyncCreateInfo& info)
     auto* s = new Sync{};
     s->init(info);
     return s;
+}
+
+void RendererBackendVulkan::destory_sync(Sync* sync)
+{
+    assert(sync);
+    sync->destroy();
+    delete sync;
 }
 
 Swapchain* RendererBackendVulkan::make_swapchain()

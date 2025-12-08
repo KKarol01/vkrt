@@ -1,9 +1,9 @@
 #include "staging_buffer.hpp"
 #include <eng/renderer/renderer.hpp>
+#include <eng/math/align.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
-#include <eng/utils.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/to_vk.hpp>
@@ -13,81 +13,107 @@ namespace eng
 namespace gfx
 {
 
-void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)>& on_buffer_resize)
+void StagingBuffer::resize(Handle<Buffer> dst, size_t new_size)
 {
-    auto* r = Engine::get().renderer;
-    buffer = r->make_buffer(BufferDescriptor{
-        "staging buffer", CAPACITY, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS });
-    this->queue = queue;
-    this->on_buffer_resize = on_buffer_resize;
-    cmdpool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-    dummy_sync = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "sbuf dummy sync" });
-    allocations.reserve(128);
-}
-
-void StagingBuffer::resize(Handle<Buffer> buffer, size_t newsize)
-{
-    auto& old = buffer.get();
-    if(newsize <= old.capacity)
+    assert(dst);
+    auto& dstb = dst.get();
+    assert(dstb.size <= dstb.capacity);
+    if(new_size <= dstb.capacity)
     {
-        old.size = std::min(old.size, newsize);
+        dstb.size = std::min(new_size, dstb.size);
         return;
     }
-    const auto info = BufferDescriptor{ old.name, newsize, old.usage };
-    Buffer newbuffer{ info };
-    VkBufferMetadata::init(newbuffer);
-    newbuffer.size = old.size;
-    if(newbuffer.memory) { memcpy(newbuffer.memory, old.memory, old.size); }
-    else if(old.size > 0)
+
+    auto newbuf = eng::Engine::get().renderer->backend->make_buffer(BufferDescriptor{ dstb.name, new_size, dstb.usage });
+    if(dstb.size > 0)
     {
-        flush(); // flush any previous transactions that might've been done for that buffer.
-        get_transaction().cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                       PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
-        get_transaction().cmd->copy(newbuffer, old, 0, { 0, old.size });
+        if(false && dstb.memory)
+        {
+            flush()->wait_cpu(~0ull);
+            memcpy(newbuf.memory, dstb.memory, dstb.size);
+        }
+        else
+        {
+            queue->wait_sync(flush(), PipelineStage::TRANSFER_BIT);
+            get_cmd()->copy(newbuf, dstb, 0, { 0, dstb.size });
+            flush()->wait_cpu(~0ull);
+        }
     }
-    retired_bufs.push_back(RetiredBuffer{ &get_transaction(), std::make_unique<Buffer>(old) });
-    old = std::move(newbuffer);
-    if(on_buffer_resize) { on_buffer_resize(buffer); }
-#ifdef ENG_SBUF_DEBUG_STATS
-    ++debugstats.buf_resize_count;
-#endif
+
+    newbuf.size = dstb.size;
+    eng::Engine::get().renderer->backend->destroy_buffer(dstb);
+    dstb = newbuf;
+    if(on_buffer_resize) { on_buffer_resize(dst); }
 }
 
-void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range range)
+void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range)
 {
-    if(range.size == 0) { return; }
-    if(dst_offset == STAGING_APPEND) { dst_offset = dst->size; }
-    if(dst->capacity < dst_offset + range.size) { resize(dst, dst_offset + range.size); }
-    if(dst->memory && src->memory)
+    assert(dst && src);
+    if(src_range.size == 0) { return; }
+    translate_dst_offset(dst, dst_offset, src_range.size);
+    auto& dstb = dst.get();
+    const auto& srcb = src.get();
+    if(false && dstb.memory != nullptr && srcb.memory != nullptr)
     {
-        memcpy((std::byte*)dst->memory + dst_offset, (const std::byte*)src->memory + range.offset, range.size);
+        memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)srcb.memory + src_range.offset, src_range.size);
     }
-    else { get_transaction().cmd->copy(dst.get(), src.get(), dst_offset, range); }
-    dst->size = std::max(dst->size, dst_offset + range.size);
+    else { get_cmd()->copy(dstb, srcb, dst_offset, src_range); }
+    dstb.size = std::max(dstb.size, dst_offset + src_range.size);
 }
 
 void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size)
 {
+    assert(dst && src);
     if(src_size == 0) { return; }
-    if(dst_offset == STAGING_APPEND) { dst_offset = dst->size; }
-    if(dst->capacity < dst_offset + src_size) { resize(dst, dst_offset + src_size); }
-    if(dst->memory) { memcpy((std::byte*)dst->memory + dst_offset, src, src_size); }
+    translate_dst_offset(dst, dst_offset, src_size);
+
+    auto& dstb = dst.get();
+    if(false && dstb.memory) { memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)src, src_size); }
     else
     {
         size_t uploaded = 0;
         while(uploaded < src_size)
         {
-            auto alloc = allocate(src_size - uploaded);
+            const auto upload_size = src_size - uploaded;
+            auto alloc = allocate(upload_size);
+            assert(alloc.mem != nullptr);
             memcpy(alloc.mem, (const std::byte*)src + uploaded, alloc.size);
-            get_transaction().cmd->copy(dst.get(), buffer.get(), dst_offset + uploaded, { alloc.offset, alloc.size });
+            get_cmd()->copy(dstb, buffer.get(), dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
             uploaded += alloc.size;
         }
+        assert(uploaded == src_size);
     }
-    dst->size = std::max(dst->size, dst_offset + src_size);
+    dstb.size = std::max(dstb.size, dst_offset + src_size);
 }
 
-void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout dstlayout)
+void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy)
 {
+    assert(dst && src);
+    // prepare_image(dst, src);
+    auto& dsti = dst.get();
+    const auto& srci = src.get();
+    // assert(srci.current_layout == ImageLayout::TRANSFER_SRC);
+    // assert(dsti.current_layout == ImageLayout::TRANSFER_DST);
+    const auto dstrange = ImageSubRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
+    const auto srcrange = ImageSubRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
+    get_cmd()->copy(dsti, srci, copy, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC);
+}
+
+void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit)
+{
+    assert(dst && src);
+    // prepare_image(dst, src);
+    auto& dsti = dst.get();
+    const auto& srci = src.get();
+    const auto dstrange = ImageSubRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
+    const auto srcrange = ImageSubRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
+    get_cmd()->blit(dsti, srci, blit, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageFilter::LINEAR);
+}
+
+void StagingBuffer::copy(Handle<Image> dst, const void* const src)
+{
+    assert(dst && src);
+    prepare_image(dst, {});
     auto& img = dst.get();
     const auto block_data = GetBlockData(img.format);
     const auto bx = img.width / block_data.x;
@@ -97,8 +123,6 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout d
     const auto rowsize = bx * block_data.size;
     const auto imgsize = bcount * block_data.size;
 
-    get_transaction().cmd->barrier(img, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::TRANSFER_BIT,
-                                   PipelineAccess::TRANSFER_WRITE_BIT, dst->current_layout, ImageLayout::TRANSFER_DST);
     size_t upbytes = 0;
     while(upbytes < imgsize)
     {
@@ -107,7 +131,7 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout d
         auto alloc = allocate(upsize);
         if(alloc.size < rowsize)
         {
-            reset();
+            reset_allocator();
             continue;
         }
         const auto urows = (uprows % img.height);
@@ -121,250 +145,99 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src, ImageLayout d
             .imageOffset = { 0, (int32_t)(urows * block_data.y), (int32_t)(uslices * block_data.z) },
             .imageExtent = { img.width, (uint32_t)(alrows * block_data.y), (uint32_t)(alslices * block_data.z) } });
         memcpy(alloc.mem, (std::byte*)src + upbytes, alloc.size);
-        get_transaction().cmd->copy(img, buffer.get(), &copy, 1);
+        get_cmd()->copy(img, buffer.get(), &copy, 1);
         upbytes += alrows * rowsize;
     }
-    if(dstlayout != ImageLayout::UNDEFINED) { barrier(dst, dstlayout); }
     assert(upbytes == imgsize);
-}
-
-void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy)
-{
-    // dst and src may be the same. if that's the case, need to make sure to check if ranges overlap.
-    const auto oldsrcl = src->current_layout;
-    assert(oldsrcl != ImageLayout::UNDEFINED);
-    const auto dstrange = ImageSubRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
-    const auto srcrange = ImageSubRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
-    get_transaction().cmd->copy(dst.get(), src.get(), copy, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC);
-}
-
-void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit)
-{
-    const auto oldsrcl = src->current_layout;
-    assert(oldsrcl != ImageLayout::UNDEFINED);
-    const auto dstrange = ImageSubRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
-    const auto srcrange = ImageSubRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
-    get_transaction().cmd->blit(dst.get(), src.get(), blit, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageFilter::LINEAR);
 }
 
 void StagingBuffer::barrier()
 {
-    get_transaction().cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                   PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW);
+    get_cmd()->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_RW);
 }
 
-void StagingBuffer::barrier(Handle<Image> image, ImageLayout dstlayout)
+void StagingBuffer::barrier(Handle<Image> dst, ImageLayout dst_layout)
 {
-    barrier(image, dstlayout, ImageSubRange{ { 0, image->mips }, { 0, image->layers } });
+    assert(dst && dst_layout != ImageLayout::UNDEFINED);
+    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_RW, dst->current_layout, dst_layout);
 }
 
-void StagingBuffer::barrier(Handle<Image> image, ImageLayout dstlayout, ImageSubRange range)
+void StagingBuffer::barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageSubRange& range)
 {
-    barrier(image, image->current_layout, dstlayout, range);
+    assert(dst && dst_layout != ImageLayout::UNDEFINED);
+    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
+                       PipelineAccess::TRANSFER_RW, src_layout, dst_layout, range);
 }
 
-void StagingBuffer::barrier(Handle<Image> image, ImageLayout srclayout, ImageLayout dstlayout, ImageSubRange range)
+void StagingBuffer::flush_resizes() { assert(false); }
+
+void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)>& on_buffer_resize)
 {
-    get_transaction().cmd->barrier(image.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                   PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, srclayout, dstlayout, range);
+    auto* r = Engine::get().renderer;
+    assert(r != nullptr && queue != nullptr);
+    buffer = r->make_buffer(BufferDescriptor{
+        "staging buffer", CAPACITY, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS });
+    assert(buffer);
+    memory = buffer->memory;
+    assert(memory != nullptr);
+    this->queue = queue;
+    this->on_buffer_resize = on_buffer_resize;
+    allocator = DoubleSidedAllocator{ memory, CAPACITY };
+
+    int alloc_dirs[]{ 1, -1 };
+    for(int i = 0; i < 2; ++i)
+    {
+        _dbs[i].alloc_dir = alloc_dirs[i];
+        _dbs[i].cmdpool =
+            queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        _dbs[i].sync = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, ENG_FMT("sbufs{}", i) });
+        assert(_dbs[i].cmdpool != nullptr);
+        assert(_dbs[i].sync != nullptr);
+        dbs[i] = &_dbs[i];
+    }
+    db = dbs[0];
 }
 
-// main idea of flush:
-// 1. if no transactions staged: return dummy, always signaled, sync.
-// 2. go over the staged ones, changed their states to pending
-// 3. submit.
 Sync* StagingBuffer::flush()
 {
-    if(staged.empty()) { return dummy_sync; }
-    auto* sem = staged.front()->sync;
-    for(auto* e : staged)
-    {
-        if(e->state == Transaction::State::RECORDING) { cmdpool->end(e->cmd); }
-        e->state = Transaction::State::PENDING;
-        queue->with_cmd_buf(e->cmd);
-        queue->signal_sync(e->sync, PipelineStage::TRANSFER_BIT);
-    }
-    queue->submit();
-    staged.clear();
-#ifdef ENG_SBUF_DEBUG_STATS
-    ++debugstats.flush_count;
-#endif
-    return sem;
+    if(db->cmd == nullptr) { return db->sync; }
+    assert(db->cmd != nullptr && db->sync != nullptr);
+    // flush_resizes();
+    db->cmdpool->end(db->cmd);
+    queue->with_cmd_buf(db->cmd).signal_sync(db->sync, PipelineStage::TRANSFER_BIT).submit();
+    db->cmd = nullptr;
+    return db->sync;
 }
 
-// main idea of reset
-// 1. flush any staged
-// 2. start removing oldest transactions until failure.
-// 3. on each success, reset sync, cmd, add them to their free lists
-// 4. remove all the allocations belonging to the deleted transactions
-//    and put them in the free allocs for later allocs.
-// 5. actually remove transactions with pop_front to not disturb pointers/refs to other transactions.
-// 6. optionally, if all the transactions have completed and have been deleted,
-//    reset everything, with buffer head and free allocs
 void StagingBuffer::reset()
 {
     flush();
-    assert(staged.empty());
-    auto it = transactions.begin();
-    while(it != transactions.end())
-    {
-        if(it->state == Transaction::State::PENDING && it->sync->wait_cpu(0) == VK_SUCCESS)
-        {
-            it->sync->reset();
-            cmdpool->reset(it->cmd);
-            cmds.push_back(it->cmd);
-            syncs.push_back(it->sync);
-            ++it;
-            continue;
-        }
-        break;
-    }
-    bool sort_free_allocs = false;
-    for(auto dit = transactions.begin(); dit != it; ++dit)
-    {
-        {
-            for(auto& e : allocations)
-            {
-                if(e.transaction == &*dit)
-                {
-                    assert(e.transaction);
-                    sort_free_allocs = true;
-                    e.transaction = nullptr;
-                    free_allocs.push_back(e);
-                }
-            }
-            std::erase_if(allocations, [dit](const auto& e) { return !e.transaction; });
-        }
-        {
-            for(auto& e : retired_bufs)
-            {
-                assert(e.transaction);
-                if(e.transaction == &*dit) { VkBufferMetadata::destroy(*e.buf); }
-            }
-            std::erase_if(retired_bufs, [dit](const auto& e) { return e.transaction == &*dit; });
-        }
-    }
-    if(sort_free_allocs)
-    {
-        std::sort(free_allocs.begin(), free_allocs.end(),
-                  [](const auto& a, const auto& b) { return a.realsize < b.realsize; });
-    }
-    const auto delcount = std::distance(transactions.begin(), it);
-    for(auto i = 0u; i < delcount; ++i)
-    {
-        transactions.pop_front();
-    }
-    if(transactions.empty())
-    {
-        assert(allocations.empty());
-        assert(retired_bufs.empty());
-        assert(cmds.size());
-        assert(syncs.size());
-        head = 0;
-        free_allocs.clear();
-#ifdef ENG_SBUF_DEBUG_STATS
-        debugstats.reset();
-#endif
-    }
+    std::swap(dbs[0], dbs[1]);
+    db = dbs[0];
+    db->sync->wait_cpu(~0ull);
+    db->sync->reset();
+    db->cmdpool->reset();
+    db->cmd = nullptr;
+    allocator.reset(db->alloc_dir);
 }
 
-// main idea of this algorithm:
-// 1. if there is free memory - allocate.
-// 2. if no free space in the buffer, look for free alocs
-// 3. allocs are sorted in ascending size, so pick the first one that is big enough.
-// 4. if there is no big enough, get the biggest one.
-// 5. if no free allocs, and no memory, call reset, and repeat.
 StagingBuffer::Allocation StagingBuffer::allocate(size_t size)
 {
-    while(true)
-    {
-        auto free_space = CAPACITY - head;
-        if(free_space == 0)
-        {
-            if(free_allocs.empty())
-            {
-                reset();
-                continue;
-            }
-            auto it = std::upper_bound(free_allocs.begin(), free_allocs.end(), size,
-                                       [](const auto size, const auto& iter) { return size < iter.realsize; });
-            if(it == free_allocs.end()) { it = it - 1; }
-            auto fa = *it;
-            free_allocs.erase(it);
-            fa.transaction = &get_transaction();
-            fa.size = std::min(size, fa.realsize);
-#ifdef ENG_SBUF_DEBUG_STATS
-            ++debugstats.freealloc_count;
-#endif
-            return fa;
-        }
-        assert(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
-        const auto aligned_size = std::min(align_up2(size, ALIGNMENT), free_space);
-        assert(aligned_size % ALIGNMENT == 0 && aligned_size <= free_space);
-        void* mem = (std::byte*)buffer->memory + head;
-        head += aligned_size;
-        Allocation alloc{
-            &get_transaction(),          &buffer.get(), mem, (uintptr_t)mem - (uintptr_t)buffer->memory, aligned_size,
-            std::min(aligned_size, size)
-        };
-        allocations.push_back(alloc);
-#ifdef ENG_SBUF_DEBUG_STATS
-        ++debugstats.linalloc_count;
-#endif
-        return alloc;
-    }
-}
-
-// 1. find one recording
-// 2. if failed, make new one.
-StagingBuffer::Transaction& StagingBuffer::get_transaction()
-{
-    if(transactions.empty())
-    {
-#ifdef ENG_SBUF_DEBUG_STATS
-        ++debugstats.transaction_count;
-#endif
-        transactions.emplace_back();
-    }
-    if(transactions.back().state != Transaction::State::RECORDING)
-    {
-        auto& back = transactions.back();
-        if(back.state == Transaction::State::UNINITIALIZED)
-        {
-            back.state = Transaction::State::INITIAL;
-            back.cmd = get_cmd();
-            back.sync = get_sync();
-        }
-        if(back.state == Transaction::State::INITIAL)
-        {
-            back.state = Transaction::State::RECORDING;
-            cmdpool->begin(back.cmd);
-            staged.push_back(&back);
-        }
-        if(back.state == Transaction::State::PENDING)
-        {
-#ifdef ENG_SBUF_DEBUG_STATS
-            ++debugstats.transaction_count;
-#endif
-            transactions.emplace_back();
-            return get_transaction();
-        }
-    }
-    return transactions.back();
+    const auto free_space = allocator.get_free_space();
+    if(free_space < ALIGNMENT) { reset_allocator(); }
+    const auto alloc_size = std::min(align_up2(size, ALIGNMENT), free_space);
+    assert(alloc_size > 0 && alloc_size % ALIGNMENT == 0);
+    auto* mem = allocator.alloc(alloc_size, db->alloc_dir);
+    Allocation alloc{ mem, (uintptr_t)mem - (uintptr_t)memory, std::min(alloc_size, size) };
+    return alloc;
 }
 
 CommandBuffer* StagingBuffer::get_cmd()
 {
-    if(cmds.empty())
-    {
-#ifdef ENG_SBUF_DEBUG_STATS
-        ++debugstats.cmd_count;
-#endif
-        return cmdpool->allocate();
-    }
-    auto* back = cmds.back();
-    cmds.pop_back();
-    return back;
+    if(db->cmd == nullptr) { db->cmd = db->cmdpool->begin(); }
+    return db->cmd;
 }
 
 Sync* StagingBuffer::get_sync()
@@ -379,6 +252,20 @@ Sync* StagingBuffer::get_sync()
     auto* back = syncs.back();
     syncs.pop_back();
     return back;
+}
+
+void StagingBuffer::reset_allocator()
+{
+    flush();
+    db->sync->wait_cpu(~0ull);
+    allocator.reset(db->alloc_dir);
+    if(allocator.get_free_space() < ALIGNMENT)
+    {
+        reset();                   // reset previous, as it hogs up all the memory
+        std::swap(dbs[0], dbs[1]); // go back to our data storage for this frame
+        db = dbs[0];
+    }
+    assert(allocator.get_free_space() >= ALIGNMENT);
 }
 
 #ifdef ENG_SBUF_DEBUG_STATS
