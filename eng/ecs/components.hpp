@@ -14,6 +14,12 @@ struct Mesh;
 struct Geometry;
 struct Material;
 } // namespace gfx
+
+namespace asset
+{
+struct Mesh;
+} // namespace asset
+
 } // namespace eng
 
 namespace eng
@@ -43,7 +49,7 @@ struct Node
 
 struct Mesh
 {
-    std::string name;
+    const asset::Mesh* mesh{};
     std::vector<Handle<gfx::Mesh>> meshes;
     uint32_t gpu_resource{ ~0u };
 };

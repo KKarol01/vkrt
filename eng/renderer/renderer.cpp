@@ -91,32 +91,18 @@ void Renderer::init(RendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    ecs_mesh_view = Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>(
-        [this](ecs::entity e) {
-            new_transforms.push_back(e);
-            const auto* mesh = Engine::get().ecs->get<ecs::Mesh>(e);
-            for(const auto& rmesh : mesh->meshes)
-            {
-                const auto& mpeffect = rmesh->material->mesh_pass->effects;
-                for(auto i = 0u; i < mpeffect.size(); ++i)
-                {
-                    const auto rpt = (RenderPassType)i;
-                    if(mpeffect.at(i))
-                    {
-                        render_passes.at(rpt).entities.push_back(e);
-                        render_passes.at(rpt).redo = true;
-                    }
-                }
-            }
-        },
-        [this](ecs::entity e, ecs::signature_t sig) {
-            if(sig.test(ecs::get_id<ecs::Transform>())) { new_transforms.push_back(e); }
-            if(sig.test(ecs::get_id<ecs::Mesh>()))
-            {
-                ENG_TODO();
-                assert(false);
-            }
-        });
+    ecs_mesh_view = Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>([this](ecs::entity e) { instance_entity(e); },
+                                                                           [this](ecs::entity e, ecs::signature_t sig) {
+                                                                               if(sig.test(ecs::get_id<ecs::Transform>()))
+                                                                               {
+                                                                                   new_transforms.push_back(e);
+                                                                               }
+                                                                               if(sig.test(ecs::get_id<ecs::Mesh>()))
+                                                                               {
+                                                                                   ENG_TODO();
+                                                                                   assert(false);
+                                                                               }
+                                                                           });
     ecs_light_view = Engine::get().ecs->get_view<ecs::Light>([this](auto e) { new_lights.push_back(e); },
                                                              [this](auto e, auto sig) { new_lights.push_back(e); });
 
@@ -407,6 +393,32 @@ void Renderer::init_rgraph_passes()
                                                                                    rgraphpasses->swapcbufsview, swapchain });
 }
 
+void Renderer::instance_entity(ecs::entity e)
+{
+    if(!Engine::get().ecs->has<ecs::Transform, ecs::Mesh>(e))
+    {
+        ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", e);
+        return;
+    }
+    new_transforms.push_back(e);
+    auto* mesh = Engine::get().ecs->get<ecs::Mesh>(e);
+    assert(mesh->gpu_resource == ~0u);
+    mesh->gpu_resource = gpu_resource_allocator.allocate_slot();
+    for(const auto& rmesh : mesh->meshes)
+    {
+        const auto& mpeffect = rmesh->material->mesh_pass->effects;
+        for(auto i = 0u; i < mpeffect.size(); ++i)
+        {
+            const auto rpt = (RenderPassType)i;
+            if(mpeffect.at(i))
+            {
+                render_passes.at(rpt).entities.push_back(e);
+                render_passes.at(rpt).redo = true;
+            }
+        }
+    }
+}
+
 void Renderer::update()
 {
     auto* ew = Engine::get().window;
@@ -613,7 +625,7 @@ void Renderer::build_renderpasses()
         for(const auto& e : rp.entities)
         {
             auto& m = *Engine::get().ecs->get<ecs::Mesh>(e);
-            if(m.gpu_resource == ~0u) { m.gpu_resource = gpu_resource_allocator.allocate_slot(); }
+            assert(m.gpu_resource != ~0u);
             for(auto i = 0u; i < m.meshes.size(); ++i)
             {
                 const auto& mesh = m.meshes.at(i).get();

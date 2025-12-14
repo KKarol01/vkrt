@@ -33,7 +33,8 @@ template <typename... Components> struct View;
 
 struct ComponentIdGenerator
 {
-    template <typename Component> static component_id_t generate()
+    // call through free function get_id() or get_id_bit()
+    template <typename Component> static component_id_t _generate()
     {
         static component_id_t id = _id.fetch_add(1);
         assert(id < MAX_COMPONENTS);
@@ -44,7 +45,7 @@ struct ComponentIdGenerator
 
 template <typename Component> component_id_t get_id()
 {
-    return ComponentIdGenerator::generate<std::remove_cvref_t<Component>>();
+    return ComponentIdGenerator::_generate<std::remove_cvref_t<Component>>();
 }
 
 template <typename Component> component_id_t get_id_bit() { return component_id_t{ 1 } << get_id<Component>(); }
@@ -126,7 +127,7 @@ class Registry
     {
         signature_t signature{};
         entity parent{ INVALID_ENTITY };
-        std::vector<entity> children;
+        std::vector<ecs::entity> children;
     };
 
   public:
@@ -186,7 +187,10 @@ class Registry
     }
 
     // get the component from the entity. may return nullptr
-    template <typename Component> const Component* get(entity e) const { return const_cast<Registry*>(this)->get<Component>(e); }
+    template <typename Component> const Component* get(entity e) const
+    {
+        return const_cast<Registry*>(this)->get<Component>(e);
+    }
 
     // attach compontents to the entity
     template <typename... Components> void emplace(entity e, Components&&... comps)
@@ -286,15 +290,15 @@ class Registry
     void traverse_hierarchy(entity e, const auto& callback)
     {
         if(!is_valid(e)) { return; }
-        const auto dfs = [this, &callback](const auto& self, entity p, entity e) -> void {
-            callback(p, e);
+        const auto dfs = [this, &callback](const auto& self, entity e) -> void {
+            callback(e);
             auto& ch = get_md(e).children;
             for(auto c : ch)
             {
-                self(self, e, c);
+                self(self, c);
             }
         };
-        dfs(dfs, INVALID_ENTITY, e);
+        dfs(dfs, e);
     }
 
     // clones entity with it's component and children/parent hierarchy
@@ -303,7 +307,7 @@ class Registry
         if(!is_valid(src)) { return INVALID_ENTITY; }
         std::stack<entity> cloned_parents;
         entity root = INVALID_ENTITY;
-        traverse_hierarchy(src, [this, &cloned_parents, &root](auto _, auto src_entity) {
+        traverse_hierarchy(src, [this, &cloned_parents, &root](auto src_entity) {
             auto dst_entity = create();
             if(root == INVALID_ENTITY) { root = dst_entity; }
             if(cloned_parents.size())
@@ -317,8 +321,8 @@ class Registry
             {
                 if(srcmd.signature.test(i))
                 {
-                    get_md(dst_entity).signature.set(i, true);
                     component_arrays.at(i)->clone(src_entity, dst_entity);
+                    get_md(dst_entity).signature.set(i, true);
                 }
             }
             for(auto i = 0u; i < srcmd.children.size(); ++i)
@@ -374,7 +378,6 @@ class Registry
         return ecs::View<Components...>{ rview };
     }
 
-  private:
     // checks if entity is valid and is registered.
     bool is_valid(entity e) const { return e != INVALID_ENTITY && has(e); }
 
@@ -395,10 +398,10 @@ class Registry
         const auto prevsig = md.signature ^ mask;
         for(auto i = 0u; i < viewsigs.size(); ++i)
         {
-            const auto sig = viewsigs.at(i);
+            const auto viewsig = viewsigs.at(i);
             // only add an entity, when before it couldn't pass the view's signature
             // due to lacking required components, and now it can.
-            if((prevsig & sig) != sig && (md.signature & sig) == sig)
+            if((prevsig & viewsig) != viewsig && (md.signature & viewsig) == viewsig)
             {
                 auto& view = views.at(i);
                 view.entities.push_back(e);
@@ -419,7 +422,7 @@ class Registry
 
 template <typename... Components> struct View
 {
-    struct iterator
+    struct Iterator
     {
         using difference_type = ptrdiff_t;
         using value_type = std::tuple<entity, Components...>;
@@ -428,21 +431,21 @@ template <typename... Components> struct View
         using iterator_category = std::random_access_iterator_tag;
 
         // clang-format off
-        iterator(Registry::View* rview, ecs::entity* e) : rview(rview), e(e) {}
-        bool operator==(iterator it) const { return rview == it.rview && e == it.e; }
-        bool operator!=(iterator it) const { return !(*this == it); }
-        iterator& operator++() { ++e; return *this; }
-        iterator& operator--() { --e; return *this; }
+        Iterator(Registry::View* rview, ecs::entity* e) : rview(rview), e(e) {}
+        bool operator==(Iterator it) const { return rview == it.rview && e == it.e; }
+        bool operator!=(Iterator it) const { return !(*this == it); }
+        Iterator& operator++() { ++e; return *this; }
+        Iterator& operator--() { --e; return *this; }
         reference operator*() { return reference{ *e, *rview->registry->get<Components>(*e)... }; }
-        reference operator->() { return iterator::operator*(); }
+        reference operator->() { return Iterator::operator*(); }
         // clang-format on
 
         Registry::View* rview{};
         entity* e{};
     };
 
-    auto begin() { return iterator{ rview, rview->entities.data() }; }
-    auto end() { return iterator{ rview, rview->entities.data() + rview->entities.size() }; }
+    auto begin() { return Iterator{ rview, rview->entities.data() }; }
+    auto end() { return Iterator{ rview, rview->entities.data() + rview->entities.size() }; }
     auto size() const { return rview->entities.size(); }
 
     Registry::View* rview{};

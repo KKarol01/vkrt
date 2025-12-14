@@ -99,7 +99,7 @@ void App::on_init()
     // ecs->update<ecs::Transform>(e1);
 
     renderer.init();
-    const auto e = Engine::get().scene->load_from_file("cyberpunk.glb");
+    const auto* e = Engine::get().scene->load_from_file("cyberpunk.glb");
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
@@ -145,8 +145,7 @@ void App::on_init()
         }
     }
 
-    //Engine::get().scene->instance_entity(e);
-    // Engine::get().scene->instance_entity(e);
+    Engine::get().scene->instance_model(e);
 }
 
 void App::on_update() { renderer.update(); }

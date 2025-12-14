@@ -82,8 +82,8 @@ class SparseSet
         return insert(dense.at(free_list_head));
     }
 
-    // Returns iterator with index to dense of the element that got replaced with the last element.
-    // Usually used to index accompanying vectors and swap the last element in them too.
+    // Returns index to dense at which deletion (if any) happened.
+    // This is mainly used to delete from secondary vectors that keep associated data.
     Iterator erase(key_t e)
     {
         if(!has(e)) { return Iterator{}; }

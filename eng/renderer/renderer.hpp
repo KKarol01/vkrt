@@ -689,6 +689,8 @@ class Renderer
     void init_bufs();
     void init_rgraph_passes();
 
+    void instance_entity(ecs::entity e);
+
     void update();
     void render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
     void build_renderpasses();
