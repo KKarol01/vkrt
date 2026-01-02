@@ -27,7 +27,7 @@ void StagingBuffer::resize(Handle<Buffer> dst, size_t new_size)
     auto newbuf = eng::Engine::get().renderer->backend->make_buffer(BufferDescriptor{ dstb.name, new_size, dstb.usage });
     if(dstb.size > 0)
     {
-        if(false && dstb.memory)
+        if(dstb.memory)
         {
             flush()->wait_cpu(~0ull);
             memcpy(newbuf.memory, dstb.memory, dstb.size);
@@ -53,7 +53,7 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
     translate_dst_offset(dst, dst_offset, src_range.size);
     auto& dstb = dst.get();
     const auto& srcb = src.get();
-    if(false && dstb.memory != nullptr && srcb.memory != nullptr)
+    if(dstb.memory != nullptr && srcb.memory != nullptr)
     {
         memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)srcb.memory + src_range.offset, src_range.size);
     }
@@ -68,7 +68,7 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
     translate_dst_offset(dst, dst_offset, src_size);
 
     auto& dstb = dst.get();
-    if(false && dstb.memory) { memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)src, src_size); }
+    if(dstb.memory) { memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)src, src_size); }
     else
     {
         size_t uploaded = 0;
