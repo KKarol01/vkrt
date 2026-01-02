@@ -39,62 +39,67 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
                                uint32_t primitive_index, asset::Model& model)
 {
     const auto& fprim = fastmesh.primitives.at(primitive_index);
-    std::vector<gfx::Vertex> vertices;
+
+    std::vector<float> vertices;
     std::vector<uint32_t> indices;
-    if(auto it = fprim.findAttribute("POSITION"); it != fprim.attributes.end())
-    {
-        auto& acc = fastasset.accessors.at(it->accessorIndex);
-        if(!acc.bufferViewIndex)
+
+    static constexpr const char* FAST_COMPS[]{ "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0" };
+    static constexpr gfx::VertexComponent GFX_COMPS[]{ gfx::VertexComponent::POSITION_BIT, gfx::VertexComponent::NORMAL_BIT,
+                                                       gfx::VertexComponent::TANGENT_BIT, gfx::VertexComponent::UV0_BIT };
+
+    const auto vertex_layout = [&fprim] {
+        Flags<gfx::VertexComponent> vertex_layout{};
+        for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
         {
-            ENG_ERROR("No bufferViewIndex...");
-            return nullptr;
+            if(fprim.findAttribute(FAST_COMPS[i]) != fprim.attributes.end()) { vertex_layout |= GFX_COMPS[i]; }
         }
-        vertices.resize(acc.count);
-        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, acc, [&vertices](const auto& vec, auto idx) {
-            vertices.at(idx).position = { vec.x(), vec.y(), vec.z() };
-        });
-    }
-    else
+        return vertex_layout;
+    }();
+    const auto vertex_size = gfx::get_vertex_layout_size(vertex_layout);
+    const auto get_vertex_component = [&vertices, &vertex_size, &vertex_layout](size_t vidx, gfx::VertexComponent comp) -> std::byte* {
+        auto* ptr = (std::byte*)vertices.data();
+        return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
+    };
+
+    const auto fast_iterate = [&fastasset, &vertices, &get_vertex_component](int comp, const auto& fastacc,
+                                                                             gfx::VertexComponent gfxcomp) {
+        const auto cb = [&get_vertex_component, &gfxcomp]<size_t comps>(const auto& vec, auto idx) {
+            float v[comps]{};
+            for(auto i = 0u; i < comps; ++i)
+            {
+                v[i] = vec[i];
+            }
+            auto* pdst = get_vertex_component(idx, gfxcomp);
+            memcpy(pdst, v, gfx::get_vertex_component_size(gfxcomp));
+        };
+        const auto cb2 = [&cb](const auto& a, auto b) { cb.operator()<2>(a, b); };
+        const auto cb3 = [&cb](const auto& a, auto b) { cb.operator()<3>(a, b); };
+        const auto cb4 = [&cb](const auto& a, auto b) { cb.operator()<4>(a, b); };
+
+        if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, fastacc, cb3); }
+        else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, fastacc, cb3); }
+        else if(comp == 2) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(fastasset, fastacc, cb4); }
+        else if(comp == 3) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(fastasset, fastacc, cb2); }
+    };
+
+    for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
     {
-        ENG_WARN("Mesh primitive does not contain position. Skipping...");
-        return nullptr;
-    }
-    if(auto it = fprim.findAttribute("NORMAL"); it != fprim.attributes.end())
-    {
-        auto& acc = fastasset.accessors.at(it->accessorIndex);
-        if(!acc.bufferViewIndex)
+        if(!vertex_layout.test(GFX_COMPS[i]))
         {
-            ENG_ERROR("No bufferViewIndex...");
-            return nullptr;
+            if(i == 0)
+            {
+                ENG_ERROR("Mesh does not have positions");
+                return {};
+            }
+            continue;
         }
-        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, acc, [&vertices](const auto& vec, auto idx) {
-            vertices.at(idx).normal = { vec.x(), vec.y(), vec.z() };
-        });
-    }
-    if(auto it = fprim.findAttribute("TEXCOORD_0"); it != fprim.attributes.end())
-    {
+
+        auto it = fprim.findAttribute(FAST_COMPS[i]);
         auto& acc = fastasset.accessors.at(it->accessorIndex);
-        if(!acc.bufferViewIndex)
-        {
-            ENG_ERROR("No bufferViewIndex...");
-            return nullptr;
-        }
-        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(fastasset, acc, [&vertices](const auto& vec, auto idx) {
-            vertices.at(idx).uv = { vec.x(), vec.y() };
-        });
+        if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
+        fast_iterate(i, acc, GFX_COMPS[i]);
     }
-    if(auto it = fprim.findAttribute("TANGENT"); it != fprim.attributes.end())
-    {
-        auto& acc = fastasset.accessors.at(it->accessorIndex);
-        if(!acc.bufferViewIndex)
-        {
-            ENG_ERROR("No bufferViewIndex...");
-            return nullptr;
-        }
-        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(fastasset, acc, [&vertices](const auto& vec, auto idx) {
-            vertices.at(idx).tangent = { vec.x(), vec.y(), vec.z(), vec.w() };
-        });
-    }
+
     if(!fprim.indicesAccessor)
     {
         ENG_WARN("Mesh ({}) primitive ({}) does not have mandatory vertex indices. Skipping...", fastmesh.name.c_str(), primitive_index);
@@ -112,8 +117,13 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
         fastgltf::copyFromAccessor<uint32_t>(fastasset, acc, indices.data());
     }
 
-    const auto render_geometry =
-        Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{ .vertices = vertices, .indices = indices });
+    const auto render_geometry = Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{
+        .flags = {},
+        .vertex_layout = vertex_layout,
+        .index_format = gfx::IndexFormat::U32,
+        .vertices = vertices,
+        .indices = std::as_bytes(std::span{ indices }),
+    });
 
     auto& geom = model.geometries.emplace_back();
     geom.render_geometry = render_geometry;

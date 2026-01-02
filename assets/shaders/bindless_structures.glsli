@@ -104,8 +104,8 @@ ENG_DECLARE_STORAGE_BUFFER(GPUVertexPositionsBuffer) {
 struct GPUVertexAttribute
 {
     ENG_TYPE_FLOAT3 normal;
-    ENG_TYPE_FLOAT2 uv;
     ENG_TYPE_FLOAT4 tangent;
+    ENG_TYPE_FLOAT2 uv;
 };
 ENG_DECLARE_STORAGE_BUFFER(GPUVertexAttributesBuffer) { 
     ENG_TYPE_UNSIZED(GPUVertexAttribute, attributes); 

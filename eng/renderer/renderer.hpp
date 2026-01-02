@@ -46,7 +46,59 @@ struct ImageBlockData
     uint32_t x, y, z;
 };
 
-ImageBlockData GetBlockData(ImageFormat format);
+ImageBlockData get_block_data(ImageFormat format);
+
+inline size_t get_vertex_component_size(VertexComponent a)
+{
+    switch(a)
+    {
+    case VertexComponent::NONE:
+        return 0;
+    case VertexComponent::POSITION_BIT:
+        return 3 * sizeof(float);
+    case VertexComponent::NORMAL_BIT:
+        return 3 * sizeof(float);
+    case VertexComponent::TANGENT_BIT:
+        return 4 * sizeof(float);
+    case VertexComponent::UV0_BIT:
+        return 2 * sizeof(float);
+    }
+    ENG_ERROR("Undefined case");
+    return 0;
+}
+
+inline size_t get_vertex_layout_size(Flags<VertexComponent> a)
+{
+    static constexpr VertexComponent comps[]{ VertexComponent::POSITION_BIT, VertexComponent::NORMAL_BIT,
+                                              VertexComponent::TANGENT_BIT, VertexComponent::UV0_BIT };
+    size_t sum = 0;
+    for(auto e : std::span{ comps })
+    {
+        if(a.test_clear(e)) { sum += get_vertex_component_size(e); }
+    }
+    assert(a.empty());
+    return sum;
+}
+
+inline size_t get_vertex_component_offset(Flags<VertexComponent> layout, VertexComponent comp)
+{
+    return get_vertex_layout_size(layout & (std::to_underlying(comp) - 1)); // calc size of all previous present components in the bitmask
+}
+
+inline size_t get_index_size(IndexFormat a)
+{
+    switch(a)
+    {
+    case IndexFormat::U8:
+        return 1;
+    case IndexFormat::U16:
+        return 2;
+    case IndexFormat::U32:
+        return 4;
+    }
+    ENG_ERROR("Undefined case");
+    return 0;
+}
 
 struct Shader
 {
@@ -270,14 +322,6 @@ struct Mesh
     Handle<Material> material;
 };
 
-struct Vertex
-{
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 uv;
-    glm::vec4 tangent;
-};
-
 struct Meshlet
 {
     int32_t vertex_offset;
@@ -290,8 +334,10 @@ struct Meshlet
 struct GeometryDescriptor
 {
     Flags<GeometryFlags> flags;
-    std::span<const Vertex> vertices;
-    std::span<uint32_t> indices;
+    Flags<VertexComponent> vertex_layout;
+    IndexFormat index_format;
+    std::span<const float> vertices;
+    std::span<const std::byte> indices;
 };
 
 struct BufferDescriptor
@@ -709,7 +755,7 @@ class Renderer
     Handle<Texture> make_texture(const TextureDescriptor& info);
     Handle<Material> make_material(const MaterialDescriptor& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
-    static void meshletize_geometry(const GeometryDescriptor& info, std::vector<gfx::Vertex>& out_vertices,
+    static void meshletize_geometry(const GeometryDescriptor& info, std::vector<float>& out_vertices,
                                     std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);

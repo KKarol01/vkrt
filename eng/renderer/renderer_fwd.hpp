@@ -103,6 +103,23 @@ enum class GeometryFlags
     DIRTY_BLAS_BIT = 0x1,
 };
 
+enum class IndexFormat
+{
+    U8,
+    U16,
+    U32,
+};
+
+enum class VertexComponent : uint32_t
+{
+    NONE = 0x0,
+    POSITION_BIT = 0x1,
+    NORMAL_BIT = 0x2,
+    TANGENT_BIT = 0x4,
+    UV0_BIT = 0x8,
+};
+ENG_ENABLE_FLAGS_OPERATORS(VertexComponent);
+
 enum class InstanceFlags
 {
     RAY_TRACED_BIT = 0x1
@@ -317,7 +334,6 @@ struct MeshPassCreateInfo;
 struct MeshPass;
 struct Material;
 struct Mesh;
-struct Vertex;
 struct Meshlet;
 struct GeometryDescriptor;
 struct BufferDescriptor;

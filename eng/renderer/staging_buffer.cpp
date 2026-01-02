@@ -115,7 +115,7 @@ void StagingBuffer::copy(Handle<Image> dst, const void* const src)
     assert(dst && src);
     prepare_image(dst, {});
     auto& img = dst.get();
-    const auto block_data = GetBlockData(img.format);
+    const auto block_data = get_block_data(img.format);
     const auto bx = img.width / block_data.x;
     const auto by = img.height / block_data.y;
     const auto bz = img.depth / block_data.z;

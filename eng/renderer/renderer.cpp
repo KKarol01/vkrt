@@ -36,7 +36,7 @@ struct RenderGraphPasses
     std::unique_ptr<pass::PresentCopy> present_copy;
 };
 
-ImageBlockData GetBlockData(ImageFormat format)
+ImageBlockData get_block_data(ImageFormat format)
 {
     switch(format)
     {
@@ -154,58 +154,58 @@ void Renderer::init(RendererBackend* backend)
 
 void Renderer::init_helper_geom()
 {
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    const auto gen_uv_sphere = [&vertices, &indices] {
-        const auto segs = 16;
-        const auto rings = 16;
-        vertices.clear();
-        indices.clear();
-        vertices.reserve(segs * rings);
-        indices.reserve((rings - 1) * (segs - 1) * 6);
-        for(auto y = 0u; y < rings; ++y)
-        {
-            const auto v = (float)y / (float)(rings - 1);
-            const auto theta = v * glm::pi<float>();
-            const auto st = std::sinf(theta);
-            const auto ct = std::cosf(theta);
-            for(auto x = 0u; x < segs; ++x)
-            {
-                const auto u = (float)x / (float)(segs - 1);
-                const auto phi = u * 2.0f * glm::pi<float>();
-                const auto sp = std::sinf(phi);
-                const auto cp = std::cosf(phi);
-                vertices.push_back(Vertex{ .position = { st * cp, ct, st * sp }, .uv = { u, v } });
-            }
-        }
-        for(auto y = 0u; y < rings - 1; ++y)
-        {
-            for(auto x = 0u; x < segs - 1; ++x)
-            {
-                const auto idx = y * segs + x;
-                indices.push_back(idx);
-                indices.push_back(idx + 1);
-                indices.push_back(idx + segs);
-                indices.push_back(idx + segs);
-                indices.push_back(idx + 1);
-                indices.push_back(idx + segs + 1);
-            }
-        }
-    };
+    // std::vector<Vertex> vertices;
+    // std::vector<uint32_t> indices;
+    // const auto gen_uv_sphere = [&vertices, &indices] {
+    //     const auto segs = 16;
+    //     const auto rings = 16;
+    //     vertices.clear();
+    //     indices.clear();
+    //     vertices.reserve(segs * rings);
+    //     indices.reserve((rings - 1) * (segs - 1) * 6);
+    //     for(auto y = 0u; y < rings; ++y)
+    //     {
+    //         const auto v = (float)y / (float)(rings - 1);
+    //         const auto theta = v * glm::pi<float>();
+    //         const auto st = std::sinf(theta);
+    //         const auto ct = std::cosf(theta);
+    //         for(auto x = 0u; x < segs; ++x)
+    //         {
+    //             const auto u = (float)x / (float)(segs - 1);
+    //             const auto phi = u * 2.0f * glm::pi<float>();
+    //             const auto sp = std::sinf(phi);
+    //             const auto cp = std::cosf(phi);
+    //             vertices.push_back(Vertex{ .position = { st * cp, ct, st * sp }, .uv = { u, v } });
+    //         }
+    //     }
+    //     for(auto y = 0u; y < rings - 1; ++y)
+    //     {
+    //         for(auto x = 0u; x < segs - 1; ++x)
+    //         {
+    //             const auto idx = y * segs + x;
+    //             indices.push_back(idx);
+    //             indices.push_back(idx + 1);
+    //             indices.push_back(idx + segs);
+    //             indices.push_back(idx + segs);
+    //             indices.push_back(idx + 1);
+    //             indices.push_back(idx + segs + 1);
+    //         }
+    //     }
+    // };
 
-    gen_uv_sphere();
-    assert(vertices.size() <= ~uint16_t{});
-    helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
-    helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
-                     Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
-        .layout = bindless_pplayout,
-        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
-        .depth_write = true,
-        .depth_compare = DepthCompare::GREATER,
-        .culling = CullFace::BACK,
-    });
+    // gen_uv_sphere();
+    // assert(vertices.size() <= ~uint16_t{});
+    // helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
+    // helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
+    //                  Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
+    //     .layout = bindless_pplayout,
+    //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
+    //     .depth_test = true,
+    //     .depth_write = true,
+    //     .depth_compare = DepthCompare::GREATER,
+    //     .culling = CullFace::BACK,
+    // });
 }
 
 void Renderer::init_pipelines()
@@ -843,21 +843,26 @@ Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
-    std::vector<Vertex> out_vertices;
+    std::vector<float> out_vertices;
     std::vector<uint16_t> out_indices;
     std::vector<Meshlet> out_meshlets;
     meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
 
     Geometry geometry{ .meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)out_meshlets.size() } };
 
-    static constexpr auto VXATTRSIZE = sizeof(Vertex) - sizeof(Vertex::position);
-    std::vector<glm::vec3> positions(out_vertices.size());
-    std::vector<std::byte> attributes(out_vertices.size() * VXATTRSIZE);
-    for(auto i = 0ull; i < out_vertices.size(); ++i)
+    const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
+    const auto index_count = out_indices.size();
+    const auto vertex_count = out_vertices.size() * sizeof(float) / vertex_size;
+    const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
+    const auto attr_size = vertex_size - pos_size;
+
+    std::byte* psrcvx = (std::byte*)out_vertices.data();
+    std::vector<std::byte> positions(vertex_count * pos_size);
+    std::vector<std::byte> attributes(vertex_count * attr_size);
+    for(auto i = 0ull; i < vertex_count; ++i)
     {
-        auto& v = out_vertices.at(i);
-        positions[i] = v.position;
-        memcpy(&attributes[i * VXATTRSIZE], reinterpret_cast<const std::byte*>(&v) + sizeof(Vertex::position), VXATTRSIZE);
+        memcpy(&positions[i * pos_size], &psrcvx[i * vertex_size], pos_size);
+        memcpy(&attributes[i * attr_size], &psrcvx[i * vertex_size + pos_size], attr_size);
     }
     std::vector<glm::vec4> bounding_spheres(out_meshlets.size());
     for(auto i = 0u; i < out_meshlets.size(); ++i)
@@ -872,8 +877,8 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     sbuf->copy(bufs.idx_buf, out_indices, STAGING_APPEND);
     sbuf->copy(bufs.bsphere_buf, bounding_spheres, STAGING_APPEND);
 
-    bufs.vertex_count += positions.size();
-    bufs.index_count += out_indices.size();
+    bufs.vertex_count += vertex_count;
+    bufs.index_count += index_count;
     meshlets.insert(meshlets.end(), out_meshlets.begin(), out_meshlets.end());
 
     const auto handle = geometries.insert(std::move(geometry));
@@ -884,45 +889,64 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     return handle;
 }
 
-void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<Vertex>& out_vertices,
+void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<float>& out_vertices,
                                    std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets)
 {
     static constexpr auto max_verts = 64u;
     static constexpr auto max_tris = 124u;
     static constexpr auto cone_weight = 0.0f;
 
-    const auto& indices = batch.indices;
-    const auto& vertices = batch.vertices;
+    std::vector<uint32_t> indices(batch.indices.size_bytes() / get_index_size(batch.index_format));
+    for(auto i = 0ull; i < indices.size(); ++i)
+    {
+        if(batch.index_format == IndexFormat::U8)
+        {
+            indices[i] = *(reinterpret_cast<const uint8_t*>(batch.indices.data()) + i);
+        }
+        else if(batch.index_format == IndexFormat::U16)
+        {
+            indices[i] = *(reinterpret_cast<const uint16_t*>(batch.indices.data()) + i);
+        }
+        else if(batch.index_format == IndexFormat::U32)
+        {
+            indices[i] = *(reinterpret_cast<const uint32_t*>(batch.indices.data()) + i);
+        }
+    }
+
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
     std::vector<meshopt_Meshlet> mlts(max_meshlets);
     std::vector<meshopt_Bounds> mlt_bnds;
-    std::vector<uint32_t> mlt_vtxs(max_meshlets * max_verts);
-    std::vector<uint8_t> mlt_idxs(max_meshlets * max_tris * 3);
+    std::vector<uint32_t> mlt_vxs(max_meshlets * max_verts);
+    std::vector<uint8_t> mlt_ids(max_meshlets * max_tris * 3);
 
-    const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vtxs.data(), mlt_idxs.data(), indices.data(),
-                                              indices.size(), &vertices[0].position.x, vertices.size(),
-                                              sizeof(vertices[0]), max_verts, max_tris, cone_weight);
-
+    const auto vx_size = get_vertex_layout_size(batch.vertex_layout);
+    const auto vx_count = batch.vertices.size_bytes() / vx_size;
+    const auto pos_size = get_vertex_component_size(VertexComponent::POSITION_BIT);
+    const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vxs.data(), mlt_ids.data(), indices.data(), indices.size(),
+                                              batch.vertices.data(), vx_count, vx_size, max_verts, max_tris, cone_weight);
     const auto& last_mlt = mlts.at(mltcnt - 1);
-    mlt_vtxs.resize(last_mlt.vertex_offset + last_mlt.vertex_count);
-    mlt_idxs.resize(last_mlt.triangle_offset + ((last_mlt.triangle_count * 3 + 3) & ~3));
+    mlt_vxs.resize(last_mlt.vertex_offset + last_mlt.vertex_count);
+    mlt_ids.resize(last_mlt.triangle_offset + ((last_mlt.triangle_count * 3 + 3) & ~3));
     mlts.resize(mltcnt);
     mlt_bnds.reserve(mltcnt);
     for(auto& m : mlts)
     {
-        meshopt_optimizeMeshlet(&mlt_vtxs.at(m.vertex_offset), &mlt_idxs.at(m.triangle_offset), m.triangle_count, m.vertex_count);
-        const auto mbounds =
-            meshopt_computeMeshletBounds(&mlt_vtxs.at(m.vertex_offset), &mlt_idxs.at(m.triangle_offset),
-                                         m.triangle_count, &vertices[0].position.x, vertices.size(), sizeof(vertices[0]));
+        meshopt_optimizeMeshlet(&mlt_vxs.at(m.vertex_offset), &mlt_ids.at(m.triangle_offset), m.triangle_count, m.vertex_count);
+        const auto mbounds = meshopt_computeMeshletBounds(&mlt_vxs.at(m.vertex_offset), &mlt_ids.at(m.triangle_offset),
+                                                          m.triangle_count, batch.vertices.data(), vx_count, vx_size);
         mlt_bnds.push_back(mbounds);
     }
-    out_vertices.resize(mlt_vtxs.size());
-    std::transform(mlt_vtxs.begin(), mlt_vtxs.end(), out_vertices.begin(),
-                   [&vertices](uint32_t idx) { return vertices[idx]; });
+    out_vertices.resize(mlt_vxs.size() * vx_size / sizeof(float));
+    for(auto i = 0ull; i < mlt_vxs.size(); ++i)
+    {
+        auto* pdst = (std::byte*)out_vertices.data();
+        const auto* psrc = (const std::byte*)batch.vertices.data();
+        memcpy(pdst + i * vx_size, psrc + mlt_vxs[i] * vx_size, vx_size);
+    }
 
-    out_indices.resize(mlt_idxs.size());
-    std::transform(mlt_idxs.begin(), mlt_idxs.end(), out_indices.begin(),
-                   [](auto idx) { return static_cast<uint8_t>(idx); });
+    out_indices.resize(mlt_ids.size());
+    std::transform(mlt_ids.begin(), mlt_ids.end(), out_indices.begin(),
+                   [](auto idx) { return static_cast<uint16_t>(idx); });
     out_meshlets.resize(mltcnt);
     for(auto i = 0u; i < mltcnt; ++i)
     {
