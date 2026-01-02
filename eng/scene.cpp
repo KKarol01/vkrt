@@ -15,6 +15,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/camera.hpp>
+#include <eng/physics/bvh.hpp>
 #include <third_party/imgui/imgui.h>
 #include <third_party/imgui/imgui_internal.h>
 #include <third_party/ImGuizmo/ImGuizmo.h>
@@ -127,6 +128,9 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
 
     auto& geom = model.geometries.emplace_back();
     geom.render_geometry = render_geometry;
+    geom.bvh = physics::BVH{ std::as_bytes(std::span{ vertices }), gfx::get_vertex_layout_size(vertex_layout),
+                             std::as_bytes(std::span{ indices }), gfx::IndexFormat::U32 };
+
     return &geom;
 }
 
@@ -277,7 +281,7 @@ asset::Mesh* load_mesh(const fastgltf::Asset& fastasset, const fastgltf::Node& f
 
     const auto& fm = fastasset.meshes.at(*fastnode.meshIndex);
     std::vector<Handle<gfx::Mesh>> gfxmeshes;
-    gfxmeshes.reserve(fm.primitives.size());
+    std::vector<uint32_t> geometries;
     for(auto i = 0u; i < fm.primitives.size(); ++i)
     {
         const auto* geom = gltf::load_geometry(fastasset, fm, i, model);
@@ -298,6 +302,7 @@ asset::Mesh* load_mesh(const fastgltf::Asset& fastasset, const fastgltf::Node& f
     auto& mesh = model.meshes.at(*fastnode.meshIndex);
     mesh.name = fm.name.c_str();
     mesh.render_meshes = std::move(gfxmeshes);
+    mesh.geometries = { (uint32_t)(model.geometries.size() - fm.primitives.size()), (uint32_t)fm.primitives.size() };
     return &mesh;
 }
 
@@ -441,7 +446,7 @@ ecs::entity Scene::instance_model(const asset::Model* model)
                                               const asset::Model::Node& node, ecs::entity parent) -> ecs::entity {
         auto* ecsr = Engine::get().ecs;
         auto entity = ecsr->create();
-        ecsr->emplace(entity, ecs::Node{ node.name });
+        ecsr->emplace(entity, ecs::Node{ node.name, &model });
         ecsr->emplace(entity, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
         if(node.mesh != ~0u)
         {
@@ -539,15 +544,20 @@ void Scene::ui_draw_scene()
 {
     if(ImGui::Begin("Scene", 0, ImGuiWindowFlags_HorizontalScrollbar))
     {
-        const auto draw_hierarchy = [this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
+        const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity e, bool expand, const auto& self) -> void {
+            ui.scene.nodes[e].expanded = expand;
+            for(auto ch : reg->get_children(e))
+            {
+                self(reg, ch, expand, self);
+            }
+        };
+
+        const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
             const auto enode = reg->get<ecs::Node>(e);
             const auto& echildren = reg->get_children(e);
-            auto idd = ImGui::GetID(enode->name.c_str());
-            ImGui::PushID(enode->name.c_str());
             ImGui::PushID((int)e);
-            const auto imhid = ImGui::GetItemID();
-            assert(idd != imhid);
-            auto& ui_node = ui.scene.nodes[imhid];
+            auto& ui_node = ui.scene.nodes[e];
+            // ImGui::BeginGroup();
             if(echildren.size())
             {
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().ItemSpacing * 0.5f);
@@ -565,6 +575,12 @@ void Scene::ui_draw_scene()
                 ImGui::GetItemRectSize();
                 if(ImGui::Selectable(enode->name.c_str(), &is_sel)) { ui.scene.sel_entity = e; }
             }
+            // ImGui::EndGroup();
+            if(ImGui::IsItemClicked() && ImGui::IsMouseDoubleClicked(0))
+            {
+                expand_hierarchy(reg, e, !ui_node.expanded, expand_hierarchy);
+            }
+
             if(ui_node.expanded)
             {
                 ImGui::Indent();
@@ -574,7 +590,6 @@ void Scene::ui_draw_scene()
                 }
                 ImGui::Unindent();
             }
-            ImGui::PopID();
             ImGui::PopID();
         };
         for(const auto& e : scene)
@@ -596,7 +611,7 @@ void Scene::ui_draw_inspector()
     auto* cmesh = ecs->get<ecs::Mesh>(entity);
     auto* clight = ecs->get<ecs::Light>(entity);
 
-    if(ImGui::Begin("Inspector"))
+    if(ImGui::Begin("Inspector", 0, ImGuiWindowFlags_HorizontalScrollbar))
     {
         assert(cnode && ctransform);
         ImGui::SeparatorText("Node");
@@ -631,6 +646,21 @@ void Scene::ui_draw_inspector()
             edited |= ImGui::SliderFloat("Intensity", &clight->intensity, 0.0f, 100.0f);
             // todo: don't like that entities with light component have to be detected and handled separately
             if(edited) { update_transform(entity); }
+        }
+
+        if(cmesh)
+        {
+            ImGui::SeparatorText("BVH");
+            for(auto i = 0u; i < cmesh->mesh->geometries.size; ++i)
+            {
+                const auto stats = cnode->model->geometries[cmesh->mesh->geometries.offset + i].bvh.get_stats();
+                ImGui::Text("BVH%u: size[kB]: %llu, tris: %u, nodes: %u", i, stats.size / 1024,
+                            (uint32_t)stats.tris.size(), (uint32_t)stats.nodes.size());
+                const auto aabb = stats.nodes[0].aabb;
+                ImGui::Text("\tExtent:");
+                ImGui::Text("\t[%5.2f %5.2f %5.2f]", aabb.min.x, aabb.min.y, aabb.min.z);
+                ImGui::Text("\t[%5.2f %5.2f %5.2f]", aabb.max.x, aabb.max.y, aabb.max.z);
+            }
         }
     }
     ImGui::End();

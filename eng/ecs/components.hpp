@@ -17,6 +17,7 @@ struct Material;
 
 namespace asset
 {
+struct Model;
 struct Mesh;
 } // namespace asset
 
@@ -45,6 +46,7 @@ struct Transform
 struct Node
 {
     std::string name;
+    const asset::Model* model{};
 };
 
 struct Mesh

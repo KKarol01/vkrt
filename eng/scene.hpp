@@ -12,6 +12,7 @@
 #include <eng/ecs/ecs.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/common/handlemap.hpp>
+#include <eng/physics/bvh.hpp>
 
 namespace eng
 {
@@ -21,6 +22,7 @@ namespace asset
 struct Geometry
 {
     Handle<gfx::Geometry> render_geometry;
+    physics::BVH bvh;
 };
 
 struct Image
@@ -45,6 +47,7 @@ struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> render_meshes;
+    Range32u geometries;
 };
 
 struct Model
@@ -100,7 +103,7 @@ class Scene
                 // bool selected{};
             };
             ecs::entity sel_entity{ ecs::INVALID_ENTITY };
-            std::unordered_map<uint32_t, Node> nodes;
+            std::unordered_map<ecs::entity, Node> nodes;
         };
 
         Scene scene;

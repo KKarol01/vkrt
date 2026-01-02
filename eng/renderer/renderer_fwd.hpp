@@ -363,6 +363,105 @@ enum class SyncType;
 struct SyncCreateInfo;
 struct Sync;
 class SubmitQueue;
+
+inline size_t get_vertex_component_size(VertexComponent comp)
+{
+    switch(comp)
+    {
+    case VertexComponent::NONE:
+        return 0;
+    case VertexComponent::POSITION_BIT:
+        return 3 * sizeof(float);
+    case VertexComponent::NORMAL_BIT:
+        return 3 * sizeof(float);
+    case VertexComponent::TANGENT_BIT:
+        return 4 * sizeof(float);
+    case VertexComponent::UV0_BIT:
+        return 2 * sizeof(float);
+    }
+    ENG_ERROR("Undefined case");
+    return 0;
+}
+
+inline size_t get_vertex_layout_size(Flags<VertexComponent> layout)
+{
+    static constexpr VertexComponent comps[]{ VertexComponent::POSITION_BIT, VertexComponent::NORMAL_BIT,
+                                              VertexComponent::TANGENT_BIT, VertexComponent::UV0_BIT };
+    size_t sum = 0;
+    for(auto e : std::span{ comps })
+    {
+        if(layout.test_clear(e)) { sum += get_vertex_component_size(e); }
+    }
+    assert(layout.empty());
+    return sum;
+}
+
+inline size_t get_vertex_component_offset(Flags<VertexComponent> layout, VertexComponent comp)
+{
+    return get_vertex_layout_size(layout & (std::to_underlying(comp) - 1)); // calc size of all previous present components in the bitmask
+}
+
+inline size_t get_vertex_count(std::span<const float> vertices, Flags<VertexComponent> layout)
+{
+    return vertices.size_bytes() / get_vertex_layout_size(layout);
+}
+
+inline size_t get_index_size(IndexFormat format)
+{
+    switch(format)
+    {
+    case IndexFormat::U8:
+        return 1;
+    case IndexFormat::U16:
+        return 2;
+    case IndexFormat::U32:
+        return 4;
+    }
+    ENG_ERROR("Undefined case");
+    return 0;
+}
+
+inline size_t get_index_count(std::span<const std::byte> indices, IndexFormat format)
+{
+    return indices.size() / get_index_size(format);
+}
+
+// Copies indices between formats. Dstformat must be greater or equal to srcf in byte size.
+// If dst is empty, only returns number of indices in the source span, so that it can be resized
+// and this function be called again.
+// Returns number of indices.
+inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> src, IndexFormat dstf, IndexFormat srcf)
+{
+    if(src.empty()) { return 0; }
+    const auto ic = get_index_count(src, srcf);
+    if(dst.empty()) { return ic; }
+    const auto dststride = get_index_size(dstf);
+    const auto srcstride = get_index_size(srcf);
+    const auto copy_over = [&dst, &src, ic]<typename DstType, typename SrcType> {
+        auto* pdst = (DstType*)dst.data();
+        auto* psrc = (SrcType*)src.data();
+        for(auto i = 0ull; i < ic; ++i)
+        {
+            pdst[i] = static_cast<DstType>(psrc[i]);
+        }
+    };
+    if(dstf == IndexFormat::U32 && srcf == IndexFormat::U32) { memcpy(dst.data(), src.data(), src.size_bytes()); }
+    else if(dstf == IndexFormat::U32 && srcf == IndexFormat::U16)
+    {
+        copy_over.template operator()<uint32_t, uint16_t>();
+    }
+    else if(dstf == IndexFormat::U32 && srcf == IndexFormat::U8) { copy_over.template operator()<uint32_t, uint8_t>(); }
+    else if(dstf == IndexFormat::U16 && srcf == IndexFormat::U16) { memcpy(dst.data(), src.data(), src.size_bytes()); }
+    else if(dstf == IndexFormat::U16 && srcf == IndexFormat::U8) { copy_over.template operator()<uint16_t, uint8_t>(); }
+    else if(dstf == IndexFormat::U8 && srcf == IndexFormat::U8) { memcpy(dst.data(), src.data(), src.size_bytes()); }
+    else
+    {
+        ENG_ERROR("Unhandled case.");
+        return 0;
+    }
+    return ic;
+}
+
 } // namespace gfx
 } // namespace eng
 

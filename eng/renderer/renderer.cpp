@@ -855,7 +855,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
     const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
     const auto index_count = out_indices.size();
-    const auto vertex_count = get_vertex_count(batch.vertex_layout, out_vertices);
+    const auto vertex_count = get_vertex_count(out_vertices, batch.vertex_layout);
     const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
     const auto attr_size = vertex_size - pos_size;
 
@@ -900,7 +900,7 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     static constexpr auto max_tris = 124u;
     static constexpr auto cone_weight = 0.0f;
 
-    std::vector<uint32_t> indices(get_index_count(batch.index_format, batch.indices));
+    std::vector<uint32_t> indices(get_index_count(batch.indices, batch.index_format));
     copy_indices(std::as_writable_bytes(std::span{ indices }), batch.indices, IndexFormat::U32, batch.index_format);
 
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
@@ -910,7 +910,7 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     std::vector<uint8_t> mlt_ids(max_meshlets * max_tris * 3);
 
     const auto vx_size = get_vertex_layout_size(batch.vertex_layout);
-    const auto vx_count = get_vertex_count(batch.vertex_layout, batch.vertices);
+    const auto vx_count = get_vertex_count(batch.vertices, batch.vertex_layout);
     const auto pos_size = get_vertex_component_size(VertexComponent::POSITION_BIT);
     const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vxs.data(), mlt_ids.data(), indices.data(), indices.size(),
                                               batch.vertices.data(), vx_count, vx_size, max_verts, max_tris, cone_weight);

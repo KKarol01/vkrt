@@ -126,6 +126,8 @@ add_executable(eng
     
     "eng/ui.cpp"
     "eng/to_string.cpp" 
+
+    "eng/physics/bvh.cpp"
 )
 
 target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
