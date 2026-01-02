@@ -843,6 +843,9 @@ Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
+    assert((batch.vertex_layout & ~(VertexComponent::POSITION_BIT | VertexComponent::NORMAL_BIT |
+                                    VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT)) == 0);
+
     std::vector<float> out_vertices;
     std::vector<uint16_t> out_indices;
     std::vector<Meshlet> out_meshlets;
@@ -852,7 +855,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
     const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
     const auto index_count = out_indices.size();
-    const auto vertex_count = out_vertices.size() * sizeof(float) / vertex_size;
+    const auto vertex_count = get_vertex_count(batch.vertex_layout, out_vertices);
     const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
     const auto attr_size = vertex_size - pos_size;
 
@@ -883,8 +886,9 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
     const auto handle = geometries.insert(std::move(geometry));
 
-    ENG_LOG("Batching geometry: [VXS: {:.2f} KB, IXS: {:.2f} KB]", static_cast<float>(batch.vertices.size_bytes()) / 1024.0f,
-            static_cast<float>(batch.indices.size_bytes()) / 1024.0f);
+    ENG_LOG("Batching geometry: [VXS: {:.2f} KB, IXS: {:.2f} KB]",
+            static_cast<float>(out_vertices.size() * sizeof(out_vertices[0])) / 1024.0f,
+            static_cast<float>(out_indices.size() * sizeof(out_indices[0])) / 1024.0f);
 
     return handle;
 }
@@ -896,22 +900,8 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     static constexpr auto max_tris = 124u;
     static constexpr auto cone_weight = 0.0f;
 
-    std::vector<uint32_t> indices(batch.indices.size_bytes() / get_index_size(batch.index_format));
-    for(auto i = 0ull; i < indices.size(); ++i)
-    {
-        if(batch.index_format == IndexFormat::U8)
-        {
-            indices[i] = *(reinterpret_cast<const uint8_t*>(batch.indices.data()) + i);
-        }
-        else if(batch.index_format == IndexFormat::U16)
-        {
-            indices[i] = *(reinterpret_cast<const uint16_t*>(batch.indices.data()) + i);
-        }
-        else if(batch.index_format == IndexFormat::U32)
-        {
-            indices[i] = *(reinterpret_cast<const uint32_t*>(batch.indices.data()) + i);
-        }
-    }
+    std::vector<uint32_t> indices(get_index_count(batch.index_format, batch.indices));
+    copy_indices(std::as_writable_bytes(std::span{ indices }), batch.indices, IndexFormat::U32, batch.index_format);
 
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
     std::vector<meshopt_Meshlet> mlts(max_meshlets);
@@ -920,7 +910,7 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     std::vector<uint8_t> mlt_ids(max_meshlets * max_tris * 3);
 
     const auto vx_size = get_vertex_layout_size(batch.vertex_layout);
-    const auto vx_count = batch.vertices.size_bytes() / vx_size;
+    const auto vx_count = get_vertex_count(batch.vertex_layout, batch.vertices);
     const auto pos_size = get_vertex_component_size(VertexComponent::POSITION_BIT);
     const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vxs.data(), mlt_ids.data(), indices.data(), indices.size(),
                                               batch.vertices.data(), vx_count, vx_size, max_verts, max_tris, cone_weight);

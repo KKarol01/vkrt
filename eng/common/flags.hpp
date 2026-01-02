@@ -5,6 +5,7 @@
 #include <eng/common/hash.hpp>
 
 #define ENG_ENABLE_FLAGS_OPERATORS(Type)                                                                               \
+    constexpr Flags<Type> operator~(const Type& a) noexcept { return ~Flags<Type>{ a }; }                              \
     constexpr Flags<Type> operator|(const Type& a, const Type& b) noexcept                                             \
     {                                                                                                                  \
         return Flags<Type>{ a } | Flags<Type>{ b };                                                                    \

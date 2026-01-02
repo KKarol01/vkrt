@@ -177,10 +177,12 @@ void StagingBuffer::init(SubmitQueue* queue, const Callback<void(Handle<Buffer>)
 {
     auto* r = Engine::get().renderer;
     assert(r != nullptr && queue != nullptr);
-    buffer = r->make_buffer(BufferDescriptor{
-        "staging buffer", CAPACITY, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS });
+    buffer = r->make_buffer(BufferDescriptor{ "staging buffer", CAPACITY + ALIGNMENT,
+                                              BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS });
     assert(buffer);
-    memory = buffer->memory;
+    const auto offset_to_align = align_up2((uintptr_t)buffer->memory, ALIGNMENT) - (uintptr_t)buffer->memory;
+    memory = (void*)((char*)buffer->memory + offset_to_align);
+
     assert(memory != nullptr);
     this->queue = queue;
     this->on_buffer_resize = on_buffer_resize;
