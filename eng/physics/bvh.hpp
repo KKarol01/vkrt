@@ -34,6 +34,11 @@ class BVH
     inline static constexpr uint32_t INVALID_CHILD = ~0u;
     struct Node
     {
+        struct Metadata
+        {
+            uint32_t level{ ~0u };
+        };
+
         bool is_leaf() const { return pcount > 0; }
         AABB aabb{};
         uint32_t left_or_pstart{ INVALID_CHILD }; // if pcount==0, it's the index of the left child, and the right child
@@ -45,8 +50,10 @@ class BVH
     struct Stats
     {
         size_t size{};
+        uint32_t levels{};
         std::span<const Triangle> tris;
         std::span<const Node> nodes;
+        std::span<const Node::Metadata> metadatas;
     };
 
     BVH() = default;
@@ -59,8 +66,10 @@ class BVH
     void subdivide(uint32_t node);
     void update_bounds(uint32_t node);
 
+    uint32_t levels{};
     std::vector<Triangle> tris;
     std::vector<Node> nodes;
+    std::vector<Node::Metadata> metadatas;
 };
 } // namespace physics
 } // namespace eng

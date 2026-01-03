@@ -100,6 +100,9 @@ class Scene
             struct Node
             {
                 bool expanded{};
+
+                bool bvh_level_exclusive{};
+                int bvh_level{};
                 // bool selected{};
             };
             ecs::entity sel_entity{ ecs::INVALID_ENTITY };

@@ -606,6 +606,7 @@ void Scene::ui_draw_inspector()
 
     auto* ecs = Engine::get().ecs;
     auto& entity = ui.scene.sel_entity;
+    auto& uie = ui.scene.nodes.at(entity);
     auto* ctransform = ecs->get<ecs::Transform>(entity);
     auto* cnode = ecs->get<ecs::Node>(entity);
     auto* cmesh = ecs->get<ecs::Mesh>(entity);
@@ -653,11 +654,24 @@ void Scene::ui_draw_inspector()
             ImGui::SeparatorText("BVH");
             for(auto i = 0u; i < cmesh->mesh->geometries.size; ++i)
             {
-                const auto stats = cnode->model->geometries[cmesh->mesh->geometries.offset + i].bvh.get_stats();
-
-                for(const auto& e : stats.nodes)
+                const auto& bvh = cnode->model->geometries[cmesh->mesh->geometries.offset + i].bvh;
+                const auto stats = bvh.get_stats();
+                ImGui::Checkbox("##bvh_level_exclusive", &uie.bvh_level_exclusive);
+                ImGui::SameLine();
+                if(ImGui::IsItemHovered()) { ImGui::SetItemTooltip("Shows levels up to X or only equal to X."); }
+                ImGui::SliderInt("show level", &uie.bvh_level, 0, stats.levels);
+                if(uie.bvh_level > 0)
                 {
-                    Engine::get().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
+                    for(auto ni = 0u; ni < stats.nodes.size(); ++ni)
+                    {
+                        if((uie.bvh_level_exclusive && stats.metadatas[ni].level != uie.bvh_level) ||
+                           (!uie.bvh_level_exclusive && stats.metadatas[ni].level > uie.bvh_level))
+                        {
+                            continue;
+                        }
+                        const auto& e = stats.nodes[ni];
+                        Engine::get().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
+                    }
                 }
 
                 ImGui::Text("BVH%u: size[kB]: %llu, tris: %u, nodes: %u", i, stats.size / 1024,

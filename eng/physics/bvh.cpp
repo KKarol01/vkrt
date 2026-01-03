@@ -41,14 +41,25 @@ BVH::BVH(std::span<const std::byte> vertices, size_t stride, std::span<const std
     update_bounds(0);
     subdivide(0);
     nodes.shrink_to_fit();
+    metadatas.resize(nodes.size());
+
+    const auto count_levels = [this](uint32_t node, uint32_t level, const auto& self) -> uint32_t {
+        const auto& n = nodes[node];
+        metadatas[node].level = level;
+        if(n.is_leaf()) { return level; }
+        return std::max(self(n.left_or_pstart, level + 1, self), self(n.left_or_pstart + 1, level + 1, self));
+    };
+    levels = count_levels(0, 1, count_levels);
 }
 
 BVH::Stats BVH::get_stats() const
 {
     return Stats{
         .size = nodes.size() * sizeof(nodes[0]) + tris.size() * sizeof(tris[0]),
+        .levels = levels,
         .tris = tris,
         .nodes = nodes,
+        .metadatas = metadatas,
     };
 }
 
