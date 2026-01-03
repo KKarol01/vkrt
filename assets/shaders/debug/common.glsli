@@ -1,0 +1,21 @@
+#ifndef DEBUG_COMMON_H
+#define DEBUG_COMMON_H
+
+#ifndef NO_BINDLESS_STRUCTS_INCLUDE
+#include "./bindless_structures.glsli"
+#endif
+
+ENG_DECLARE_STORAGE_BUFFER(GPUDebugVerticessBuffer) {
+    ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT3, positions); 
+} ENG_DECLARE_BINDLESS(GPUDebugVerticessBuffer);
+
+#ifndef NO_PUSH_CONSTANTS
+layout(scalar, push_constant) uniform PushConstants
+{
+    uint32_t GPUEngConstantsBufferIndex;
+    uint32_t GPUDebugVerticessBufferIndex;
+    uint32_t color; // rgba
+};
+#endif
+
+#endif

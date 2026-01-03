@@ -33,9 +33,16 @@ enum class DepthCompare
     EQUAL
 };
 
+enum class Topology
+{
+    LINE_LIST,
+    TRIANGLE_LIST,
+};
+
 enum class PolygonMode
 {
-    FILL
+    FILL,
+    LINE,
 };
 
 enum class StencilOp
@@ -356,6 +363,7 @@ struct InstanceSettings;
 struct BLASInstanceSettings;
 struct VsmData;
 struct Swapchain;
+struct DebugGeometry;
 
 class CommandBuffer;
 class CommandPool;

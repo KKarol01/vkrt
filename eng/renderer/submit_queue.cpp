@@ -223,6 +223,12 @@ void CommandBuffer::before_draw_dispatch()
     }
 }
 
+void CommandBuffer::draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset)
+{
+    before_draw_dispatch();
+    vkCmdDraw(cmd, vertex_count, instance_count, vertex_offset, instance_offset);
+}
+
 void CommandBuffer::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
                                  uint32_t vertex_offset, uint32_t instance_offset)
 {

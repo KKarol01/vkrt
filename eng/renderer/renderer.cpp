@@ -32,6 +32,7 @@ struct RenderGraphPasses
     std::unique_ptr<pass::culling::MainPass> cull_main;
     std::unique_ptr<pass::fwdp::LightCulling> fwdp_lightcull;
     std::unique_ptr<pass::DefaultUnlit> default_unlit;
+    std::unique_ptr<pass::DebugGeom> debug_geom;
     std::unique_ptr<pass::ImGui> imgui;
     std::unique_ptr<pass::PresentCopy> present_copy;
 };
@@ -387,6 +388,8 @@ void Renderer::init_rgraph_passes()
         std::make_unique<pass::DefaultUnlit>(rgraph, pass::DefaultUnlit::CreateInfo{
                                                          &*rgraphpasses->cull_zprepass, &*rgraphpasses->fwdp_lightcull,
                                                          rgraphpasses->cbufsview, rgraphpasses->zbufsview });
+    rgraphpasses->debug_geom =
+        std::make_unique<pass::DebugGeom>(rgraph, pass::DebugGeom::CreateInfo{ rgraphpasses->cbufsview, rgraphpasses->zbufsview });
     rgraphpasses->imgui = std::make_unique<pass::ImGui>(rgraph, pass::ImGui::CreateInfo{ rgraphpasses->cbufsview });
     rgraphpasses->present_copy =
         std::make_unique<pass::PresentCopy>(rgraph, pass::PresentCopy::CreateInfo{ rgraphpasses->cbufsview,
@@ -534,6 +537,7 @@ void Renderer::update()
     rgraph->add_pass(&*rgraphpasses->cull_main);
     rgraph->add_pass(&*rgraphpasses->fwdp_lightcull);
     rgraph->add_pass(&*rgraphpasses->default_unlit);
+    rgraph->add_pass(&*rgraphpasses->debug_geom);
     rgraph->add_pass(&*rgraphpasses->imgui);
     rgraph->add_pass(&*rgraphpasses->present_copy);
     rgraph->compile();
@@ -590,16 +594,6 @@ void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cm
         cmd->bind_resource(2, rgraph->get_resource(fwd.culled_light_grid_bufs).buffer);
         cmd->bind_resource(3, rgraph->get_resource(fwd.culled_light_list_bufs).buffer);
     });
-    if(0)
-    {
-        const auto& geom = helpergeom.uvsphere.get();
-        cmd->bind_pipeline(helpergeom.ppskybox.get());
-        for(auto mli = 0u; mli < geom.meshlet_range.size; ++mli)
-        {
-            const auto& ml = meshlets.at(geom.meshlet_range.offset + mli);
-            cmd->draw_indexed(ml.index_count, 1, ml.index_offset, ml.vertex_offset, 0);
-        }
-    }
     cmd->end_rendering();
 }
 
@@ -726,6 +720,8 @@ void Renderer::render_ibatch(CommandBuffer* cmd, const IndirectBatch& ibatch,
         cmdoffacc += mb.cmd_count;
     }
 }
+
+void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
 Handle<Buffer> Renderer::make_buffer(const BufferDescriptor& info)
 {
@@ -1037,6 +1033,85 @@ Handle<DescriptorSet> DescriptorPool::allocate(Handle<PipelineLayout> playout, u
 }
 
 DescriptorSet& DescriptorPool::get_dset(Handle<DescriptorSet> set) { return sets.at(*set); }
+
+void Renderer::DebugGeomBuffers::render(CommandBuffer* cmd, Sync* s)
+{
+    assert(s == nullptr);
+    if(geometry.empty()) { return; }
+    const auto verts = expand_into_vertices();
+    assert(verts.size() > geometry.size() && verts.size() % 2 == 0);
+    if(!vpos_buf)
+    {
+        vpos_buf = Engine::get().renderer->make_buffer(BufferDescriptor{ "debug verts", verts.size() * sizeof(verts[0]),
+                                                                         BufferUsage::STORAGE_BIT });
+    }
+
+    Engine::get().renderer->sbuf->copy(vpos_buf, verts, 0);
+    Engine::get().renderer->sbuf->flush()->wait_cpu(~0ull);
+
+    cmd->bind_resource(1, vpos_buf);
+    cmd->draw(verts.size(), 1, 0, 0);
+    geometry.clear();
+}
+
+std::vector<glm::vec3> Renderer::DebugGeomBuffers::expand_into_vertices()
+{
+    const auto num_verts = std::transform_reduce(geometry.begin(), geometry.end(), 0ull, std::plus<>{}, [](auto val) {
+        // NONE, AABB,
+        static constexpr uint32_t NUM_VERTS[]{ 0u, 24u };
+        return NUM_VERTS[std::to_underlying(val.type)];
+    });
+    std::vector<glm::vec3> verts;
+    verts.reserve(num_verts);
+    const auto push_line = [&verts](auto a, auto b) {
+        verts.push_back(a);
+        verts.push_back(b);
+    };
+    for(const auto& e : geometry)
+    {
+        switch(e.type)
+        {
+        case DebugGeometry::Type::AABB:
+        {
+            const glm::vec3& min = e.data.aabb.a;
+            const glm::vec3& max = e.data.aabb.b;
+
+            // 8 corners
+            const glm::vec3 v000{ min.x, min.y, min.z };
+            const glm::vec3 v100{ max.x, min.y, min.z };
+            const glm::vec3 v010{ min.x, max.y, min.z };
+            const glm::vec3 v110{ max.x, max.y, min.z };
+
+            const glm::vec3 v001{ min.x, min.y, max.z };
+            const glm::vec3 v101{ max.x, min.y, max.z };
+            const glm::vec3 v011{ min.x, max.y, max.z };
+            const glm::vec3 v111{ max.x, max.y, max.z };
+
+            push_line(v000, v100);
+            push_line(v100, v110);
+            push_line(v110, v010);
+            push_line(v010, v000);
+
+            push_line(v001, v101);
+            push_line(v101, v111);
+            push_line(v111, v011);
+            push_line(v011, v001);
+
+            push_line(v000, v001);
+            push_line(v100, v101);
+            push_line(v110, v111);
+            push_line(v010, v011);
+            break;
+        }
+        default:
+        {
+            ENG_ERROR("Unhandled case");
+            continue;
+        }
+        }
+    }
+    return verts;
+}
 
 } // namespace gfx
 } // namespace eng

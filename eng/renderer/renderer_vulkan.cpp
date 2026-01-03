@@ -170,7 +170,7 @@ void VkPipelineMetadata::init(const Pipeline& a)
                                                   .vertexAttributeDescriptionCount = (uint32_t)a.info.attributes.size(),
                                                   .pVertexAttributeDescriptions = vkattributes.data() });
 
-    auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST });
+    auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = gfx::to_vk(a.info.topology) });
 
     auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
 
@@ -668,6 +668,7 @@ void RendererBackendVulkan::initialize_vulkan()
     auto dev_2_features = Vks(VkPhysicalDeviceFeatures2{ .features = {
                                                              .geometryShader = true,
                                                              .multiDrawIndirect = true,
+                                                             .fillModeNonSolid = true,
                                                              .vertexPipelineStoresAndAtomics = true,
                                                              .fragmentStoresAndAtomics = true,
                                                          } });

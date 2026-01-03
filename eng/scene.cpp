@@ -654,6 +654,12 @@ void Scene::ui_draw_inspector()
             for(auto i = 0u; i < cmesh->mesh->geometries.size; ++i)
             {
                 const auto stats = cnode->model->geometries[cmesh->mesh->geometries.offset + i].bvh.get_stats();
+
+                for(const auto& e : stats.nodes)
+                {
+                    Engine::get().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
+                }
+
                 ImGui::Text("BVH%u: size[kB]: %llu, tris: %u, nodes: %u", i, stats.size / 1024,
                             (uint32_t)stats.tris.size(), (uint32_t)stats.nodes.size());
                 const auto aabb = stats.nodes[0].aabb;

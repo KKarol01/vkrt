@@ -175,11 +175,22 @@ VkSamplerReductionMode to_vk(const SamplerReductionMode a)
     }
 }
 
+VkPrimitiveTopology to_vk(const Topology& a)
+{
+    switch(a) 
+    {
+        case Topology::LINE_LIST:       { return VK_PRIMITIVE_TOPOLOGY_LINE_LIST; }
+        case Topology::TRIANGLE_LIST:   { return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; }
+        default: { ENG_ERROR("Unhandled case."); return {}; }
+    }
+}
+
 VkPolygonMode to_vk(const PolygonMode & a)
 {
     switch(a) 
     {
         case PolygonMode::FILL: { return VK_POLYGON_MODE_FILL; }
+        case PolygonMode::LINE: { return VK_POLYGON_MODE_LINE; }
         default: { ENG_ERROR("Unhandled case."); return {}; }
     }
 }

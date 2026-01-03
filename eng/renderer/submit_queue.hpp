@@ -52,7 +52,7 @@ class CommandBuffer
     void end_rendering();
 
     void before_draw_dispatch();
-
+    void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset);
     void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset, uint32_t vertex_offset,
                       uint32_t instance_offset);
     void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,

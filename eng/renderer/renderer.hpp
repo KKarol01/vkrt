@@ -213,6 +213,7 @@ struct PipelineCreateInfo
     StencilState stencil_front;
     StencilState stencil_back;
 
+    Topology topology{ Topology::TRIANGLE_LIST };
     PolygonMode polygon_mode{ PolygonMode::FILL };
     CullFace culling{ CullFace::NONE };
     bool front_is_ccw{ true };
@@ -509,6 +510,28 @@ struct Swapchain
     uint32_t current_index{ 0ul };
 };
 
+struct DebugGeometry
+{
+    enum class Type
+    {
+        NONE,
+        AABB,
+    };
+
+    static DebugGeometry init_aabb(glm::vec3 a, glm::vec3 b)
+    {
+        return DebugGeometry{ .type = Type::AABB, .data = { .aabb = { a, b } } };
+    }
+
+    Type type{ Type::NONE };
+    union {
+        struct AABB
+        {
+            glm::vec3 a, b;
+        } aabb;
+    } data;
+};
+
 class RendererBackend
 {
   public:
@@ -573,8 +596,9 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo, [&t] {
     for(const auto& e : t.bindings) { hash = eng::hash::combine_fnv1a(hash, e); }
     for(const auto& e : t.attributes) { hash = eng::hash::combine_fnv1a(hash, e); }
     // clang-format on
-    hash = eng::hash::combine_fnv1a(hash, t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
-                                    t.stencil_front, t.stencil_back, t.polygon_mode, t.culling, t.front_is_ccw, t.line_width);
+    hash = eng::hash::combine_fnv1a(hash, t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare,
+                                    t.stencil_test, t.stencil_front, t.stencil_back, t.topology, t.polygon_mode,
+                                    t.culling, t.front_is_ccw, t.line_width);
     return hash;
 }());
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout, eng::hash::combine_fnv1a(t.info));
@@ -655,6 +679,18 @@ class Renderer
         Handle<Buffer> constants{};
     };
 
+    struct DebugGeomBuffers
+    {
+        void render(CommandBuffer* cmd, Sync* s);
+        void add(const DebugGeometry& geom) { geometry.push_back(geom); }
+
+      private:
+        std::vector<glm::vec3> expand_into_vertices();
+
+        Handle<Buffer> vpos_buf;
+        std::vector<DebugGeometry> geometry;
+    };
+
     struct GeometryBuffers
     {
         Handle<Buffer> vpos_buf;      // positions
@@ -675,12 +711,6 @@ class Renderer
         size_t index_count{};
     };
 
-    struct HelperGeometry
-    {
-        Handle<Geometry> uvsphere;
-        Handle<Pipeline> ppskybox;
-    };
-
     void init(RendererBackend* backend);
     void init_helper_geom();
     void init_pipelines();
@@ -695,6 +725,7 @@ class Renderer
     void build_renderpasses();
     void render_ibatch(CommandBuffer* cmd, const IndirectBatch& ibatch,
                        const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
+    void render_debug(const DebugGeometry& geom);
 
     Handle<Buffer> make_buffer(const BufferDescriptor& info);
     Handle<Image> make_image(const ImageDescriptor& info);
@@ -773,6 +804,7 @@ class Renderer
     std::vector<ecs::entity> new_lights;
 
     GeometryBuffers bufs;
+    DebugGeomBuffers debug_bufs;
     SlotAllocator gpu_resource_allocator;
     SlotAllocator gpu_light_allocator;
     std::vector<Sync*> syncs;
@@ -789,7 +821,6 @@ class Renderer
     Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;
-    HelperGeometry helpergeom;
 };
 } // namespace gfx
 } // namespace eng

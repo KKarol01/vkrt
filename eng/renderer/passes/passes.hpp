@@ -333,6 +333,70 @@ class DefaultUnlit : public RenderGraph::Pass
     RenderGraph::ResourceView cbufs;
 };
 
+class DebugGeom : public RenderGraph::Pass
+{
+  public:
+    struct CreateInfo
+    {
+        RenderGraph::ResourceView cbufs;
+        RenderGraph::ResourceView zbufs;
+    };
+    DebugGeom(RenderGraph* g, const CreateInfo& info) : Pass("DebugGeom", RenderOrder::DEFAULT_UNLIT)
+    {
+        auto* r = Engine::get().renderer;
+        zbufs = info.zbufs;
+        cbufs = info.cbufs;
+        debug_pipeline = r->make_pipeline(PipelineCreateInfo{
+            .shaders = { r->make_shader("debug/geom.vert.glsl"),
+                         r->make_shader("debug/geom.frag.glsl") },
+            .layout = r->bindless_pplayout,
+            .depth_test = false,
+            .depth_write = false,
+            .topology = Topology::LINE_LIST,
+            .polygon_mode = PolygonMode::FILL,
+            .culling = CullFace::NONE,
+            .line_width = 1.0f,
+        });
+    }
+    void setup() override
+    {
+        auto* r = Engine::get().renderer;
+        // access(zbufs, PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_READ_BIT, ImageLayout::ATTACHMENT);
+        access(cbufs, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT, true);
+    }
+    void execute(RenderGraph* rg, SubmitQueue* q, CommandBuffer* cmd) override
+    {
+        auto* r = Engine::get().renderer;
+        const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
+        const auto& cbuf = rg->get_resource(cbufs.get()).image.get();
+        VkViewport vkview{ 0.0f, 0.0f, (float)cbuf.width, (float)cbuf.height, 0.0f, 1.0f };
+        VkRect2D vksciss{ {}, { (uint32_t)cbuf.width, (uint32_t)cbuf.height } };
+
+        const VkRenderingAttachmentInfo vkcols[] = {
+            Vks(VkRenderingAttachmentInfo{ .imageView = cbuf.default_view->md.vk->view,
+                                           .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+                                           .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                                           .storeOp = VK_ATTACHMENT_STORE_OP_STORE }),
+        };
+        const auto vkreninfo = Vks(VkRenderingInfo{
+            .renderArea = vksciss,
+            .layerCount = 1,
+            .colorAttachmentCount = std::size(vkcols),
+            .pColorAttachments = vkcols,
+        });
+        cmd->set_scissors(&vksciss, 1);
+        cmd->set_viewports(&vkview, 1);
+        cmd->bind_pipeline(debug_pipeline.get());
+        cmd->bind_resource(0, r->get_perframe().constants);
+        cmd->begin_rendering(vkreninfo);
+        r->debug_bufs.render(cmd, nullptr);
+        cmd->end_rendering();
+    }
+    RenderGraph::ResourceView zbufs;
+    RenderGraph::ResourceView cbufs;
+    Handle<Pipeline> debug_pipeline;
+};
+
 class ImGui : public RenderGraph::Pass
 {
   public:
