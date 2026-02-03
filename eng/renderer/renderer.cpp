@@ -13,6 +13,7 @@
 #include <eng/ecs/components.hpp>
 #include <eng/ui.hpp>
 #include <eng/renderer/passes/passes.hpp>
+#include <eng/scene.hpp>
 #include <assets/shaders/bindless_structures.glsli>
 
 namespace eng
@@ -21,22 +22,6 @@ namespace eng
 namespace gfx
 {
 
-struct RenderGraphPasses
-{
-    RenderGraph::ResourceView zbufsview;
-    RenderGraph::ResourceView cbufsview;
-    RenderGraph::ResourceView swapcbufsview;
-
-    std::unique_ptr<pass::culling::ZPrepass> cull_zprepass;
-    std::unique_ptr<pass::culling::Hiz> cull_hiz;
-    std::unique_ptr<pass::culling::MainPass> cull_main;
-    std::unique_ptr<pass::fwdp::LightCulling> fwdp_lightcull;
-    std::unique_ptr<pass::DefaultUnlit> default_unlit;
-    std::unique_ptr<pass::DebugGeom> debug_geom;
-    std::unique_ptr<pass::ImGui> imgui;
-    std::unique_ptr<pass::PresentCopy> present_copy;
-};
-
 ImageBlockData get_block_data(ImageFormat format)
 {
     switch(format)
@@ -44,42 +29,25 @@ ImageBlockData get_block_data(ImageFormat format)
     case ImageFormat::R8G8B8A8_UNORM:
     case ImageFormat::R8G8B8A8_SRGB:
     {
-        return { 4, 1, 1, 1 };
+        return { 4, { 1, 1, 1 } };
     }
     default:
     {
-        assert(false && "Bad format.");
+        ENG_ASSERT(false && "Bad format.");
         return {};
     }
     }
 }
 
-void Renderer::init(RendererBackend* backend)
+void Renderer::init(IRendererBackend* backend)
 {
-    // clang-format off
-    ENG_SET_HANDLE_GETTERS(Buffer,           { return &::eng::Engine::get().renderer->buffers.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Image,            { return &::eng::Engine::get().renderer->images.at(handle); });
-    ENG_SET_HANDLE_GETTERS(ImageView,        { return &::eng::Engine::get().renderer->image_views.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Geometry,         { return &::eng::Engine::get().renderer->geometries.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Mesh,             { return &::eng::Engine::get().renderer->meshes.at(*handle); });
-    ENG_SET_HANDLE_GETTERS(Texture,          { return &::eng::Engine::get().renderer->textures.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Material,         { return &::eng::Engine::get().renderer->materials.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Shader,           { return &::eng::Engine::get().renderer->shaders.at(handle); });
-    ENG_SET_HANDLE_GETTERS(PipelineLayout,   { return &::eng::Engine::get().renderer->pplayouts.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Pipeline,         { return &::eng::Engine::get().renderer->pipelines.at(handle); });
-    ENG_SET_HANDLE_GETTERS(Sampler,          { return &::eng::Engine::get().renderer->samplers.at(handle); });
-    ENG_SET_HANDLE_GETTERS(MeshPass,         { return &::eng::Engine::get().renderer->mesh_passes.at(handle); });
-    ENG_SET_HANDLE_GETTERS(ShaderEffect,     { return &::eng::Engine::get().renderer->shader_effects.at(handle); });
-    ENG_SET_HANDLE_GETTERS(DescriptorPool,   { return &::eng::Engine::get().renderer->descpools.at(*handle); });
-    // clang-format on
-
     this->backend = backend;
     backend->init();
 
     gq = backend->get_queue(QueueType::GRAPHICS);
     swapchain = backend->make_swapchain();
     sbuf = new StagingBuffer{};
-    sbuf->init(gq, [this](auto buf) { bindless->update_index(buf); });
+    sbuf->init(gq);
     rgraph = new RenderGraph{};
     rgraph->init(this);
 
@@ -93,7 +61,7 @@ void Renderer::init(RendererBackend* backend)
     imgui_renderer->init();
 
     ecs_mesh_view = Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>([this](ecs::entity e) { instance_entity(e); },
-                                                                           [this](ecs::entity e, ecs::signature_t sig) {
+                                                                           [this](ecs::entity e, ecs::signature sig) {
                                                                                if(sig.test(ecs::get_id<ecs::Transform>()))
                                                                                {
                                                                                    new_transforms.push_back(e);
@@ -101,56 +69,60 @@ void Renderer::init(RendererBackend* backend)
                                                                                if(sig.test(ecs::get_id<ecs::Mesh>()))
                                                                                {
                                                                                    ENG_TODO();
-                                                                                   assert(false);
+                                                                                   ENG_ASSERT(false);
                                                                                }
                                                                            });
-    ecs_light_view = Engine::get().ecs->get_view<ecs::Light>([this](auto e) { new_lights.push_back(e); },
-                                                             [this](auto e, auto sig) { new_lights.push_back(e); });
-
-    Engine::get().ui->add_tab(UI::Tab{
-        "Debug",
-        UI::Location::RIGHT_PANE,
-        [this] {
-            if(!Engine::get().ui->show_debug_tab) { return; }
-            if(ImGui::Begin("Debug"))
-            {
-                auto* camera = Engine::get().camera;
-                ImGui::SeparatorText("Camera");
-                ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
-
-                ImGui::SeparatorText("Forward+");
-                ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
-                ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
-                ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
-
-                bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
-                bool changed = false;
-                changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
-                if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
-                else { debug_output = DebugOutput::COLOR; }
-                ImGui::Checkbox("FWDP enable", &fwdp_enable);
-
-                ImGui::SeparatorText("Culling");
-                const auto& ppf = get_perframe(-1);
-                const auto& cullbuf = rgraph->get_resource(rgraphpasses->cull_zprepass->culled_id_bufs.get(-1)).buffer.get();
-                uint32_t mlts = 0;
-                for(auto [e, t, m] : ecs_mesh_view)
-                {
-                    const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
-                    for(auto mmsh : msh->meshes)
-                    {
-                        mlts += mmsh->geometry->meshlet_range.size;
-                    }
-                }
-                ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
-                float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
-                ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
-                ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
-                ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
-            }
-            ImGui::End();
+    ecs_light_view = Engine::get().ecs->get_view<ecs::Light>(
+        [this](ecs::entity e) {
+            new_lights.push_back(e);
+            ++bufs.light_count;
         },
-    });
+        [this](ecs::entity e, ecs::signature sig) { new_lights.push_back(e); });
+
+    // Engine::get().ui->add_tab(UI::Tab{
+    //     "Debug",
+    //     UI::Location::RIGHT_PANE,
+    //     [this] {
+    //         if(!Engine::get().ui->show_debug_tab) { return; }
+    //         if(ImGui::Begin("Debug"))
+    //         {
+    //             auto* camera = Engine::get().camera;
+    //             ImGui::SeparatorText("Camera");
+    //             ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
+
+    //            ImGui::SeparatorText("Forward+");
+    //            ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
+    //            ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
+    //            ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
+
+    //            bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
+    //            bool changed = false;
+    //            changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
+    //            if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
+    //            else { debug_output = DebugOutput::COLOR; }
+    //            ImGui::Checkbox("FWDP enable", &fwdp_enable);
+
+    //            ImGui::SeparatorText("Culling");
+    //            const auto& ppf = get_perframe(-1);
+    //            const auto& cullbuf =
+    //            rgraph->get_resource(rgraphpasses->cull_zprepass->culled_id_bufs.get(-1)).buffer.get(); uint32_t mlts
+    //            = 0; for(auto [e, t, m] : ecs_mesh_view)
+    //            {
+    //                const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
+    //                for(auto mmsh : msh->meshes)
+    //                {
+    //                    mlts += mmsh->geometry->meshlet_range.size;
+    //                }
+    //            }
+    //            ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
+    //            float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
+    //            ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
+    //            ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
+    //            ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
+    //        }
+    //        ImGui::End();
+    //    },
+    //});
 }
 
 void Renderer::init_helper_geom()
@@ -195,12 +167,12 @@ void Renderer::init_helper_geom()
     // };
 
     // gen_uv_sphere();
-    // assert(vertices.size() <= ~uint16_t{});
+    // ENG_ASSERT(vertices.size() <= ~uint16_t{});
     // helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
     // helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
     //     .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
     //                  Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
-    //     .layout = bindless_pplayout,
+    //     .layout = common_playout,
     //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
     //     .depth_test = true,
     //     .depth_write = true,
@@ -224,125 +196,114 @@ void Renderer::init_pipelines()
     imsamplers[ENG_SAMPLER_NEAREST] = nearest_sampler;
     imsamplers[ENG_SAMPLER_HIZ] = hiz_sampler;
 
-    const auto bindless_bflags = PipelineBindingFlags::UPDATE_AFTER_BIND_BIT |
-                                 PipelineBindingFlags::UPDATE_UNUSED_WHILE_PENDING_BIT | PipelineBindingFlags::PARTIALLY_BOUND_BIT;
-    bindless_pplayout = make_pplayout(PipelineLayoutCreateInfo{
-        .sets = { PipelineLayoutCreateInfo::SetLayout{
-            .flags = PipelineSetFlags::UPDATE_AFTER_BIND_BIT,
-            .bindings = {
-                { PipelineBindingType::STORAGE_BUFFER, BINDLESS_STORAGE_BUFFER_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
-                { PipelineBindingType::STORAGE_IMAGE, BINDLESS_STORAGE_IMAGE_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
-                { PipelineBindingType::SAMPLED_IMAGE, BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL, bindless_bflags },
-                { PipelineBindingType::SEPARATE_SAMPLER, BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, bindless_bflags, imsamplers },
-            } } },
-        .range = {ShaderStage::ALL, 128},
+    if(backend->caps.supports_bindless)
+    {
+        const auto common_dlayout = make_layout(DescriptorLayout{
+            .layout = {
+                { DescriptorType::STORAGE_BUFFER, BINDLESS_STORAGE_BUFFER_BINDING, 1024, ShaderStage::ALL },
+                { DescriptorType::STORAGE_IMAGE, BINDLESS_STORAGE_IMAGE_BINDING, 1024, ShaderStage::ALL },
+                { DescriptorType::SAMPLED_IMAGE, BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL },
+                { DescriptorType::SEPARATE_SAMPLER, BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, imsamplers },
+            } });
+        common_playout = make_layout(PipelineLayout{
+            .layout = { common_dlayout },
+            .push_range = { ShaderStage::ALL, PushRange::MAX_PUSH_BYTES },
         });
-    bindless_pool = make_descpool(DescriptorPoolCreateInfo{
-        .flags = DescriptorPoolFlags::UPDATE_AFTER_BIND_BIT,
-        .max_sets = 2,
-        .pools = { { PipelineBindingType::STORAGE_BUFFER, 2 * 1024 },
-                   { PipelineBindingType::STORAGE_IMAGE, 2 * 1024 },
-                   { PipelineBindingType::SAMPLED_IMAGE, 2 * 1024 },
-                   { PipelineBindingType::SEPARATE_SAMPLER, 2 * 2 } },
-    });
-    bindless_set = bindless_pool->allocate(bindless_pplayout, 0);
-    bindless = new BindlessPool{ bindless_pool, bindless_set };
+        descriptor_allocator = new DescriptorSetAllocatorBindlessVk{ common_playout.get() };
+    }
+    else
+    {
+        ENG_ERROR("Nonbindless path not supported.");
+        return;
+    }
 
-    hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = bindless_pplayout });
-    cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
-        .layout = bindless_pplayout,
-    });
-    cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
-                     Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
-        .layout = bindless_pplayout,
-        .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
-        .depth_write = true,
-        .depth_compare = DepthCompare::GREATER,
-        .culling = CullFace::BACK,
-    });
-    fwdp_cull_lights_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-        .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
-        .layout = bindless_pplayout,
-    });
-    default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
-        .layout = bindless_pplayout,
-        .attachments = { .count = 1,
-                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
-                         .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-                                                                           .src_color_factor = BlendFactor::SRC_ALPHA,
-                                                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                                                           .color_op = BlendOp::ADD,
-                                                                           .src_alpha_factor = BlendFactor::ONE,
-                                                                           .dst_alpha_factor = BlendFactor::ZERO,
-                                                                           .alpha_op = BlendOp::ADD } },
-                         .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = true,
-        .depth_write = false,
-        .depth_compare = DepthCompare::GEQUAL,
-        .culling = CullFace::BACK,
-    });
-    MeshPassCreateInfo info{ .name = "default_unlit" };
-    info.effects[(uint32_t)RenderPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline });
-    default_meshpass = make_mesh_pass(info);
+    // hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = common_playout });
+    // cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
+    //     .layout = common_playout,
+    // });
+    // cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
+    //                  Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
+    //     .layout = common_playout,
+    //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
+    //     .depth_test = true,
+    //     .depth_write = true,
+    //     .depth_compare = DepthCompare::GREATER,
+    //     .culling = CullFace::BACK,
+    // });
+    // fwdp_cull_lights_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
+    //     .layout = common_playout,
+    // });
+    // default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
+    //     .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
+    //     .layout = common_playout,
+    //     .attachments = { .count = 1,
+    //                      .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+    //                      .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+    //                                                                        .src_color_factor = BlendFactor::SRC_ALPHA,
+    //                                                                        .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+    //                                                                        .color_op = BlendOp::ADD,
+    //                                                                        .src_alpha_factor = BlendFactor::ONE,
+    //                                                                        .dst_alpha_factor = BlendFactor::ZERO,
+    //                                                                        .alpha_op = BlendOp::ADD } },
+    //                      .depth_format = ImageFormat::D32_SFLOAT },
+    //     .depth_test = true,
+    //     .depth_write = false,
+    //     .depth_compare = DepthCompare::GEQUAL,
+    //     .culling = CullFace::BACK,
+    // });
+
+    default_meshpass =
+        make_mesh_pass(MeshPass::init("default_unlit").set(RenderPassType::FORWARD, make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline })));
     default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
 }
 
 void Renderer::init_perframes()
 {
     auto* ew = Engine::get().window;
-    perframe.resize(frame_count);
-    for(auto i = 0u; i < frame_count; ++i)
+    perframe.resize(frames_in_flight);
+    for(auto i = 0u; i < frames_in_flight; ++i)
     {
         auto& pf = perframe[i];
-        auto& gb = pf.gbuffer;
-        gb.color = make_image(ImageDescriptor{
-            .name = ENG_FMT("gcolor{}", i),
-            .width = (uint32_t)ew->width,
-            .height = (uint32_t)ew->height,
-            .format = ImageFormat::R8G8B8A8_SRGB,
-            .usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT,
-        });
-        gb.depth = make_image(ImageDescriptor{
-            .name = ENG_FMT("gdepth{}", i),
-            .width = (uint32_t)ew->width,
-            .height = (uint32_t)ew->height,
-            .format = ImageFormat::D32_SFLOAT,
-            .usage = ImageUsage::DEPTH_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT,
-        });
+        // auto& gb = pf.gbuffer;
+        // gb.color = make_image(ImageDescriptor{
+        //     .name = ENG_FMT("gcolor{}", i),
+        //     .width = (uint32_t)ew->width,
+        //     .height = (uint32_t)ew->height,
+        //     .format = ImageFormat::R8G8B8A8_SRGB,
+        //     .usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT,
+        // });
+        // gb.depth = make_image(ImageDescriptor{
+        //     .name = ENG_FMT("gdepth{}", i),
+        //     .width = (uint32_t)ew->width,
+        //     .height = (uint32_t)ew->height,
+        //     .format = ImageFormat::D32_SFLOAT,
+        //     .usage = ImageUsage::DEPTH_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT,
+        // });
         pf.cmdpool = gq->make_command_pool();
         pf.acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
         pf.ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
         pf.ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         pf.constants =
-            make_buffer(BufferDescriptor{ ENG_FMT("constants_{}", i), sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT });
+            make_buffer(Buffer::init(ENG_FMT("constants_{}", i), sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
     }
 }
 
 void Renderer::init_bufs()
 {
-    bufs.vpos_buf = make_buffer(BufferDescriptor{ "vertex positions", 1024, BufferUsage::STORAGE_BIT });
-    bufs.vattr_buf = make_buffer(BufferDescriptor{ "vertex attributes", 1024, BufferUsage::STORAGE_BIT });
-    bufs.idx_buf = make_buffer(BufferDescriptor{ "vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT });
-    bufs.bsphere_buf = make_buffer(BufferDescriptor{ "bounding spheres", 1024, BufferUsage::STORAGE_BIT });
-    bufs.mats_buf = make_buffer(BufferDescriptor{ "materials", 1024, BufferUsage::STORAGE_BIT });
+    bufs.positions = make_buffer(Buffer::init("vertex positions", 1024, BufferUsage::STORAGE_BIT));
+    bufs.attributes = make_buffer(Buffer::init("vertex attributes", 1024, BufferUsage::STORAGE_BIT));
+    bufs.indices = make_buffer(Buffer::init("vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT));
+    bufs.bspheres = make_buffer(Buffer::init("bounding spheres", 1024, BufferUsage::STORAGE_BIT));
+    bufs.materials = make_buffer(Buffer::init("materials", 1024, BufferUsage::STORAGE_BIT));
     for(uint32_t i = 0; i < 2; ++i)
     {
-        bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
-        bufs.lights_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("lights {}", i), 256, BufferUsage::STORAGE_BIT });
-    }
-    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
-    {
-        const auto rpt = (RenderPassType)i;
-        render_passes[rpt].batch.cmd_buf = make_buffer(BufferDescriptor{
-            ENG_FMT("{}_cmds", to_string(rpt)), 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
-        render_passes[rpt].batch.ids_buf =
-            make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string(rpt)), 1024, BufferUsage::STORAGE_BIT });
+        bufs.transforms[i] = make_buffer(Buffer::init(ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT));
+        bufs.lights[i] = make_buffer(Buffer::init(ENG_FMT("lights {}", i), 1024, BufferUsage::STORAGE_BIT));
     }
     {
         const auto* w = Engine::get().window;
@@ -355,45 +316,53 @@ void Renderer::init_bufs()
 
 void Renderer::init_rgraph_passes()
 {
-    rgraphpasses = new RenderGraphPasses{};
-    std::vector<Handle<Image>> zbufs(frame_count);
-    std::vector<Handle<Image>> cbufs(frame_count);
-    std::vector<Handle<Image>> swapcbufs(frame_count);
-    for(auto i = 0u; i < frame_count; ++i)
+    ENG_ASSERT(rgraph_passes.empty());
+    rgraph_passes.push_back(new pass::SSTriangle{});
+
+    for(auto& pass : rgraph_passes)
     {
-        zbufs[i] = perframe[i].gbuffer.depth;
-        cbufs[i] = perframe[i].gbuffer.color;
-        swapcbufs[i] = swapchain->images[i];
+        pass->init();
     }
-    rgraphpasses->zbufsview = rgraph->import_resource(std::span{ zbufs });
-    rgraphpasses->cbufsview = rgraph->import_resource(std::span{ cbufs });
-    rgraphpasses->swapcbufsview = rgraph->import_resource(std::span{ swapcbufs });
 
-    rgraphpasses->cull_zprepass =
-        std::make_unique<pass::culling::ZPrepass>(rgraph, pass::culling::ZPrepass::CreateInfo{ rgraphpasses->zbufsview });
-    rgraphpasses->cull_hiz =
-        std::make_unique<pass::culling::Hiz>(rgraph, pass::culling::Hiz::CreateInfo{ rgraphpasses->zbufsview });
-    rgraphpasses->cull_main =
-        std::make_unique<pass::culling::MainPass>(rgraph, pass::culling::MainPass::CreateInfo{
-                                                              &render_passes.at(RenderPassType::FORWARD),
-                                                              &*rgraphpasses->cull_zprepass, &*rgraphpasses->cull_hiz });
+    // rgraphpasses = new RenderGraphPasses{};
+    // std::vector<Handle<Image>> zbufs(frame_count);
+    // std::vector<Handle<Image>> cbufs(frame_count);
+    // std::vector<Handle<Image>> swapcbufs(frame_count);
+    // for(auto i = 0u; i < frame_count; ++i)
+    //{
+    //     zbufs[i] = perframe[i].gbuffer.depth;
+    //     cbufs[i] = perframe[i].gbuffer.color;
+    //     swapcbufs[i] = swapchain->images[i];
+    // }
+    // rgraphpasses->zbufsview = rgraph->import_resource(std::span{ zbufs });
+    // rgraphpasses->cbufsview = rgraph->import_resource(std::span{ cbufs });
+    // rgraphpasses->swapcbufsview = rgraph->import_resource(std::span{ swapcbufs });
 
-    rgraphpasses->cull_zprepass->ibatches = &rgraphpasses->cull_main->batches; // todo: don't like this
+    // rgraphpasses->cull_zprepass =
+    //     std::make_unique<pass::culling::ZPrepass>(rgraph, pass::culling::ZPrepass::CreateInfo{ rgraphpasses->zbufsview });
+    // rgraphpasses->cull_hiz =
+    //     std::make_unique<pass::culling::Hiz>(rgraph, pass::culling::Hiz::CreateInfo{ rgraphpasses->zbufsview });
+    // rgraphpasses->cull_main =
+    //     std::make_unique<pass::culling::MainPass>(rgraph, pass::culling::MainPass::CreateInfo{
+    //                                                           &render_passes.at(RenderPassType::FORWARD),
+    //                                                           &*rgraphpasses->cull_zprepass, &*rgraphpasses->cull_hiz });
 
-    rgraphpasses->fwdp_lightcull =
-        std::make_unique<pass::fwdp::LightCulling>(rgraph, pass::fwdp::LightCulling::CreateInfo{
-                                                               rgraphpasses->zbufsview, bufs.fwdp_num_tiles,
-                                                               bufs.fwdp_lights_per_tile, bufs.fwdp_tile_pixels });
-    rgraphpasses->default_unlit =
-        std::make_unique<pass::DefaultUnlit>(rgraph, pass::DefaultUnlit::CreateInfo{
-                                                         &*rgraphpasses->cull_zprepass, &*rgraphpasses->fwdp_lightcull,
-                                                         rgraphpasses->cbufsview, rgraphpasses->zbufsview });
-    rgraphpasses->debug_geom =
-        std::make_unique<pass::DebugGeom>(rgraph, pass::DebugGeom::CreateInfo{ rgraphpasses->cbufsview, rgraphpasses->zbufsview });
-    rgraphpasses->imgui = std::make_unique<pass::ImGui>(rgraph, pass::ImGui::CreateInfo{ rgraphpasses->cbufsview });
-    rgraphpasses->present_copy =
-        std::make_unique<pass::PresentCopy>(rgraph, pass::PresentCopy::CreateInfo{ rgraphpasses->cbufsview,
-                                                                                   rgraphpasses->swapcbufsview, swapchain });
+    // rgraphpasses->cull_zprepass->ibatches = &rgraphpasses->cull_main->batches; // todo: don't like this
+
+    // rgraphpasses->fwdp_lightcull =
+    //     std::make_unique<pass::fwdp::LightCulling>(rgraph, pass::fwdp::LightCulling::CreateInfo{
+    //                                                            rgraphpasses->zbufsview, bufs.fwdp_num_tiles,
+    //                                                            bufs.fwdp_lights_per_tile, bufs.fwdp_tile_pixels });
+    // rgraphpasses->default_unlit =
+    //     std::make_unique<pass::DefaultUnlit>(rgraph, pass::DefaultUnlit::CreateInfo{
+    //                                                      &*rgraphpasses->cull_zprepass, &*rgraphpasses->fwdp_lightcull,
+    //                                                      rgraphpasses->cbufsview, rgraphpasses->zbufsview });
+    // rgraphpasses->debug_geom =
+    //     std::make_unique<pass::DebugGeom>(rgraph, pass::DebugGeom::CreateInfo{ rgraphpasses->cbufsview, rgraphpasses->zbufsview });
+    // rgraphpasses->imgui = std::make_unique<pass::ImGui>(rgraph, pass::ImGui::CreateInfo{ rgraphpasses->cbufsview });
+    // rgraphpasses->present_copy =
+    //     std::make_unique<pass::PresentCopy>(rgraph, pass::PresentCopy::CreateInfo{ rgraphpasses->cbufsview,
+    //                                                                                rgraphpasses->swapcbufsview, swapchain });
 }
 
 void Renderer::instance_entity(ecs::entity e)
@@ -403,21 +372,21 @@ void Renderer::instance_entity(ecs::entity e)
         ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", e);
         return;
     }
-    new_transforms.push_back(e);
     auto* mesh = Engine::get().ecs->get<ecs::Mesh>(e);
-    assert(mesh->gpu_resource == ~0u);
+    if(mesh->gpu_resource != ~0u)
+    {
+        ENG_WARN("Entity {} with mesh {} is already instanced {}", e, mesh->asset->name, mesh->gpu_resource);
+        return;
+    }
+    new_transforms.push_back(e);
+    ++bufs.transform_count;
     mesh->gpu_resource = gpu_resource_allocator.allocate_slot();
-    for(const auto& rmesh : mesh->meshes)
+    for(const auto& rmesh : mesh->asset->render_meshes)
     {
         const auto& mpeffect = rmesh->material->mesh_pass->effects;
         for(auto i = 0u; i < mpeffect.size(); ++i)
         {
-            const auto rpt = (RenderPassType)i;
-            if(mpeffect.at(i))
-            {
-                render_passes.at(rpt).entities.push_back(e);
-                render_passes.at(rpt).redo = true;
-            }
+            if(mpeffect.at(i)) { render_passes.get((RenderPassType)i).entities.push_back(e); }
         }
     }
 }
@@ -425,9 +394,8 @@ void Renderer::instance_entity(ecs::entity e)
 void Renderer::update()
 {
     auto* ew = Engine::get().window;
-    const auto pfi = Engine::get().frame_num % Renderer::frame_count;
     auto& pf = get_perframe();
-    const auto& ppf = perframe.at((Engine::get().frame_num + perframe.size() - 1) % perframe.size()); // get previous frame res
+    const auto& ppf = perframe.at(frame_index % perframe.size()); // get previous frame res
 
     pf.ren_fen->wait_cpu(~0ull);
     pf.ren_fen->reset();
@@ -435,6 +403,8 @@ void Renderer::update()
     pf.ren_sem->reset();
     pf.swp_sem->reset();
     pf.cmdpool->reset();
+
+    sbuf->next();
     sbuf->reset();
     swapchain->acquire(~0ull, pf.acq_sem);
 
@@ -461,40 +431,46 @@ void Renderer::update()
         for(const auto& e : new_materials)
         {
             // use stable handle index inside the storage to index it in the gpu
-            GPUMaterial gpumat{ .base_color_idx = get_bindless(e->base_color_texture) };
-            sbuf->copy(bufs.mats_buf, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+            if(backend->caps.supports_bindless)
+            {
+                GPUMaterial gpumat{ .base_color_idx = descriptor_allocator->get_bindless(e->base_color_texture, false) };
+                sbuf->copy(bufs.materials, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+            }
+            else { ENG_ASSERT(false); }
         }
         new_materials.clear();
     }
     if(new_transforms.size())
     {
-        std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
-        sbuf->copy(bufs.trs_bufs[0], bufs.trs_bufs[1], 0, { 0, bufs.trs_bufs[1]->size });
-        sbuf->barrier();
+        std::swap(bufs.transforms[0], bufs.transforms[1]);
+        const auto req_size = bufs.transform_count * sizeof(glm::mat4);
+        resize_buffer(bufs.transforms[0], req_size, false);
+        sbuf->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
-            const auto* trs = Engine::get().ecs->get<ecs::Transform>(new_transforms.at(i));
-            const auto* msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms.at(i));
-            sbuf->copy(bufs.trs_bufs[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
+            const auto* trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
+            const auto* msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
+            sbuf->copy(bufs.transforms[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
         }
         new_transforms.clear();
     }
     if(new_lights.size())
     {
-        std::swap(bufs.lights_bufs[0], bufs.lights_bufs[1]);
-        sbuf->copy(bufs.lights_bufs[0], bufs.lights_bufs[1], 0, { 0, bufs.lights_bufs[1]->size });
-        sbuf->barrier();
+        std::swap(bufs.lights[0], bufs.lights[1]);
+        const auto req_size = bufs.light_count * sizeof(GPULight) + 4;
+        resize_buffer(bufs.lights[0], req_size, false);
+        sbuf->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
         for(auto i = 0u; i < new_lights.size(); ++i)
         {
-            auto* l = Engine::get().ecs->get<ecs::Light>(new_lights.at(i));
-            const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights.at(i));
+            auto* l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
+            const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
             if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate_slot(); }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
-            sbuf->copy(bufs.lights_bufs[0], &gpul,
-                       offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight), sizeof(GPULight));
+            sbuf->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight),
+                       sizeof(GPULight));
         }
         const auto lc = (uint32_t)ecs_light_view.size();
-        sbuf->copy(bufs.lights_bufs[0], &lc, offsetof(GPULightsBuffer, count), 4);
+        sbuf->copy(bufs.lights[0], &lc, offsetof(GPULightsBuffer, count), 4);
         new_lights.clear();
     }
 
@@ -506,50 +482,66 @@ void Renderer::update()
     static auto prev_view = view;
     if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
 
-    GPUEngConstantsBuffer cb{
-        .vposb = get_bindless(bufs.vpos_buf),
-        .vatrb = get_bindless(bufs.vattr_buf),
-        .vidxb = get_bindless(bufs.idx_buf),
-        .GPUBoundingSpheresBufferIndex = get_bindless(bufs.bsphere_buf),
-        .GPUTransformsBufferIndex = get_bindless(bufs.trs_bufs[0]),
-        .rmatb = get_bindless(bufs.mats_buf),
-        .GPULightsBufferIndex = get_bindless(bufs.lights_bufs[0]),
-        .view = view,
-        .prev_view = prev_view,
-        .proj = proj,
-        .proj_view = proj * view,
-        .inv_view = invview,
-        .inv_proj = invproj,
-        .inv_proj_view = invview * invproj,
-        //.rand_mat = rand_mat,
-        .cam_pos = Engine::get().camera->pos,
+    // ENG_ASSERT(false);
+    //  GPUEngConstantsBuffer cb{
+    //      .vposb = get_bindless(bufs.vpos_buf),
+    //      .vatrb = get_bindless(bufs.vattr_buf),
+    //      .vidxb = get_bindless(bufs.idx_buf),
+    //      .GPUBoundingSpheresBufferIndex = get_bindless(bufs.bsphere_buf),
+    //      .GPUTransformsBufferIndex = get_bindless(bufs.trs_bufs[0]),
+    //      .rmatb = get_bindless(bufs.mats_buf),
+    //      .GPULightsBufferIndex = get_bindless(bufs.lights_bufs[0]),
+    //      .view = view,
+    //      .prev_view = prev_view,
+    //      .proj = proj,
+    //      .proj_view = proj * view,
+    //      .inv_view = invview,
+    //      .inv_proj = invproj,
+    //      .inv_proj_view = invview * invproj,
+    //      //.rand_mat = rand_mat,
+    //      .cam_pos = Engine::get().camera->pos,
 
-        .output_mode = (uint32_t)debug_output,
-        .fwdp_enable = (uint32_t)fwdp_enable,
-        .fwdp_max_lights_per_tile = bufs.fwdp_lights_per_tile,
-        .mlt_frust_cull_enable = (uint32_t)mlt_frust_cull_enable,
-        .mlt_occ_cull_enable = (uint32_t)mlt_occ_cull_enable,
-    };
-    sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
+    //    .output_mode = (uint32_t)debug_output,
+    //    .fwdp_enable = (uint32_t)fwdp_enable,
+    //    .fwdp_max_lights_per_tile = bufs.fwdp_lights_per_tile,
+    //    .mlt_frust_cull_enable = (uint32_t)mlt_frust_cull_enable,
+    //    .mlt_occ_cull_enable = (uint32_t)mlt_occ_cull_enable,
+    //};
+    // sbuf->copy(pf.constants, &cb, 0ull, sizeof(cb));
 
-    rgraph->add_pass(&*rgraphpasses->cull_zprepass);
-    rgraph->add_pass(&*rgraphpasses->cull_hiz);
-    rgraph->add_pass(&*rgraphpasses->cull_main);
-    rgraph->add_pass(&*rgraphpasses->fwdp_lightcull);
-    rgraph->add_pass(&*rgraphpasses->default_unlit);
-    rgraph->add_pass(&*rgraphpasses->debug_geom);
-    rgraph->add_pass(&*rgraphpasses->imgui);
-    rgraph->add_pass(&*rgraphpasses->present_copy);
+    // ENG_ASSERT(false);
+    //  rgraph->add_pass(&*rgraphpasses->cull_zprepass);
+    //  rgraph->add_pass(&*rgraphpasses->cull_hiz);
+    //  rgraph->add_pass(&*rgraphpasses->cull_main);
+    //  rgraph->add_pass(&*rgraphpasses->fwdp_lightcull);
+    //  rgraph->add_pass(&*rgraphpasses->default_unlit);
+    //  rgraph->add_pass(&*rgraphpasses->debug_geom);
+    //  rgraph->add_pass(&*rgraphpasses->imgui);
+    //  rgraph->add_pass(&*rgraphpasses->present_copy);
+    //  rgraph->compile();
+    //  auto* rgsync = rgraph->execute(sbuf->flush());
+
+    // auto* cmd = pf.cmdpool->begin();
+    // cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL,
+    //              PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
+    // pf.cmdpool->end(cmd);
+
+    for(auto& pass : rgraph_passes)
+    {
+        pass->on_render_graph(*rgraph);
+    }
+
+    sbuf->reset();
+    //sbuf->queue_wait(rgraph->gq, PipelineStage::ALL, true);
     rgraph->compile();
-    auto* rgsync = rgraph->execute(sbuf->flush());
+    Sync* rgsync = rgraph->execute(pf.acq_sem);
 
     auto* cmd = pf.cmdpool->begin();
     cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL,
-                 PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
+                 PipelineAccess::NONE, ImageLayout::UNDEFINED, ImageLayout::PRESENT);
     pf.cmdpool->end(cmd);
 
-    gq->wait_sync(pf.acq_sem, PipelineStage::ALL)
-        .wait_sync(rgsync, PipelineStage::ALL)
+    gq->wait_sync(rgsync, PipelineStage::ALL)
         .with_cmd_buf(cmd)
         .signal_sync(pf.swp_sem, PipelineStage::NONE)
         .signal_sync(pf.ren_fen)
@@ -558,222 +550,219 @@ void Renderer::update()
     gq->wait_idle();
 }
 
-void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd)
+void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd)
 {
-    auto* ew = Engine::get().window;
-    auto& pf = get_perframe();
-    auto& rp = render_passes.at(pass);
+    // ENG_ASSERT(false);
+    //  auto* ew = Engine::get().window;
+    //  auto& pf = get_perframe();
+    //  auto& rp = render_passes.at(pass);
 
-    const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
-        .imageView = pf.gbuffer.color->default_view->md.vk->view,
-        .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = { .color = { .uint32 = {} } } }) };
-    const auto vkdep = Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
-                                                      .imageLayout = to_vk(ImageLayout::ATTACHMENT),
-                                                      .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                                                      .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
-    VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
-    VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
-    const auto vkreninfo = Vks(VkRenderingInfo{
-        .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
+    // const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
+    //     .imageView = pf.gbuffer.color->default_view->md.vk->view,
+    //     .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+    //     .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+    //     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    //     .clearValue = { .color = { .uint32 = {} } } }) };
+    // const auto vkdep = Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
+    //                                                   .imageLayout = to_vk(ImageLayout::ATTACHMENT),
+    //                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+    //                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
+    // VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+    // VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+    // const auto vkreninfo = Vks(VkRenderingInfo{
+    //     .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
 
-    // todo: mbatches might be empty. is this bad that i run this?
-    cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
-    cmd->set_scissors(&vksciss, 1);
-    cmd->set_viewports(&vkview, 1);
-    cmd->begin_rendering(vkreninfo);
-    const auto& maincullpass = rgraph->get_pass<pass::culling::MainPass>("culling::MainPass");
-    const auto& ib = maincullpass.batches[get_perframe_index()];
-    render_ibatch(cmd, ib, [this, &ib, &pf](CommandBuffer* cmd) {
-        const auto outputmode = (uint32_t)debug_output;
-        cmd->bind_resource(0, pf.constants);
-        cmd->bind_resource(1, ib.ids_buf);
-        const auto& fwd = rgraph->get_pass<pass::fwdp::LightCulling>("fwdp::LightCulling");
-        cmd->bind_resource(2, rgraph->get_resource(fwd.culled_light_grid_bufs).buffer);
-        cmd->bind_resource(3, rgraph->get_resource(fwd.culled_light_list_bufs).buffer);
-    });
-    cmd->end_rendering();
+    //// todo: mbatches might be empty. is this bad that i run this?
+    // cmd->bind_index(bufs.idx_buf.get(), 0, bufs.index_type);
+    // cmd->set_scissors(&vksciss, 1);
+    // cmd->set_viewports(&vkview, 1);
+    // cmd->begin_rendering(vkreninfo);
+    // const auto& maincullpass = rgraph->get_pass<pass::culling::MainPass>("culling::MainPass");
+    // const auto& ib = maincullpass.batches[get_perframe_index()];
+    // render_ibatch(cmd, ib, [this, &ib, &pf](CommandBuffer* cmd) {
+    //     const auto outputmode = (uint32_t)debug_output;
+    //     cmd->bind_resource(0, pf.constants);
+    //     cmd->bind_resource(1, ib.ids_buf);
+    //     const auto& fwd = rgraph->get_pass<pass::fwdp::LightCulling>("fwdp::LightCulling");
+    //     cmd->bind_resource(2, rgraph->get_resource(fwd.culled_light_grid_bufs).buffer);
+    //     cmd->bind_resource(3, rgraph->get_resource(fwd.culled_light_list_bufs).buffer);
+    // });
+    // cmd->end_rendering();
 }
 
 void Renderer::build_renderpasses()
 {
-    struct MeshInstance
+    for(auto rpti = 0u; rpti < (int)RenderPassType::LAST_ENUM; ++rpti)
     {
-        Handle<Geometry> geom;
-        Handle<Material> material;
-        uint32_t id;
-        uint32_t mlti;
-    };
-    struct RPassData
-    {
-        std::vector<MeshInstance> minsts;
-    };
-    std::unordered_map<RenderPassType, RPassData> rpdatas;
+        auto& rp = render_passes.passes[rpti];
+        if(!rp.needs_rebuild()) { continue; }
 
-    for(const auto& [rpt, rp] : render_passes)
-    {
-        if(!rp.redo) { continue; }
-
+        rp.clear();
         for(const auto& e : rp.entities)
         {
-            auto& m = *Engine::get().ecs->get<ecs::Mesh>(e);
-            assert(m.gpu_resource != ~0u);
-            for(auto i = 0u; i < m.meshes.size(); ++i)
+            auto* ecsmesh = Engine::get().ecs->get<ecs::Mesh>(e);
+            if(ecsmesh == nullptr)
             {
-                const auto& mesh = m.meshes.at(i).get();
+                ENG_ERROR("Entity {} does not have a mesh", e);
+                continue;
+            }
+            if(ecsmesh->gpu_resource == ~0u)
+            {
+                ENG_ERROR("Entity {} was not instanced properly. Forgot to call instance_entity()?", e);
+                continue;
+            }
+
+            for(const auto& e : ecsmesh->asset->render_meshes)
+            {
+                const auto& mesh = e.get();
                 const auto& geom = mesh.geometry.get();
-                const auto& meshpass = mesh.material->mesh_pass.get();
-                for(auto j = 0u; j < geom.meshlet_range.size; ++j)
+                for(auto i = 0u; i < geom.meshlet_range.size; ++i)
                 {
-                    rpdatas[rpt].minsts.push_back(MeshInstance{ mesh.geometry, mesh.material, m.gpu_resource,
-                                                                geom.meshlet_range.offset + j });
+                    rp.mesh_instances.push_back(MeshInstance{ mesh.geometry, mesh.material, ecsmesh->gpu_resource,
+                                                              geom.meshlet_range.offset + i });
                 }
             }
         }
-    }
 
-    for(auto& [rpt, rpd] : rpdatas)
-    {
-        auto& rp = render_passes.at(rpt);
-        rp.redo = false;
-
-        // first sort by material, so pipelines can be the same (batch by pipelines)
-        // then sort by meshlet so indirect command struct can be the same (batch by instances)
-        std::sort(rpd.minsts.begin(), rpd.minsts.end(), [](const MeshInstance& a, const MeshInstance& b) {
-            if(a.material >= b.material) { return false; }
-            if(a.mlti >= b.mlti) { return false; }
-            return true;
+        std::sort(rp.mesh_instances.begin(), rp.mesh_instances.end(), [](const MeshInstance& a, const MeshInstance& b) {
+            if(a.material < b.material && a.meshlet_index < b.meshlet_index) { return true; }
+            return false;
         });
 
-        Handle<Pipeline> pp;
-        uint32_t cmdi = ~0u;
-        uint32_t mlti = ~0u;
-        uint32_t batchi = ~0u;
-        rp.batch.batches.clear();
-        rp.batch.batches.resize(rpd.minsts.size());
-        std::vector<DrawIndexedIndirectCommand> cmds(rpd.minsts.size());
-        std::vector<uint32_t> cmdcnts(rpd.minsts.size());
-        std::vector<GPUInstanceId> gpuids(rpd.minsts.size());
-        for(auto i = 0u; i < rpd.minsts.size(); ++i)
+        std::vector<DrawIndexedIndirectCommand> commands; // command for each geometry
+        commands.reserve(rp.mesh_instances.size());
+        std::vector<GPUInstanceId> instance_indices; // instanceoffset + instance id is the index of the current instance being renderd; accessed from shaders
+        instance_indices.reserve(rp.mesh_instances.size());
+        std::vector<uint32_t> counts; // how many commands can be drawn without changing the pipeline
+        counts.reserve(rp.mesh_instances.size());
+        rp.draw.batches.reserve(rp.mesh_instances.size());
+        for(auto i = 0u; i < rp.mesh_instances.size(); ++i)
         {
-            const auto& minst = rpd.minsts.at(i);
-            const auto& geom = minst.geom.get();
-            const auto& mlt = meshlets.at(minst.mlti);
-            const auto& mat = minst.material.get();
-            const auto& mpp = mat.mesh_pass->effects.at((uint32_t)rpt)->pipeline;
-            // pipeline changed
-            if(mpp != pp)
+            const auto& geom = rp.mesh_instances[i].geometry.get();
+            const auto& material = rp.mesh_instances[i].material.get();
+            const auto& mp = material.mesh_pass->effects[rpti].get();
+            if(i == 0 || rp.draw.batches.back().pipeline != mp.pipeline)
             {
-                pp = mpp;
-                rp.batch.batches.at(++batchi).pipeline = pp;
+                rp.draw.batches.push_back(InstanceBatch{ mp.pipeline, 0, 0 });
+                counts.push_back(0);
             }
-            // indirect command changed
-            if(minst.mlti != mlti)
+            if(i == 0 || rp.mesh_instances[i - 1].meshlet_index != rp.mesh_instances[i].meshlet_index)
             {
-                mlti = minst.mlti;
-                cmds.at(++cmdi) = DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
-                                                              .instanceCount = 0,
-                                                              .firstIndex = mlt.index_offset,
-                                                              .vertexOffset = mlt.vertex_offset,
-                                                              .firstInstance = i };
+                const auto& mlt = meshlets[rp.mesh_instances[i].meshlet_index];
+                commands.push_back(DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
+                                                               .instanceCount = 0,
+                                                               .firstIndex = mlt.index_offset,
+                                                               .vertexOffset = mlt.vertex_offset,
+                                                               .firstInstance = i });
             }
-            gpuids.at(i) = GPUInstanceId{ cmdi, minst.mlti, minst.id, *minst.material };
-            // don't increment the indirect command instcount here - this the culling stage handles
-            ++rp.batch.batches.at(batchi).inst_count;
-            rp.batch.batches.at(batchi).cmd_count = cmdi + 1 - (batchi > 0 ? rp.batch.batches.at(batchi - 1).cmd_count : 0);
-            ++cmdcnts.at(batchi); // = rp.batch.batches.at(batchi).cmd_count;
+            ++rp.draw.batches.back().instance_count;
+            rp.draw.batches.back().command_count =
+                commands.size() - (rp.draw.batches.size() > 1 ? 0ull : rp.draw.batches[rp.draw.batches.size() - 2].command_count);
+            ++commands.back().instanceCount;
+            counts.back() = rp.draw.batches.back().command_count;
         }
 
-        ++cmdi;
-        ++batchi;
-        cmds.resize(cmdi);
-        cmdcnts.resize(batchi);
-        const auto cmdoff = align_up2((batchi + 1) * sizeof(uint32_t), 16ull);
-        rp.batch.batches.resize(batchi);
-        rp.batch.cmd_count = cmdi;
-        rp.batch.cmd_start = cmdoff;
-        rp.batch.ids_count = gpuids.size();
-        rp.redo = false;
+        const auto counts_size = counts.size() * sizeof(counts[0]);
+        const auto cmds_start = align_up2(counts_size, 16);
+        const auto cmds_size = commands.size() * sizeof(backend->get_indirect_indexed_command_size());
+        const auto total_size = cmds_start + cmds_size;
 
-        sbuf->copy(rp.batch.cmd_buf, cmdcnts, 0);
-        sbuf->copy(rp.batch.cmd_buf, cmds, cmdoff);
-        sbuf->copy(rp.batch.ids_buf, &rp.batch.ids_count, 0, 4);
-        sbuf->copy(rp.batch.ids_buf, gpuids, 4);
-    }
-}
+        if(!rp.draw.indirect_buf)
+        {
+            rp.draw.indirect_buf = make_buffer(Buffer::init(ENG_FMT("{} indirect buffer", to_string((RenderPassType)rpti)),
+                                                            total_size, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT));
+        }
+        if(!rp.instance_buffer)
+        {
+            rp.instance_buffer =
+                make_buffer(Buffer::init(ENG_FMT("{} instance buffer", to_string((RenderPassType)rpti)),
+                                         instance_indices.size() * sizeof(instance_indices[0]) + 4, BufferUsage::STORAGE_BIT));
+        }
 
-void Renderer::render_ibatch(CommandBuffer* cmd, const IndirectBatch& ibatch,
-                             const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps)
-{
-    auto cmdoffacc = 0u;
-    for(auto i = 0u; i < ibatch.batches.size(); ++i)
-    {
-        const auto& mb = ibatch.batches.at(i);
-        const auto cntoff = sizeof(uint32_t) * i;
-        const auto cmdoff = sizeof(DrawIndexedIndirectCommand) * cmdoffacc + ibatch.cmd_start;
-        if(bind_pps) { cmd->bind_pipeline(mb.pipeline.get()); }
-        if(i == 0 && setup_resources) { setup_resources(cmd); }
-        cmd->draw_indexed_indirect_count(ibatch.cmd_buf.get(), cmdoff, ibatch.cmd_buf.get(), cntoff, mb.cmd_count,
-                                         sizeof(DrawIndexedIndirectCommand));
-        cmdoffacc += mb.cmd_count;
+        std::vector<std::byte> command_bytes(cmds_size);
+        for(auto i = 0u; i < commands.size(); ++i)
+        {
+            backend->make_indirect_indexed_command(&command_bytes[i * backend->get_indirect_indexed_command_size()],
+                                                   commands[i].indexCount, commands[i].instanceCount, commands[i].firstIndex,
+                                                   commands[i].vertexOffset, commands[i].firstInstance);
+        }
+
+        resize_buffer(rp.draw.indirect_buf, total_size, false);
+        resize_buffer(rp.instance_buffer, instance_indices.size() * sizeof(instance_indices[0]), false);
+        sbuf->copy(rp.draw.indirect_buf, counts, 0ull);
+        sbuf->copy(rp.draw.indirect_buf, command_bytes, cmds_start);
+        sbuf->copy_value(rp.instance_buffer, (uint32_t)instance_indices.size(), offsetof(GPUInstanceIdsBuffer, count));
+        sbuf->copy(rp.instance_buffer, instance_indices, offsetof(GPUInstanceIdsBuffer, ids_us));
+        rp.draw.counts_view = BufferView{ rp.draw.indirect_buf, { 0ull, counts_size } };
+        rp.draw.cmds_view = BufferView{ rp.draw.indirect_buf, { cmds_start, cmds_size } };
+        rp.instance_view = BufferView{ rp.instance_buffer, { 0ull, ~0ull } };
     }
 }
 
 void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
-Handle<Buffer> Renderer::make_buffer(const BufferDescriptor& info)
+Handle<Buffer> Renderer::make_buffer(Buffer&& buffer)
 {
     uint32_t order = 0;
-    float size = (float)info.size;
-    for(; size >= 1024.0f && order < 4; size /= 1024.0f, ++order) {}
+    float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
-    ENG_LOG("Creating buffer {} [{:.2f} {}]", info.name, size, units[order]);
-    return buffers.insert(backend->make_buffer(info));
+    for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
+    ENG_LOG("Creating buffer {} [{:.2f} {}]", buffer.name, size, units[order]);
+    backend->allocate_buffer(buffer);
+    return buffers.insert(std::move(buffer));
 }
 
-Handle<Image> Renderer::make_image(const ImageDescriptor& info)
+Handle<Image> Renderer::make_image(Image&& image)
 {
-    auto h = images.insert(backend->make_image(info));
-    h->default_view = make_view(ImageViewDescriptor{ .name = ENG_FMT("{}_default", info.name), .image = h });
-    if(info.data.size_bytes())
-    {
-        sbuf->copy(h, info.data.data());
-        for(auto i = 0u; i < info.mips - 1; ++i)
-        {
-            const Range3D32i srcsz{
-                { 0, 0, 0 }, { std::max(info.width >> i, 1u), std::max(info.height >> i, 1u), std::max(info.depth >> i, 1u) }
-            };
-            const Range3D32i dstsz{ { 0, 0, 0 },
-                                    { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
-                                      std::max(srcsz.size.z >> 1, 1) } };
-            sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
-            sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz });
-        }
-        sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageLayout::READ_ONLY, ImageSubRange{ { 0, info.mips - 1 }, { 0, 1 } });
-        sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY, ImageSubRange{ { info.mips - 1, 1 }, { 0, 1 } });
-        h->current_layout = ImageLayout::READ_ONLY;
-    }
-    return h;
+    backend->allocate_image(image);
+    return images.insert(std::move(image));
+
+    // sbuf -> copy()
+    //  auto h = images.insert(backend->make_image(info));
+    //  h->default_view = make_view(ImageViewDescriptor{ .name = ENG_FMT("{}_default", info.name), .image = h });
+    //  if(info.data.size_bytes())
+    //{
+    //      sbuf->copy(h, info.data.data(), false);
+    //      for(auto i = 0u; i < info.mips - 1; ++i)
+    //      {
+    //          const Range3D32i srcsz{
+    //              { 0, 0, 0 }, { std::max(info.width >> i, 1u), std::max(info.height >> i, 1u), std::max(info.depth >> i, 1u) }
+    //          };
+    //          const Range3D32i dstsz{ { 0, 0, 0 },
+    //                                  { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
+    //                                    std::max(srcsz.size.z >> 1, 1) } };
+    //          sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
+    //          sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz });
+    //          sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageLayout::READ_ONLY, ImageSubRange{ { i, 1 }, { 0, 1 } });
+    //      }
+    //      sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY, ImageSubRange{ { info.mips - 1, 1 }, { 0, 1 } });
+    //  }
+    //  return h;
 }
 
-Handle<ImageView> Renderer::make_view(const ImageViewDescriptor& info)
-{
-    auto& img = Handle{ info.image }.get();
-    auto view = ImageView{ .name = info.name,
-                           .image = info.image,
-                           .type = info.view_type ? *info.view_type : img.deduce_view_type(),
-                           .format = info.format ? *info.format : img.format,
-                           .aspect = info.aspect ? *info.aspect : img.deduce_aspect(),
-                           .mips = info.mips,
-                           .layers = info.layers };
-    const auto found_handle = image_views.find(view);
-    if(!found_handle) { backend->make_view(view); }
-    auto it = image_views.insert(view);
-    if(!found_handle) { image_views_cache[info.image].push_back(it.handle); }
-    return it.handle;
-}
+// Handle<BufferView> Renderer::make_view(const BufferViewDescriptor& info)
+//{
+//     auto& res = Handle{ info.buffer }.get();
+//     const auto ret = buffer_views.insert(BufferView{ .buffer = info.buffer, .range = info.range });
+//     return ret.handle;
+// }
+
+// ImageView Renderer::make_view(const ImageViewDescriptor& info)
+//{
+//     auto& img = Handle{ info.image }.get();
+//     auto view = ImageView{ .name = info.name,
+//                            .image = info.image,
+//                            .type = info.view_type ? *info.view_type : img.deduce_view_type(),
+//                            .format = info.format ? *info.format : img.format,
+//                            .aspect = info.aspect ? *info.aspect : img.deduce_aspect(),
+//                            .mips = info.mips,
+//                            .layers = info.layers };
+//     const auto found_handle = image_views.find(view);
+//     if(!found_handle) { backend->make_view(view); }
+//     auto it = image_views.insert(view);
+//     if(!found_handle) { image_views_cache[info.image].push_back(it.handle); }
+//     return it.handle;
+// }
 
 Handle<Sampler> Renderer::make_sampler(const SamplerDescriptor& info)
 {
@@ -800,11 +789,20 @@ Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
     return it.handle;
 }
 
-Handle<PipelineLayout> Renderer::make_pplayout(const PipelineLayoutCreateInfo& info)
+Handle<DescriptorLayout> Renderer::make_layout(const DescriptorLayout& info)
 {
-    PipelineLayout layout{ .info = info };
+    DescriptorLayout layout = info;
+    const auto found_handle = dlayouts.find(layout);
+    if(!found_handle) { backend->compile_layout(layout); }
+    auto it = dlayouts.insert(std::move(layout));
+    return it.handle;
+}
+
+Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
+{
+    PipelineLayout layout = info;
     const auto found_handle = pplayouts.find(layout);
-    if(!found_handle) { backend->compile_pplayout(layout); }
+    if(!found_handle) { backend->compile_layout(layout); }
     auto it = pplayouts.insert(std::move(layout));
     return it.handle;
 }
@@ -812,6 +810,7 @@ Handle<PipelineLayout> Renderer::make_pplayout(const PipelineLayoutCreateInfo& i
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
+    if(!p.info.layout) { p.info.layout = common_playout; }
     const auto found_handle = pipelines.find(p);
     if(!found_handle) { backend->make_pipeline(p); }
     auto it = pipelines.insert(std::move(p));
@@ -822,11 +821,6 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_sync(info); }
 
 void Renderer::destroy_sync(Sync* sync) { backend->destory_sync(sync); }
-
-Handle<Texture> Renderer::make_texture(const TextureDescriptor& batch)
-{
-    return textures.insert(Texture{ batch.view, batch.layout, batch.is_storage }).handle;
-}
 
 Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
 {
@@ -839,8 +833,8 @@ Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
-    assert((batch.vertex_layout & ~(VertexComponent::POSITION_BIT | VertexComponent::NORMAL_BIT |
-                                    VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT)) == 0);
+    ENG_ASSERT((batch.vertex_layout & ~(VertexComponent::POSITION_BIT | VertexComponent::NORMAL_BIT |
+                                        VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT)) == 0);
 
     std::vector<float> out_vertices;
     std::vector<uint16_t> out_indices;
@@ -871,10 +865,14 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
         bounding_spheres.at(i) = out_meshlets.at(i).bounding_sphere;
     }
 
-    sbuf->copy(bufs.vpos_buf, positions, STAGING_APPEND);
-    sbuf->copy(bufs.vattr_buf, attributes, STAGING_APPEND);
-    sbuf->copy(bufs.idx_buf, out_indices, STAGING_APPEND);
-    sbuf->copy(bufs.bsphere_buf, bounding_spheres, STAGING_APPEND);
+    resize_buffer(bufs.positions, positions.size() * sizeof(positions[0]), STAGING_APPEND, true);
+    resize_buffer(bufs.attributes, attributes.size() * sizeof(attributes[0]), STAGING_APPEND, true);
+    resize_buffer(bufs.indices, out_indices.size() * sizeof(out_indices[0]), STAGING_APPEND, true);
+    resize_buffer(bufs.bspheres, bounding_spheres.size() * sizeof(bounding_spheres[0]), STAGING_APPEND, true);
+    sbuf->copy(bufs.positions, positions, STAGING_APPEND);
+    sbuf->copy(bufs.attributes, attributes, STAGING_APPEND);
+    sbuf->copy(bufs.indices, out_indices, STAGING_APPEND);
+    sbuf->copy(bufs.bspheres, bounding_spheres, STAGING_APPEND);
 
     bufs.vertex_count += vertex_count;
     bufs.index_count += index_count;
@@ -896,8 +894,7 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     static constexpr auto max_tris = 124u;
     static constexpr auto cone_weight = 0.0f;
 
-    std::vector<uint32_t> indices(get_index_count(batch.indices, batch.index_format));
-    copy_indices(std::as_writable_bytes(std::span{ indices }), batch.indices, IndexFormat::U32, batch.index_format);
+    const auto& indices = batch.indices;
 
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
     std::vector<meshopt_Meshlet> mlts(max_meshlets);
@@ -959,16 +956,54 @@ Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
     return shader_effects.insert(info).handle;
 }
 
-Handle<MeshPass> Renderer::make_mesh_pass(const MeshPassCreateInfo& info)
+Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
+
+void Renderer::retire_buffer(Handle<Buffer>& handle)
 {
-    auto it = mesh_passes.insert(MeshPass{ .name = info.name, .effects = info.effects });
-    return it.handle;
+    get_perframe().retired_resources.emplace_back(handle);
+    handle = {};
 }
 
-Handle<DescriptorPool> Renderer::make_descpool(const DescriptorPoolCreateInfo& info)
+void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data)
 {
-    descpools.push_back(backend->make_descpool(info));
-    return Handle<DescriptorPool>{ (uint32_t)descpools.size() - 1 };
+    if(!handle)
+    {
+        ENG_ERROR("Buffer is null");
+        return;
+    }
+
+    if(new_size <= handle->capacity)
+    {
+        handle->size = std::min(new_size, handle->size);
+        return;
+    }
+
+    auto dsth = make_buffer(Buffer::init(handle->name, new_size, handle->usage));
+    auto& dst = dsth.get();
+    if(copy_data)
+    {
+        if(new_size < handle->size) { ENG_WARN("Source data truncated as destination buffer is too small."); }
+        sbuf->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true);
+    }
+    retire_buffer(handle);
+    handle = dsth;
+}
+
+void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data)
+{
+    if(!handle)
+    {
+        ENG_ERROR("Buffer is null");
+        return;
+    }
+    const auto& buf = handle.get();
+    if(offset == STAGING_APPEND) { offset = buf.size; }
+    const auto req_capacity = offset + upload_size;
+    if(req_capacity <= buf.capacity) { return; }
+    auto new_size = buf.capacity * 1.5;
+    if(new_size < req_capacity) { new_size = req_capacity; }
+    new_size = std::ceil(new_size);
+    resize_buffer(handle, new_size, copy_data);
 }
 
 void Renderer::update_transform(ecs::entity entity)
@@ -979,77 +1014,83 @@ void Renderer::update_transform(ecs::entity entity)
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
-uint32_t Renderer::get_bindless(Handle<Buffer> buffer, Range range) { return bindless->get_index(buffer, range); }
-
-uint32_t Renderer::get_bindless(Handle<Texture> texture) { return bindless->get_index(texture); }
-
-uint32_t Renderer::get_bindless(Handle<Sampler> sampler) { return bindless->get_index(sampler); }
-
-uint32_t Renderer::get_perframe_index(int32_t offset)
-{
-    return (Engine::get().frame_num + perframe.size() + offset) % perframe.size();
-}
+uint32_t Renderer::get_perframe_index(int32_t offset) { return (uint32_t)(frame_index % perframe.size()); }
 
 Renderer::PerFrame& Renderer::get_perframe(int32_t offset) { return perframe.at(get_perframe_index(offset)); }
 
-bool PipelineLayout::is_compatible(const PipelineLayout& a) const
+bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {
-    if(info.range != a.info.range) { return false; }
-
-    const size_t set_count = std::min(info.sets.size(), a.info.sets.size());
-    for(size_t i = 0; i < set_count; ++i)
+    if(layout.size() != a.layout.size()) { return false; }
+    for(size_t j = 0; j < layout.size(); ++j)
     {
-        const auto& s1 = info.sets[i];
-        const auto& s2 = a.info.sets[i];
-        if(s1.flags != s2.flags) { return false; }
-        if(s1.bindings.size() != s2.bindings.size()) { return false; }
-        for(size_t j = 0; j < s1.bindings.size(); ++j)
+        const auto& da = layout[j];
+        const auto& db = a.layout[j];
+        if(da.type != db.type) { return false; }
+        if(da.slot != db.slot) { return false; }
+        if(da.size != db.size) { return false; }
+        if(da.stages != db.stages) { return false; }
+        if(da.immutable_samplers == nullptr && db.immutable_samplers == nullptr) {}
+        else if(da.immutable_samplers != nullptr && db.immutable_samplers != nullptr)
         {
-            const auto& b1 = s1.bindings[j];
-            const auto& b2 = s2.bindings[j];
-            if(b1.type != b2.type) { return false; }
-            if(b1.slot != b2.slot) { return false; }
-            if(b1.size != b2.size) { return false; }
-            if(b1.stages != b2.stages) { return false; }
-            if(b1.flags != b2.flags) { return false; }
-            if(b1.immutable_samplers == nullptr && b2.immutable_samplers == nullptr) {}
-            else if(b1.immutable_samplers != nullptr && b2.immutable_samplers != nullptr)
+            for(auto i = 0u; i < da.size; ++i)
             {
-                for(auto i = 0u; i < b1.size; ++i)
-                {
-                    if(b1.immutable_samplers[i] != b2.immutable_samplers[i]) { return false; }
-                }
+                if(da.immutable_samplers[i] != db.immutable_samplers[i]) { return false; }
             }
-            else { return false; }
         }
+        else { return false; }
     }
     return true;
 }
 
-Handle<DescriptorSet> DescriptorPool::allocate(Handle<PipelineLayout> playout, uint32_t dset_idx)
+bool PipelineLayout::is_compatible(const PipelineLayout& a) const
 {
-    sets.push_back(Engine::get().renderer->backend->allocate_set(*this, playout.get(), dset_idx));
-    return Handle<DescriptorSet>{ (uint32_t)sets.size() - 1 };
+    if(push_range != a.push_range) { return false; }
+
+    const size_t set_count = std::min(layout.size(), a.layout.size());
+    for(size_t i = 0; i < set_count; ++i)
+    {
+        const auto& s1 = layout[i];
+        const auto& s2 = a.layout[i];
+        if(!s1->is_compatible(s2.get())) { return false; }
+    }
+    return true;
 }
 
-DescriptorSet& DescriptorPool::get_dset(Handle<DescriptorSet> set) { return sets.at(*set); }
-
-void Renderer::DebugGeomBuffers::render(CommandBuffer* cmd, Sync* s)
+void Renderer::IndirectBatch::draw(const Callback<void(const IndirectDrawParams&)>& draw_callback) const
 {
-    assert(s == nullptr);
+    size_t cmdoffacc = 0;
+    for(auto i = 0u; i < batches.size(); ++i)
+    {
+        const auto& batch = batches[i];
+        const auto cntoff = sizeof(uint32_t) * i;
+        const auto cmdoff = get_renderer().backend->get_indirect_indexed_command_size() * cmdoffacc + cmds_view.range.offset;
+        draw_callback(IndirectDrawParams{
+            .batch = this,
+            .draw = &batch,
+            .max_draw_count = batch.command_count,
+        });
+        cmdoffacc += batch.command_count;
+    }
+}
+
+void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
+{
+    ENG_ASSERT(s == nullptr);
     if(geometry.empty()) { return; }
     const auto verts = expand_into_vertices();
-    assert(verts.size() > geometry.size() && verts.size() % 2 == 0);
+    ENG_ASSERT(verts.size() > geometry.size() && verts.size() % 2 == 0);
     if(!vpos_buf)
     {
-        vpos_buf = Engine::get().renderer->make_buffer(BufferDescriptor{ "debug verts", verts.size() * sizeof(verts[0]),
-                                                                         BufferUsage::STORAGE_BIT });
+        vpos_buf = Engine::get().renderer->make_buffer(Buffer::init("debug verts", verts.size() * sizeof(verts[0]),
+                                                                    BufferUsage::STORAGE_BIT));
     }
 
-    Engine::get().renderer->sbuf->copy(vpos_buf, verts, 0);
-    Engine::get().renderer->sbuf->flush()->wait_cpu(~0ull);
+    ENG_ASSERT(false);
+    // Engine::get().renderer->sbuf->copy(vpos_buf, verts, 0);
+    // Engine::get().renderer->sbuf->flush()->wait_cpu(~0ull);
 
-    cmd->bind_resource(1, vpos_buf);
+    ENG_ASSERT(false);
+    // cmd->bind_resource(1, vpos_buf);
     cmd->draw(verts.size(), 1, 0, 0);
     geometry.clear();
 }
@@ -1112,6 +1153,28 @@ std::vector<glm::vec3> Renderer::DebugGeomBuffers::expand_into_vertices()
     }
     return verts;
 }
+
+ImageView ImageView::init(Handle<Image> image, std::optional<ImageFormat> format, std::optional<ImageViewType> type,
+                          uint32_t src_mip, uint32_t dst_mip, uint32_t src_layer, uint32_t dst_layer)
+{
+    ENG_ASSERT(image);
+    Image& img = image.get();
+    if(!format) { format = img.format; }
+    if(!type) { type = get_view_type_from_image(img.type); }
+    if(dst_mip == ~0u) { dst_mip = img.mips - 1; }
+    if(dst_layer == ~0u) { dst_layer = img.layers - 1; }
+    ImageView view{ .image = image,
+                    .type = *type,
+                    .format = *format,
+                    .src_subresource = img.mips * src_layer + src_mip,
+                    .dst_subresource = img.mips * dst_layer + dst_mip };
+    auto insertion = img.views.emplace(view, nullptr);
+    if(!insertion.second) { return view; }
+    get_renderer().backend->allocate_view(view, &insertion.first->second);
+    return view;
+}
+
+ImageView::Metadata ImageView::get_md() const { return get_renderer().backend->get_md(*this); }
 
 } // namespace gfx
 } // namespace eng

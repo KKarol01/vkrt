@@ -10,7 +10,7 @@ namespace eng
 template <typename T> class HandleSparseVec
 {
     using handle_t = Handle<T>;
-    using Storage = typename handle_t::storage_type;
+    using storage_t = typename handle_t::storage_type;
 
   public:
     auto size() const { return data.size() - free_list.size(); }
@@ -18,30 +18,12 @@ template <typename T> class HandleSparseVec
     T& at(handle_t h) { return data.at(*h); }
     const T& at(handle_t h) const { return data.at(*h); }
 
-    handle_t insert(const T& t)
+    handle_t insert(auto&& e)
     {
-        assert(size() < ~Storage{});
+        assert(size() < ~storage_t{});
         handle_t handle;
-        if(!get_index(handle)) { data.push_back(t); }
-        else { at(handle) = t; }
-        return handle;
-    }
-
-    handle_t insert(T&& t)
-    {
-        assert(size() < ~Storage{});
-        handle_t handle;
-        if(!get_index(handle)) { data.push_back(std::move(t)); }
-        else { at(handle) = std::move(t); }
-        return handle;
-    }
-
-    template <typename... Args> handle_t emplace(Args&&... args)
-    {
-        assert(size() < ~Storage{});
-        handle_t handle;
-        if(!get_index(handle)) { data.emplace_back(std::forward<Args>(args)...); }
-        else { at(handle) = T{ std::forward<Args>(args)... }; }
+        if(!get_index(handle)) { data.push_back(std::forward<decltype(e)>(e)); }
+        else { at(handle) = std::forward<decltype(e)>(e); }
         return handle;
     }
 
@@ -62,7 +44,7 @@ template <typename T> class HandleSparseVec
             free_list.pop_front();
             return true;
         }
-        out_handle = handle_t{ static_cast<Storage>(data.size()) };
+        out_handle = handle_t{ static_cast<storage_t>(data.size()) };
         return false;
     }
 

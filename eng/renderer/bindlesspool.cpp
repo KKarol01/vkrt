@@ -11,147 +11,237 @@ namespace eng
 namespace gfx
 {
 
-BindlessPool::BindlessPool(Handle<DescriptorPool> pool, Handle<DescriptorSet> set) : pool(pool), set(set)
+DescriptorSetVk DescriptorPoolVk::allocate(const DescriptorLayout& layout, uint32_t setidx)
 {
-    auto* r = RendererBackendVulkan::get_instance();
-    assert(set);
-}
-
-void BindlessPool::bind(CommandBuffer* cmd)
-{
-    update();
-    cmd->bind_descriptors(&pool.get(), &pool->get_dset(set), { 0, 1 });
-}
-
-uint32_t BindlessPool::get_index(Handle<Buffer> handle, Range range)
-{
-    auto& vec = buffer_indices[handle];
-    BufferView bv{ handle, range };
-    auto vecit = std::find_if(vec.begin(), vec.end(), [&bv](auto& e) { return e.first == bv; });
-    if(vecit == vec.end())
+    while(true)
     {
-        vec.emplace_back(bv, buffer_slots.allocate_slot());
-        update_index(handle);
-        vecit = vec.begin() + (vec.size() - 1);
-    }
-    return vecit->second;
-}
+        VkDescriptorPool pool;
+        if(free.empty()) { add_page(); }
+        pool = free.back();
 
-uint32_t BindlessPool::get_index(Handle<Texture> handle)
-{
-    const auto is_storage = handle->is_storage;
-    const auto ret = is_storage ? image_indices.emplace(handle, ~index_t{}) : texture_indices.emplace(handle, ~index_t{});
-    if(ret.second)
-    {
-        if(is_storage) { ret.first->second = image_slots.allocate_slot(); }
-        else { ret.first->second = texture_slots.allocate_slot(); }
-        update_index(handle);
-    }
-    return ret.first->second;
-}
-
-uint32_t BindlessPool::get_index(Handle<Sampler> handle)
-{
-    const auto ret = sampler_indices.emplace(handle, ~index_t{});
-    if(ret.second)
-    {
-        ret.first->second = sampler_slots.allocate_slot();
-        update_index(handle);
-    }
-    return ret.first->second;
-}
-
-void BindlessPool::free_index(Handle<Buffer> handle)
-{
-    if(auto it = buffer_indices.find(handle); it != buffer_indices.end())
-    {
-        for(const auto& e : it->second)
+        const auto vk_alloc_info = Vks(VkDescriptorSetAllocateInfo{
+            .descriptorPool = pool, .descriptorSetCount = 1, .pSetLayouts = &layout.md.vk->layout });
+        VkDescriptorSet vkset;
+        const auto res = vkAllocateDescriptorSets(RendererBackendVk::get_dev(), &vk_alloc_info, &vkset);
+        if(res != VK_SUCCESS)
         {
-            buffer_slots.free_slot(e.second);
+            if(res != VK_ERROR_OUT_OF_POOL_MEMORY)
+            {
+                ENG_ERROR("Unhandled error");
+                return {};
+            }
+            used.push_back(pool);
+            free.pop_back();
+            continue;
         }
-        buffer_indices.erase(it);
+        return { setidx, vkset };
     }
 }
 
-void BindlessPool::free_index(Handle<Texture> handle)
+void DescriptorPoolVk::add_page()
 {
-    const auto is_storage = handle->is_storage;
-    if(is_storage)
-    {
-        if(auto it = image_indices.find(handle); it != image_indices.end())
+    const auto vksizes = [this]() {
+        std::vector<VkDescriptorPoolSize> vec;
+        vec.reserve(sizes.size());
+        for(const auto& sz : sizes)
         {
-            image_slots.free_slot(it->second);
-            image_indices.erase(it);
+            vec.push_back(VkDescriptorPoolSize{ .type = to_vk(sz.type), .descriptorCount = (uint32_t)sz.ratio * max_allocs });
         }
+        return vec;
+    }();
+    const auto vk_pool_info = Vks(VkDescriptorPoolCreateInfo{ .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+                                                              .maxSets = max_allocs,
+                                                              .poolSizeCount = (uint32_t)sizes.size(),
+                                                              .pPoolSizes = vksizes.data() });
+    VK_CHECK(vkCreateDescriptorPool(RendererBackendVk::get_dev(), &vk_pool_info, nullptr, &free.emplace_back()));
+    max_allocs = std::min(4096.0, std::ceil(max_allocs * 1.5));
+}
+
+DescriptorSetAllocatorBindlessVk::DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout)
+{
+    const auto& layout0 = global_bindless_layout.layout[0].get();
+    std::vector<DescriptorSizeRatio> ratios = [&layout0] {
+        std::vector<DescriptorSizeRatio> ratios;
+        ratios.reserve(layout0.layout.size());
+        for(const auto& d : layout0.layout)
+        {
+            ratios.push_back(DescriptorSizeRatio{ d.type, (float)d.size });
+        }
+        return ratios;
+    }();
+    DescriptorPoolVk pool{ 1, ratios };
+
+    set = pool.allocate(layout0, 0);
+}
+
+void DescriptorSetAllocatorBindlessVk::bind_resources(uint32_t slot, std::span<const DescriptorResource> resources)
+{
+    for(auto i = 0u; i < resources.size(); ++i)
+    {
+        const auto& res = resources[i];
+        uint32_t idx;
+        if(res.type == DescriptorType::STORAGE_BUFFER)
+        {
+            idx = bind_resource(*static_cast<const BufferView*>(res.view));
+        }
+        else if(res.type == DescriptorType::STORAGE_IMAGE || res.type == DescriptorType::SAMPLED_IMAGE)
+        {
+            idx = bind_resource(*static_cast<const ImageView*>(res.view), res.type == DescriptorType::STORAGE_IMAGE);
+        }
+        else
+        {
+            ENG_ERROR("Unrecognized type");
+            continue;
+        }
+        push_values[slot + i] = idx;
+    }
+    push_ranges.push_back({ slot, (uint32_t)resources.size() });
+}
+
+uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const ImageView& view, bool is_storage)
+{
+    return bind_resource(view, is_storage);
+}
+
+uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const BufferView& view) { return bind_resource(view); }
+
+void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
+{
+    if(writes.size() > 0)
+    {
+        vkUpdateDescriptorSets(RendererBackendVk::get_dev(), (uint32_t)writes.size(), writes.data(), 0, nullptr);
+        writes.clear();
+        buf_writes.clear();
+        img_writes.clear();
+    }
+    for(const auto& range : push_ranges)
+    {
+        cmd->push_constants(ShaderStage::ALL, &push_values[range.offset],
+                            { (uint32_t)(range.offset * sizeof(uint32_t)), (uint32_t)(range.size * sizeof(uint32_t)) });
+    }
+    push_ranges.clear();
+    cmd->bind_sets(&set, 1);
+}
+
+void DescriptorSetAllocatorBindlessVk::reset()
+{
+    const auto& r = get_renderer();
+    auto delcount = 0u;
+    for(auto i = 0u; i < pending_frees.size(); ++i)
+    {
+        auto& pf = pending_frees[i];
+        if(r.frame_index - pf.frame < r.frames_in_flight)
+        {
+            // break, as next frees were only added later, so cannot be freed too.
+            break;
+        }
+        pf.allocator->free_slot(pf.slot);
+        ++delcount;
+    }
+    pending_frees.erase(pending_frees.begin(), pending_frees.begin() + delcount);
+    push_ranges.clear();
+}
+
+uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
+{
+    const auto& buf = view.buffer.get();
+    auto [it, success] = buffer_views.emplace(view.buffer, Views{ .vkbuffer = buf.md.vk->buffer });
+    auto& views = buffer_views[view.buffer];
+    if(views.vkbuffer != buf.md.vk->buffer)
+    {
+        views.vkbuffer = buf.md.vk->buffer;
+        for(const auto& e : views.slots)
+        {
+            pending_frees.push_back(FreedResource{ &storage_buffer_slots, e.slot, get_renderer().frame_index });
+        }
+        views.slots.clear();
+    }
+
+    const auto vit =
+        std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.buffer == view; });
+
+    if(vit != views.slots.end()) { return vit->slot; }
+    const auto alloc = (uint32_t)storage_buffer_slots.allocate_slot();
+    views.slots.push_back(Views::Slot{ .slot = alloc, .buffer = view, .is_storage = true });
+    write_descriptor(DescriptorType::STORAGE_BUFFER, &view, alloc);
+    return alloc;
+}
+
+uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is_storage)
+{
+    const auto& img = view.image.get();
+    auto [it, success] = image_views.emplace(view.image, Views{ .vkimage = img.md.vk->image });
+    auto& views = it->second;
+    if(views.vkimage != img.md.vk->image)
+    {
+        views.vkimage = img.md.vk->image;
+        for(const auto& e : views.slots)
+        {
+            if(e.is_storage)
+            {
+                pending_frees.push_back(FreedResource{ &storage_image_slots, e.slot, get_renderer().frame_index });
+            }
+            else { pending_frees.push_back(FreedResource{ &sampled_image_slots, e.slot, get_renderer().frame_index }); }
+        }
+        views.slots.clear();
+    }
+
+    const auto vit =
+        std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.image == view; });
+
+    if(vit != views.slots.end()) { return vit->slot; }
+    const auto alloc = (uint32_t)storage_buffer_slots.allocate_slot();
+    views.slots.push_back(Views::Slot{ .slot = alloc, .image = view, .is_storage = is_storage });
+    write_descriptor(is_storage ? DescriptorType::STORAGE_BUFFER : DescriptorType::SAMPLED_IMAGE, &view, alloc);
+    return alloc;
+}
+
+void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, uint32_t slot)
+{
+    auto& write = writes.emplace_back(Vks(VkWriteDescriptorSet{}));
+    write.dstSet = set.set;
+    write.descriptorCount = 1;
+    write.descriptorType = to_vk(type);
+    write.dstArrayElement = slot;
+    write.dstBinding = type == DescriptorType::STORAGE_BUFFER  ? BINDLESS_STORAGE_BUFFER_BINDING
+                       : type == DescriptorType::STORAGE_IMAGE ? BINDLESS_STORAGE_IMAGE_BINDING
+                       : type == DescriptorType::SAMPLED_IMAGE ? BINDLESS_SAMPLED_IMAGE_BINDING
+                                                               : ~0u;
+    assert(write.dstBinding != ~0u);
+
+    if(type == DescriptorType::STORAGE_BUFFER)
+    {
+        auto* info = &buf_writes.emplace_back();
+        const auto& engview = *(BufferView*)view;
+        info->buffer = engview.buffer->md.vk->buffer;
+        info->offset = engview.range.offset;
+        info->range = engview.range.size;
+        write.pBufferInfo = info;
+    }
+    else if(type == DescriptorType::STORAGE_IMAGE)
+    {
+        auto* info = &img_writes.emplace_back();
+        const auto& engview = (const ImageView*)view;
+        info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        info->imageView = engview->get_md().vk->view;
+        info->sampler = {};
+        write.pImageInfo = info;
+    }
+    else if(type == DescriptorType::SAMPLED_IMAGE)
+    {
+        auto* info = &img_writes.emplace_back();
+        const auto& engview = (const ImageView*)view;
+        info->imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+        info->imageView = engview->get_md().vk->view;
+        info->sampler = {};
+        write.pImageInfo = info;
     }
     else
     {
-        if(auto it = texture_indices.find(handle); it != texture_indices.end())
-        {
-            texture_slots.free_slot(it->second);
-            texture_indices.erase(it);
-        }
+        ENG_ERROR("Invalid type");
+        writes.pop_back();
+        return;
     }
-}
-
-void BindlessPool::update_index(Handle<Buffer> handle)
-{
-    if(!buffer_indices.contains(handle)) { return; }
-    const auto& views = buffer_indices.at(handle);
-
-    for(auto& e : views)
-    {
-        const auto& update = buffer_updates.emplace_back(Vks(VkDescriptorBufferInfo{
-            .buffer = VkBufferMetadata::get(handle.get()).buffer, .offset = e.first.range.offset, .range = e.first.range.size }));
-        const auto write = Vks(VkWriteDescriptorSet{ .dstSet = VkDescriptorSetMetadata::get(pool->get_dset(set))->set,
-                                                     .dstBinding = BINDLESS_STORAGE_BUFFER_BINDING,
-                                                     .dstArrayElement = e.second,
-                                                     .descriptorCount = 1,
-                                                     .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                                     .pBufferInfo = &update });
-        updates.push_back(write);
-    }
-}
-
-void BindlessPool::update_index(Handle<Texture> handle)
-{
-    const auto& txt = handle.get();
-    const auto index = txt.is_storage ? image_indices.at(handle) : texture_indices.at(handle);
-    const auto& update = image_updates.emplace_back(Vks(VkDescriptorImageInfo{
-        .sampler = nullptr, .imageView = txt.view->md.vk->view, .imageLayout = to_vk(txt.layout) }));
-    const auto write = Vks(VkWriteDescriptorSet{
-        .dstSet = VkDescriptorSetMetadata::get(pool->get_dset(set))->set,
-        .dstBinding = (uint32_t)(txt.is_storage ? BINDLESS_STORAGE_IMAGE_BINDING : BINDLESS_SAMPLED_IMAGE_BINDING),
-        .dstArrayElement = index,
-        .descriptorCount = 1,
-        .descriptorType = (txt.is_storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE),
-        .pImageInfo = &update });
-    updates.push_back(write);
-}
-
-void BindlessPool::update_index(Handle<Sampler> handle)
-{
-    const auto& res = handle.get();
-    const auto index = sampler_indices.at(handle);
-    const auto& update =
-        sampler_updates.emplace_back(Vks(VkDescriptorImageInfo{ .sampler = VkSamplerMetadata::get(res).sampler }));
-    const auto write = Vks(VkWriteDescriptorSet{ .dstSet = VkDescriptorSetMetadata::get(pool->get_dset(set))->set,
-                                                 .dstBinding = (uint32_t)BINDLESS_SAMPLER_BINDING,
-                                                 .dstArrayElement = index,
-                                                 .descriptorCount = 1,
-                                                 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-                                                 .pImageInfo = &update });
-    updates.push_back(write);
-}
-
-void BindlessPool::update()
-{
-    if(updates.empty()) { return; }
-    vkUpdateDescriptorSets(RendererBackendVulkan::get_instance()->dev, updates.size(), updates.data(), 0, nullptr);
-    updates.clear();
-    image_updates.clear();
-    buffer_updates.clear();
-    sampler_updates.clear();
 }
 
 } // namespace gfx

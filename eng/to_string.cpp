@@ -7,69 +7,65 @@
 
 namespace eng
 {
+namespace gfx
+{
 // clang-format off
-std::string to_string(const gfx::ImageFormat& a) 
+std::string to_string(const ImageFormat& a) 
 { 
     switch(a) 
     {
-        case gfx::ImageFormat::R8G8B8A8_UNORM: { return "R8G8B8A8_UNORM"; }
-        case gfx::ImageFormat::R8G8B8A8_SRGB: { return "R8G8B8A8_SRGB"; }
+        case ImageFormat::R8G8B8A8_UNORM: { return "R8G8B8A8_UNORM"; }
+        case ImageFormat::R8G8B8A8_SRGB: { return "R8G8B8A8_SRGB"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
 
-std::string to_string(const gfx::ImageType& a) 
+std::string to_string(const ImageType& a) 
 { 
     switch(a) 
     {
-        case gfx::ImageType::TYPE_1D: { return "TYPE_1D"; }
-        case gfx::ImageType::TYPE_2D: { return "TYPE_2D"; }
-        case gfx::ImageType::TYPE_3D: { return "TYPE_3D"; }
+        case ImageType::TYPE_1D: { return "TYPE_1D"; }
+        case ImageType::TYPE_2D: { return "TYPE_2D"; }
+        case ImageType::TYPE_3D: { return "TYPE_3D"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
 
-std::string to_string(const gfx::ImageViewType& a) 
+std::string to_string(const ImageViewType& a) 
 { 
     switch(a) 
     {
-        case gfx::ImageViewType::NONE:    { return "NONE"; }
-        case gfx::ImageViewType::TYPE_1D: { return "TYPE_1D"; }
-        case gfx::ImageViewType::TYPE_2D: { return "TYPE_2D"; }
-        case gfx::ImageViewType::TYPE_3D: { return "TYPE_3D"; }
+        case ImageViewType::NONE:    { return "NONE"; }
+        case ImageViewType::TYPE_1D: { return "TYPE_1D"; }
+        case ImageViewType::TYPE_2D: { return "TYPE_2D"; }
+        case ImageViewType::TYPE_3D: { return "TYPE_3D"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
 
-std::string to_string(const gfx::ImageViewDescriptor& a)
-{
-    return ENG_FMT("{}_{}_{}_{}_{}_{}", a.format ? to_string(*a.format) : "EMPTY",
-                       a.view_type ? to_string(*a.view_type) : "EMPTY", a.mips.offset, a.mips.size, a.layers.offset,
-                       a.layers.size);
-}
-
-std::string to_string(const gfx::SyncType& a)
+std::string to_string(const SyncType& a)
 {
     switch(a) 
     {
-        case gfx::SyncType::UNKNOWN: { return "UNKNOWN"; }
-        case gfx::SyncType::FENCE: { return "FENCE"; }
-        case gfx::SyncType::BINARY_SEMAPHORE: { return "BINARY_SEMAPHORE"; }
-        case gfx::SyncType::TIMELINE_SEMAPHORE: { return "TIMELINE_SEMAPHORE"; }
+        case SyncType::UNKNOWN: { return "UNKNOWN"; }
+        case SyncType::FENCE: { return "FENCE"; }
+        case SyncType::BINARY_SEMAPHORE: { return "BINARY_SEMAPHORE"; }
+        case SyncType::TIMELINE_SEMAPHORE: { return "TIMELINE_SEMAPHORE"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
 
-std::string to_string(const gfx::RenderPassType& a)
+std::string to_string(const RenderPassType& a)
 {
     switch(a)
     {
-        case gfx::RenderPassType::FORWARD: { return "FORWARD"; }
-        case gfx::RenderPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
+        case RenderPassType::FORWARD: { return "FORWARD"; }
+        case RenderPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
 
 // clang-format on
 
+} // namespace gfx
 } // namespace eng

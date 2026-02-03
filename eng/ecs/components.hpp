@@ -51,9 +51,8 @@ struct Node
 
 struct Mesh
 {
-    const asset::Mesh* mesh{};
-    std::vector<Handle<gfx::Mesh>> meshes;
-    uint32_t gpu_resource{ ~0u };
+    const asset::Mesh* asset{};   // asset
+    uint32_t gpu_resource{ ~0u }; // per-instance
 };
 
 struct alignas(16) Light

@@ -1,24 +1,16 @@
 #pragma once
 
 #include <string>
+#include <eng/renderer/renderer_fwd.hpp>
 
 namespace eng
 {
 namespace gfx
 {
-enum class ImageFormat;
-enum class ImageType;
-enum class ImageViewType;
-enum class SyncType;
-struct ImageViewDescriptor;
-enum class RenderPassType : uint32_t;
+std::string to_string(const ImageFormat& a);
+std::string to_string(const ImageType& a);
+std::string to_string(const ImageViewType& a);
+std::string to_string(const SyncType& a);
+std::string to_string(const RenderPassType& a);
 } // namespace gfx
-
-std::string to_string(const gfx::ImageFormat& a);
-std::string to_string(const gfx::ImageType& a);
-std::string to_string(const gfx::ImageViewType& a);
-std::string to_string(const gfx::ImageViewDescriptor& a);
-std::string to_string(const gfx::SyncType& a);
-std::string to_string(const gfx::RenderPassType& a);
-
 } // namespace eng

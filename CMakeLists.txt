@@ -133,7 +133,7 @@ add_executable(eng
 target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
-#target_compile_options(eng PRIVATE -Wall)
+# target_compile_options(eng PRIVATE )
 target_link_libraries(eng
     PUBLIC
         glm 
@@ -154,7 +154,6 @@ target_compile_definitions(eng
         _CRT_SECURE_NO_WARNINGS
         VC_EXTRALEAN
         NOMINMAX
-        ENGINE_BASE_ASSET_PATH="${CMAKE_SOURCE_DIR}/assets/"
         IMGUI_DEFINE_MATH_OPERATORS
 )
 

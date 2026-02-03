@@ -6,6 +6,7 @@
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/engine.hpp>
+#include <eng/common/paths.hpp>
 #include <eng/camera.hpp>
 #include <eng/scene.hpp>
 #include <eng/ui.hpp>
@@ -115,8 +116,10 @@ Engine& Engine::get()
     return _engine;
 }
 
-void Engine::init()
+void Engine::init(int argc, char* argv[])
 {
+    eng::paths::init(argv[0]);
+
     if(!glfwInit()) { ENG_WARN("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
@@ -132,8 +135,9 @@ void Engine::init()
     glfwSetWindowFocusCallback(window->window, on_window_focus);
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
+
     camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
-    renderer->init(new gfx::RendererBackendVulkan{});
+    renderer->init(new gfx::RendererBackendVk{});
     scene->init();
     ui->init();
 }
@@ -153,7 +157,7 @@ void Engine::start()
             ui->update();
             scene->update();
             renderer->update();
-            ++frame_num;
+            ++tick;
             last_frame_time = now;
         }
         delta_time = get_time_secs() - last_frame_time;

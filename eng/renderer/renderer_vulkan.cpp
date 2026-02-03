@@ -57,74 +57,91 @@ namespace eng
 namespace gfx
 {
 
-void VkPipelineLayoutMetadata::init(PipelineLayout& a)
+void DescriptorLayoutMetadataVk::init(DescriptorLayout& a)
 {
-    if(a.metadata) { return; }
-    auto* r = RendererBackendVulkan::get_instance();
-    auto* md = new VkPipelineLayoutMetadata{};
-    a.metadata = md;
+    if(a.md.vk) { return; }
+    auto* md = new DescriptorLayoutMetadataVk{};
+    a.md.vk = md;
 
-    md->dlayouts.resize(a.info.sets.size());
-    std::vector<VkDescriptorSetLayoutCreateInfo> dsl_cinfos(a.info.sets.size());
-    std::vector<std::vector<VkDescriptorSetLayoutBinding>> dsl_bindings(a.info.sets.size());
-    std::vector<std::vector<VkDescriptorBindingFlags>> db_flags(a.info.sets.size());
-    std::vector<std::vector<VkSampler>> immsamps(a.info.sets.size());
-    for(auto dslidx = 0u; dslidx < dsl_cinfos.size(); ++dslidx)
-    {
-        const auto& aset = a.info.sets.at(dslidx);
-        dsl_bindings.at(dslidx).resize(aset.bindings.size());
-        db_flags.at(dslidx).resize(aset.bindings.size());
-        auto& dsl_cinfo = dsl_cinfos.at(dslidx);
-        dsl_cinfo = Vks(VkDescriptorSetLayoutCreateInfo{
-            .flags = gfx::to_vk(aset.flags),
-            .bindingCount = (uint32_t)aset.bindings.size(),
-            .pBindings = dsl_bindings.at(dslidx).data(),
-        });
-        auto dslbf_cinfo = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{ .bindingCount = (uint32_t)aset.bindings.size(),
-                                                                            .pBindingFlags = db_flags.at(dslidx).data() });
-        dsl_cinfo.pNext = &dslbf_cinfo;
-        for(auto bidx = 0u; bidx < aset.bindings.size(); ++bidx)
+    std::vector<VkSampler> vkimsamps;
+    std::vector<VkDescriptorBindingFlags> vkbindingflags;
+    const auto vkbindings = [&a, &vkimsamps, &vkbindingflags] {
+        std::vector<VkDescriptorSetLayoutBinding> bindings;
+        bindings.reserve(a.layout.size());
+        vkbindingflags.reserve(a.layout.size());
+        for(const auto& e : a.layout)
         {
-            const auto& abinding = aset.bindings.at(bidx);
-            if(abinding.immutable_samplers)
+            if(e.immutable_samplers)
             {
-                immsamps.at(dslidx).resize(abinding.size);
-                for(auto j = 0u; j < abinding.size; ++j)
+                vkimsamps.resize(e.size);
+                for(auto i = 0u; i < e.size; ++i)
                 {
-                    immsamps.at(dslidx).at(j) = VkSamplerMetadata::get(abinding.immutable_samplers[j].get()).sampler;
+                    vkimsamps[i] = e.immutable_samplers[i]->md.vk->sampler;
                 }
             }
-            dsl_bindings.at(dslidx).at(bidx) =
-                Vks(VkDescriptorSetLayoutBinding{ .binding = abinding.slot,
-                                                  .descriptorType = gfx::to_vk(abinding.type),
-                                                  .descriptorCount = abinding.size,
-                                                  .stageFlags = gfx::to_vk(abinding.stages),
-                                                  .pImmutableSamplers = immsamps.at(dslidx).data() });
-            db_flags.at(dslidx).at(bidx) = gfx::to_vk(abinding.flags);
+            bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = e.slot,
+                .descriptorType = to_vk(e.type),
+                .descriptorCount = e.size,
+                .stageFlags = to_vk(e.stages),
+                .pImmutableSamplers = e.immutable_samplers ? vkimsamps.data() : nullptr,
+            });
+            vkbindingflags.push_back(VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+                                     VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
         }
-        if(md->dlayouts.at(dslidx)) { vkDestroyDescriptorSetLayout(r->dev, md->dlayouts.at(dslidx), nullptr); }
-        VK_CHECK(vkCreateDescriptorSetLayout(r->dev, &dsl_cinfo, nullptr, &md->dlayouts.at(dslidx)));
-    }
+        return bindings;
+    }();
 
-    VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.info.range.stages), .offset = 0ull, .size = a.info.range.size };
+    const auto vkbindingflagsinfo = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
+        .bindingCount = (uint32_t)vkbindingflags.size(),
+        .pBindingFlags = vkbindingflags.data(),
+    });
 
-    const auto pli = Vks(VkPipelineLayoutCreateInfo{ .setLayoutCount = (uint32_t)md->dlayouts.size(),
-                                                     .pSetLayouts = md->dlayouts.data(),
-                                                     .pushConstantRangeCount = range.size > 0 ? 1u : 0u,
-                                                     .pPushConstantRanges = &range });
-    VK_CHECK(vkCreatePipelineLayout(r->dev, &pli, nullptr, &md->layout));
+    const auto vklayoutinfo = Vks(VkDescriptorSetLayoutCreateInfo{
+        .pNext = &vkbindingflagsinfo,
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
+        .bindingCount = (uint32_t)vkbindings.size(),
+        .pBindings = vkbindings.data(),
+    });
+    VK_CHECK(vkCreateDescriptorSetLayout(RendererBackendVk::get_dev(), &vklayoutinfo, nullptr, &md->layout));
 }
 
-void VkPipelineLayoutMetadata::destroy(PipelineLayout& a)
+void DescriptorLayoutMetadataVk::destroy(DescriptorLayout& a)
 {
-    // destroy set layouts
+    if(a.md.vk == nullptr) { return; }
+    vkDestroyDescriptorSetLayout(RendererBackendVk::get_dev(), a.md.vk->layout, nullptr);
+    delete a.md.vk;
+    a.md.vk = nullptr;
+}
+
+void PipelineLayoutMetadataVk::init(PipelineLayout& a)
+{
+    if(a.md.vk) { return; }
+    auto* md = new PipelineLayoutMetadataVk{};
+    a.md.vk = md;
+
+    std::vector<VkDescriptorSetLayout> vksls(a.layout.size());
+    for(auto i = 0u; i < vksls.size(); ++i)
+    {
+        vksls[i] = a.layout[i]->md.vk->layout;
+    }
+    VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.push_range.stages), .offset = 0ull, .size = a.push_range.size };
+
+    const auto pli = Vks(VkPipelineLayoutCreateInfo{ .setLayoutCount = (uint32_t)vksls.size(),
+                                                     .pSetLayouts = vksls.data(),
+                                                     .pushConstantRangeCount = range.size > 0 ? 1u : 0u,
+                                                     .pPushConstantRanges = &range });
+    VK_CHECK(vkCreatePipelineLayout(RendererBackendVk::get_dev(), &pli, nullptr, &md->layout));
+}
+
+void PipelineLayoutMetadataVk::destroy(PipelineLayout& a)
+{
     // destroy layout
     // free metadata
     ENG_TODO();
-    assert(false);
 }
 
-void VkPipelineMetadata::init(const Pipeline& a)
+void PipelineMetadataVk::init(const Pipeline& a)
 {
     if(!a.md.vk)
     {
@@ -132,10 +149,10 @@ void VkPipelineMetadata::init(const Pipeline& a)
         return;
     }
 
-    auto* r = RendererBackendVulkan::get_instance();
+    auto vkdev = RendererBackendVk::get_dev();
     auto* md = a.md.vk;
 
-    if(md->pipeline) { vkDestroyPipeline(r->dev, md->pipeline, nullptr); }
+    if(md->pipeline) { vkDestroyPipeline(vkdev, md->pipeline, nullptr); }
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     stages.reserve(a.info.shaders.size());
@@ -146,9 +163,8 @@ void VkPipelineMetadata::init(const Pipeline& a)
 
     if(a.type == PipelineType::COMPUTE)
     {
-        const auto vkinfo = Vks(VkComputePipelineCreateInfo{
-            .stage = stages.at(0), .layout = VkPipelineLayoutMetadata::get(a.info.layout.get())->layout });
-        VK_CHECK(vkCreateComputePipelines(r->dev, {}, 1, &vkinfo, {}, &md->pipeline));
+        const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = a.info.layout->md.vk->layout });
+        VK_CHECK(vkCreateComputePipelines(vkdev, {}, 1, &vkinfo, {}, &md->pipeline));
         return;
     }
 
@@ -265,59 +281,31 @@ void VkPipelineMetadata::init(const Pipeline& a)
         .pDepthStencilState = &pDepthStencilState,
         .pColorBlendState = &pColorBlendState,
         .pDynamicState = &pDynamicState,
-        .layout = VkPipelineLayoutMetadata::get(a.info.layout.get())->layout,
+        .layout = a.info.layout->md.vk->layout,
     });
-    VK_CHECK(vkCreateGraphicsPipelines(r->dev, nullptr, 1, &vk_info, nullptr, &md->pipeline));
+    VK_CHECK(vkCreateGraphicsPipelines(vkdev, nullptr, 1, &vk_info, nullptr, &md->pipeline));
 }
 
-void VkPipelineMetadata::destroy(Pipeline& a)
+void PipelineMetadataVk::destroy(Pipeline& a)
 {
     if(!a.md.vk) { return; }
     auto* md = a.md.vk;
     assert(md->pipeline);
-    vkDestroyPipeline(RendererBackendVulkan::get_instance()->dev, md->pipeline, nullptr);
+    vkDestroyPipeline(RendererBackendVk::get_dev(), md->pipeline, nullptr);
     delete a.md.vk;
     a.md.vk = nullptr;
 }
 
-void VkDescriptorPoolMetadata::init(DescriptorPool& a)
+void BufferMetadataVk::init(Buffer& a)
 {
-    if(a.metadata) { return; }
-    auto* md = new VkDescriptorPoolMetadata{};
-    a.metadata = md;
-
-    std::vector<VkDescriptorPoolSize> sizes(a.info.pools.size());
-    for(auto i = 0u; i < sizes.size(); ++i)
-    {
-        sizes.at(i) =
-            VkDescriptorPoolSize{ .type = gfx::to_vk(a.info.pools.at(i).type), .descriptorCount = a.info.pools.at(i).count };
-    }
-    auto dpi = Vks(VkDescriptorPoolCreateInfo{
-        .flags = gfx::to_vk(a.info.flags),
-        .maxSets = a.info.max_sets,
-        .poolSizeCount = (uint32_t)sizes.size(),
-        .pPoolSizes = sizes.data(),
-    });
-    VK_CHECK(vkCreateDescriptorPool(RendererBackendVulkan::get_instance()->dev, &dpi, nullptr, &md->pool));
-    a.sets.reserve(a.info.max_sets);
-}
-
-void VkDescriptorPoolMetadata::destroy(DescriptorPool& a)
-{
-    ENG_TODO();
-    assert(false);
-}
-
-void VkBufferMetadata::init(Buffer& a)
-{
-    if(a.metadata)
+    if(a.md.vk)
     {
         ENG_ERROR("Trying to init already init buffer");
         return;
     }
 
-    auto* md = new VkBufferMetadata{};
-    a.metadata = md;
+    auto* md = new BufferMetadataVk{};
+    a.md.vk = md;
     const auto cpu_map = a.usage.test(gfx::BufferUsage::CPU_ACCESS);
     if(a.capacity == 0)
     {
@@ -326,7 +314,7 @@ void VkBufferMetadata::init(Buffer& a)
     }
     a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
 
-    auto* r = RendererBackendVulkan::get_instance();
+    auto& backend = RendererBackendVk::get_instance();
     const auto vkinfo = Vks(VkBufferCreateInfo{ .size = a.capacity, .usage = to_vk(a.usage) });
     const auto vmainfo = VmaAllocationCreateInfo{
         .flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u,
@@ -335,7 +323,7 @@ void VkBufferMetadata::init(Buffer& a)
     };
 
     VmaAllocationInfo vmaai{};
-    VK_CHECK(vmaCreateBuffer(r->vma, &vkinfo, &vmainfo, &md->buffer, &md->vmaa, &vmaai));
+    VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vmaa, &vmaai));
     if(md->buffer) { set_debug_name(md->buffer, a.name); }
     else
     {
@@ -346,38 +334,26 @@ void VkBufferMetadata::init(Buffer& a)
     if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
     {
         const auto vkbdai = Vks(VkBufferDeviceAddressInfo{ .buffer = md->buffer });
-        md->bda = vkGetBufferDeviceAddress(r->dev, &vkbdai);
+        md->bda = vkGetBufferDeviceAddress(backend.dev, &vkbdai);
     }
 }
 
-void VkBufferMetadata::destroy(Buffer& a)
+void BufferMetadataVk::destroy(Buffer& a)
 {
-    if(!a.metadata)
+    if(!a.md.vk)
     {
         assert(a.capacity == 0);
         return;
     }
-    auto* r = RendererBackendVulkan::get_instance();
-    auto* md = (VkBufferMetadata*)a.metadata;
+    auto& backend = RendererBackendVk::get_instance();
+    auto* md = a.md.vk;
     if(!md->buffer || !md->vmaa) { return; }
-    vmaDestroyBuffer(r->vma, md->buffer, md->vmaa);
+    vmaDestroyBuffer(backend.vma, md->buffer, md->vmaa);
     delete md;
-    a.metadata = nullptr;
+    a.md.vk = nullptr;
 }
 
-VkBufferMetadata& VkBufferMetadata::get(Buffer& a)
-{
-    assert(a.metadata);
-    return *(VkBufferMetadata*)a.metadata;
-}
-
-const VkBufferMetadata& VkBufferMetadata::get(const Buffer& a)
-{
-    assert(a.metadata);
-    return *(const VkBufferMetadata*)a.metadata;
-}
-
-void VkImageMetadata::init(Image& a, VkImage img)
+void ImageMetadataVk::init(Image& a, VkImage img)
 {
     if(a.md.vk)
     {
@@ -385,8 +361,8 @@ void VkImageMetadata::init(Image& a, VkImage img)
         return;
     }
 
-    auto* r = RendererBackendVulkan::get_instance();
-    auto* md = new VkImageMetadata{};
+    auto& backend = RendererBackendVk::get_instance();
+    auto* md = new ImageMetadataVk{};
     a.md.vk = md;
 
     if(a.width + a.height + a.depth == 0)
@@ -403,62 +379,75 @@ void VkImageMetadata::init(Image& a, VkImage img)
                                              .arrayLayers = a.layers,
                                              .samples = VK_SAMPLE_COUNT_1_BIT,
                                              .tiling = VK_IMAGE_TILING_OPTIMAL,
-                                             .usage = to_vk(a.usage),
-                                             .initialLayout = to_vk(a.current_layout) });
+                                             .usage = to_vk(a.usage) | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                             .initialLayout = to_vk(ImageLayout::UNDEFINED) });
     if(img) { md->image = img; }
-    else { VK_CHECK(vmaCreateImage(r->vma, &info, &vma_info, &md->image, &md->vmaa, nullptr)); }
+    else { VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr)); }
     if(md->image) { set_debug_name(md->image, a.name); }
     else { ENG_ERROR("Could not create image {}", a.name); }
 }
 
-void VkImageMetadata::destroy(Image& a, bool destroy_image)
+void ImageMetadataVk::destroy(Image& a, bool destroy_image)
 {
     if(!a.md.vk) { return; }
-    auto* r = RendererBackendVulkan::get_instance();
+    auto& backend = RendererBackendVk::get_instance();
     auto* md = a.md.vk;
-    if(destroy_image) { vmaDestroyImage(r->vma, md->image, md->vmaa); }
+    if(destroy_image) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
     delete a.md.vk;
     a.md.vk = nullptr;
 }
 
-void VkImageViewMetadata::init(ImageView& a)
+void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
 {
-    if(a.md.vk)
+    if(out_allocation == nullptr)
     {
-        ENG_ERROR("Trying to init already init image view");
+        ENG_ERROR("Out allocation is nullptr");
         return;
     }
-    assert(a.image);
-    auto* r = RendererBackendVulkan::get_instance();
-    auto& img = a.image.get();
-    assert(img.md.vk);
-    const auto vkinfo = Vks(VkImageViewCreateInfo{
-        .image = a.image->md.vk->image,
-        .viewType = to_vk(a.type),
-        .format = to_vk(a.format),
-        .subresourceRange = { to_vk(a.aspect), a.mips.offset, a.mips.size, a.layers.offset, a.layers.size } });
 
-    auto* md = new VkImageViewMetadata{};
-    a.md.vk = md;
-    VK_CHECK(vkCreateImageView(r->dev, &vkinfo, {}, &md->view));
+    if(!view.image)
+    {
+        ENG_ERROR("Invalid image");
+        return;
+    }
+
+    auto& backend = RendererBackendVk::get_instance();
+    auto& img = view.image.get();
+    ENG_ASSERT(img.md.vk != nullptr);
+
+    const auto src_layer = view.src_subresource / img.mips;
+    const auto src_mip = view.src_subresource % img.mips;
+    const auto dst_layer = view.dst_subresource / img.mips;
+    const auto dst_mip = view.dst_subresource % img.mips;
+    const auto vkinfo =
+        Vks(VkImageViewCreateInfo{ .image = view.image->md.vk->image,
+                                   .viewType = to_vk(view.type),
+                                   .format = to_vk(view.format),
+                                   .subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip,
+                                                         dst_mip - src_mip + 1, src_layer, dst_layer - src_layer + 1 } });
+
+    auto* md = new ImageViewMetadataVk{};
+    VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
     if(!md->view) { ENG_ERROR("Could not create image view for image {}", img.name); }
-    else { set_debug_name(md->view, a.name); }
+    else { set_debug_name(md->view, img.name); }
+    *out_allocation = md;
 }
 
-void VkImageViewMetadata::destroy(ImageView& a)
+void ImageViewMetadataVk::destroy(ImageView& a)
 {
-    if(!a.md.vk) { return; }
-    auto* md = a.md.vk;
-    assert(md->view);
-    auto* r = RendererBackendVulkan::get_instance();
-    vkDestroyImageView(r->dev, md->view, nullptr);
-    delete md;
-    a.md.vk = nullptr;
+    if(!a) { return; }
+    auto md = a.get_md();
+    if(md.vk == nullptr) { return; }
+    assert(md.vk->view);
+    auto& backend = RendererBackendVk::get_instance();
+    vkDestroyImageView(backend.dev, md.vk->view, nullptr);
+    delete md.vk;
+    a.image->views.erase(a);
 }
 
-void VkSamplerMetadata::init(Sampler& a)
+void SamplerMetadataVk::init(Sampler& a)
 {
-    if(a.metadata) { return; }
+    if(a.md.vk != nullptr) { return; }
     auto vkinfo = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(a.info.filtering[1]),
                                            .minFilter = gfx::to_vk(a.info.filtering[0]),
                                            .mipmapMode = gfx::to_vk(a.info.mipmap_mode),
@@ -474,37 +463,20 @@ void VkSamplerMetadata::init(Sampler& a)
         vkreduction.reductionMode = gfx::to_vk(*a.info.reduction_mode);
         vkinfo.pNext = &vkreduction;
     }
-    auto* md = new VkSamplerMetadata{};
-    a.metadata = md;
-    VK_CHECK(vkCreateSampler(RendererBackendVulkan::get_instance()->dev, &vkinfo, {}, &md->sampler));
+    auto* md = new SamplerMetadataVk{};
+    a.md.vk = md;
+    VK_CHECK(vkCreateSampler(RendererBackendVk::get_dev(), &vkinfo, {}, &md->sampler));
 }
 
-void VkSamplerMetadata::destroy(Sampler& a)
+void SamplerMetadataVk::destroy(Sampler& a)
 {
-    if(!a.metadata)
-    {
-        ENG_ERROR("Trying to init already init sampler.");
-        return;
-    }
-    auto* md = (VkSamplerMetadata*)a.metadata;
-    vkDestroySampler(RendererBackendVulkan::get_instance()->dev, md->sampler, nullptr);
-    delete md;
-    a.metadata = nullptr;
+    if(a.md.vk == nullptr) { return; }
+    vkDestroySampler(RendererBackendVk::get_dev(), a.md.vk->sampler, nullptr);
+    delete a.md.vk;
+    a.md.vk = nullptr;
 }
 
-VkSamplerMetadata& VkSamplerMetadata::get(Sampler& a)
-{
-    assert(a.metadata);
-    return *(VkSamplerMetadata*)a.metadata;
-}
-
-const VkSamplerMetadata& VkSamplerMetadata::get(const Sampler& a)
-{
-    assert(a.metadata);
-    return *(VkSamplerMetadata*)a.metadata;
-}
-
-void VkSwapchainMetadata::init(Swapchain& a)
+void SwapchainMetadataVk::init(Swapchain& a)
 {
     if(a.metadata)
     {
@@ -512,17 +484,17 @@ void VkSwapchainMetadata::init(Swapchain& a)
         return;
     }
     Swapchain::acquire_impl = &acquire;
-    a.images.resize(Renderer::frame_count);
-    a.views.resize(Renderer::frame_count);
-    auto* md = new VkSwapchainMetadata{};
+    a.images.resize(Renderer::frames_in_flight);
+    a.views.resize(Renderer::frames_in_flight);
+    auto* md = new SwapchainMetadataVk{};
     a.metadata = md;
 
     const auto image_usage_flags = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT;
     const auto image_format = ImageFormat::R8G8B8A8_SRGB;
-    auto* r = RendererBackendVulkan::get_instance();
+    auto& backend = RendererBackendVk::get_instance();
     const auto sinfo = Vks(VkSwapchainCreateInfoKHR{
-        .surface = r->window_surface,
-        .minImageCount = Renderer::frame_count,
+        .surface = backend.window_surface,
+        .minImageCount = Renderer::frames_in_flight,
         .imageFormat = to_vk(image_format),
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent = VkExtent2D{ (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height },
@@ -535,8 +507,8 @@ void VkSwapchainMetadata::init(Swapchain& a)
     });
 
     std::vector<VkImage> vkimgs(a.images.size());
-    VK_CHECK(vkCreateSwapchainKHR(r->dev, &sinfo, nullptr, &md->swapchain));
-    VK_CHECK(vkGetSwapchainImagesKHR(r->dev, md->swapchain, &Renderer::frame_count, vkimgs.data()));
+    VK_CHECK(vkCreateSwapchainKHR(backend.dev, &sinfo, nullptr, &md->swapchain));
+    VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &Renderer::frames_in_flight, vkimgs.data()));
 
     for(uint32_t i = 0; i < vkimgs.size(); ++i)
     {
@@ -546,56 +518,54 @@ void VkSwapchainMetadata::init(Swapchain& a)
         img.width = sinfo.imageExtent.width;
         img.height = sinfo.imageExtent.height;
         img.usage = image_usage_flags;
-        VkImageMetadata::init(img, vkimgs.at(i));
+        ImageMetadataVk::init(img, vkimgs.at(i));
         a.images[i] = Engine::get().renderer->images.insert(std::move(img));
-        a.views[i] = Engine::get().renderer->make_view(ImageViewDescriptor{ .name = ENG_FMT("swapchain_view_{}", i),
-                                                                            .image = a.images[i] });
-        a.images[i]->default_view = a.views[i];
+        a.views[i] = ImageView::init(a.images[i]);
     }
 }
 
-void VkSwapchainMetadata::destroy(Swapchain& a)
+void SwapchainMetadataVk::destroy(Swapchain& a)
 {
     if(!a.metadata) { return; }
-    auto* r = RendererBackendVulkan::get_instance();
+    auto& backend = RendererBackendVk::get_instance();
     auto& md = get(a);
-    vkDestroySwapchainKHR(r->dev, md.swapchain, nullptr);
+    vkDestroySwapchainKHR(backend.dev, md.swapchain, nullptr);
     assert(a.images.size() == a.views.size());
     for(auto i = 0u; i < a.images.size(); ++i)
     {
-        VkImageMetadata::destroy(a.images.at(i).get(), false);
+        ImageMetadataVk::destroy(a.images.at(i).get(), false);
         Engine::get().renderer->images.erase(a.images.at(i));
     }
     delete &md;
     a = Swapchain{};
 }
 
-VkSwapchainMetadata& VkSwapchainMetadata::get(Swapchain& a)
+SwapchainMetadataVk& SwapchainMetadataVk::get(Swapchain& a)
 {
     assert(a.metadata);
-    return *(VkSwapchainMetadata*)a.metadata;
+    return *(SwapchainMetadataVk*)a.metadata;
 }
 
-uint32_t VkSwapchainMetadata::acquire(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence)
+uint32_t SwapchainMetadataVk::acquire(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence)
 {
-    auto* r = RendererBackendVulkan::get_instance();
+    auto& backend = RendererBackendVk::get_instance();
     uint32_t index;
     VkSemaphore vksem{};
     VkFence vkfen{};
     if(semaphore) { vksem = semaphore->semaphore; }
     if(fence) { vkfen = fence->fence; }
-    VK_CHECK(vkAcquireNextImageKHR(r->dev, get(*a).swapchain, timeout, vksem, vkfen, &index));
+    VK_CHECK(vkAcquireNextImageKHR(backend.dev, get(*a).swapchain, timeout, vksem, vkfen, &index));
     return index;
 }
 
-RendererBackendVulkan* RendererBackendVulkan::get_instance()
+RendererBackendVk& RendererBackendVk::get_instance()
 {
-    return static_cast<RendererBackendVulkan*>(Engine::get().renderer->backend);
+    return *static_cast<RendererBackendVk*>(Engine::get().renderer->backend);
 }
 
-void RendererBackendVulkan::init() { initialize_vulkan(); }
+void RendererBackendVk::init() { initialize_vulkan(); }
 
-void RendererBackendVulkan::initialize_vulkan()
+void RendererBackendVk::initialize_vulkan()
 {
     if(volkInitialize() != VK_SUCCESS)
     {
@@ -781,6 +751,10 @@ void RendererBackendVulkan::initialize_vulkan()
         .vulkanApiVersion = VK_API_VERSION_1_3,
     };
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
+
+    caps = RendererBackendCaps{
+        .supports_bindless = true, // Should be really checked, but it's safe to assume true
+    };
 }
 
 // void RendererBackendVulkan::initialize_resources()
@@ -1329,40 +1303,33 @@ void RendererBackendVulkan::initialize_vulkan()
 // #endif
 // }
 
-Buffer RendererBackendVulkan::make_buffer(const BufferDescriptor& info)
+void RendererBackendVk::allocate_buffer(Buffer& buffer) { BufferMetadataVk::init(buffer); }
+
+void RendererBackendVk::destroy_buffer(Buffer& buffer) { BufferMetadataVk::destroy(buffer); }
+
+void RendererBackendVk::allocate_image(Image& image) { ImageMetadataVk::init(image); }
+
+void RendererBackendVk::allocate_view(const ImageView& view, void** out_allocation)
 {
-    Buffer b{ info };
-    VkBufferMetadata::init(b);
-    return b;
+    ImageViewMetadataVk::init(view, out_allocation);
 }
 
-void RendererBackendVulkan::destroy_buffer(Buffer& b) { VkBufferMetadata::destroy(b); }
-
-Image RendererBackendVulkan::make_image(const ImageDescriptor& info)
-{
-    Image i{ info };
-    VkImageMetadata::init(i);
-    return i;
-}
-
-void RendererBackendVulkan::make_view(ImageView& view) { VkImageViewMetadata::init(view); }
-
-Sampler RendererBackendVulkan::make_sampler(const SamplerDescriptor& info)
+Sampler RendererBackendVk::make_sampler(const SamplerDescriptor& info)
 {
     Sampler s{ info };
-    VkSamplerMetadata::init(s);
+    SamplerMetadataVk::init(s);
     return s;
 }
 
-void RendererBackendVulkan::make_shader(Shader& shader) { shader.md.vk = new VkShaderMetadata{}; }
+void RendererBackendVk::make_shader(Shader& shader) { shader.md.vk = new ShaderMetadataVk{}; }
 
-bool RendererBackendVulkan::compile_shader(const Shader& shader)
+bool RendererBackendVk::compile_shader(const Shader& shader)
 {
     auto* shmd = shader.md.vk;
     assert(shmd);
     static const auto read_file = [](const std::filesystem::path& file_path) {
         std::string file_path_str = file_path.string();
-        std::string include_paths = (std::filesystem::path{ ENGINE_BASE_ASSET_PATH } / "shaders").string();
+        std::string include_paths = eng::paths::SHADERS_DIR.string();
         char stbi_error[256] = {};
         char* stb_include_cstr = stb_include_file(file_path_str.data(), nullptr, include_paths.data(), stbi_error);
         if(!stb_include_cstr)
@@ -1445,13 +1412,19 @@ bool RendererBackendVulkan::compile_shader(const Shader& shader)
     return true;
 }
 
-bool RendererBackendVulkan::compile_pplayout(PipelineLayout& layout)
+bool RendererBackendVk::compile_layout(DescriptorLayout& layout)
 {
-    VkPipelineLayoutMetadata::init(layout);
+    DescriptorLayoutMetadataVk::init(layout);
     return true;
 }
 
-void RendererBackendVulkan::make_pipeline(Pipeline& pipeline)
+bool RendererBackendVk::compile_layout(PipelineLayout& layout)
+{
+    PipelineLayoutMetadataVk::init(layout);
+    return true;
+}
+
+void RendererBackendVk::make_pipeline(Pipeline& pipeline)
 {
     const auto stage = pipeline.info.shaders[0]->stage;
     if(stage == ShaderStage::VERTEX_BIT) { pipeline.type = PipelineType::GRAPHICS; }
@@ -1461,62 +1434,57 @@ void RendererBackendVulkan::make_pipeline(Pipeline& pipeline)
         ENG_ERROR("Unrecognized pipeline type");
         return;
     }
-    pipeline.md.vk = new VkPipelineMetadata{};
+    pipeline.md.vk = new PipelineMetadataVk{};
 }
 
-bool RendererBackendVulkan::compile_pipeline(const Pipeline& pipeline)
+bool RendererBackendVk::compile_pipeline(const Pipeline& pipeline)
 {
-    VkPipelineMetadata::init(pipeline);
+    PipelineMetadataVk::init(pipeline);
     return true;
 }
 
-Sync* RendererBackendVulkan::make_sync(const SyncCreateInfo& info)
+Sync* RendererBackendVk::make_sync(const SyncCreateInfo& info)
 {
     auto* s = new Sync{};
     s->init(info);
     return s;
 }
 
-void RendererBackendVulkan::destory_sync(Sync* sync)
+void RendererBackendVk::destory_sync(Sync* sync)
 {
     assert(sync);
     sync->destroy();
     delete sync;
 }
 
-Swapchain* RendererBackendVulkan::make_swapchain()
+Swapchain* RendererBackendVk::make_swapchain()
 {
     auto* sw = new Swapchain{};
-    VkSwapchainMetadata::init(*sw);
+    SwapchainMetadataVk::init(*sw);
     return sw;
 }
 
-SubmitQueue* RendererBackendVulkan::get_queue(QueueType type)
+SubmitQueue* RendererBackendVk::get_queue(QueueType type)
 {
     if(type == QueueType::GRAPHICS) { return gq; }
     ENG_ERROR("Unsupported queue");
     return nullptr;
 }
 
-DescriptorPool RendererBackendVulkan::make_descpool(const DescriptorPoolCreateInfo& info)
+ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
-    DescriptorPool pool{ .info = info };
-    VkDescriptorPoolMetadata::init(pool);
-    return pool;
+    const auto& img = view.image.get();
+    return ImageView::Metadata{ .vk = (ImageViewMetadataVk*)img.views.at(view) };
 }
 
-DescriptorSet RendererBackendVulkan::allocate_set(DescriptorPool& pool, const PipelineLayout& playout, uint32_t dset_idx)
+size_t RendererBackendVk::get_indirect_indexed_command_size() const { return sizeof(IndirectIndexedCommand); }
+
+void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count,
+                                                      uint32_t first_index, int32_t first_vertex, uint32_t first_instance) const
 {
-    assert(pool.metadata && playout.metadata);
-    DescriptorSet set{};
-    auto* md = new VkDescriptorSetMetadata{};
-    set.metadata = md;
-    const auto* vkpl = VkPipelineLayoutMetadata::get(playout);
-    const auto dsai = Vks(VkDescriptorSetAllocateInfo{ .descriptorPool = VkDescriptorPoolMetadata::get(pool)->pool,
-                                                       .descriptorSetCount = 1,
-                                                       .pSetLayouts = &vkpl->dlayouts.at(dset_idx) });
-    vkAllocateDescriptorSets(dev, &dsai, &md->set);
-    return set;
+    ENG_ASSERT(out != nullptr);
+    IndirectIndexedCommand cmd{ index_count, instance_count, first_index, first_vertex, first_instance };
+    memcpy(out, &cmd, sizeof(cmd));
 }
 
 // todo: swapchain impl should not be here
@@ -1528,7 +1496,7 @@ uint32_t Swapchain::acquire(uint64_t timeout, Sync* semaphore, Sync* fence)
 
 Handle<Image> Swapchain::get_image() const { return images.at(current_index); }
 
-Handle<ImageView> Swapchain::get_view() const { return views.at(current_index); }
+ImageView Swapchain::get_view() const { return views.at(current_index); }
 
 // Handle<Mesh> RendererBackendVulkan::instance_mesh(const InstanceSettings& settings)
 //{
@@ -2052,7 +2020,7 @@ Handle<ImageView> Swapchain::get_view() const { return views.at(current_index); 
 //     images.erase(image);
 // }
 //
-// void RendererBackendVulkan::destroy_view(Handle<ImageView> view)
+// void RendererBackendVulkan::destroy_view(ImageView view)
 //{
 //     VkImageViewMetadata::destroy(view.get());
 //     image_views.erase(view);

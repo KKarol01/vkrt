@@ -71,7 +71,7 @@ class Engine
   public:
     static Engine& get();
 
-    void init();
+    void init(int argc, char* argv[]);
     void destroy();
     void start();
 
@@ -86,7 +86,7 @@ class Engine
     double get_time_secs();
     double last_frame_time{};
     double delta_time{};
-    uint64_t frame_num{};
+    uint64_t tick{};
     float refresh_rate{ 1.0f / 60.0f };
 
     Signal<void()> on_init;

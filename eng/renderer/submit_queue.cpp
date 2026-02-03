@@ -13,8 +13,8 @@ namespace eng
 namespace gfx
 {
 
-void CommandBuffer::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
-                            Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access)
+void CommandBufferVk::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                              Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access)
 {
     const auto barrier = Vks(VkMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
                                                .srcAccessMask = to_vk(src_access),
@@ -24,18 +24,9 @@ void CommandBuffer::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-void CommandBuffer::barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
-                            Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
-                            ImageLayout new_layout)
-{
-    barrier(image, src_stage, src_access, dst_stage, dst_access, old_layout, new_layout,
-            ImageSubRange{ { 0, image.mips }, { 0, image.layers } });
-    image.current_layout = new_layout;
-}
-
-void CommandBuffer::barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
-                            Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
-                            ImageLayout new_layout, const ImageSubRange& range)
+void CommandBufferVk::barrier(const Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                              Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
+                              ImageLayout new_layout, const ImageMipLayerRange& range)
 {
     const auto barr =
         Vks(VkImageMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
@@ -45,251 +36,236 @@ void CommandBuffer::barrier(Image& image, Flags<PipelineStage> src_stage, Flags<
                                    .oldLayout = to_vk(old_layout),
                                    .newLayout = to_vk(new_layout),
                                    .image = image.md.vk->image,
-                                   .subresourceRange = { to_vk(image.deduce_aspect()), range.mips.offset,
+                                   .subresourceRange = { to_vk(get_aspect_from_format(image.format)), range.mips.offset,
                                                          range.mips.size, range.layers.offset, range.layers.size } });
     const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-void CommandBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range)
+void CommandBufferVk::copy(const Buffer& dst, const Buffer& src, size_t dst_offset, Range range)
 {
-    assert(dst.capacity >= dst_offset + range.size && src.capacity >= range.offset + range.size);
+    ENG_ASSERT(dst_offset + range.size <= dst.capacity && range.offset + range.size <= src.capacity);
     VkBufferCopy region{ range.offset, dst_offset, range.size };
-    vkCmdCopyBuffer(cmd, VkBufferMetadata::get(src).buffer, VkBufferMetadata::get(dst).buffer, 1, &region);
+    vkCmdCopyBuffer(cmd, src.md.vk->buffer, dst.md.vk->buffer, 1, &region);
 }
 
-void CommandBuffer::copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
+void CommandBufferVk::copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
 {
-    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = VkBufferMetadata::get(src).buffer,
+    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = src.md.vk->buffer,
                                                     .dstImage = dst.md.vk->image,
-                                                    .dstImageLayout = to_vk(dst.current_layout),
+                                                    .dstImageLayout = to_vk(ImageLayout::TRANSFER_DST),
                                                     .regionCount = count,
                                                     .pRegions = regions });
     vkCmdCopyBufferToImage2(cmd, &info);
 }
 
-void CommandBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, ImageLayout dstlayout, ImageLayout srclayout)
+void CommandBufferVk::copy(const Image& dst, const Image& src, const ImageCopy& copy)
 {
     auto* dstmd = dst.md.vk;
     const auto* srcmd = dst.md.vk;
-    VkImageCopy vkcp{ .srcSubresource = { to_vk(src.deduce_aspect()), copy.srclayers.mip, copy.srclayers.layers.offset,
-                                          copy.srclayers.layers.size },
+    VkImageCopy vkcp{ .srcSubresource = { to_vk(get_aspect_from_format(src.format)), copy.srclayers.mip,
+                                          copy.srclayers.layers.offset, copy.srclayers.layers.size },
                       .srcOffset = { copy.srcoffset.x, copy.srcoffset.y, copy.srcoffset.z },
-                      .dstSubresource = { to_vk(dst.deduce_aspect()), copy.dstlayers.mip, copy.dstlayers.layers.offset,
-                                          copy.dstlayers.layers.size },
+                      .dstSubresource = { to_vk(get_aspect_from_format(dst.format)), copy.dstlayers.mip,
+                                          copy.dstlayers.layers.offset, copy.dstlayers.layers.size },
                       .dstOffset = { copy.dstoffset.x, copy.dstoffset.y, copy.dstoffset.z },
                       .extent = { copy.extent.x, copy.extent.y, copy.extent.z } };
-    vkCmdCopyImage(cmd, srcmd->image, to_vk(srclayout), dstmd->image, to_vk(dstlayout), 1, &vkcp);
+    vkCmdCopyImage(cmd, srcmd->image, to_vk(ImageLayout::TRANSFER_SRC), dstmd->image, to_vk(ImageLayout::TRANSFER_DST), 1, &vkcp);
 }
 
-void CommandBuffer::copy(Image& dst, const Image& src)
+void CommandBufferVk::copy(const Image& dst, const Image& src)
 {
     auto* dstmd = dst.md.vk;
     const auto* srcmd = src.md.vk;
-    const auto vkr = VkImageCopy{ .srcSubresource = { to_vk(src.deduce_aspect()), 0, 0, std::min(dst.layers, src.layers) },
-                                  .dstSubresource = { to_vk(dst.deduce_aspect()), 0, 0, std::min(dst.layers, src.layers) },
-                                  .extent = { dst.width, dst.height, dst.depth } };
-    vkCmdCopyImage(cmd, srcmd->image, to_vk(src.current_layout), dstmd->image, to_vk(dst.current_layout), 1, &vkr);
+    const auto vkr =
+        VkImageCopy{ .srcSubresource = { to_vk(get_aspect_from_format(src.format)), 0, 0, std::min(dst.layers, src.layers) },
+                     .dstSubresource = { to_vk(get_aspect_from_format(dst.format)), 0, 0, std::min(dst.layers, src.layers) },
+                     .extent = { dst.width, dst.height, dst.depth } };
+    vkCmdCopyImage(cmd, srcmd->image, to_vk(ImageLayout::TRANSFER_SRC), dstmd->image, to_vk(ImageLayout::TRANSFER_DST), 1, &vkr);
 }
 
-void CommandBuffer::blit(Image& dst, const Image& src, const ImageBlit& range, ImageLayout dstlayout,
-                         ImageLayout srclayout, ImageFilter filter)
+void CommandBufferVk::blit(const Image& dst, const Image& src, const ImageBlit& blit)
 {
     auto* dstmd = dst.md.vk;
     const auto* srcmd = src.md.vk;
-    auto blit = VkImageBlit{};
-    blit.srcSubresource = { .aspectMask = to_vk(src.deduce_aspect()),
-                            .mipLevel = range.srclayers.mip,
-                            .baseArrayLayer = range.srclayers.layers.offset,
-                            .layerCount = range.srclayers.layers.size };
-    blit.srcOffsets[0] = VkOffset3D{ range.srcrange.offset.x, range.srcrange.offset.y, range.srcrange.offset.z };
-    blit.srcOffsets[1] =
-        VkOffset3D{ range.srcrange.offset.x + range.srcrange.size.x, range.srcrange.offset.y + range.srcrange.size.y,
-                    range.srcrange.offset.z + range.srcrange.size.z };
-    blit.dstSubresource = { .aspectMask = to_vk(dst.deduce_aspect()),
-                            .mipLevel = range.dstlayers.mip,
-                            .baseArrayLayer = range.dstlayers.layers.offset,
-                            .layerCount = range.dstlayers.layers.size };
-    blit.dstOffsets[0] = VkOffset3D{ range.dstrange.offset.x, range.dstrange.offset.y, range.dstrange.offset.z };
-    blit.dstOffsets[1] =
-        VkOffset3D{ range.dstrange.offset.x + range.dstrange.size.x, range.dstrange.offset.y + range.dstrange.size.y,
-                    range.dstrange.offset.z + range.dstrange.size.z };
-    vkCmdBlitImage(cmd, srcmd->image, to_vk(srclayout), dstmd->image, to_vk(dstlayout), 1, &blit, to_vk(filter));
+    auto vkblit = VkImageBlit{};
+    vkblit.srcSubresource = { .aspectMask = to_vk(get_aspect_from_format(src.format)),
+                              .mipLevel = blit.srclayers.mip,
+                              .baseArrayLayer = blit.srclayers.layers.offset,
+                              .layerCount = blit.srclayers.layers.size };
+    vkblit.srcOffsets[0] = VkOffset3D{ blit.srcrange.offset.x, blit.srcrange.offset.y, blit.srcrange.offset.z };
+    vkblit.srcOffsets[1] =
+        VkOffset3D{ blit.srcrange.offset.x + blit.srcrange.size.x, blit.srcrange.offset.y + blit.srcrange.size.y,
+                    blit.srcrange.offset.z + blit.srcrange.size.z };
+    vkblit.dstSubresource = { .aspectMask = to_vk(get_aspect_from_format(dst.format)),
+                              .mipLevel = blit.dstlayers.mip,
+                              .baseArrayLayer = blit.dstlayers.layers.offset,
+                              .layerCount = blit.dstlayers.layers.size };
+    vkblit.dstOffsets[0] = VkOffset3D{ blit.dstrange.offset.x, blit.dstrange.offset.y, blit.dstrange.offset.z };
+    vkblit.dstOffsets[1] =
+        VkOffset3D{ blit.dstrange.offset.x + blit.dstrange.size.x, blit.dstrange.offset.y + blit.dstrange.size.y,
+                    blit.dstrange.offset.z + blit.dstrange.size.z };
+    vkCmdBlitImage(cmd, srcmd->image, to_vk(ImageLayout::TRANSFER_SRC), dstmd->image, to_vk(ImageLayout::TRANSFER_DST),
+                   1, &vkblit, to_vk(blit.filter));
 }
 
-void CommandBuffer::clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color)
+void CommandBufferVk::clear_color(const Image& image, float color)
 {
-    if(image.current_layout != layout)
-    {
-        barrier(image, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_ACCESS_TRANSFER_WRITE_BIT, image.current_layout, layout);
-    }
     const auto clear = VkClearColorValue{ .float32 = color };
-    const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
-                                                (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
-    vkCmdClearColorImage(cmd, image.md.vk->image, to_vk(layout), &clear, 1, &range);
+    const auto range =
+        VkImageSubresourceRange{ to_vk(ImageAspect::COLOR), 0u, VK_REMAINING_MIP_LEVELS, 0u, VK_REMAINING_ARRAY_LAYERS };
+    vkCmdClearColorImage(cmd, image.md.vk->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
 }
 
-void CommandBuffer::clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil, ImageLayout layout,
-                                        Range mips, Range layers)
+void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil)
 {
-    if(layout == ImageLayout::UNDEFINED) { layout = image.current_layout; }
-    if(image.current_layout != layout)
-    {
-        barrier(image, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_NONE, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_ACCESS_TRANSFER_WRITE_BIT, image.current_layout, layout);
-    }
-    const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil };
-    const auto range = VkImageSubresourceRange{ to_vk(image.deduce_aspect()), (uint32_t)mips.offset,
-                                                (uint32_t)mips.size, (uint32_t)layers.offset, (uint32_t)layers.size };
-    vkCmdClearDepthStencilImage(cmd, image.md.vk->image, to_vk(layout), &clear, 1, &range);
+    const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil ? 0 : *clear_stencil };
+    const auto range = VkImageSubresourceRange{ to_vk(clear_stencil ? ImageAspect::DEPTH_STENCIL : ImageAspect::DEPTH),
+                                                0u, VK_REMAINING_MIP_LEVELS, 0u, VK_REMAINING_ARRAY_LAYERS };
+    vkCmdClearDepthStencilImage(cmd, image.md.vk->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
 }
 
-void CommandBuffer::bind_index(const Buffer& index, uint32_t offset, VkIndexType type)
+void CommandBufferVk::bind_index(const Buffer& index, uint32_t offset, VkIndexType type)
 {
-    vkCmdBindIndexBuffer(cmd, VkBufferMetadata::get(index).buffer, offset, type);
+    vkCmdBindIndexBuffer(cmd, index.md.vk->buffer, offset, type);
 }
 
-void CommandBuffer::bind_pipeline(const Pipeline& pipeline)
+void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
 {
     const auto& md = *pipeline.md.vk;
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
+    rebind_desc_sets = true;
 }
 
-void CommandBuffer::bind_descriptors(const DescriptorPool* ps, DescriptorSet* ds, Range32u range)
+void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
 {
-    const auto* md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
-    std::array<VkDescriptorSet, 8> vksets{};
-    for(auto i = 0u; i < range.size; ++i)
+    if(sets == nullptr)
     {
-        vksets.at(i) = VkDescriptorSetMetadata::get(ds[i])->set;
+        ENG_ASSERT(false);
+        return;
     }
-    vkCmdBindDescriptorSets(cmd, to_vk(current_pipeline->type), md->layout, range.offset, range.size, vksets.data(), 0, nullptr);
+    const DescriptorSetVk* vksets = (const DescriptorSetVk*)sets;
+    for(auto i = 0u; i < count; ++i)
+    {
+        vkCmdBindDescriptorSets(cmd, to_vk(current_pipeline->type), current_pipeline->info.layout->md.vk->layout,
+                                vksets[i].setidx, 1, &vksets[i].set, 0, nullptr);
+    }
 }
 
-void CommandBuffer::push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range)
+void CommandBufferVk::bind_resources(uint32_t slot, std::span<DescriptorResource> resources)
 {
-    memcpy(pcbuf + range.offset, values, range.size);
-    flush_pc_size = std::max(flush_pc_size, range.offset + range.size);
+    rebind_desc_sets = true;
+    descriptor_allocator->bind_resources(slot, resources);
 }
 
-void CommandBuffer::bind_resource(uint32_t slot, Handle<Buffer> resource, Range range)
+void CommandBufferVk::push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range)
 {
-    const auto idx = Engine::get().renderer->get_bindless(resource, range);
-    push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
+    vkCmdPushConstants(cmd, current_pipeline->info.layout->md.vk->layout, VK_SHADER_STAGE_ALL, range.offset, range.size, values);
 }
 
-void CommandBuffer::bind_resource(uint32_t slot, Handle<Texture> resource)
-{
-    const auto idx = Engine::get().renderer->get_bindless(resource);
-    push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
-}
-
-void CommandBuffer::bind_resource(uint32_t slot, Handle<Sampler> resource)
-{
-    const auto idx = Engine::get().renderer->get_bindless(resource);
-    push_constants(ShaderStage::ALL, &idx, { slot * (uint32_t)sizeof(idx), sizeof(idx) });
-}
-
-void CommandBuffer::set_viewports(const VkViewport* viewports, uint32_t count)
+void CommandBufferVk::set_viewports(const VkViewport* viewports, uint32_t count)
 {
     vkCmdSetViewportWithCount(cmd, count, viewports);
 }
 
-void CommandBuffer::set_scissors(const VkRect2D* scissors, uint32_t count)
+void CommandBufferVk::set_scissors(const VkRect2D* scissors, uint32_t count)
 {
     vkCmdSetScissorWithCount(cmd, count, scissors);
 }
 
-void CommandBuffer::begin_rendering(const VkRenderingInfo& info)
+void CommandBufferVk::begin_rendering(const VkRenderingInfo& info)
 {
     before_draw_dispatch(); // todo: not sure if this should be the only place for non compute/rt dispatches
     vkCmdBeginRendering(cmd, &info);
 }
 
-void CommandBuffer::end_rendering() { vkCmdEndRendering(cmd); }
+void CommandBufferVk::end_rendering() { vkCmdEndRendering(cmd); }
 
-void CommandBuffer::before_draw_dispatch()
+void CommandBufferVk::before_draw_dispatch()
 {
-    if(flush_pc_size > 0)
+    if(rebind_desc_sets)
     {
-        const auto* md = VkPipelineLayoutMetadata::get(current_pipeline->info.layout.get());
-        vkCmdPushConstants(cmd, md->layout, gfx::to_vk(Flags<ShaderStage>{ ShaderStage::ALL }), 0u, flush_pc_size, pcbuf);
-        flush_pc_size = 0;
-        auto* r = Engine::get().renderer;
-        // todo: don't do this each time; only when pipeline layouts disturb it and when it wasn't already bound.
-        r->bindless->bind(this);
+        descriptor_allocator->flush(this);
+        rebind_desc_sets = false;
     }
 }
 
-void CommandBuffer::draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset)
+void CommandBufferVk::draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset)
 {
     before_draw_dispatch();
     vkCmdDraw(cmd, vertex_count, instance_count, vertex_offset, instance_offset);
 }
 
-void CommandBuffer::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
-                                 uint32_t vertex_offset, uint32_t instance_offset)
+void CommandBufferVk::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
+                                   uint32_t vertex_offset, uint32_t instance_offset)
 {
     before_draw_dispatch();
     vkCmdDrawIndexed(cmd, index_count, instance_count, index_offset, vertex_offset, instance_offset);
 }
 
-void CommandBuffer::draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
-                                                size_t count_offset, uint32_t max_draw_count, uint32_t stride)
+void CommandBufferVk::draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
+                                                  size_t count_offset, uint32_t max_draw_count, uint32_t stride)
 {
     before_draw_dispatch();
-    vkCmdDrawIndexedIndirectCount(cmd, VkBufferMetadata::get(indirect).buffer, indirect_offset,
-                                  VkBufferMetadata::get(count).buffer, count_offset, max_draw_count, stride);
+    vkCmdDrawIndexedIndirectCount(cmd, indirect.md.vk->buffer, indirect_offset, count.md.vk->buffer, count_offset,
+                                  max_draw_count, stride);
 }
 
-void CommandBuffer::dispatch(uint32_t x, uint32_t y, uint32_t z)
+void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
 {
     before_draw_dispatch();
     vkCmdDispatch(cmd, x, y, z);
 }
 
-CommandPool::CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
+void CommandBufferVk::begin_label(const std::string& label)
+{
+    const auto vkl = Vks(VkDebugUtilsLabelEXT{ .pLabelName = label.c_str(), .color = { 0.0f, 0.0f, 1.0f, 1.0f } });
+    vkCmdBeginDebugUtilsLabelEXT(cmd, &vkl);
+}
+
+void CommandBufferVk::end_label() { vkCmdEndDebugUtilsLabelEXT(cmd); }
+
+CommandPoolVk::CommandPoolVk(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
 {
     const auto vk_info = Vks(VkCommandPoolCreateInfo{ .flags = flags, .queueFamilyIndex = family_index });
     VK_CHECK(vkCreateCommandPool(dev, &vk_info, nullptr, &pool));
 }
 
-CommandBuffer* CommandPool::allocate()
+ICommandBuffer* CommandPoolVk::allocate()
 {
     if(free.empty())
     {
-        CommandBuffer* cmd = &used.emplace_back();
         const auto vk_info = Vks(VkCommandBufferAllocateInfo{
             .commandPool = pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 });
-        VK_CHECK(vkAllocateCommandBuffers(dev, &vk_info, &cmd->cmd));
-        return cmd;
+        VkCommandBuffer vkcmd;
+        VK_CHECK(vkAllocateCommandBuffers(dev, &vk_info, &vkcmd));
+        return &used.emplace_back(vkcmd, get_renderer().descriptor_allocator);
     }
-    auto cmd = &used.emplace_back(free.front());
+    auto* cmd = &used.emplace_back(std::move(free.front()));
     free.pop_front();
     return cmd;
 }
 
-CommandBuffer* CommandPool::begin()
+ICommandBuffer* CommandPoolVk::begin()
 {
     auto cmd = allocate();
     begin(cmd);
     return cmd;
 }
 
-CommandBuffer* CommandPool::begin(CommandBuffer* cmd)
+ICommandBuffer* CommandPoolVk::begin(ICommandBuffer* cmd)
 {
     const auto vk_info = Vks(VkCommandBufferBeginInfo{ .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT });
-    VK_CHECK(vkBeginCommandBuffer(cmd->cmd, &vk_info));
+    VK_CHECK(vkBeginCommandBuffer(((CommandBufferVk*)cmd)->cmd, &vk_info));
     return cmd;
 }
 
-void CommandPool::reset(CommandBuffer* cmd) { vkResetCommandBuffer(cmd->cmd, {}); }
+void CommandPoolVk::reset(ICommandBuffer* cmd) { vkResetCommandBuffer(((CommandBufferVk*)cmd)->cmd, {}); }
 
-void CommandPool::end(CommandBuffer* cmd) { vkEndCommandBuffer(cmd->cmd); }
+void CommandPoolVk::end(ICommandBuffer* cmd) { vkEndCommandBuffer(((CommandBufferVk*)cmd)->cmd); }
 
-void CommandPool::reset()
+void CommandPoolVk::reset()
 {
     VK_CHECK(vkResetCommandPool(dev, pool, {}));
     free = std::move(used);
@@ -308,7 +284,7 @@ void Sync::init(const SyncCreateInfo& info)
     if(type == FENCE)
     {
         const auto vkinfo = Vks(VkFenceCreateInfo{ .flags = value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
-        VK_CHECK(vkCreateFence(RendererBackendVulkan::get_instance()->dev, &vkinfo, nullptr, &fence));
+        VK_CHECK(vkCreateFence(RendererBackendVk::get_dev(), &vkinfo, nullptr, &fence));
         if(name.size()) { set_debug_name(fence, name); }
     }
     else
@@ -317,7 +293,7 @@ void Sync::init(const SyncCreateInfo& info)
         const auto timeline_info =
             Vks(VkSemaphoreTypeCreateInfo{ .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = value });
         if(type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeline_info; }
-        VK_CHECK(vkCreateSemaphore(RendererBackendVulkan::get_instance()->dev, &vkinfo, nullptr, &semaphore));
+        VK_CHECK(vkCreateSemaphore(RendererBackendVk::get_dev(), &vkinfo, nullptr, &semaphore));
         if(name.size()) { set_debug_name(semaphore, name); }
     }
 }
@@ -325,8 +301,8 @@ void Sync::init(const SyncCreateInfo& info)
 void Sync::destroy()
 {
     if(type == UNKNOWN) { return; }
-    if(type == FENCE) { vkDestroyFence(RendererBackendVulkan::get_instance()->dev, fence, nullptr); }
-    else { vkDestroySemaphore(RendererBackendVulkan::get_instance()->dev, semaphore, nullptr); }
+    if(type == FENCE) { vkDestroyFence(RendererBackendVk::get_dev(), fence, nullptr); }
+    else { vkDestroySemaphore(RendererBackendVk::get_dev(), semaphore, nullptr); }
     type = UNKNOWN;
     value = 0u;
     name.clear();
@@ -338,11 +314,11 @@ void Sync::signal_cpu(uint64_t value)
     if(type == TIMELINE_SEMAPHORE)
     {
         const auto info = Vks(VkSemaphoreSignalInfo{ .semaphore = semaphore, .value = value });
-        vkSignalSemaphore(RendererBackendVulkan::get_instance()->dev, &info);
+        vkSignalSemaphore(RendererBackendVk::get_dev(), &info);
     }
     else
     {
-        ENG_ERROR("Sync object of type {} cannot be signaled on.", eng::to_string(type));
+        ENG_ERROR("Sync object of type {} cannot be signaled on.", to_string(type));
         return;
     }
     this->value = value;
@@ -356,13 +332,13 @@ VkResult Sync::wait_cpu(size_t timeout, uint64_t value) const
         return VK_ERROR_UNKNOWN;
     }
     if(value == ~0ull) { value = this->value; }
-    if(type == FENCE) { return vkWaitForFences(RendererBackendVulkan::get_instance()->dev, 1, &fence, true, timeout); }
+    if(type == FENCE) { return vkWaitForFences(RendererBackendVk::get_dev(), 1, &fence, true, timeout); }
     else if(type == TIMELINE_SEMAPHORE)
     {
         const auto info = Vks(VkSemaphoreWaitInfo{ .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &value });
-        return vkWaitSemaphores(RendererBackendVulkan::get_instance()->dev, &info, timeout);
+        return vkWaitSemaphores(RendererBackendVk::get_dev(), &info, timeout);
     }
-    ENG_ERROR("Sync object of type {} cannot be waited on.", eng::to_string(type));
+    ENG_ERROR("Sync object of type {} cannot be waited on.", to_string(type));
     return VK_ERROR_UNKNOWN;
 }
 
@@ -382,7 +358,7 @@ uint64_t Sync::wait_gpu(uint64_t value)
 void Sync::reset(uint64_t value)
 {
     if(type == UNKNOWN) { return; }
-    if(type == FENCE) { vkResetFences(RendererBackendVulkan::get_instance()->dev, 1, &fence); }
+    if(type == FENCE) { vkResetFences(RendererBackendVk::get_dev(), 1, &fence); }
     else
     {
         auto type = this->type;
@@ -393,19 +369,18 @@ void Sync::reset(uint64_t value)
 }
 
 SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
-    : dev(dev), queue(queue), family_idx(family_idx),
-      fence(RendererBackendVulkan::get_instance()->make_sync({ SyncType::FENCE }))
+    : dev(dev), queue(queue), family_idx(family_idx), fence(get_renderer().make_sync({ SyncType::FENCE }))
 {
 }
 
-CommandPool* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
+CommandPoolVk* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
 {
     return &command_pools.emplace_back(dev, family_idx, flags);
 }
 
 SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
 {
-    assert(sync);
+    ENG_ASSERT(sync);
     if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
     {
         submission.wait_sems.push_back(sync);
@@ -419,7 +394,7 @@ SubmitQueue& SubmitQueue::signal_sync(Sync* sync, Flags<PipelineStage> stages, u
 {
     if(sync->type == SyncType::FENCE)
     {
-        assert(!submission.fence);
+        ENG_ASSERT(!submission.fence);
         submission.fence = sync;
     }
     else if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
@@ -431,7 +406,7 @@ SubmitQueue& SubmitQueue::signal_sync(Sync* sync, Flags<PipelineStage> stages, u
     return *this;
 }
 
-SubmitQueue& SubmitQueue::with_cmd_buf(CommandBuffer* cmd)
+SubmitQueue& SubmitQueue::with_cmd_buf(ICommandBuffer* cmd)
 {
     submission.cmds.push_back(cmd);
     return *this;
@@ -439,6 +414,11 @@ SubmitQueue& SubmitQueue::with_cmd_buf(CommandBuffer* cmd)
 
 VkResult SubmitQueue::submit()
 {
+    for(auto& [sync, stage] : submission.pushed_syncs)
+    {
+        wait_sync(sync, stage);
+    }
+
     std::vector<VkSemaphoreSubmitInfo> wait_sems(submission.wait_sems.size());
     std::vector<VkSemaphoreSubmitInfo> sig_sems(submission.signal_sems.size());
     std::vector<VkCommandBufferSubmitInfo> cmds(submission.cmds.size());
@@ -457,7 +437,7 @@ VkResult SubmitQueue::submit()
     }
     for(auto i = 0u; i < cmds.size(); ++i)
     {
-        cmds[i] = Vks(VkCommandBufferSubmitInfo{ .commandBuffer = submission.cmds[i]->cmd });
+        cmds[i] = Vks(VkCommandBufferSubmitInfo{ .commandBuffer = ((CommandBufferVk*)submission.cmds[i])->cmd });
     }
 
     const auto vk_info = Vks(VkSubmitInfo2{
@@ -485,7 +465,7 @@ VkResult SubmitQueue::submit_wait(uint64_t timeout)
         is_fence_temp = true;
     }
     else { sfence = submission.fence; }
-    assert(sfence);
+    ENG_ASSERT(sfence);
     const auto sres = submit();
     const auto res = sfence->wait_cpu(timeout);
     if(is_fence_temp) { sfence->reset(); }
@@ -503,7 +483,7 @@ void SubmitQueue::present(Swapchain* swapchain)
     const auto pinfo = Vks(VkPresentInfoKHR{ .waitSemaphoreCount = (uint32_t)wait_sems.size(),
                                              .pWaitSemaphores = wait_sems.data(),
                                              .swapchainCount = 1,
-                                             .pSwapchains = &VkSwapchainMetadata::get(*swapchain).swapchain,
+                                             .pSwapchains = &SwapchainMetadataVk::get(*swapchain).swapchain,
                                              .pImageIndices = &swapchain->current_index });
     vkQueuePresentKHR(queue, &pinfo);
     submission = {};

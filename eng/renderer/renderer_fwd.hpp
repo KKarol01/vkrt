@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
+#include <eng/common/types.hpp>
 
 namespace eng
 {
@@ -144,7 +146,7 @@ enum class BufferUsage
 };
 ENG_ENABLE_FLAGS_OPERATORS(BufferUsage);
 
-enum class ImageFormat
+enum class ImageFormat : uint8_t
 {
     UNDEFINED,
     R8G8B8A8_UNORM,
@@ -157,16 +159,19 @@ enum class ImageFormat
     R32FG32FB32FA32F,
 };
 
-enum class ImageAspect
+enum class ImageAspect : uint8_t
 {
     NONE,
     COLOR,
     DEPTH,
     STENCIL,
     DEPTH_STENCIL,
+
+    /* Remember about get_aspect_from_format when adding new formats. */
+
 };
 
-enum class ImageUsage
+enum class ImageUsage : uint32_t
 {
     NONE = 0x0,
     STORAGE_BIT = 0x1,
@@ -181,25 +186,25 @@ enum class ImageUsage
 };
 ENG_ENABLE_FLAGS_OPERATORS(ImageUsage);
 
-enum class ImageLayout
+enum class ImageLayout : uint8_t
 {
-    UNDEFINED = 0x0,
-    GENERAL = 0x1,
-    READ_ONLY = 0x2,
-    ATTACHMENT = 0x4,
-    TRANSFER_SRC = 0x8,
-    TRANSFER_DST = 0x10,
-    PRESENT = 0x20,
+    UNDEFINED,
+    GENERAL,
+    READ_ONLY,
+    ATTACHMENT,
+    TRANSFER_SRC,
+    TRANSFER_DST,
+    PRESENT,
 };
 
-enum class ImageType
+enum class ImageType : uint8_t
 {
     TYPE_1D,
     TYPE_2D,
     TYPE_3D,
 };
 
-enum class ImageViewType
+enum class ImageViewType : uint8_t
 {
     NONE,
     TYPE_1D,
@@ -207,13 +212,13 @@ enum class ImageViewType
     TYPE_3D,
 };
 
-enum class ImageFilter
+enum class ImageFilter : uint8_t
 {
     NEAREST,
     LINEAR,
 };
 
-enum class ImageAddressing
+enum class ImageAddressing : uint8_t
 {
     REPEAT,
     CLAMP_EDGE
@@ -260,6 +265,9 @@ enum class PipelineAccess : uint32_t
     TRANSFER_READ_BIT = 0x200,
     TRANSFER_WRITE_BIT = 0x400,
     TRANSFER_RW = TRANSFER_READ_BIT | TRANSFER_WRITE_BIT,
+
+    READS = SHADER_READ_BIT | COLOR_READ_BIT | DS_READ_BIT | STORAGE_READ_BIT | INDIRECT_READ_BIT | TRANSFER_READ_BIT,
+    WRITES = SHADER_WRITE_BIT | COLOR_WRITE_BIT | DS_WRITE_BIT | STORAGE_WRITE_BIT | TRANSFER_WRITE_BIT,
 };
 ENG_ENABLE_FLAGS_OPERATORS(PipelineAccess)
 
@@ -278,21 +286,7 @@ enum class ShaderStage : uint32_t
 };
 ENG_ENABLE_FLAGS_OPERATORS(ShaderStage);
 
-enum class PipelineSetFlags : uint32_t
-{
-    UPDATE_AFTER_BIND_BIT = 0x1,
-};
-ENG_ENABLE_FLAGS_OPERATORS(PipelineSetFlags);
-
-enum class PipelineBindingFlags : uint32_t
-{
-    UPDATE_AFTER_BIND_BIT = 0x1,
-    UPDATE_UNUSED_WHILE_PENDING_BIT = 0x2,
-    PARTIALLY_BOUND_BIT = 0x4,
-};
-ENG_ENABLE_FLAGS_OPERATORS(PipelineBindingFlags);
-
-enum class PipelineBindingType
+enum class DescriptorType
 {
     UNDEFINED,
     STORAGE_BUFFER,
@@ -328,12 +322,11 @@ enum class SamplerMipmapMode
 
 struct ImageBlockData;
 struct Shader;
-struct PipelineLayoutCreateInfo;
-struct DescriptorPoolCreateInfo;
-struct DescriptorPool;
 struct DescriptorSet;
-struct PipelineLayout;
+struct DescriptorLayout;
 struct PipelineCreateInfo;
+struct PushRange;
+struct PipelineLayout;
 struct Pipeline;
 struct Geometry;
 struct ShaderEffect;
@@ -343,19 +336,16 @@ struct Material;
 struct Mesh;
 struct Meshlet;
 struct GeometryDescriptor;
-struct BufferDescriptor;
 struct Buffer;
-struct ImageDescriptor;
+struct BufferView;
 struct Image;
-struct ImageViewDescriptor;
 struct ImageView;
-struct ImageSubRange;
-struct ImageSubLayers;
+struct ImageMipLayerRange;
+struct ImageLayerRange;
 struct ImageBlit;
 struct ImageCopy;
 struct SamplerDescriptor;
 struct Sampler;
-struct TextureDescriptor;
 struct Texture;
 struct MaterialDescriptor;
 struct MeshDescriptor;
@@ -364,13 +354,64 @@ struct BLASInstanceSettings;
 struct VsmData;
 struct Swapchain;
 struct DebugGeometry;
+struct DescriptorResource;
 
-class CommandBuffer;
-class CommandPool;
+class CommandBufferVk;
+class CommandPoolVk;
 enum class SyncType;
 struct SyncCreateInfo;
 struct Sync;
 class SubmitQueue;
+
+class ImGuiRenderer;
+class BindlessPool;
+class StagingBuffer;
+class SubmitQueue;
+struct ImageMetadataVk;
+struct ImageViewMetadataVk;
+struct ShaderMetadataVk;
+struct PipelineMetadataVk;
+struct DescriptorLayoutMetadataVk;
+struct VkDescriptorPoolMetadata;
+struct DescriptorSetMetadataVk;
+struct PipelineLayoutMetadataVk;
+struct SamplerMetadataVk;
+struct BufferMetadataVk;
+class RenderGraph;
+struct IDescriptorSetAllocator;
+
+namespace pass
+{
+class IPass;
+}
+
+struct BufferView
+{
+    auto operator<=>(const BufferView&) const = default;
+    static BufferView init(Handle<Buffer> buffer, size_t start = 0, size_t size = ~0ull)
+    {
+        return BufferView{ .buffer = buffer, .range = { start, size } };
+    }
+    Handle<Buffer> buffer;
+    Range64u range{};
+};
+
+struct ImageView
+{
+    union Metadata {
+        ImageViewMetadataVk* vk;
+    };
+    static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                          uint32_t src_mip = 0u, uint32_t dst_mip = ~0u, uint32_t src_layer = 0u, uint32_t dst_layer = ~0u);
+    auto operator<=>(const ImageView& a) const = default;
+    explicit operator bool() const { return (bool)image; }
+    Metadata get_md() const;
+    Handle<Image> image;
+    ImageViewType type{};
+    ImageFormat format{};
+    uint32_t src_subresource{};
+    uint32_t dst_subresource{ ~0u };
+};
 
 inline size_t get_vertex_component_size(VertexComponent comp)
 {
@@ -470,20 +511,49 @@ inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> 
     return ic;
 }
 
+inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
+{
+    switch(format)
+    {
+    case ImageFormat::R8G8B8A8_UNORM:
+    case ImageFormat::R8G8B8A8_SRGB:
+    case ImageFormat::R16F:
+    case ImageFormat::R32F:
+    case ImageFormat::R32FG32FB32FA32F:
+        return ImageAspect::COLOR;
+
+    case ImageFormat::D16_UNORM:
+    case ImageFormat::D32_SFLOAT:
+        return ImageAspect::DEPTH;
+
+    case ImageFormat::D24_S8_UNORM:
+        return ImageAspect::DEPTH_STENCIL;
+
+    default:
+    {
+        ENG_ASSERT("Unhandled case");
+        return ImageAspect::NONE;
+    }
+    }
+}
+
+inline ImageViewType get_view_type_from_image(ImageType type)
+{
+    switch(type)
+    {
+    case ImageType::TYPE_1D:
+        return ImageViewType::TYPE_1D;
+    case ImageType::TYPE_2D:
+        return ImageViewType::TYPE_2D;
+    case ImageType::TYPE_3D:
+        return ImageViewType::TYPE_3D;
+    default:
+    {
+        ENG_ASSERT("Unhandled case");
+        return ImageViewType::NONE;
+    }
+    }
+}
+
 } // namespace gfx
 } // namespace eng
-
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer);
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image);
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Sampler);
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry);
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh);
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::DescriptorPool);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Pipeline);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect);

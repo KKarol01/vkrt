@@ -30,7 +30,7 @@ template <typename VkStruct> inline void set_debug_name(VkStruct object, const s
         .objectHandle = reinterpret_cast<uint64_t>(object),
         .pObjectName = name.c_str(),
     };
-    vkSetDebugUtilsObjectNameEXT(RendererBackendVulkan::get_instance()->dev, &obj_name);
+    vkSetDebugUtilsObjectNameEXT(RendererBackendVk::get_dev(), &obj_name);
 #endif
 }
 

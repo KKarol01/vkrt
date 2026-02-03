@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <array>
+#include <tuple>
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
@@ -103,137 +104,117 @@ struct FFTOcean
     Handle<Image> gradient;
 };
 
-struct VkShaderMetadata
+struct ShaderMetadataVk
 {
     VkShaderModule shader{};
 };
 
-struct VkPipelineLayoutMetadata
+struct DescriptorLayoutMetadataVk
+{
+    static void init(DescriptorLayout& a);
+    static void destroy(DescriptorLayout& a);
+    VkDescriptorSetLayout layout{};
+};
+
+struct PipelineLayoutMetadataVk
 {
     static void init(PipelineLayout& a);
     static void destroy(PipelineLayout& a);
-    static VkPipelineLayoutMetadata* get(const PipelineLayout& a)
-    {
-        return static_cast<VkPipelineLayoutMetadata*>(a.metadata);
-    }
-    std::vector<VkDescriptorSetLayout> dlayouts;
     VkPipelineLayout layout{};
 };
 
-struct VkPipelineMetadata
+struct PipelineMetadataVk
 {
     static void init(const Pipeline& a);
     static void destroy(Pipeline& a);
     VkPipeline pipeline{};
 };
 
-struct VkDescriptorPoolMetadata
-{
-    static void init(DescriptorPool& a);
-    static void destroy(DescriptorPool& a);
-    static VkDescriptorPoolMetadata* get(const DescriptorPool& a)
-    {
-        return static_cast<VkDescriptorPoolMetadata*>(a.metadata);
-    }
-    VkDescriptorPool pool{};
-};
-
-struct VkDescriptorSetMetadata
-{
-    static VkDescriptorSetMetadata* get(const DescriptorSet& a)
-    {
-        return static_cast<VkDescriptorSetMetadata*>(a.metadata);
-    }
-    VkDescriptorSet set{};
-};
-
-struct VkBufferMetadata
+struct BufferMetadataVk
 {
     static void init(Buffer& a);
     static void destroy(Buffer& a);
-    static VkBufferMetadata& get(Buffer& a);
-    static const VkBufferMetadata& get(const Buffer& a);
     VkBuffer buffer{};
     VmaAllocation vmaa{};
     VkDeviceAddress bda{};
 };
 
-struct VkImageMetadata
+struct ImageMetadataVk
 {
     static void init(Image& a, VkImage img = {});
     static void destroy(Image& a, bool destroy_image = true);
     VkImage image{};
     VmaAllocation vmaa{};
+    std::vector<std::tuple<uint64_t, ImageView, VkImageView>> views; // <hash, view, vkimageview>
 };
 
-struct VkImageViewMetadata
+struct ImageViewMetadataVk
 {
-    static void init(ImageView& a);
+    static void init(const ImageView& view, void** out_allocation);
     static void destroy(ImageView& a);
     VkImageView view{};
 };
 
-struct VkSamplerMetadata
+struct SamplerMetadataVk
 {
     static void init(Sampler& a);
     static void destroy(Sampler& a);
-    static VkSamplerMetadata& get(Sampler& a);
-    static const VkSamplerMetadata& get(const Sampler& a);
-    // static const VkSamplerMetadata& get(const Sampler& a);
     VkSampler sampler{};
 };
 
-struct VkSwapchainMetadata
+struct SwapchainMetadataVk
 {
     static void init(Swapchain& a);
     static void destroy(Swapchain& a);
-    static VkSwapchainMetadata& get(Swapchain& a);
+    static SwapchainMetadataVk& get(Swapchain& a);
     static uint32_t acquire(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence);
     VkSwapchainKHR swapchain{};
 };
 
-class RendererBackendVulkan : public RendererBackend
+class RendererBackendVk : public IRendererBackend
 {
   public:
-    static RendererBackendVulkan* get_instance();
+    struct IndirectIndexedCommand
+    {
+        uint32_t indexCount;
+        uint32_t instanceCount;
+        uint32_t firstIndex;
+        int32_t vertexOffset;
+        uint32_t firstInstance;
+    };
 
-    RendererBackendVulkan() = default;
-    RendererBackendVulkan(const RendererBackendVulkan&) = delete;
-    RendererBackendVulkan& operator=(const RendererBackendVulkan&) = delete;
-    ~RendererBackendVulkan() override = default;
+    static RendererBackendVk& get_instance();
+    static VkDevice get_dev() { return get_instance().dev; }
 
-    void init() final;
+    RendererBackendVk() = default;
+    RendererBackendVk(const RendererBackendVk&) = delete;
+    RendererBackendVk& operator=(const RendererBackendVk&) = delete;
+    ~RendererBackendVk() override = default;
+
+    void init() override;
     void initialize_vulkan();
 
-    Buffer make_buffer(const BufferDescriptor& info) final;
-    void destroy_buffer(Buffer& b) final;
-    Image make_image(const ImageDescriptor& info) final;
-    void make_view(ImageView& view) final;
-    Sampler make_sampler(const SamplerDescriptor& info) final;
-    void make_shader(Shader& shader) final;
-    bool compile_shader(const Shader& shader) final;
-    bool compile_pplayout(PipelineLayout& layout) final;
-    void make_pipeline(Pipeline& pipeline) final;
-    bool compile_pipeline(const Pipeline& pipeline) final;
-    Sync* make_sync(const SyncCreateInfo& info) final;
-    void destory_sync(Sync* sync) final;
-    Swapchain* make_swapchain() final;
-    SubmitQueue* get_queue(QueueType type) final;
-    DescriptorPool make_descpool(const DescriptorPoolCreateInfo& info) final;
-    DescriptorSet allocate_set(DescriptorPool& pool, const PipelineLayout& playout, uint32_t dset_idx) final;
+    void allocate_buffer(Buffer& buffer) override;
+    void destroy_buffer(Buffer& b) override;
+    void allocate_image(Image& info) override;
+    void allocate_view(const ImageView& view, void** out_allocation) override;
+    Sampler make_sampler(const SamplerDescriptor& info) override;
+    void make_shader(Shader& shader) override;
+    bool compile_shader(const Shader& shader) override;
+    bool compile_layout(DescriptorLayout& layout) override;
+    bool compile_layout(PipelineLayout& layout) override;
+    void make_pipeline(Pipeline& pipeline) override;
+    bool compile_pipeline(const Pipeline& pipeline) override;
+    Sync* make_sync(const SyncCreateInfo& info) override;
+    void destory_sync(Sync* sync) override;
+    Swapchain* make_swapchain() override;
+    SubmitQueue* get_queue(QueueType type) override;
 
-    // void bake_indirect_commands();
-    // void build_transforms_buffer();
+    ImageView::Metadata get_md(const ImageView& view) override;
 
-    // void build_blas();
-    // void build_tlas();
-    // void update_ddgi();
-
-    // void destroy_buffer(Handle<Buffer> buffer);
-    // void destroy_image(Handle<Image> image);
-    // void destroy_view(Handle<ImageView> view);
-    // uint32_t get_bindless(Handle<Buffer> buffer);
-    // void update_resource(Handle<Buffer> dst);
+    size_t get_indirect_indexed_command_size() const override;
+    void make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count, uint32_t first_index,
+                                       int32_t first_vertex, uint32_t first_instance) const override;
 
     VkInstance instance;
     VkDevice dev;
@@ -246,27 +227,6 @@ class RendererBackendVulkan : public RendererBackend
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
-
-    // std::vector<ecs::entity> blas_instances;
-
-    // VkAccelerationStructureKHR tlas{};
-    // Handle<Buffer> tlas_buffer;
-    // Handle<Buffer> tlas_instance_buffer;
-    // Handle<Buffer> tlas_scratch_buffer;
-
-    // Handle<Buffer> tlas_mesh_offsets_buffer;
-    // Handle<Buffer> tlas_transform_buffer;
-    // Handle<Buffer> blas_mesh_offsets_buffer;
-    // Handle<Buffer> triangle_geo_inst_id_buffer;
-    // Handle<Buffer> mesh_instances_buffer;
-
-    // DDGI ddgi;
-    // gfx::VsmData vsm; // TODO: not sure if vsmdata should be in gfx and renderer.hpp
-    // FFTOcean fftocean;
-
-    // std::vector<Handle<Shader>> shaders_to_compile;
-    // std::vector<Handle<Pipeline>> pipelines_to_compile;
-    // std::vector<MeshletInstance> meshlets_to_instance;
 };
 } // namespace gfx
 

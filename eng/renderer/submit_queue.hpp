@@ -12,38 +12,86 @@ namespace eng
 {
 namespace gfx
 {
-class CommandPool;
+class CommandPoolVk;
+struct DescriptorSetVk;
+class IDescriptorSetAllocator;
+struct DescriptorResource;
 
-class CommandBuffer
+class ICommandBuffer
 {
   public:
+    virtual ~ICommandBuffer() = default;
+    virtual void barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                         Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access) = 0;
+    virtual void barrier(const Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                         Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
+                         ImageLayout new_layout, const ImageMipLayerRange& range = { { 0u, ~0u }, { 0u, ~0u } }) = 0;
+
+    virtual void copy(const Buffer& dst, const Buffer& src, size_t dst_offset, Range range) = 0;
+    virtual void copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count) = 0;
+    virtual void copy(const Image& dst, const Image& src, const ImageCopy& copy) = 0;
+    virtual void copy(const Image& dst, const Image& src) = 0;
+    virtual void blit(const Image& dst, const Image& src, const ImageBlit& blit) = 0;
+
+    virtual void clear_color(const Image& image, float color) = 0;
+    virtual void clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil = {}) = 0;
+
+    virtual void bind_index(const Buffer& index, uint32_t offset, VkIndexType type) = 0;
+    virtual void bind_pipeline(const Pipeline& pipeline) = 0;
+    virtual void bind_sets(const void* sets, uint32_t count = 1) = 0;
+    virtual void bind_resources(uint32_t slot, std::span<DescriptorResource> resources) = 0;
+
+    virtual void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range) = 0;
+
+    virtual void set_viewports(const VkViewport* viewports, uint32_t count) = 0;
+    virtual void set_scissors(const VkRect2D* scissors, uint32_t count) = 0;
+
+    virtual void begin_rendering(const VkRenderingInfo& info) = 0;
+    virtual void end_rendering() = 0;
+
+    virtual void before_draw_dispatch() = 0;
+    virtual void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset) = 0;
+    virtual void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
+                              uint32_t vertex_offset, uint32_t instance_offset) = 0;
+    virtual void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
+                                             size_t count_offset, uint32_t max_draw_count, uint32_t stride) = 0;
+    virtual void dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
+
+    virtual void begin_label(const std::string& label) = 0;
+    virtual void end_label() = 0;
+};
+
+class CommandBufferVk : public ICommandBuffer
+{
+  public:
+    CommandBufferVk(VkCommandBuffer cmd, IDescriptorSetAllocator* setalloc) : cmd(cmd), descriptor_allocator(setalloc)
+    {
+    }
+    ~CommandBufferVk() override = default;
+
     void barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
-                 Flags<PipelineAccess> dst_access);
-    void barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
-                 Flags<PipelineAccess> dst_access, ImageLayout old_layout, ImageLayout new_layout);
+                 Flags<PipelineAccess> dst_access) override;
+    void barrier(const Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
+                 Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
+                 ImageLayout new_layout, const ImageMipLayerRange& range = { { 0u, ~0u }, { 0u, ~0u } }) override;
 
-    // doesn't set 'current layout' member
-    void barrier(Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access, Flags<PipelineStage> dst_stage,
-                 Flags<PipelineAccess> dst_access, ImageLayout old_layout, ImageLayout new_layout, const ImageSubRange& range);
+    void copy(const Buffer& dst, const Buffer& src, size_t dst_offset, Range range) override;
+    void copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count) override;
+    void copy(const Image& dst, const Image& src, const ImageCopy& copy) override;
+    void copy(const Image& dst, const Image& src) override;
+    void blit(const Image& dst, const Image& src, const ImageBlit& blit) override;
 
-    void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range range);
-    void copy(Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count);
-    void copy(Image& dst, const Image& src, const ImageCopy& copy, ImageLayout dstlayout, ImageLayout srclayout);
-    void copy(Image& dst, const Image& src);
-    void blit(Image& dst, const Image& src, const ImageBlit& range, ImageLayout dstlayout, ImageLayout srclayout, ImageFilter filter);
-
-    void clear_color(Image& image, ImageLayout layout, Range mips, Range layers, float color);
-    void clear_depth_stencil(Image& image, float clear_depth, uint32_t clear_stencil,
-                             ImageLayout layout = ImageLayout::UNDEFINED, Range mips = { 0, ~0u }, Range layers = { 0, ~0u });
+    // color out/color rw -> clear -> color out/color rw/attachment optimal
+    void clear_color(const Image& image, float color) override;
+    // late z /ds rw -> clear -> early z/ds rw/attachment optimal
+    void clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil) override;
 
     void bind_index(const Buffer& index, uint32_t offset, VkIndexType type);
     void bind_pipeline(const Pipeline& pipeline);
-    void bind_descriptors(const DescriptorPool* ps, DescriptorSet* ds, Range32u range);
+    void bind_sets(const void* sets, uint32_t count = 1);
+    void bind_resources(uint32_t slot, std::span<DescriptorResource> resources);
 
     void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range);
-    void bind_resource(uint32_t slot, Handle<Buffer> resource, Range range = { 0, ~0ull });
-    void bind_resource(uint32_t slot, Handle<Texture> resource);
-    void bind_resource(uint32_t slot, Handle<Sampler> resource);
 
     void set_viewports(const VkViewport* viewports, uint32_t count);
     void set_scissors(const VkRect2D* scissors, uint32_t count);
@@ -55,32 +103,49 @@ class CommandBuffer
     void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset);
     void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset, uint32_t vertex_offset,
                       uint32_t instance_offset);
+    // Draw using
     void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
                                      size_t count_offset, uint32_t max_draw_count, uint32_t stride);
     void dispatch(uint32_t x, uint32_t y, uint32_t z);
 
+    void begin_label(const std::string& label);
+    void end_label();
+
     VkCommandBuffer cmd{};
     const Pipeline* current_pipeline{};
-    uint32_t flush_pc_size{};
-    std::byte pcbuf[PipelineLayoutCreateInfo::MAX_PUSH_BYTES];
+    IDescriptorSetAllocator* descriptor_allocator{};
+    bool rebind_desc_sets{ true };
 };
 
-class CommandPool
+class ICommandPool
 {
   public:
-    CommandPool() noexcept = default;
-    CommandPool(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept;
+    virtual ~ICommandPool() = default;
+    virtual ICommandBuffer* allocate() = 0;
+    virtual ICommandBuffer* begin() = 0;
+    virtual ICommandBuffer* begin(ICommandBuffer* cmd) = 0;
+    virtual void end(ICommandBuffer* cmd) = 0;
+    virtual void reset() = 0;
+    virtual void reset(ICommandBuffer* cmd) = 0;
+};
 
-    CommandBuffer* allocate();
-    CommandBuffer* begin();
-    CommandBuffer* begin(CommandBuffer* cmd);
-    void end(CommandBuffer* cmd);
-    void reset();
-    void reset(CommandBuffer* cmd);
+class CommandPoolVk : public ICommandPool
+{
+  public:
+    CommandPoolVk() noexcept = default;
+    CommandPoolVk(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept;
+    ~CommandPoolVk() override = default;
+
+    ICommandBuffer* allocate() override;
+    ICommandBuffer* begin() override;
+    ICommandBuffer* begin(ICommandBuffer* cmd) override;
+    void end(ICommandBuffer* cmd) override;
+    void reset() override;
+    void reset(ICommandBuffer* cmd) override;
 
     VkDevice dev{};
-    std::deque<CommandBuffer> free;
-    std::deque<CommandBuffer> used;
+    std::deque<CommandBufferVk> free;
+    std::deque<CommandBufferVk> used;
     VkCommandPool pool{};
 };
 
@@ -130,7 +195,8 @@ class SubmitQueue
         std::vector<Sync*> signal_sems;
         std::vector<uint64_t> signal_values;
         std::vector<Flags<PipelineStage>> signal_stages;
-        std::vector<CommandBuffer*> cmds;
+        std::vector<ICommandBuffer*> cmds;
+        std::vector<std::pair<Sync*, Flags<PipelineStage>>> pushed_syncs;
         Sync* fence{};
     };
 
@@ -138,11 +204,11 @@ class SubmitQueue
     SubmitQueue() noexcept = default;
     SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept;
 
-    CommandPool* make_command_pool(VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+    CommandPoolVk* make_command_pool(VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    SubmitQueue& wait_sync(Sync* sync, Flags<PipelineStage> stages = {}, uint64_t value = ~0ull);
-    SubmitQueue& signal_sync(Sync* sync, Flags<PipelineStage> stages = {}, uint64_t value = ~0ull);
-    SubmitQueue& with_cmd_buf(CommandBuffer* cmd);
+    SubmitQueue& wait_sync(Sync* sync, Flags<PipelineStage> stages = PipelineStage::ALL, uint64_t value = ~0ull);
+    SubmitQueue& signal_sync(Sync* sync, Flags<PipelineStage> stages = PipelineStage::ALL, uint64_t value = ~0ull);
+    SubmitQueue& with_cmd_buf(ICommandBuffer* cmd);
     VkResult submit();
     VkResult submit_wait(uint64_t timeout);
     void present(Swapchain* swapchain);
@@ -152,7 +218,7 @@ class SubmitQueue
     VkQueue queue{};
     uint32_t family_idx{ ~0u };
     Sync* fence{};
-    std::deque<CommandPool> command_pools;
+    std::deque<CommandPoolVk> command_pools;
     Submission submission;
 };
 } // namespace gfx

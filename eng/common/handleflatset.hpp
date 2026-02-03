@@ -63,7 +63,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     {
         if(size() == MAX_INDEX)
         {
-            // can't insert anymore buckets. try searching instead and fail.
+            // can't insert buckets anymore. try searching instead and fail.
             auto* b = find_bucket(t);
             if(b) { return { b->index, false }; }
             return { MAX_INDEX, false };
@@ -74,7 +74,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
         const auto hash8 = uint8_t{ hash & 0xFF };
         auto idx = hash & (buckets.size() - 1);
         Bucket nb{ hash8, 0u, (index_t)offsets.size() };
-        Bucket* ob{}; // pointer to new bucket with new item after insertion to update index
+        Bucket* ob{}; // pointer to new bucket with new item after insertion to update index, if some bucket was reused
         while(true)
         {
             // go over buckets, starting from index calculated from hash
@@ -125,8 +125,8 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
             if(b.offset < nb.offset)
             {
                 std::swap(b, nb);
-                // remember the new bucket with the new element to update the index later
-                // as we might find some free bucket with already allocated index.
+                // remember the new bucket with the new element to update it's index later
+                // as we might reuse a bucket with already allocated index.
                 if(!ob) { ob = &b; }
             }
             if(nb.offset == MAX_OFFSET)

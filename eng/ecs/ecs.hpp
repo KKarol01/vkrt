@@ -27,7 +27,7 @@ using entity = uint32_t;
 using component_id_t = uint32_t;
 inline static constexpr entity INVALID_ENTITY = ~entity{};
 inline static constexpr entity MAX_COMPONENTS = sizeof(component_id_t) * 8;
-using signature_t = std::bitset<MAX_COMPONENTS>;
+using signature = std::bitset<MAX_COMPONENTS>;
 
 template <typename... Components> struct View;
 
@@ -125,7 +125,7 @@ class Registry
 {
     struct EntityMetadata
     {
-        signature_t signature{};
+        signature signature{};
         entity parent{ INVALID_ENTITY };
         std::vector<ecs::entity> children;
     };
@@ -134,7 +134,7 @@ class Registry
     struct View
     {
         using on_add_callback_t = void(ecs::entity);
-        using on_update_callback_t = void(ecs::entity, signature_t);
+        using on_update_callback_t = void(ecs::entity, signature);
 
         Registry* registry{};
         std::vector<ecs::entity> entities;
@@ -173,7 +173,7 @@ class Registry
     {
         if(is_valid(e))
         {
-            const auto mask = signature_t{ (get_id_bit<Components>() | ...) };
+            const auto mask = signature{ (get_id_bit<Components>() | ...) };
             return (get_md(e).signature & mask) == mask;
         }
         return false;
@@ -196,7 +196,7 @@ class Registry
     template <typename... Components> void emplace(entity e, Components&&... comps)
     {
         if(!is_valid(e)) { return; }
-        const signature_t compids = (get_id_bit<Components>() | ...);
+        const signature compids = (get_id_bit<Components>() | ...);
         get_md(e).signature |= compids;
         ((get_comp_arr<Components>().emplace(e, std::forward<Components>(comps))), ...);
         views_on_add(e, compids);
@@ -335,9 +335,10 @@ class Registry
         return root;
     }
 
+    // Notify on_update on any view that cares about any of the components in the template.
     template <typename... Components> void update(entity e)
     {
-        const auto sig = signature_t{ (get_id_bit<Components>() | ...) };
+        const auto sig = signature{ (get_id_bit<Components>() | ...) };
         for(auto i = 0u; i < viewsigs.size(); ++i)
         {
             const auto& vsig = viewsigs.at(i);
@@ -345,13 +346,13 @@ class Registry
         }
     }
 
-    // obtains a view of the only entities that have the specified components.
-    // optionally, takes callbacks that are called when entities get removed or added.
+    // Obtains a view of the entities that have all of the specified components.
+    // Optionally, takes callbacks that are called when entities get removed or added.
     template <typename... Components>
     ecs::View<Components...> get_view(std::optional<Callback<View::on_add_callback_t>> on_add = std::nullopt,
                                       std::optional<Callback<View::on_update_callback_t>> on_update = std::nullopt)
     {
-        const auto sig = signature_t{ (get_id_bit<Components>() | ...) };
+        const auto sig = signature{ (get_id_bit<Components>() | ...) };
         View* rview{};
         for(auto i = 0u; i < viewsigs.size(); ++i)
         {
@@ -391,7 +392,7 @@ class Registry
     // broadcasts to views new entity or new component.
     // mask is used to skip views that already contain this entity.
     // mask should only contain bits of newly added components.
-    void views_on_add(entity e, signature_t mask = signature_t{})
+    void views_on_add(entity e, signature mask = signature{})
     {
         if(e == INVALID_ENTITY) { return; }
         const auto& md = get_md(e);
@@ -415,7 +416,7 @@ class Registry
 
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
     std::deque<View> views;
-    std::vector<signature_t> viewsigs; // corresponds 1:1 to views
+    std::vector<signature> viewsigs; // corresponds 1:1 to views
     SparseSet entities;
     std::vector<EntityMetadata> metadatas; // corresponds 1:1 to entities in dense array
 };

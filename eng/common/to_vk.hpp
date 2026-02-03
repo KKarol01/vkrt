@@ -1,40 +1,11 @@
 #pragma once
-#include <vulkan/vulkan.h>
 #include <eng/common/flags.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 
 namespace eng
 {
 namespace gfx
 {
-
-enum class ImageFormat;
-enum class ImageType;
-enum class ImageViewType;
-enum class ImageFilter;
-enum class ImageAddressing;
-enum class ImageAspect;
-enum class ImageLayout;
-enum class ImageUsage;
-enum class CullFace;
-enum class VertexFormat;
-enum class DepthCompare;
-enum class Topology;
-enum class PolygonMode;
-enum class StencilOp;
-enum class CompareOp;
-enum class BlendFactor;
-enum class BlendOp;
-enum class SamplerReductionMode;
-enum class SamplerMipmapMode;
-enum class BufferUsage;
-enum class PipelineStage : uint32_t;
-enum class PipelineAccess : uint32_t;
-enum class PipelineType;
-enum class ShaderStage : uint32_t;
-enum class PipelineSetFlags : uint32_t;
-enum class PipelineBindingFlags : uint32_t;
-enum class PipelineBindingType;
-enum class DescriptorPoolFlags;
 
 VkFilter to_vk(const ImageFilter& a);
 VkSamplerAddressMode to_vk(const ImageAddressing& a);
@@ -61,9 +32,7 @@ VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a);
 VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a);
 VkPipelineBindPoint to_vk(const PipelineType& a);
 VkShaderStageFlags to_vk(const Flags<ShaderStage>& a);
-VkDescriptorSetLayoutCreateFlags to_vk(const Flags<PipelineSetFlags>& a);
-VkDescriptorBindingFlags to_vk(const Flags<PipelineBindingFlags>& a);
-VkDescriptorType to_vk(const PipelineBindingType& a);
+VkDescriptorType to_vk(const DescriptorType& a);
 VkDescriptorPoolCreateFlags to_vk(const Flags<DescriptorPoolFlags>& a);
 
 } // namespace gfx

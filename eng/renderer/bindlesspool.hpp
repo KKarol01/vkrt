@@ -2,11 +2,13 @@
 
 #include <vulkan/vulkan.h>
 #include <unordered_map>
+#include <span>
 #include <deque>
+#include <array>
 #include <vector>
 #include <cstdint>
 #include <eng/common/handle.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
+#include <eng/renderer/renderer.hpp>
 #include <eng/common/slotallocator.hpp>
 #include <eng/common/hash.hpp>
 
@@ -15,59 +17,108 @@ namespace eng
 namespace gfx
 {
 
-// todo: probably wanna move it to image view
-struct BufferView
+struct DescriptorSetVk
 {
-    auto operator<=>(const BufferView&) const = default;
-    Handle<Buffer> buffer;
-    Range range;
+    uint32_t setidx{ ~0u };
+    VkDescriptorSet set{};
 };
 
-} // namespace gfx
-} // namespace eng
-
-//ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range.offset, t.range.size));
-
-namespace eng
+struct DescriptorSizeRatio
 {
-namespace gfx
-{
+    DescriptorType type;
+    float ratio{ 1.0f };
+};
 
-class BindlessPool
+class DescriptorPoolVk
 {
   public:
-    using index_t = uint32_t;
-    static inline constexpr auto INVALID_INDEX = ~index_t{};
+    DescriptorPoolVk() = default;
+    DescriptorPoolVk(uint32_t max_allocs, std::span<DescriptorSizeRatio> sizes)
+        : max_allocs(max_allocs), sizes(sizes.begin(), sizes.end())
+    {
+    }
 
-    BindlessPool(Handle<DescriptorPool> pool, Handle<DescriptorSet> set);
-    void bind(CommandBuffer* cmd);
+    DescriptorSetVk allocate(const DescriptorLayout& layout, uint32_t setidx);
+    void add_page();
 
-    uint32_t get_index(Handle<Buffer> handle, Range range = { 0ull, ~0ull });
-    uint32_t get_index(Handle<Texture> handle);
-    uint32_t get_index(Handle<Sampler> handle);
-    void free_index(Handle<Buffer> handle);
-    void free_index(Handle<Texture> handle);
-    void update_index(Handle<Buffer> handle);
-    void update_index(Handle<Texture> handle);
-    void update_index(Handle<Sampler> handle);
-    void update();
+    uint32_t max_allocs;
+    std::vector<DescriptorSizeRatio> sizes;
+    std::vector<VkDescriptorPool> used;
+    std::vector<VkDescriptorPool> free;
+};
+
+class IDescriptorSetAllocator
+{
+  public:
+    virtual ~IDescriptorSetAllocator() = default;
+
+    virtual void bind_resources(uint32_t slot, std::span<const DescriptorResource> resources) = 0;
+
+    virtual uint32_t get_bindless(const ImageView& view, bool is_storage) { return ~0u; }
+    virtual uint32_t get_bindless(const BufferView& view) { return ~0u; }
+
+    virtual void flush(CommandBufferVk* cmd) = 0;
+    virtual void reset() = 0;
+};
+
+class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
+{
+    struct Views
+    {
+        struct Slot
+        {
+            uint32_t slot;
+            union {
+                BufferView buffer;
+                ImageView image;
+            };
+            bool is_storage{}; // valid only if it's image. determines whether it is storage or sampled.
+        };
+        union {
+            VkBuffer vkbuffer;
+            VkImage vkimage;
+        };
+        std::vector<Slot> slots;
+    };
+    struct FreedResource
+    {
+        SlotAllocator* allocator{};
+        uint32_t slot;
+        uint64_t frame{}; // frame at which the resource was freed. if delta is bigger than frames in flight, it can be overwritten
+    };
+
+  public:
+    DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
+    ~DescriptorSetAllocatorBindlessVk() override = default;
+
+    void bind_resources(uint32_t slot, std::span<const DescriptorResource> resources) override;
+
+    uint32_t get_bindless(const ImageView& view, bool is_storage) override;
+    uint32_t get_bindless(const BufferView& view) override;
+
+    void flush(CommandBufferVk* cmd) override;
+    void reset() override;
 
   private:
-    Handle<DescriptorPool> pool{};
-    Handle<DescriptorSet> set{};
+    uint32_t bind_resource(BufferView view);
+    uint32_t bind_resource(ImageView view, bool is_storage);
+    void write_descriptor(DescriptorType type, const void* view, uint32_t slot);
 
-    SlotAllocator buffer_slots;
-    SlotAllocator image_slots;
-    SlotAllocator texture_slots;
-    SlotAllocator sampler_slots;
-    std::unordered_map<Handle<Buffer>, std::vector<std::pair<BufferView, index_t>>> buffer_indices;
-    std::unordered_map<Handle<Texture>, index_t> image_indices;
-    std::unordered_map<Handle<Texture>, index_t> texture_indices;
-    std::unordered_map<Handle<Sampler>, index_t> sampler_indices;
-    std::vector<VkWriteDescriptorSet> updates;
-    std::deque<VkDescriptorBufferInfo> buffer_updates;
-    std::deque<VkDescriptorImageInfo> image_updates;
-    std::deque<VkDescriptorImageInfo> sampler_updates;
+    DescriptorPoolVk pool{};
+    DescriptorSetVk set{};
+    std::array<uint32_t, PushRange::MAX_PUSH_BYTES / sizeof(uint32_t)> push_values;
+    std::vector<Range32u> push_ranges;
+
+    std::vector<VkWriteDescriptorSet> writes;
+    std::deque<VkDescriptorBufferInfo> buf_writes;
+    std::deque<VkDescriptorImageInfo> img_writes;
+
+    SlotAllocator storage_buffer_slots;
+    SlotAllocator storage_image_slots;
+    SlotAllocator sampled_image_slots;
+    std::unordered_map<Handle<Buffer>, Views> buffer_views;
+    std::unordered_map<Handle<Image>, Views> image_views;
+    std::vector<FreedResource> pending_frees;
 };
 
 } // namespace gfx

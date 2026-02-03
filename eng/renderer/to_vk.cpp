@@ -334,30 +334,14 @@ VkShaderStageFlags to_vk(const Flags<ShaderStage>& a)
     return flags;
 }
 
-VkDescriptorSetLayoutCreateFlags to_vk(const Flags<PipelineSetFlags>& a)
-{
-    VkDescriptorSetLayoutCreateFlags flags{};
-    if(a.test(PipelineSetFlags::UPDATE_AFTER_BIND_BIT)) { flags |= VkDescriptorSetLayoutCreateFlagBits::VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT; }
-    return flags;
-}
-
-VkDescriptorBindingFlags to_vk(const Flags<PipelineBindingFlags>& a)
-{
-    VkDescriptorBindingFlags flags{};
-    if(a.test(PipelineBindingFlags::UPDATE_AFTER_BIND_BIT))             { flags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT; }
-    if(a.test(PipelineBindingFlags::UPDATE_UNUSED_WHILE_PENDING_BIT))   { flags |= VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT; }
-    if(a.test(PipelineBindingFlags::PARTIALLY_BOUND_BIT))               { flags |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT; }
-    return flags;
-}
-
-VkDescriptorType to_vk(const PipelineBindingType& a)
+VkDescriptorType to_vk(const DescriptorType& a)
 {
     switch(a)
     {
-        case PipelineBindingType::STORAGE_BUFFER: { return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; }
-        case PipelineBindingType::SAMPLED_IMAGE: { return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; }
-        case PipelineBindingType::STORAGE_IMAGE: { return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; }
-        case PipelineBindingType::SEPARATE_SAMPLER: { return VK_DESCRIPTOR_TYPE_SAMPLER; }
+        case DescriptorType::STORAGE_BUFFER: { return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; }
+        case DescriptorType::SAMPLED_IMAGE: { return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; }
+        case DescriptorType::STORAGE_IMAGE: { return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; }
+        case DescriptorType::SEPARATE_SAMPLER: { return VK_DESCRIPTOR_TYPE_SAMPLER; }
         default: { ENG_ERROR("Unhandled case."); return {}; }
     }
 }

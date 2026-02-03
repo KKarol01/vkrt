@@ -13,6 +13,7 @@
 #include <eng/common/logger.hpp>
 #include <eng/common/paths.hpp>
 #include <eng/renderer/renderer.hpp>
+#include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/camera.hpp>
 #include <eng/physics/bvh.hpp>
@@ -73,9 +74,9 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
             auto* pdst = get_vertex_component(idx, gfxcomp);
             memcpy(pdst, v, gfx::get_vertex_component_size(gfxcomp));
         };
-        const auto cb2 = [&cb](const auto& a, auto b) { cb.operator()<2>(a, b); };
-        const auto cb3 = [&cb](const auto& a, auto b) { cb.operator()<3>(a, b); };
-        const auto cb4 = [&cb](const auto& a, auto b) { cb.operator()<4>(a, b); };
+        const auto cb2 = [&cb](const auto& a, auto b) { cb.template operator()<2>(a, b); };
+        const auto cb3 = [&cb](const auto& a, auto b) { cb.template operator()<3>(a, b); };
+        const auto cb4 = [&cb](const auto& a, auto b) { cb.template operator()<4>(a, b); };
 
         if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, fastacc, cb3); }
         else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, fastacc, cb3); }
@@ -121,9 +122,8 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
     const auto render_geometry = Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{
         .flags = {},
         .vertex_layout = vertex_layout,
-        .index_format = gfx::IndexFormat::U32,
         .vertices = vertices,
-        .indices = std::as_bytes(std::span{ indices }),
+        .indices = std::span{ indices },
     });
 
     auto& geom = model.geometries.emplace_back();
@@ -157,8 +157,6 @@ asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat form
         return nullptr;
     }
 
-    auto imgd = gfx::ImageDescriptor{};
-    imgd.name = fimg.name.c_str();
     int x, y, ch;
     std::byte* imgdata = reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()),
                                                                             data.size(), &x, &y, &ch, 4));
@@ -168,15 +166,15 @@ asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat form
         return nullptr;
     }
 
-    imgd.usage = gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT | gfx::ImageUsage::TRANSFER_SRC_BIT;
-    imgd.data = { imgdata, imgdata + x * y * ch };
-    imgd.width = (uint32_t)x;
-    imgd.height = (uint32_t)y;
-    imgd.format = format;
-    imgd.mips = std::log2(std::min(x, y)) + 1;
-    const auto img = Engine::get().renderer->make_image(imgd);
+    const auto img =
+        Engine::get().renderer->make_image(gfx::Image::init(fimg.name.c_str(), (uint32_t)x, (uint32_t)y, 0, format,
+                                                            gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                            0, 1, gfx::ImageLayout::READ_ONLY));
+    ENG_TODO("TODO: Process mips");
+    gfx::get_renderer().sbuf->copy(img, imgdata, 0, 0, true, true);
     stbi_image_free(imgdata);
-    model.images.at(image_index).name = imgd.name;
+    model.images.at(image_index).name = fimg.name.c_str();
     model.images.at(image_index).render_image = img;
     return &model.images.at(image_index);
 }
@@ -217,7 +215,7 @@ asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat form
 asset::Texture* load_texture(const fastgltf::Asset& fastasset, gfx::ImageFormat format, size_t texture_index, asset::Model& model)
 {
     if(model.textures.size() <= texture_index) { model.textures.resize(fastasset.textures.size()); }
-    if(model.textures.at(texture_index).render_texture) { return &model.textures.at(texture_index); }
+    if(model.textures.at(texture_index).view) { return &model.textures.at(texture_index); }
     const auto& ftex = fastasset.textures.at(texture_index);
     const auto image_index = ftex.imageIndex ? *ftex.imageIndex : ~0ull;
     if(image_index == ~0ull) { return nullptr; }
@@ -227,14 +225,7 @@ asset::Texture* load_texture(const fastgltf::Asset& fastasset, gfx::ImageFormat 
         ENG_ERROR("Could not load texture ({}) image ({})", ftex.name.c_str(), texture_index);
         return nullptr;
     }
-    const auto tex = Engine::get().renderer->make_texture(gfx::TextureDescriptor{
-        .view = image->render_image->default_view,
-        .layout = gfx::ImageLayout::READ_ONLY,
-        //.sampler = load_sampler(asset, ftex.samplerIndex ? *ftex.samplerIndex : ~0ull, model), // todo: somehow pass the sampler -- or set it in the gui, once it's done...
-        .is_storage = false });
-
-    model.textures.at(texture_index).name = ftex.name.c_str();
-    model.textures.at(texture_index).render_texture = tex;
+    model.textures.at(texture_index) = Texture{ ftex.name.c_str(), gfx::ImageView::init(image->render_image) };
     return &model.textures.at(texture_index);
 }
 
@@ -251,20 +242,20 @@ asset::Material* load_material(const fastgltf::Asset& fastasset, const fastgltf:
     if(fmat.pbrData.baseColorTexture)
     {
         auto* tex = gltf::load_texture(fastasset, gfx::ImageFormat::R8G8B8A8_SRGB, fmat.pbrData.baseColorTexture->textureIndex, model);
-        if(tex != nullptr) { matdesc.base_color_texture = tex->render_texture; }
+        if(tex != nullptr) { matdesc.base_color_texture = tex->view; }
         else { ENG_ERROR("Could not load base color texture for material ({}).", fmat.name.c_str()); }
     }
     if(fmat.normalTexture)
     {
         auto* tex = gltf::load_texture(fastasset, gfx::ImageFormat::R8G8B8A8_UNORM, fmat.normalTexture->textureIndex, model);
-        if(tex != nullptr) { matdesc.normal_texture = tex->render_texture; }
+        if(tex != nullptr) { matdesc.normal_texture = tex->view; }
         else { ENG_ERROR("Could not load normal texture for material ({}).", fmat.name.c_str()); }
     }
     if(fmat.pbrData.metallicRoughnessTexture)
     {
         auto* tex = gltf::load_texture(fastasset, gfx::ImageFormat::R8G8B8A8_UNORM,
                                        fmat.pbrData.metallicRoughnessTexture->textureIndex, model);
-        if(tex != nullptr) { matdesc.metallic_roughness_texture = tex->render_texture; }
+        if(tex != nullptr) { matdesc.metallic_roughness_texture = tex->view; }
         else { ENG_ERROR("Could not load metallic roughness texture for material ({}).", fmat.name.c_str()); }
     }
     const auto mat = Engine::get().renderer->make_material(matdesc);
@@ -349,48 +340,39 @@ void load_node(const fastgltf::Asset& fastasset, const fastgltf::Node& fastnode,
 }
 } // namespace gltf
 
-Model GLTFModelImporter::load_model(const std::filesystem::path& path)
+std::expected<asset::Model, std::string> GLTFModelImporter::load_model(const std::filesystem::path& path)
 {
-    const auto filepath = eng::paths::canonize_path(eng::paths::MODELS_DIR / path);
-
-    if(!std::filesystem::exists(filepath))
+    if(!std::filesystem::exists(path))
     {
-        ENG_WARN("Path {} does not point to any file.", filepath.string());
-        return {};
+        return std::unexpected(ENG_FMT("Path {} does not point to any file.", path.string()));
     }
 
-    if(filepath.extension() != ".glb")
-    {
-        ENG_WARN("Only glb files are supported.");
-        return {};
-    }
+    if(path.extension() != ".glb") { return std::unexpected("Only glb files are supported."); }
 
-    auto fastdatabuf = fastgltf::GltfDataBuffer::FromPath(filepath);
+    auto fastdatabuf = fastgltf::GltfDataBuffer::FromPath(path);
     if(!fastdatabuf)
     {
-        ENG_WARN("Error during GLTF import: {}", fastgltf::getErrorName(fastdatabuf.error()));
-        return {};
+        return std::unexpected(ENG_FMT("Error during GLTF import: {}", fastgltf::getErrorName(fastdatabuf.error())));
     }
 
     static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     fastgltf::Parser fastparser;
-    auto fastexpasset = fastparser.loadGltfBinary(fastdatabuf.get(), filepath.parent_path(), gltfOptions);
+    auto fastexpasset = fastparser.loadGltfBinary(fastdatabuf.get(), path.parent_path(), gltfOptions);
     if(!fastexpasset)
     {
-        ENG_WARN("Error during loading fastgltf::Parser::loadGltfBinary: {}", fastgltf::getErrorName(fastexpasset.error()));
-        return {};
+        return std::unexpected(ENG_FMT("Error during loading fastgltf::Parser::loadGltfBinary: {}",
+                                       fastgltf::getErrorName(fastexpasset.error())));
     }
 
     auto& fastasset = fastexpasset.get();
     if(fastasset.scenes.empty())
     {
-        ENG_WARN("Error during loading. Fastgltf asset does not have any scenes defined.");
-        return {};
+        return std::unexpected("Error during loading. Fastgltf asset does not have any scenes defined.");
     }
 
     auto& fastscene = fastasset.scenes.at(0);
-    auto* r = Engine::get().renderer;
+    auto& r = gfx::get_renderer();
     asset::Model model;
     model.nodes.reserve(fastasset.nodes.size() + 1);
     auto root_node = asset::Model::Node{};
@@ -404,8 +386,8 @@ Model GLTFModelImporter::load_model(const std::filesystem::path& path)
     }
     model.root_node = model.nodes.size();
     model.nodes.push_back(std::move(root_node));
-    assert(model.nodes.capacity() == fastasset.nodes.size() + 1);
-    return model;
+    ENG_ASSERT(model.nodes.capacity() == fastasset.nodes.size() + 1);
+    return std::move(model);
 }
 } // namespace import
 } // namespace asset
@@ -424,14 +406,20 @@ void Scene::init()
 
 asset::Model* Scene::load_from_file(const std::filesystem::path& _path)
 {
-    const auto filepath = eng::paths::canonize_path(eng::paths::MODELS_DIR / _path);
+    const auto filepath = eng::paths::MODELS_DIR / _path;
     const auto fileext = filepath.extension();
 
     if(const auto it = loaded_models.find(filepath); it != loaded_models.end()) { return &it->second; }
 
     if(const auto it = asset::import::file_importers.find(fileext); it != asset::import::file_importers.end())
     {
-        return &loaded_models.emplace(filepath, it->second->load_model(filepath)).first->second;
+        auto model = it->second->load_model(filepath);
+        if(!model)
+        {
+            ENG_WARN("{}", model.error());
+            return nullptr;
+        }
+        return &loaded_models.emplace(filepath, std::move(*model)).first->second;
     }
 
     ENG_WARN("No importer for extensions {}.", fileext.string());
@@ -448,10 +436,7 @@ ecs::entity Scene::instance_model(const asset::Model* model)
         auto entity = ecsr->create();
         ecsr->emplace(entity, ecs::Node{ node.name, &model });
         ecsr->emplace(entity, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
-        if(node.mesh != ~0u)
-        {
-            ecsr->emplace(entity, ecs::Mesh{ &model.meshes.at(node.mesh), model.meshes.at(node.mesh).render_meshes, ~0u });
-        }
+        if(node.mesh != ~0u) { ecsr->emplace(entity, ecs::Mesh{ &model.meshes.at(node.mesh), ~0u }); }
         if(parent != ecs::INVALID_ENTITY) { ecsr->make_child(parent, entity); }
         for(const auto& e : node.children)
         {
@@ -520,7 +505,7 @@ void Scene::update()
 
             while(visit.size())
             {
-                assert(trs.size() == visit.size());
+                ENG_ASSERT(trs.size() == visit.size());
                 auto e = visit.top();
                 auto pt = trs.top();
                 visit.pop();
@@ -612,78 +597,80 @@ void Scene::ui_draw_inspector()
     auto* cmesh = ecs->get<ecs::Mesh>(entity);
     auto* clight = ecs->get<ecs::Light>(entity);
 
-    if(ImGui::Begin("Inspector", 0, ImGuiWindowFlags_HorizontalScrollbar))
-    {
-        assert(cnode && ctransform);
-        ImGui::SeparatorText("Node");
-        ImGui::SeparatorText("Transform");
-        if(ImGui::DragFloat3("Position", &ctransform->local[3].x)) { update_transform(entity); }
-        if(cmesh)
-        {
-            ImGui::SeparatorText("Mesh renderer");
-            ImGui::Text(cmesh->mesh->name.c_str());
-            if(cmesh->meshes.size())
-            {
-                // ImGui::Indent();
-                for(auto& e : cmesh->meshes)
-                {
-                    auto& material = e->material.get();
-                    ImGui::Text("Pass: %s", material.mesh_pass->name.c_str());
-                    if(material.base_color_texture)
-                    {
-                        ImGui::Image(*material.base_color_texture + 1, { 128.0f, 128.0f });
-                    }
-                }
-                // ImGui::Unindent();
-            }
-        }
-        if(clight)
-        {
-            ImGui::SeparatorText("Light");
-            ImGui::Text("Type: %s", to_string(clight->type).c_str());
-            bool edited = false;
-            edited |= ImGui::ColorEdit4("Color", &clight->color.x);
-            edited |= ImGui::SliderFloat("Range", &clight->range, 0.0f, 100.0f);
-            edited |= ImGui::SliderFloat("Intensity", &clight->intensity, 0.0f, 100.0f);
-            // todo: don't like that entities with light component have to be detected and handled separately
-            if(edited) { update_transform(entity); }
-        }
+    ENG_ASSERT(false);
 
-        if(cmesh)
-        {
-            ImGui::SeparatorText("BVH");
-            for(auto i = 0u; i < cmesh->mesh->geometries.size; ++i)
-            {
-                const auto& bvh = cnode->model->geometries[cmesh->mesh->geometries.offset + i].bvh;
-                const auto stats = bvh.get_stats();
-                ImGui::Checkbox("##bvh_level_exclusive", &uie.bvh_level_exclusive);
-                ImGui::SameLine();
-                if(ImGui::IsItemHovered()) { ImGui::SetItemTooltip("Shows levels up to X or only equal to X."); }
-                ImGui::SliderInt("show level", &uie.bvh_level, 0, stats.levels);
-                if(uie.bvh_level > 0)
-                {
-                    for(auto ni = 0u; ni < stats.nodes.size(); ++ni)
-                    {
-                        if((uie.bvh_level_exclusive && stats.metadatas[ni].level != uie.bvh_level) ||
-                           (!uie.bvh_level_exclusive && stats.metadatas[ni].level > uie.bvh_level))
-                        {
-                            continue;
-                        }
-                        const auto& e = stats.nodes[ni];
-                        Engine::get().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
-                    }
-                }
+    // if(ImGui::Begin("Inspector", 0, ImGuiWindowFlags_HorizontalScrollbar))
+    //{
+    //     ENG_ASSERT(cnode && ctransform);
+    //     ImGui::SeparatorText("Node");
+    //     ImGui::SeparatorText("Transform");
+    //     if(ImGui::DragFloat3("Position", &ctransform->local[3].x)) { update_transform(entity); }
+    //     if(cmesh)
+    //     {
+    //         ImGui::SeparatorText("Mesh renderer");
+    //         ImGui::Text(cmesh->mesh->name.c_str());
+    //         if(cmesh->meshes.size())
+    //         {
+    //             // ImGui::Indent();
+    //             for(auto& e : cmesh->meshes)
+    //             {
+    //                 auto& material = e->material.get();
+    //                 ImGui::Text("Pass: %s", material.mesh_pass->name.c_str());
+    //                 if(material.base_color_texture)
+    //                 {
+    //                     ImGui::Image(*material.base_color_texture + 1, { 128.0f, 128.0f });
+    //                 }
+    //             }
+    //             // ImGui::Unindent();
+    //         }
+    //     }
+    //     if(clight)
+    //     {
+    //         ImGui::SeparatorText("Light");
+    //         ImGui::Text("Type: %s", to_string(clight->type).c_str());
+    //         bool edited = false;
+    //         edited |= ImGui::ColorEdit4("Color", &clight->color.x);
+    //         edited |= ImGui::SliderFloat("Range", &clight->range, 0.0f, 100.0f);
+    //         edited |= ImGui::SliderFloat("Intensity", &clight->intensity, 0.0f, 100.0f);
+    //         // todo: don't like that entities with light component have to be detected and handled separately
+    //         if(edited) { update_transform(entity); }
+    //     }
 
-                ImGui::Text("BVH%u: size[kB]: %llu, tris: %u, nodes: %u", i, stats.size / 1024,
-                            (uint32_t)stats.tris.size(), (uint32_t)stats.nodes.size());
-                const auto aabb = stats.nodes[0].aabb;
-                ImGui::Text("\tExtent:");
-                ImGui::Text("\t[%5.2f %5.2f %5.2f]", aabb.min.x, aabb.min.y, aabb.min.z);
-                ImGui::Text("\t[%5.2f %5.2f %5.2f]", aabb.max.x, aabb.max.y, aabb.max.z);
-            }
-        }
-    }
-    ImGui::End();
+    //    if(cmesh)
+    //    {
+    //        ImGui::SeparatorText("BVH");
+    //        for(auto i = 0u; i < cmesh->mesh->geometries.size; ++i)
+    //        {
+    //            const auto& bvh = cnode->model->geometries[cmesh->mesh->geometries.offset + i].bvh;
+    //            const auto stats = bvh.get_stats();
+    //            ImGui::Checkbox("##bvh_level_exclusive", &uie.bvh_level_exclusive);
+    //            ImGui::SameLine();
+    //            if(ImGui::IsItemHovered()) { ImGui::SetItemTooltip("Shows levels up to X or only equal to X."); }
+    //            ImGui::SliderInt("show level", &uie.bvh_level, 0, stats.levels);
+    //            if(uie.bvh_level > 0)
+    //            {
+    //                for(auto ni = 0u; ni < stats.nodes.size(); ++ni)
+    //                {
+    //                    if((uie.bvh_level_exclusive && stats.metadatas[ni].level != uie.bvh_level) ||
+    //                       (!uie.bvh_level_exclusive && stats.metadatas[ni].level > uie.bvh_level))
+    //                    {
+    //                        continue;
+    //                    }
+    //                    const auto& e = stats.nodes[ni];
+    //                    Engine::get().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
+    //                }
+    //            }
+
+    //            ImGui::Text("BVH%u: size[kB]: %llu, tris: %u, nodes: %u", i, stats.size / 1024,
+    //                        (uint32_t)stats.tris.size(), (uint32_t)stats.nodes.size());
+    //            const auto aabb = stats.nodes[0].aabb;
+    //            ImGui::Text("\tExtent:");
+    //            ImGui::Text("\t[%5.2f %5.2f %5.2f]", aabb.min.x, aabb.min.y, aabb.min.z);
+    //            ImGui::Text("\t[%5.2f %5.2f %5.2f]", aabb.max.x, aabb.max.y, aabb.max.z);
+    //        }
+    //    }
+    //}
+    // ImGui::End();
 }
 
 void Scene::ui_draw_manipulate()

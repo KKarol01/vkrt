@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <unordered_set>
 #include <glm/glm.hpp>
+#include <eng/engine.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
@@ -21,29 +22,26 @@
 #include <eng/common/slotallocator.hpp>
 #include <eng/ecs/components.hpp>
 
+ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
+ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range));
+
 namespace eng
 {
 namespace gfx
 {
-class ImGuiRenderer;
-struct Sync;
-struct SyncCreateInfo;
-class BindlessPool;
-class CommandBuffer;
-class CommandPool;
-class StagingBuffer;
-class SubmitQueue;
-struct VkImageMetadata;
-struct VkImageViewMetadata;
-struct VkShaderMetadata;
-struct VkPipelineMetadata;
-class RenderGraph;
-struct RenderGraphPasses;
+
+struct DescriptorResource
+{
+    DescriptorType type;
+    const void* view{};
+    uint32_t binding{ ~0u };       //~0u infers from position in array
+    uint32_t array_element{ ~0u }; // if not ~0u, binding is an array
+};
 
 struct ImageBlockData
 {
-    uint32_t size;
-    uint32_t x, y, z;
+    uint32_t bytes_per_texel;
+    Vec3u32 texel_extent;
 };
 
 ImageBlockData get_block_data(ImageFormat format);
@@ -54,78 +52,47 @@ struct Shader
     std::filesystem::path path;
     ShaderStage stage{ ShaderStage::NONE };
     union Metadata {
-        VkShaderMetadata* vk{};
+        ShaderMetadataVk* vk{};
     } md;
 };
 
-// todo: make sure when the user passes it, it gets checked for compatibility (i think it does -- see pplayouts)
-struct PipelineLayoutCreateInfo
+struct Descriptor
+{
+    auto operator<=>(const Descriptor& a) const = default;
+    DescriptorType type{};
+    uint32_t slot{};
+    uint32_t size{};
+    Flags<ShaderStage> stages{};
+    const Handle<Sampler>* immutable_samplers{};
+};
+
+struct DescriptorLayout
+{
+    bool operator==(const DescriptorLayout& a) const { return layout == a.layout; }
+    bool is_compatible(const DescriptorLayout& a) const;
+    std::vector<Descriptor> layout;
+    union Metadata {
+        DescriptorLayoutMetadataVk* vk{};
+    } md;
+};
+
+struct PushRange
 {
     inline static constexpr auto MAX_PUSH_BYTES = 128u;
-    struct SetLayout
-    {
-        struct Binding
-        {
-            auto operator<=>(const Binding& a) const = default;
-
-            PipelineBindingType type{};
-            uint32_t slot{};
-            uint32_t size{};
-            Flags<ShaderStage> stages{};
-            Flags<PipelineBindingFlags> flags{};
-            const Handle<Sampler>* immutable_samplers{};
-        };
-
-        auto operator<=>(const SetLayout& a) const = default;
-
-        Flags<PipelineSetFlags> flags{};
-        std::vector<Binding> bindings;
-    };
-    struct PushRange
-    {
-        auto operator<=>(const PushRange& a) const = default;
-        Flags<ShaderStage> stages{};
-        uint32_t size{};
-    };
-
-    auto operator<=>(const PipelineLayoutCreateInfo& a) const = default;
-
-    std::vector<SetLayout> sets{};
-    PushRange range{};
-};
-
-struct DescriptorPoolCreateInfo
-{
-    struct Pool
-    {
-        PipelineBindingType type;
-        uint32_t count{};
-    };
-    Flags<DescriptorPoolFlags> flags{};
-    uint32_t max_sets{};
-    std::vector<Pool> pools;
-};
-
-struct DescriptorPool
-{
-    Handle<DescriptorSet> allocate(Handle<PipelineLayout> playout, uint32_t dset_idx);
-    DescriptorSet& get_dset(Handle<DescriptorSet> set);
-    DescriptorPoolCreateInfo info{};
-    std::vector<DescriptorSet> sets;
-    void* metadata{};
-};
-
-struct DescriptorSet
-{
-    void* metadata{};
+    auto operator<=>(const PushRange& a) const = default;
+    Flags<ShaderStage> stages{};
+    uint32_t size{};
 };
 
 struct PipelineLayout
 {
-    bool operator==(const PipelineLayout& a) const { return info == a.info; }
+    bool operator==(const PipelineLayout& a) const { return layout == a.layout && push_range == a.push_range; }
     bool is_compatible(const PipelineLayout& a) const;
-    PipelineLayoutCreateInfo info;
-    void* metadata{};
+    std::vector<Handle<DescriptorLayout>> layout{};
+    PushRange push_range{};
+    union Metadata {
+        PipelineLayoutMetadataVk* vk{};
+    } md;
 };
 
 struct PipelineCreateInfo
@@ -177,10 +144,11 @@ struct PipelineCreateInfo
 
     struct AttachmentState
     {
-        auto operator==(const AttachmentState& o) const
+        bool operator==(const AttachmentState& o) const
         {
             if(count != o.count) { return false; }
             if(depth_format != o.depth_format) { return false; }
+            if(stencil_format != o.stencil_format) { return false; }
             for(auto i = 0u; i < count; ++i)
             {
                 if(color_formats.at(i) != o.color_formats.at(i) || blend_states.at(i) != o.blend_states.at(i))
@@ -203,7 +171,7 @@ struct PipelineCreateInfo
     std::vector<Handle<Shader>> shaders;
     std::vector<VertexBinding> bindings;
     std::vector<VertexAttribute> attributes;
-    Handle<PipelineLayout> layout;
+    Handle<PipelineLayout> layout; // optional
 
     AttachmentState attachments;
     bool depth_test{ false };
@@ -226,7 +194,7 @@ struct Pipeline
     PipelineCreateInfo info;
     PipelineType type{};
     union Metadata {
-        VkPipelineMetadata* vk{};
+        PipelineMetadataVk* vk{};
     } md;
 };
 
@@ -244,14 +212,14 @@ struct ShaderEffect
     Handle<Pipeline> pipeline;
 };
 
-struct MeshPassCreateInfo
-{
-    std::string name;
-    std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM> effects;
-};
-
 struct MeshPass
 {
+    static MeshPass init(const std::string& name) { return MeshPass{ .name = name }; }
+    MeshPass& set(RenderPassType type, Handle<ShaderEffect> effect)
+    {
+        effects[(int)type] = effect;
+        return *this;
+    }
     bool operator==(const MeshPass& o) const { return name == o.name; }
     std::string name;
     std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM> effects;
@@ -261,7 +229,7 @@ struct Material
 {
     auto operator<=>(const Material& t) const = default;
     Handle<MeshPass> mesh_pass;
-    Handle<Texture> base_color_texture;
+    ImageView base_color_texture;
 };
 
 struct Mesh
@@ -282,75 +250,58 @@ struct Meshlet
 
 struct GeometryDescriptor
 {
-    size_t get_num_indices() const { return indices.size_bytes() / get_index_size(index_format); }
+    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
     size_t get_num_vertices() const
     {
         return vertices.size() * sizeof(vertices[0]) / get_vertex_layout_size(vertex_layout);
     }
     Flags<GeometryFlags> flags;
     Flags<VertexComponent> vertex_layout;
-    IndexFormat index_format;
     std::span<const float> vertices;
-    std::span<const std::byte> indices;
-};
-
-struct BufferDescriptor
-{
-    std::string name;
-    size_t size{};
-    Flags<BufferUsage> usage{};
+    std::span<const uint32_t> indices;
 };
 
 struct Buffer
 {
-    constexpr Buffer() noexcept = default;
-    explicit Buffer(const BufferDescriptor& info) noexcept : name(info.name), usage(info.usage), capacity(info.size) {}
+    static Buffer init(const std::string& name, size_t capacity, Flags<BufferUsage> usage)
+    {
+        return Buffer{ .name = name, .usage = usage, .capacity = capacity, .size = 0ull, .memory = {} };
+    }
 
     std::string name;
     Flags<BufferUsage> usage{};
     size_t capacity{};
     size_t size{};
-    void* metadata{};
+    union Metadata {
+        BufferMetadataVk* vk;
+    } md;
     void* memory{};
-};
-
-struct ImageDescriptor
-{
-    std::string name;
-    uint32_t width{};
-    uint32_t height{};
-    uint32_t depth{ 1 };
-    uint32_t mips{ 1 };
-    ImageFormat format{ ImageFormat::R8G8B8A8_UNORM };
-    ImageType type{ ImageType::TYPE_2D };
-    Flags<ImageUsage> usage{};
-    std::span<const std::byte> data;
 };
 
 struct Image
 {
-    Image() noexcept = default;
-    explicit Image(const ImageDescriptor& info) noexcept
-        : name(info.name), width(info.width), height(info.height), depth(info.depth), mips(info.mips),
-          format(info.format), type(info.type), usage(info.usage)
+    static Image init(const std::string& name, uint32_t width, uint32_t height, ImageFormat format,
+                      Flags<ImageUsage> usage, ImageLayout layout = ImageLayout::UNDEFINED)
     {
+        return init(name, width, height, 1, format, usage, (uint32_t)(std::log2f((float)std::min(width, height)) + 1), 1, layout);
     }
-
-    ImageViewType deduce_view_type() const
+    static Image init(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, ImageFormat format,
+                      Flags<ImageUsage> usage, uint32_t mips = 1, uint32_t layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
     {
-        return type == ImageType::TYPE_1D   ? ImageViewType::TYPE_1D
-               : type == ImageType::TYPE_2D ? ImageViewType::TYPE_2D
-               : type == ImageType::TYPE_3D ? ImageViewType::TYPE_3D
-                                            : ImageViewType::NONE;
-    }
-
-    Flags<ImageAspect> deduce_aspect() const
-    {
-        Flags<ImageAspect> f;
-        if(usage.test(ImageUsage::DEPTH_BIT)) { f |= ImageAspect::DEPTH; }
-        if(usage.test(ImageUsage::STENCIL_BIT)) { f |= ImageAspect::STENCIL; }
-        if(!f) { f |= ImageAspect::COLOR; }
-        return f;
+        return Image{
+            .name = name,
+            .type = depth > 1    ? ImageType::TYPE_3D
+                    : height > 1 ? ImageType::TYPE_2D
+                                 : ImageType::TYPE_1D,
+            .format = format,
+            .width = width,
+            .height = std::max(height, 1u),
+            .depth = std::max(depth, 1u),
+            .mips = mips == 0u ? (uint32_t)(std::log2f((float)std::min(width, height)) + 1) : mips,
+            .layers = layers,
+            .usage = usage,
+            .layout = layout,
+        };
     }
 
     std::string name;
@@ -362,51 +313,20 @@ struct Image
     uint32_t mips{ 1u };
     uint32_t layers{ 1u };
     Flags<ImageUsage> usage{ ImageUsage::NONE };
-    ImageLayout current_layout{ ImageLayout::UNDEFINED };
-    Handle<ImageView> default_view;
+    ImageLayout layout{ ImageLayout::UNDEFINED };
+    std::unordered_map<ImageView, void*> views;
     union Metadata {
-        VkImageMetadata* vk{};
+        ImageMetadataVk* vk;
     } md;
 };
 
-struct ImageViewDescriptor
-{
-    std::string name;
-    Handle<Image> image;
-    std::optional<ImageViewType> view_type;
-    std::optional<ImageFormat> format;
-    std::optional<Flags<ImageAspect>> aspect;
-    Range32u mips{ 0, ~0u };
-    Range32u layers{ 0, ~0u };
-    // swizzle always identity for now
-};
-
-struct ImageView
-{
-    bool operator==(const ImageView& a) const
-    {
-        return image == a.image && type == a.type && format == a.format && aspect == a.aspect && mips == a.mips &&
-               layers == a.layers;
-    }
-    std::string name;
-    Handle<Image> image;
-    ImageViewType type{};
-    ImageFormat format{};
-    Flags<ImageAspect> aspect{};
-    Range32u mips{};
-    Range32u layers{};
-    union Metadata {
-        VkImageViewMetadata* vk{};
-    } md;
-};
-
-struct ImageSubRange
+struct ImageMipLayerRange
 {
     Range32u mips{};
     Range32u layers{};
 };
 
-struct ImageSubLayers
+struct ImageLayerRange
 {
     uint32_t mip{};
     Range32u layers{};
@@ -414,16 +334,17 @@ struct ImageSubLayers
 
 struct ImageBlit
 {
-    ImageSubLayers srclayers{};
-    ImageSubLayers dstlayers{};
+    ImageLayerRange srclayers{};
+    ImageLayerRange dstlayers{};
     Range3D32i srcrange{};
     Range3D32i dstrange{};
+    ImageFilter filter{ ImageFilter::LINEAR };
 };
 
 struct ImageCopy
 {
-    ImageSubLayers srclayers{};
-    ImageSubLayers dstlayers{};
+    ImageLayerRange srclayers{};
+    ImageLayerRange dstlayers{};
     Vec3i32 srcoffset{};
     Vec3i32 dstoffset{};
     Vec3u32 extent{};
@@ -443,30 +364,17 @@ struct Sampler
 {
     auto operator==(const Sampler& a) const { return info == a.info; }
     SamplerDescriptor info;
-    void* metadata{};
-};
-
-struct TextureDescriptor
-{
-    Handle<ImageView> view;
-    ImageLayout layout;
-    bool is_storage{ false };
-};
-
-struct Texture
-{
-    auto operator<=>(const Texture& t) const = default;
-    Handle<ImageView> view;
-    ImageLayout layout{ ImageLayout::READ_ONLY };
-    bool is_storage{ false };
+    union Metadata {
+        SamplerMetadataVk* vk;
+    } md;
 };
 
 struct MaterialDescriptor
 {
     std::string mesh_pass{ "default_unlit" };
-    Handle<Texture> base_color_texture;
-    Handle<Texture> normal_texture;
-    Handle<Texture> metallic_roughness_texture;
+    ImageView base_color_texture;
+    ImageView normal_texture;
+    ImageView metallic_roughness_texture;
 };
 
 struct MeshDescriptor
@@ -503,10 +411,10 @@ struct Swapchain
     static inline acquire_impl_fptr acquire_impl{};
     uint32_t acquire(uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* fence = nullptr);
     Handle<Image> get_image() const;
-    Handle<ImageView> get_view() const;
+    ImageView get_view() const;
     void* metadata{};
     std::vector<Handle<Image>> images;
-    std::vector<Handle<ImageView>> views;
+    std::vector<ImageView> views;
     uint32_t current_index{ 0ul };
 };
 
@@ -532,29 +440,46 @@ struct DebugGeometry
     } data;
 };
 
-class RendererBackend
+template <typename T> struct LayoutCompatibilityChecker
+{
+    bool operator()(const T& a, const T& b) const noexcept { return a.is_compatible(b); }
+};
+
+struct RendererBackendCaps
+{
+    bool supports_bindless{};
+};
+
+class IRendererBackend
 {
   public:
-    virtual ~RendererBackend() = default;
+    virtual ~IRendererBackend() = default;
 
     virtual void init() = 0;
 
-    virtual Buffer make_buffer(const BufferDescriptor& info) = 0;
-    virtual void destroy_buffer(Buffer& b) = 0;
-    virtual Image make_image(const ImageDescriptor& info) = 0;
-    virtual void make_view(ImageView& view) = 0;
+    virtual void allocate_buffer(Buffer& buffer) = 0;
+    virtual void destroy_buffer(Buffer& buffer) = 0;
+    virtual void allocate_image(Image& image) = 0;
+    virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
     virtual void make_shader(Shader& shader) = 0;
     virtual bool compile_shader(const Shader& shader) = 0;
-    virtual bool compile_pplayout(PipelineLayout& layout) = 0;
+    virtual bool compile_layout(DescriptorLayout& layout) = 0;
+    virtual bool compile_layout(PipelineLayout& layout) = 0;
     virtual void make_pipeline(Pipeline& pipeline) = 0;
     virtual bool compile_pipeline(const Pipeline& pipeline) = 0;
     virtual Sync* make_sync(const SyncCreateInfo& info) = 0;
     virtual void destory_sync(Sync*) = 0;
     virtual Swapchain* make_swapchain() = 0;
     virtual SubmitQueue* get_queue(QueueType type) = 0;
-    virtual DescriptorPool make_descpool(const DescriptorPoolCreateInfo& info) = 0;
-    virtual DescriptorSet allocate_set(DescriptorPool& pool, const PipelineLayout& playout, uint32_t dset_idx) = 0;
+
+    virtual ImageView::Metadata get_md(const ImageView& view) = 0;
+
+    virtual size_t get_indirect_indexed_command_size() const = 0;
+    virtual void make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count, uint32_t first_index,
+                                               int32_t first_vertex, uint32_t first_instance) const = 0;
+
+    RendererBackendCaps caps{};
 };
 
 } // namespace gfx
@@ -567,41 +492,35 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::StencilState,
                     eng::hash::combine_fnv1a(t.fail, t.pass, t.depth_fail, t.compare, t.compare_mask, t.write_mask, t.ref));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::BlendState,
                     eng::hash::combine_fnv1a(t.enable, t.src_color_factor, t.dst_color_factor, t.color_op,
-                                             t.src_alpha_factor, t.dst_alpha_factor, t.alpha_op, t.r, t.g, t.b, t.a));
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::AttachmentState, [&t] {
-    uint64_t hash = 0;
-    // clang-format off
-    for(auto i=0u; i<t.count; ++i) { hash = eng::hash::combine_fnv1a(hash, t.color_formats.at(i)); }
-    for(auto i=0u; i<t.count; ++i) { hash = eng::hash::combine_fnv1a(hash, t.blend_states.at(i)); }
-    // clang-format on
-    hash = eng::hash::combine_fnv1a(hash, t.count, t.depth_format, t.stencil_format);
-    return hash;
-}());
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayoutCreateInfo, [&t] {
-    uint64_t hash = 0;
-    // clang-format off
-    for(const auto& e : t.sets) 
-    { 
-        hash = eng::hash::combine_fnv1a(hash, e.flags);
-        for(const auto& b : e.bindings) { hash = eng::hash::combine_fnv1a(hash, b.type, b.slot, b.size, b.stages, b.flags, b.immutable_samplers); }
-    }
-    hash = eng::hash::combine_fnv1a(hash, t.range.stages, t.range.size);
-    // clang-format on
-    return hash;
-}());
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo, [&t] {
-    uint64_t hash = 0;
-    // clang-format off
-    for(const auto& e : t.shaders) { hash = eng::hash::combine_fnv1a(hash, e); }
-    for(const auto& e : t.bindings) { hash = eng::hash::combine_fnv1a(hash, e); }
-    for(const auto& e : t.attributes) { hash = eng::hash::combine_fnv1a(hash, e); }
-    // clang-format on
-    hash = eng::hash::combine_fnv1a(hash, t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare,
-                                    t.stencil_test, t.stencil_front, t.stencil_back, t.topology, t.polygon_mode,
-                                    t.culling, t.front_is_ccw, t.line_width);
-    return hash;
-}());
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout, eng::hash::combine_fnv1a(t.info));
+                                             t.src_alpha_factor, t.dst_alpha_factor, t.alpha_op, t.r > 0 ? true : false,
+                                             t.g > 0 ? true : false, t.b > 0 ? true : false, t.a > 0 ? true : false));
+ENG_DEFINE_STD_HASH(
+    eng::gfx::PipelineCreateInfo::AttachmentState,
+    eng::hash::combine_fnv1a(t.count, t.depth_format, t.stencil_format,
+                             std::accumulate(t.color_formats.begin(), t.color_formats.begin() + t.count, 0ull,
+                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); }),
+                             std::accumulate(t.blend_states.begin(), t.blend_states.begin() + t.count, 0ull,
+                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); })));
+ENG_DEFINE_STD_HASH(eng::gfx::Descriptor, eng::hash::combine_fnv1a(t.type, t.slot, t.size, t.stages, t.immutable_samplers));
+ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout,
+                    eng::hash::combine_fnv1a(std::accumulate(t.layout.begin(), t.layout.end(), 0ull, [](auto hash, const auto& val) {
+                        return eng::hash::combine_fnv1a(hash, val);
+                    })));
+ENG_DEFINE_STD_HASH(
+    eng::gfx::PipelineCreateInfo,
+    eng::hash::combine_fnv1a(t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
+                             t.stencil_front, t.stencil_back, t.topology, t.polygon_mode, t.culling, t.front_is_ccw, t.line_width,
+                             std::accumulate(t.shaders.begin(), t.shaders.end(), 0ull,
+                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); }),
+                             std::accumulate(t.bindings.begin(), t.bindings.end(), 0ull,
+                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); }),
+                             std::accumulate(t.attributes.begin(), t.attributes.end(), 0ull,
+                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); })));
+ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout,
+                    eng::hash::combine_fnv1a(t.push_range.stages, t.push_range.size,
+                                             std::accumulate(t.layout.begin(), t.layout.end(), 0ull, [](auto hash, const auto& val) {
+                                                 return eng::hash::combine_fnv1a(hash, val);
+                                             })));
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Shader, eng::hash::combine_fnv1a(t.path));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, eng::hash::combine_fnv1a(t.meshlet_range));
@@ -613,8 +532,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
                     eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],
                                              t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
 ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
-ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
-ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.aspect.flags, t.mips, t.layers));
+// ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
 
 namespace eng
 {
@@ -624,64 +542,95 @@ enum class SubmitFlags : uint32_t
 {
 };
 
-namespace RenderOrder
+enum class RenderOrder
 {
-inline constexpr uint32_t DEFAULT_UNLIT = 50;
-inline constexpr uint32_t PRESENT = 100;
-} // namespace RenderOrder
+    DEFAULT_UNLIT,
+    PRESENT
+};
 
 class Renderer
 {
   public:
-    static inline uint32_t frame_count = 2;
+    static inline uint32_t frames_in_flight = 2;
 
     struct InstanceBatch
     {
         Handle<Pipeline> pipeline;
-        uint32_t inst_count{};
-        uint32_t cmd_count{};
+        uint32_t instance_count;
+        uint32_t command_count;
+    };
+
+    struct IndirectBatch;
+    struct IndirectDrawParams
+    {
+        const IndirectBatch* batch{};
+        const InstanceBatch* draw{};
+        uint32_t max_draw_count{};
     };
 
     struct IndirectBatch
     {
+        void draw(const Callback<void(const IndirectDrawParams&)>& draw_callback) const;
         std::vector<InstanceBatch> batches;
-        Handle<Buffer> cmd_buf;
-        Handle<Buffer> ids_buf;
-        uint32_t cmd_count{};
-        uint32_t cmd_start{};
-        uint32_t ids_count{};
+        Handle<Buffer> indirect_buf; // [counts..., commands...]
+        BufferView counts_view;
+        BufferView cmds_view;
     };
 
-    struct RenderPass
+    struct MeshInstance
     {
-        std::vector<ecs::entity> entities;
-        IndirectBatch batch{};
-        bool redo{ true };
+        Handle<Geometry> geometry;
+        Handle<Material> material;
+        uint32_t instance_index;
+        uint32_t meshlet_index;
+    };
+
+    struct RenderPasses
+    {
+        struct Pass
+        {
+            bool needs_rebuild() const { return entities.size() != mesh_instances.size(); }
+            void clear()
+            {
+                entities.clear();
+                mesh_instances.clear();
+                draw.batches.clear();
+            }
+            IndirectBatch draw;
+            Handle<Buffer> instance_buffer;
+            BufferView instance_view;
+            std::vector<ecs::entity> entities;
+            std::vector<MeshInstance> mesh_instances;
+        };
+        Pass& get(RenderPassType type) { return passes[(int)type]; }
+        std::array<Pass, (int)RenderPassType::LAST_ENUM> passes;
     };
 
     struct GBuffer
     {
         Handle<Image> color;
         Handle<Image> depth;
-        Handle<Image> hiz_pyramid;
-        Handle<Image> hiz_debug_output;
+        // Handle<Image> hiz_pyramid;
+        // Handle<Image> hiz_debug_output;
     };
 
     struct PerFrame
     {
         GBuffer gbuffer;
 
-        CommandPool* cmdpool{};
+        CommandPoolVk* cmdpool{};
         Sync* acq_sem{};
         Sync* ren_sem{};
         Sync* swp_sem{};
         Sync* ren_fen{};
         Handle<Buffer> constants{};
+
+        std::vector<std::variant<Handle<Buffer>, Handle<Image>>> retired_resources;
     };
 
     struct DebugGeomBuffers
     {
-        void render(CommandBuffer* cmd, Sync* s);
+        void render(CommandBufferVk* cmd, Sync* s);
         void add(const DebugGeometry& geom) { geometry.push_back(geom); }
 
       private:
@@ -693,14 +642,14 @@ class Renderer
 
     struct GeometryBuffers
     {
-        Handle<Buffer> vpos_buf;      // positions
-        Handle<Buffer> vattr_buf;     // rest of attributes
-        Handle<Buffer> idx_buf;       // indices
-        Handle<Buffer> bsphere_buf;   // bounding spheres
-        Handle<Buffer> mats_buf;      // materials
-        Handle<Buffer> trs_bufs[2]{}; // transforms
+        Handle<Buffer> positions;  // positions
+        Handle<Buffer> attributes; // rest of attributes
+        Handle<Buffer> indices;    // indices
+        Handle<Buffer> bspheres;   // bounding spheres
+        Handle<Buffer> materials;  // materials
 
-        Handle<Buffer> lights_bufs[2]{}; // lights
+        Handle<Buffer> transforms[2]; // transforms
+        Handle<Buffer> lights[2];     // lights
 
         static inline constexpr uint32_t fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
         uint32_t fwdp_lights_per_tile{ 256 }; // changing requires resizing the buffers
@@ -709,9 +658,11 @@ class Renderer
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
         size_t vertex_count{};
         size_t index_count{};
+        size_t transform_count{};
+        size_t light_count{};
     };
 
-    void init(RendererBackend* backend);
+    void init(IRendererBackend* backend);
     void init_helper_geom();
     void init_pipelines();
     void init_perframes();
@@ -721,49 +672,49 @@ class Renderer
     void instance_entity(ecs::entity e);
 
     void update();
-    void render(RenderPassType pass, SubmitQueue* queue, CommandBuffer* cmd);
+    void render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd);
     void build_renderpasses();
-    void render_ibatch(CommandBuffer* cmd, const IndirectBatch& ibatch,
-                       const Callback<void(CommandBuffer*)>& setup_resources, bool bind_pps = true);
     void render_debug(const DebugGeometry& geom);
 
-    Handle<Buffer> make_buffer(const BufferDescriptor& info);
-    Handle<Image> make_image(const ImageDescriptor& info);
-    Handle<ImageView> make_view(const ImageViewDescriptor& info);
+    Handle<Buffer> make_buffer(Buffer&& buffer);
+    Handle<Image> make_image(Image&& image);
+    // Handle<BufferView> make_view(const BufferViewDescriptor& info);
+    // ImageView make_view(const ImageViewDescriptor& info);
     Handle<Sampler> make_sampler(const SamplerDescriptor& info);
     Handle<Shader> make_shader(const std::filesystem::path& path);
-    Handle<PipelineLayout> make_pplayout(const PipelineLayoutCreateInfo& info);
+    Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
+    Handle<PipelineLayout> make_layout(const PipelineLayout& info);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Sync* make_sync(const SyncCreateInfo& info);
     void destroy_sync(Sync* sync);
-    Handle<Texture> make_texture(const TextureDescriptor& info);
+    // Handle<Texture> make_texture(const TextureDescriptor& info);
     Handle<Material> make_material(const MaterialDescriptor& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
     static void meshletize_geometry(const GeometryDescriptor& info, std::vector<float>& out_vertices,
                                     std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
-    Handle<MeshPass> make_mesh_pass(const MeshPassCreateInfo& info);
-    Handle<DescriptorPool> make_descpool(const DescriptorPoolCreateInfo& info);
+    Handle<MeshPass> make_mesh_pass(const MeshPass& info);
+
+    void retire_buffer(Handle<Buffer>& handle);
+    void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
+    void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
 
     // void instance_blas(const BLASInstanceSettings& settings);
     void update_transform(ecs::entity entity);
 
     SubmitQueue* get_queue(QueueType type);
-    uint32_t get_bindless(Handle<Buffer> buffer, Range range = { 0ull, ~0ull });
-    uint32_t get_bindless(Handle<Texture> texture);
-    uint32_t get_bindless(Handle<Sampler> sampler);
 
     uint32_t get_perframe_index(int32_t offset = 0);
     PerFrame& get_perframe(int32_t offset = 0);
 
     SubmitQueue* gq{};
     Swapchain* swapchain{};
-    RendererBackend* backend{};
+    IRendererBackend* backend{};
     StagingBuffer* sbuf{};
-    BindlessPool* bindless{};
+
     RenderGraph* rgraph{};
-    RenderGraphPasses* rgraphpasses{};
+    std::vector<pass::IPass*> rgraph_passes;
 
     enum class DebugOutput
     {
@@ -778,13 +729,13 @@ class Renderer
     HandleSparseVec<Buffer> buffers;
     HandleSparseVec<Image> images;
     HandleSparseVec<Sampler> samplers;
-    HandleFlatSet<ImageView> image_views;
-    std::unordered_map<Handle<Image>, std::vector<Handle<ImageView>>> image_views_cache;
+    // HandleFlatSet<BufferView> buffer_views;
+    // HandleFlatSet<ImageView> image_views;
+    // std::unordered_map<Handle<Image>, std::vector<ImageView>> image_views_cache;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
-    HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>,
-                  decltype([](const PipelineLayout& a, const PipelineLayout& b) -> bool { return a.is_compatible(b); })>
-        pplayouts;
+    HandleFlatSet<DescriptorLayout, std::hash<DescriptorLayout>, LayoutCompatibilityChecker<DescriptorLayout>> dlayouts;
+    HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>, LayoutCompatibilityChecker<PipelineLayout>> pplayouts;
     HandleFlatSet<Pipeline> pipelines;
     std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Meshlet> meshlets;
@@ -793,14 +744,13 @@ class Renderer
     HandleSparseVec<Geometry> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
-    HandleFlatSet<Texture> textures;
+    // HandleFlatSet<Texture> textures;
     HandleFlatSet<Material> materials;
-    std::vector<DescriptorPool> descpools;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::entity> new_transforms;
     ecs::View<ecs::Transform, ecs::Mesh> ecs_mesh_view;
     ecs::View<ecs::Light> ecs_light_view;
-    std::unordered_map<RenderPassType, RenderPass> render_passes;
+    RenderPasses render_passes;
     std::vector<ecs::entity> new_lights;
 
     GeometryBuffers bufs;
@@ -808,9 +758,11 @@ class Renderer
     SlotAllocator gpu_resource_allocator;
     SlotAllocator gpu_light_allocator;
     std::vector<Sync*> syncs;
-    Handle<DescriptorPool> bindless_pool;
-    Handle<DescriptorSet> bindless_set;
-    Handle<PipelineLayout> bindless_pplayout;
+    IDescriptorSetAllocator* descriptor_allocator{};
+    // Handle<DescriptorPool> bindless_pool;
+    // Handle<DescriptorSet> bindless_set;
+    // Handle<PipelineLayout> bindless_pplayout;
+    Handle<PipelineLayout> common_playout;
     Handle<Pipeline> default_unlit_pipeline;
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
@@ -821,6 +773,29 @@ class Renderer
     Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<PerFrame> perframe;
+    uint64_t frame_index{};
 };
+
+inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
+
 } // namespace gfx
+
+// clang-format off
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes.at(*handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
+//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
+//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
+//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(handle); });
+// clang-format on
+
 } // namespace eng

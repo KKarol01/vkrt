@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <expected>
 #include <deque>
 #include <stack>
 #include <optional>
@@ -34,7 +35,7 @@ struct Image
 struct Texture
 {
     std::string name;
-    Handle<gfx::Texture> render_texture;
+    gfx::ImageView view;
 };
 
 struct Material
@@ -75,14 +76,14 @@ class IModelImporter
 {
   public:
     virtual ~IModelImporter() = default;
-    virtual asset::Model load_model(const std::filesystem::path& path) = 0;
+    virtual std::expected<asset::Model, std::string> load_model(const std::filesystem::path& path) = 0;
 };
 
 class GLTFModelImporter : public IModelImporter
 {
   public:
     ~GLTFModelImporter() override = default;
-    asset::Model load_model(const std::filesystem::path& path) override;
+    std::expected<asset::Model, std::string> load_model(const std::filesystem::path& path) override;
 };
 
 using file_extension_t = std::filesystem::path;
