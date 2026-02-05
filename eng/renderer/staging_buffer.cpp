@@ -154,7 +154,7 @@ void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& 
 }
 
 size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back,
-                           bool discard, Vec3i32 offset, Vec3u32 extent)
+                           StagingDiscard discard, Vec3i32 offset, Vec3u32 extent)
 {
     ENG_ASSERT(dst && src);
     ENG_ASSERT(offset.z == 0);
@@ -178,7 +178,7 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
     const auto row_bytes = blocks.x * block_data.bytes_per_texel;
     const auto src_bytes = block_count * block_data.bytes_per_texel;
 
-    prepare_image(&img, nullptr, discard, false, { { mip, 1 }, { layer, 1 } });
+    prepare_image(&img, nullptr, discard == StagingDiscard::DO, false, { { mip, 1 }, { layer, 1 } });
 
     size_t bytes_uploaded = 0;
     while(bytes_uploaded < src_bytes)
@@ -235,8 +235,11 @@ void StagingBuffer::barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayo
 
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
-    const auto free_space = allocator.get_free_space();
-    if(free_space < ALIGNMENT) { reset_allocator(); }
+    auto free_space = allocator.get_free_space();
+    if(free_space < ALIGNMENT) { 
+        reset_allocator(); 
+    }
+    free_space = allocator.get_free_space();
     const auto alloc_size = std::min(align_up2(size, ALIGNMENT), free_space);
     ENG_ASSERT(alloc_size > 0 && alloc_size % ALIGNMENT == 0);
     auto* mem = allocator.alloc(alloc_size, db->dir);

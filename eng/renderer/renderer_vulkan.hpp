@@ -3,6 +3,7 @@
 #include <vector>
 #include <array>
 #include <tuple>
+#include <unordered_map>
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <eng/renderer/renderer.hpp>
@@ -142,10 +143,10 @@ struct BufferMetadataVk
 struct ImageMetadataVk
 {
     static void init(Image& a, VkImage img = {});
-    static void destroy(Image& a, bool destroy_image = true);
+    static void destroy(Image& a, bool deallocate = true);
     VkImage image{};
     VmaAllocation vmaa{};
-    std::vector<std::tuple<uint64_t, ImageView, VkImageView>> views; // <hash, view, vkimageview>
+    std::unordered_map<ImageView, ImageViewMetadataVk> views;
 };
 
 struct ImageViewMetadataVk
@@ -195,8 +196,9 @@ class RendererBackendVk : public IRendererBackend
     void initialize_vulkan();
 
     void allocate_buffer(Buffer& buffer) override;
-    void destroy_buffer(Buffer& b) override;
-    void allocate_image(Image& info) override;
+    void destroy_buffer(Buffer& buffer) override;
+    void allocate_image(Image& image) override;
+    void destroy_image(Image& image) override;
     void allocate_view(const ImageView& view, void** out_allocation) override;
     Sampler make_sampler(const SamplerDescriptor& info) override;
     void make_shader(Shader& shader) override;

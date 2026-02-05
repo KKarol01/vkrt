@@ -123,24 +123,24 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
     cmd->bind_sets(&set, 1);
 }
 
-void DescriptorSetAllocatorBindlessVk::reset()
-{
-    const auto& r = get_renderer();
-    auto delcount = 0u;
-    for(auto i = 0u; i < pending_frees.size(); ++i)
-    {
-        auto& pf = pending_frees[i];
-        if(r.frame_index - pf.frame < r.frames_in_flight)
-        {
-            // break, as next frees were only added later, so cannot be freed too.
-            break;
-        }
-        pf.allocator->free_slot(pf.slot);
-        ++delcount;
-    }
-    pending_frees.erase(pending_frees.begin(), pending_frees.begin() + delcount);
-    push_ranges.clear();
-}
+// void DescriptorSetAllocatorBindlessVk::reset()
+//{
+//     const auto& r = get_renderer();
+//     auto delcount = 0u;
+//     for(auto i = 0u; i < pending_frees.size(); ++i)
+//     {
+//         auto& pf = pending_frees[i];
+//         if(r.frame_index - pf.frame < r.frames_in_flight)
+//         {
+//             // break, as next frees were only added later, so cannot be freed too.
+//             break;
+//         }
+//         pf.allocator->free_slot(pf.slot);
+//         ++delcount;
+//     }
+//     pending_frees.erase(pending_frees.begin(), pending_frees.begin() + delcount);
+//     push_ranges.clear();
+// }
 
 uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
 {
@@ -152,7 +152,8 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
         views.vkbuffer = buf.md.vk->buffer;
         for(const auto& e : views.slots)
         {
-            pending_frees.push_back(FreedResource{ &storage_buffer_slots, e.slot, get_renderer().frame_index });
+            storage_buffer_slots.free_slot(e.slot);
+            // pending_frees.push_back(FreedResource{ &storage_buffer_slots, e.slot, get_renderer().frame_index });
         }
         views.slots.clear();
     }
@@ -172,6 +173,9 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is
     const auto& img = view.image.get();
     auto [it, success] = image_views.emplace(view.image, Views{ .vkimage = img.md.vk->image });
     auto& views = it->second;
+
+    // Assuming how destroy_resource works in the renderer, The another resource may obtain the same handled only after period of two full frames,
+    // therefore it is safe to free the slots immediately here, instead of putting the slots into pending frees and waiting another two frames.
     if(views.vkimage != img.md.vk->image)
     {
         views.vkimage = img.md.vk->image;
@@ -179,9 +183,14 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is
         {
             if(e.is_storage)
             {
-                pending_frees.push_back(FreedResource{ &storage_image_slots, e.slot, get_renderer().frame_index });
+                storage_image_slots.free_slot(e.slot);
+                // pending_frees.push_back(FreedResource{ &storage_image_slots, e.slot, get_renderer().frame_index });
             }
-            else { pending_frees.push_back(FreedResource{ &sampled_image_slots, e.slot, get_renderer().frame_index }); }
+            else
+            {
+                sampled_image_slots.free_slot(e.slot);
+                // pending_frees.push_back(FreedResource{ &sampled_image_slots, e.slot, get_renderer().frame_index });
+            }
         }
         views.slots.clear();
     }

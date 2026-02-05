@@ -387,12 +387,16 @@ void ImageMetadataVk::init(Image& a, VkImage img)
     else { ENG_ERROR("Could not create image {}", a.name); }
 }
 
-void ImageMetadataVk::destroy(Image& a, bool destroy_image)
+void ImageMetadataVk::destroy(Image& a, bool deallocate)
 {
     if(!a.md.vk) { return; }
     auto& backend = RendererBackendVk::get_instance();
     auto* md = a.md.vk;
-    if(destroy_image) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
+    if(deallocate) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
+    for(auto& [view, vkview] : a.md.vk->views)
+    {
+        vkDestroyImageView(backend.dev, vkview.view, nullptr);
+    }
     delete a.md.vk;
     a.md.vk = nullptr;
 }
@@ -442,7 +446,7 @@ void ImageViewMetadataVk::destroy(ImageView& a)
     auto& backend = RendererBackendVk::get_instance();
     vkDestroyImageView(backend.dev, md.vk->view, nullptr);
     delete md.vk;
-    a.image->views.erase(a);
+    md.vk = nullptr;
 }
 
 void SamplerMetadataVk::init(Sampler& a)
@@ -1309,6 +1313,8 @@ void RendererBackendVk::destroy_buffer(Buffer& buffer) { BufferMetadataVk::destr
 
 void RendererBackendVk::allocate_image(Image& image) { ImageMetadataVk::init(image); }
 
+void RendererBackendVk::destroy_image(Image& image) { ImageMetadataVk::destroy(image); }
+
 void RendererBackendVk::allocate_view(const ImageView& view, void** out_allocation)
 {
     ImageViewMetadataVk::init(view, out_allocation);
@@ -1473,8 +1479,18 @@ SubmitQueue* RendererBackendVk::get_queue(QueueType type)
 
 ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
-    const auto& img = view.image.get();
-    return ImageView::Metadata{ .vk = (ImageViewMetadataVk*)img.views.at(view) };
+    auto& img = Handle<Image>{ view.image }.get();
+    auto it = img.md.vk->views.find(view);
+    ImageViewMetadataVk* retmd{};
+    if(it == img.md.vk->views.end())
+    {
+        void* md;
+        get_renderer().backend->allocate_view(view, &md);
+        retmd = &img.md.vk->views.emplace(view, *(ImageViewMetadataVk*)md).first->second;
+        delete md;
+    }
+    else { retmd = &it->second; }
+    return ImageView::Metadata{ .vk = retmd };
 }
 
 size_t RendererBackendVk::get_indirect_indexed_command_size() const { return sizeof(IndirectIndexedCommand); }

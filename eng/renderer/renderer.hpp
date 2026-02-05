@@ -314,7 +314,6 @@ struct Image
     uint32_t layers{ 1u };
     Flags<ImageUsage> usage{ ImageUsage::NONE };
     ImageLayout layout{ ImageLayout::UNDEFINED };
-    std::unordered_map<ImageView, void*> views;
     union Metadata {
         ImageMetadataVk* vk;
     } md;
@@ -460,6 +459,7 @@ class IRendererBackend
     virtual void allocate_buffer(Buffer& buffer) = 0;
     virtual void destroy_buffer(Buffer& buffer) = 0;
     virtual void allocate_image(Image& image) = 0;
+    virtual void destroy_image(Image& b) = 0;
     virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
     virtual void make_shader(Shader& shader) = 0;
@@ -614,7 +614,7 @@ class Renderer
         // Handle<Image> hiz_debug_output;
     };
 
-    struct PerFrame
+    struct FrameData
     {
         GBuffer gbuffer;
 
@@ -677,9 +677,9 @@ class Renderer
     void render_debug(const DebugGeometry& geom);
 
     Handle<Buffer> make_buffer(Buffer&& buffer);
+    void destroy_buffer(Handle<Buffer>& handle);
     Handle<Image> make_image(Image&& image);
-    // Handle<BufferView> make_view(const BufferViewDescriptor& info);
-    // ImageView make_view(const ImageViewDescriptor& info);
+    void destroy_image(Handle<Image>& image);
     Handle<Sampler> make_sampler(const SamplerDescriptor& info);
     Handle<Shader> make_shader(const std::filesystem::path& path);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
@@ -705,8 +705,8 @@ class Renderer
 
     SubmitQueue* get_queue(QueueType type);
 
-    uint32_t get_perframe_index(int32_t offset = 0);
-    PerFrame& get_perframe(int32_t offset = 0);
+    uint32_t get_framedata_index(int32_t offset = 0);
+    FrameData& get_framedata(int32_t offset = 0);
 
     SubmitQueue* gq{};
     Swapchain* swapchain{};
@@ -772,7 +772,7 @@ class Renderer
     Handle<Pipeline> cullzout_pipeline;
     Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
-    std::vector<PerFrame> perframe;
+    std::vector<FrameData> perframe;
     uint64_t frame_index{};
 };
 

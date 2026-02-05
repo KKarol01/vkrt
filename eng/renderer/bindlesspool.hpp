@@ -58,7 +58,7 @@ class IDescriptorSetAllocator
     virtual uint32_t get_bindless(const BufferView& view) { return ~0u; }
 
     virtual void flush(CommandBufferVk* cmd) = 0;
-    virtual void reset() = 0;
+    // virtual void reset() = 0;
 };
 
 class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
@@ -67,25 +67,25 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     {
         struct Slot
         {
-            uint32_t slot;
+            uint32_t slot{ ~0u };
             union {
-                BufferView buffer;
+                BufferView buffer{};
                 ImageView image;
             };
             bool is_storage{}; // valid only if it's image. determines whether it is storage or sampled.
         };
         union {
-            VkBuffer vkbuffer;
+            VkBuffer vkbuffer{};
             VkImage vkimage;
         };
         std::vector<Slot> slots;
     };
-    struct FreedResource
-    {
-        SlotAllocator* allocator{};
-        uint32_t slot;
-        uint64_t frame{}; // frame at which the resource was freed. if delta is bigger than frames in flight, it can be overwritten
-    };
+    // struct FreedResource
+    //{
+    //     SlotAllocator* allocator{};
+    //     uint32_t slot;
+    //     uint64_t frame{}; // frame at which the resource was freed. if delta is bigger than frames in flight, it can be overwritten
+    // };
 
   public:
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
@@ -97,7 +97,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     uint32_t get_bindless(const BufferView& view) override;
 
     void flush(CommandBufferVk* cmd) override;
-    void reset() override;
+    // void reset() override;
 
   private:
     uint32_t bind_resource(BufferView view);
@@ -118,7 +118,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     SlotAllocator sampled_image_slots;
     std::unordered_map<Handle<Buffer>, Views> buffer_views;
     std::unordered_map<Handle<Image>, Views> image_views;
-    std::vector<FreedResource> pending_frees;
+    // std::vector<FreedResource> pending_frees;
 };
 
 } // namespace gfx

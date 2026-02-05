@@ -19,7 +19,7 @@
 #endif
 
 #define ENG_ASSERT(expr, msg, ...)                                                                                     \
-    if(bool res = (bool)(expr); res == false)                                                                          \
+    if((bool)(expr) == false)                                                                                          \
     {                                                                                                                  \
         ENG_PRTLN("[ASSERT FAILED][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                                  \
         ENG_BREAKPOINT();                                                                                              \
@@ -29,7 +29,7 @@
     do                                                                                                                 \
     {                                                                                                                  \
         ENG_PRTLN("[ERROR][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                                          \
-        ENG_ASSERT(false);                                                                                             \
+        std::terminate();                                                                                              \
     }                                                                                                                  \
     while(0)
 

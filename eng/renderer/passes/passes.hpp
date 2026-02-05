@@ -26,6 +26,20 @@ class IPass
 
 class SSTriangle : public IPass
 {
+    struct SSTrianglePass
+    {
+        Handle<RenderGraph::ResourceAccess> color;
+    };
+    struct SSCopyToSwapPass
+    {
+        Handle<RenderGraph::ResourceAccess> color;
+        Handle<RenderGraph::ResourceAccess> swap;
+    };
+    struct SSSwapPresent
+    {
+        Handle<RenderGraph::ResourceAccess> swap;
+    };
+
   public:
     ~SSTriangle() override = default;
 
@@ -40,48 +54,31 @@ class SSTriangle : public IPass
 
     void on_render_graph(RenderGraph& graph) override
     {
-        struct SSTrianglePass
-        {
-            Handle<RenderGraph::ResourceAccess> color;
-        };
-        struct SSCopyToSwapPass
-        {
-            Handle<RenderGraph::ResourceAccess> color;
-            Handle<RenderGraph::ResourceAccess> swap;
-        };
-        struct SSSwapPresent
-        {
-            Handle<RenderGraph::ResourceAccess> swap;
-        };
-
-        static SSTrianglePass sstp;
-        static SSCopyToSwapPass sscp2sw;
-        static SSSwapPresent sssp;
-
         graph.add_graphics_pass(
             "sstriangle",
             [this](RenderGraph::PassBuilder& pb) {
                 auto& r = get_renderer();
                 auto* w = Engine::get().window;
-                sstp.color = pb.create_resource(Image::init("sstriangle output", w->width, w->height, 1,
-                                                            ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT),
-                                                true);
-                sstp.color = pb.access_color(sstp.color);
-                return sstp;
+                pass_out_color.color =
+                    pb.create_resource(Image::init("sstriangle output", w->width, w->height, 1,
+                                                   ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT));
+                pass_out_color.color = pb.access_color(pass_out_color.color);
+                return pass_out_color;
             },
             [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {
                 const auto* w = Engine::get().window;
                 auto* cmd = pb.open_cmd_buf();
                 const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
-                    .imageView = graph.get_acc(sstp.color).image.get_md().vk->view,
-                    .imageLayout = to_vk(graph.get_acc(sstp.color).layout),
+                    .imageView = graph.get_acc(pass_out_color.color).image.get_md().vk->view,
+                    .imageLayout = to_vk(graph.get_acc(pass_out_color.color).layout),
                     .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                     .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } },
                 }) };
                 const auto vkrinfo = Vks(VkRenderingInfo{
                     .renderArea = { .offset = {},
-                                    .extent = { graph.get_img(sstp.color)->width, graph.get_img(sstp.color)->height } },
+                                    .extent = { graph.get_img(pass_out_color.color)->width,
+                                                graph.get_img(pass_out_color.color)->height } },
                     .layerCount = 1,
                     .colorAttachmentCount = 1,
                     .pColorAttachments = vkcols,
@@ -101,29 +98,33 @@ class SSTriangle : public IPass
             [this](RenderGraph::PassBuilder& pb) {
                 auto& r = get_renderer();
                 auto* w = Engine::get().window;
-                sscp2sw.swap = pb.import_resource(r.swapchain->get_image());
-                sscp2sw.color = pb.access_resource(sstp.color, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
-                                                   PipelineAccess::TRANSFER_READ_BIT);
-                sscp2sw.swap = pb.access_resource(sscp2sw.swap, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
-                                                  PipelineAccess::TRANSFER_WRITE_BIT);
-                return sscp2sw;
+                pass_copy_to_swap.swap = pb.import_resource(r.swapchain->get_image());
+                pass_copy_to_swap.color = pb.access_resource(pass_out_color.color, ImageLayout::TRANSFER_SRC,
+                                                             PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+                pass_copy_to_swap.swap = pb.access_resource(pass_copy_to_swap.swap, ImageLayout::TRANSFER_DST,
+                                                            PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT);
+                return pass_copy_to_swap;
             },
             [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {
                 auto* cmd = pb.open_cmd_buf();
-                cmd->copy(graph.get_img(sscp2sw.swap).get(), graph.get_img(sscp2sw.color).get());
+                cmd->copy(graph.get_img(pass_copy_to_swap.swap).get(), graph.get_img(pass_copy_to_swap.color).get());
             });
         graph.add_graphics_pass(
             "sstriangleswapchaintopresent",
             [this](RenderGraph::PassBuilder& pb) {
                 auto& r = get_renderer();
                 auto* w = Engine::get().window;
-                sssp.swap = pb.access_resource(sscp2sw.swap, ImageLayout::PRESENT, PipelineStage::NONE, PipelineAccess::NONE);
-                return sssp;
+                pass_present_swap.swap = pb.access_resource(pass_copy_to_swap.swap, ImageLayout::PRESENT,
+                                                            PipelineStage::NONE, PipelineAccess::NONE);
+                return pass_present_swap;
             },
             [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {});
     }
 
     Handle<Pipeline> pipeline;
+    SSTrianglePass pass_out_color;
+    SSCopyToSwapPass pass_copy_to_swap;
+    SSSwapPresent pass_present_swap;
 };
 
 namespace culling

@@ -23,16 +23,6 @@ class RenderGraph
     struct ResourceAccess;
     struct PassBuilder;
 
-    // struct IdGenerator
-    //{
-    //     template <typename ConcretePass> static uint32_t get()
-    //     {
-    //         static uint32_t id = gid.fetch_add(1);
-    //         return id;
-    //     }
-    //     inline static std::atomic_uint32_t gid{};
-    // };
-
     struct Clear
     {
         struct DepthStencil
@@ -82,6 +72,7 @@ class RenderGraph
         uint32_t last_read_group{ ~0u };
         uint32_t last_write_group{ ~0u };
         bool is_persistent{};
+        bool is_imported{};
     };
 
     struct ResourceAccess
@@ -102,77 +93,99 @@ class RenderGraph
 
     struct ExecutionGroup
     {
+        Sync* sync{};
         std::vector<Pass*> passes;
+    };
+
+    struct PersistentStorage
+    {
+        std::string pass_name;
+        Resource::NativeResource native;
     };
 
     struct PassBuilder
     {
-        Handle<ResourceAccess> import_resource(const Resource::NativeResource& resource, const std::optional<Clear>& clear = {})
+        Handle<ResourceAccess> add_resource(const Resource& resource, const std::optional<Clear>& clear = {})
         {
-            const auto it = std::find_if(rg->resources.begin(), rg->resources.end(),
-                                         [&resource](const auto& e) { return e.native == resource; });
-            if(it != rg->resources.end()) { return it->last_access; }
-            rg->resources.push_back(Resource{ resource, {} });
-            const auto ret = add_access(ResourceAccess{ .resource = Handle<Resource>{ (uint32_t)rg->resources.size() - 1 },
-                                                        .buffer = {},
-                                                        .layout = ImageLayout::UNDEFINED,
-                                                        .stage = {},
-                                                        .access = {} });
+            rg->resources.push_back(resource);
+            const auto ret = add_access(ResourceAccess{
+                .resource = Handle<Resource>{ (uint32_t)rg->resources.size() - 1 },
+                .buffer = {},
+                .layout = ImageLayout::UNDEFINED,
+                .stage = {},
+                .access = {},
+            });
             ENG_ASSERT(!clear);
             // if(clear) { p->clears.emplace_back(ret, *clear); }
             return ret;
         }
 
+        Handle<ResourceAccess> import_resource(const Resource::NativeResource& resource, const std::optional<Clear>& clear = {})
+        {
+            const auto it = std::find_if(rg->resources.begin(), rg->resources.end(),
+                                         [&resource](const auto& e) { return e.native == resource; });
+            if(it != rg->resources.end()) { return it->last_access; }
+            return add_resource(Resource{ .native = resource, .is_persistent = true, .is_imported = true });
+        }
+
         Handle<ResourceAccess> create_resource(Buffer&& a, bool persistent = false)
         {
             ENG_ASSERT(a.name.size() > 0);
-            if(persistent)
-            {
-                const auto hash = hash::combine_fnv1a(p->name, a.name);
-                if(auto it = rg->persistent_resources.find(hash); it != rg->persistent_resources.end())
+            Resource::NativeResource native = [this, &a, persistent] -> Resource::NativeResource {
+                if(persistent)
                 {
-                    if(it->second.pass_name != p->name)
+                    const auto hash = hash::combine_fnv1a(p->name, a.name);
+                    if(auto it = rg->persistent_resources.find(hash); it != rg->persistent_resources.end())
                     {
-                        ENG_ERROR("Hash collision");
-                        return {};
+                        if(it->second.pass_name != p->name)
+                        {
+                            ENG_ERROR("Hash collision");
+                            return Handle<Buffer>{};
+                        }
+                        return it->second.native;
                     }
-                    return import_resource(it->second.resource.native);
+                    else
+                    {
+                        auto res = Engine::get().renderer->make_buffer(std::move(a));
+                        auto persistent_it =
+                            rg->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = p->name, .native = res });
+                        return persistent_it.first->second.native;
+                    }
                 }
-                else
-                {
-                    auto res = Engine::get().renderer->make_buffer(std::move(a));
-                    auto persistent_it = rg->persistent_resources.emplace(
-                        hash, PersistentStorage{ .pass_name = p->name, .resource = Resource{ .native = res, .is_persistent = true } });
-                    return import_resource(persistent_it.first->second.resource.native);
-                }
-            }
-            return import_resource(Engine::get().renderer->make_buffer(std::move(a)));
+                return Engine::get().renderer->make_buffer(std::move(a));
+            }();
+            ENG_ASSERT(std::get<Handle<Buffer>>(native));
+            return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
 
         Handle<ResourceAccess> create_resource(Image&& a, bool persistent = false, const std::optional<Clear>& clear = {})
         {
             ENG_ASSERT(a.name.size() > 0);
-            if(persistent)
-            {
-                const auto hash = hash::combine_fnv1a(p->name, a.name);
-                if(auto it = rg->persistent_resources.find(hash); it != rg->persistent_resources.end())
+            Resource::NativeResource native = [this, &a, persistent] -> Resource::NativeResource {
+                if(persistent)
                 {
-                    if(it->second.pass_name != p->name)
+                    const auto hash = hash::combine_fnv1a(p->name, a.name);
+                    if(auto it = rg->persistent_resources.find(hash); it != rg->persistent_resources.end())
                     {
-                        ENG_ERROR("Hash collision");
-                        return {};
+                        if(it->second.pass_name != p->name)
+                        {
+                            ENG_ERROR("Hash collision");
+                            return Handle<Image>{};
+                        }
+                        return it->second.native;
                     }
-                    return import_resource(it->second.resource.native, clear);
+                    else
+                    {
+                        auto res = Engine::get().renderer->make_image(std::move(a));
+                        auto persistent_it =
+                            rg->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = p->name, .native = res });
+                        return persistent_it.first->second.native;
+                    }
                 }
-                else
-                {
-                    auto res = Engine::get().renderer->make_image(std::move(a));
-                    auto persistent_it = rg->persistent_resources.emplace(
-                        hash, PersistentStorage{ .pass_name = p->name, .resource = Resource{ .native = res, .is_persistent = true } });
-                    return import_resource(persistent_it.first->second.resource.native, clear);
-                }
-            }
-            return import_resource(Engine::get().renderer->make_image(std::move(a)), clear);
+                return Engine::get().renderer->make_image(std::move(a));
+            }();
+            ENG_ASSERT(std::get<Handle<Image>>(native));
+            return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
 
         Handle<ResourceAccess> sample_texture(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {},
@@ -437,6 +450,14 @@ class RenderGraph
                 p->cmd->end_label();
                 cmdpool->end(p->cmd);
                 gq->with_cmd_buf(p->cmd);
+
+                for(const auto& ra : p->accesses)
+                {
+                    // ENG_ERROR("CREATE RESOURCE DOES IMPORT AND CANNOT BE DELETED");
+                    // std::terminate();
+                    auto& res = get_res(ra);
+                    if(!res.is_persistent && !res.is_imported && res.last_access == ra) { destroy_resource(res); }
+                }
             }
             gq->wait_sync(sem, gstages);
             gq->signal_sync(sem, gstages);
@@ -450,15 +471,26 @@ class RenderGraph
         return sem;
     }
 
+    void destroy_resource(Resource& res)
+    {
+        ENG_ASSERT(!res.is_persistent);
+        auto& r = get_renderer();
+        if(res.is_buffer())
+        {
+            auto h = res.as_buffer();
+            r.destroy_buffer(h);
+        }
+        else
+        {
+            auto h = res.as_image();
+            r.destroy_image(h);
+        }
+    }
+
     SubmitQueue* gq{};
     CommandPoolVk* cmdpool{};
     Sync* sem{};
 
-    struct PersistentStorage
-    {
-        std::string pass_name;
-        Resource resource;
-    };
     std::unordered_map<uint64_t, PersistentStorage> persistent_resources;
     std::vector<Resource> resources;
     std::vector<ResourceAccess> accesses;

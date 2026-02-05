@@ -394,7 +394,7 @@ void Renderer::instance_entity(ecs::entity e)
 void Renderer::update()
 {
     auto* ew = Engine::get().window;
-    auto& pf = get_perframe();
+    auto& pf = get_framedata();
     const auto& ppf = perframe.at(frame_index % perframe.size()); // get previous frame res
 
     pf.ren_fen->wait_cpu(~0ull);
@@ -404,9 +404,28 @@ void Renderer::update()
     pf.swp_sem->reset();
     pf.cmdpool->reset();
 
+    sbuf->reset();
     sbuf->next();
     sbuf->reset();
     swapchain->acquire(~0ull, pf.acq_sem);
+
+    if(pf.retired_resources.size() > 0)
+    {
+        for(auto& rs : pf.retired_resources)
+        {
+            if(auto* buf = std::get_if<Handle<Buffer>>(&rs))
+            {
+                backend->destroy_buffer(buf->get());
+                buffers.erase(*buf);
+            }
+            else if(auto* img = std::get_if<Handle<Image>>(&rs))
+            {
+                backend->destroy_image(img->get());
+                images.erase(*img);
+            }
+        }
+        pf.retired_resources.clear();
+    }
 
     build_renderpasses();
 
@@ -530,10 +549,10 @@ void Renderer::update()
     {
         pass->on_render_graph(*rgraph);
     }
-
-    sbuf->reset();
-    //sbuf->queue_wait(rgraph->gq, PipelineStage::ALL, true);
     rgraph->compile();
+
+    // sbuf->queue_wait(rgraph->gq, PipelineStage::ALL, true);
+    sbuf->reset();
     Sync* rgsync = rgraph->execute(pf.acq_sem);
 
     auto* cmd = pf.cmdpool->begin();
@@ -548,6 +567,7 @@ void Renderer::update()
         .submit();
     gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
     gq->wait_idle();
+    ++frame_index;
 }
 
 void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd)
@@ -712,6 +732,13 @@ Handle<Buffer> Renderer::make_buffer(Buffer&& buffer)
     return buffers.insert(std::move(buffer));
 }
 
+void Renderer::destroy_buffer(Handle<Buffer>& buffer)
+{
+    ENG_ASSERT(buffer);
+    get_framedata().retired_resources.push_back(buffer);
+    buffer = {};
+}
+
 Handle<Image> Renderer::make_image(Image&& image)
 {
     backend->allocate_image(image);
@@ -738,6 +765,13 @@ Handle<Image> Renderer::make_image(Image&& image)
     //      sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY, ImageSubRange{ { info.mips - 1, 1 }, { 0, 1 } });
     //  }
     //  return h;
+}
+
+void Renderer::destroy_image(Handle<Image>& image)
+{
+    ENG_ASSERT(image);
+    get_framedata().retired_resources.push_back(image);
+    image = {};
 }
 
 // Handle<BufferView> Renderer::make_view(const BufferViewDescriptor& info)
@@ -960,7 +994,7 @@ Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_pa
 
 void Renderer::retire_buffer(Handle<Buffer>& handle)
 {
-    get_perframe().retired_resources.emplace_back(handle);
+    get_framedata().retired_resources.emplace_back(handle);
     handle = {};
 }
 
@@ -1014,9 +1048,9 @@ void Renderer::update_transform(ecs::entity entity)
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
-uint32_t Renderer::get_perframe_index(int32_t offset) { return (uint32_t)(frame_index % perframe.size()); }
+uint32_t Renderer::get_framedata_index(int32_t offset) { return (uint32_t)(frame_index % perframe.size()); }
 
-Renderer::PerFrame& Renderer::get_perframe(int32_t offset) { return perframe.at(get_perframe_index(offset)); }
+Renderer::FrameData& Renderer::get_framedata(int32_t offset) { return perframe.at(get_framedata_index(offset)); }
 
 bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {
@@ -1168,9 +1202,6 @@ ImageView ImageView::init(Handle<Image> image, std::optional<ImageFormat> format
                     .format = *format,
                     .src_subresource = img.mips * src_layer + src_mip,
                     .dst_subresource = img.mips * dst_layer + dst_mip };
-    auto insertion = img.views.emplace(view, nullptr);
-    if(!insertion.second) { return view; }
-    get_renderer().backend->allocate_view(view, &insertion.first->second);
     return view;
 }
 

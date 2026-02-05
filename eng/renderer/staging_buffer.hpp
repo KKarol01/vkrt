@@ -21,7 +21,13 @@ namespace eng
 {
 namespace gfx
 {
-static constexpr auto STAGING_APPEND = ~0ull;
+inline static constexpr auto STAGING_APPEND = ~0ull;
+
+enum class StagingDiscard : uint8_t
+{
+    DONT,
+    DO
+};
 
 class StagingBuffer
 {
@@ -71,7 +77,7 @@ class StagingBuffer
     // Optionally discard the layer/mip before copying (saves layout transition).
     // Optionally transition back the layer/mip to original layout from transfer dst, if not, inserts RW barrier.
     size_t copy(Handle<Image> dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back = true,
-                bool discard = false, Vec3i32 offset = {}, Vec3u32 extent = { ~0u, ~0u, ~0u });
+                StagingDiscard discard = StagingDiscard::DONT, Vec3i32 offset = {}, Vec3u32 extent = { ~0u, ~0u, ~0u });
 
     // Inserts rw->rw barrier.
     void barrier();
