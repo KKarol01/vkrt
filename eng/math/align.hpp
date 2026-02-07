@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cassert>
+#include <bit>
 
 namespace eng
 {
@@ -36,5 +37,7 @@ inline void* align_up2(void* ptr, size_t b)
     assert(ptr != nullptr && is_pow2(b));
     return reinterpret_cast<void*>(align_up2(reinterpret_cast<std::uintptr_t>(ptr), b));
 }
+
+inline size_t next_power_of_2(size_t a) { return std::bit_ceil(a); }
 
 } // namespace eng

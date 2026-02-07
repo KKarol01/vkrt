@@ -140,7 +140,7 @@ void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
 
 void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
 {
-    if(sets == nullptr)
+    if(!sets)
     {
         ENG_ASSERT(false);
         return;
@@ -220,11 +220,18 @@ void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
 
 void CommandBufferVk::begin_label(const std::string& label)
 {
+#ifndef NDEBUG
     const auto vkl = Vks(VkDebugUtilsLabelEXT{ .pLabelName = label.c_str(), .color = { 0.0f, 0.0f, 1.0f, 1.0f } });
     vkCmdBeginDebugUtilsLabelEXT(cmd, &vkl);
+#endif
 }
 
-void CommandBufferVk::end_label() { vkCmdEndDebugUtilsLabelEXT(cmd); }
+void CommandBufferVk::end_label()
+{
+#ifndef NDEBUG
+    vkCmdEndDebugUtilsLabelEXT(cmd);
+#endif
+}
 
 CommandPoolVk::CommandPoolVk(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
 {
@@ -268,7 +275,11 @@ void CommandPoolVk::end(ICommandBuffer* cmd) { vkEndCommandBuffer(((CommandBuffe
 void CommandPoolVk::reset()
 {
     VK_CHECK(vkResetCommandPool(dev, pool, {}));
-    free = std::move(used);
+    while(used.size())
+    {
+        free.push_back(used.back());
+        used.pop_back();
+    }
 }
 
 void Sync::init(const SyncCreateInfo& info)

@@ -9,7 +9,7 @@ namespace eng
 {
 namespace hash
 {
-uint64_t combine_fnv1a(const auto&... args)
+inline constexpr uint64_t combine_fnv1a(const auto&... args)
 {
     static constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
     static constexpr uint64_t prime = 0x100000001b3ull;

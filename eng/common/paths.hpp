@@ -22,7 +22,7 @@ inline void init(const char* base_path)
     //     BASE_PATH = BASE_PATH.parent_path();
     // }
 
-    BASE_PATH = std::filesystem::absolute("./");
+    BASE_PATH = std::filesystem::absolute("./../../../"); // set like this because it's in visual studio out/debug/whatever, and assets are in base folder
     SHADERS_DIR = BASE_PATH / "assets" / "shaders";
     MODELS_DIR = BASE_PATH / "assets" / "models";
 }

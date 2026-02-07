@@ -10,7 +10,7 @@ template <typename T> struct INIT_VK_STYPE;
 #ifndef NDEBUG
 #include <eng/common/logger.hpp>
 #define VK_CHECK(func)                                                                                                 \
-    if(const auto res = func; res != VK_SUCCESS) { ENG_WARN("{}", #func); assert(false); }
+    if(const auto res = func; res != VK_SUCCESS) { ENG_ERROR("{}", #func); }
 #else
 #define VK_CHECK(func) func
 #endif

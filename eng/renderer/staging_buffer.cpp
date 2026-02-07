@@ -41,7 +41,7 @@ void StagingBuffer::init(SubmitQueue* queue)
 
 void StagingBuffer::flush(Sync* sync)
 {
-    if(db->cmd == nullptr) { return; } // no transactions issued since previous flush
+    if(!db->cmd) { return; } // no transactions issued since previous flush
     db->cmdpool->end(db->cmd);
     auto* submission = get_sync();
     queue->with_cmd_buf(db->cmd).signal_sync(submission, PipelineStage::TRANSFER_BIT);
@@ -236,9 +236,7 @@ void StagingBuffer::barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayo
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
     auto free_space = allocator.get_free_space();
-    if(free_space < ALIGNMENT) { 
-        reset_allocator(); 
-    }
+    if(free_space < ALIGNMENT) { reset_allocator(); }
     free_space = allocator.get_free_space();
     const auto alloc_size = std::min(align_up2(size, ALIGNMENT), free_space);
     ENG_ASSERT(alloc_size > 0 && alloc_size % ALIGNMENT == 0);
@@ -250,7 +248,7 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 
 ICommandBuffer* StagingBuffer::get_cmd()
 {
-    if(db->cmd == nullptr) { db->cmd = db->cmdpool->begin(); }
+    if(!db->cmd) { db->cmd = db->cmdpool->begin(); }
     return db->cmd;
 }
 

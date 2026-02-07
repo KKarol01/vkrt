@@ -411,6 +411,7 @@ void Renderer::update()
 
     if(pf.retired_resources.size() > 0)
     {
+        ENG_LOG("Removing {} retired resources", pf.retired_resources.size());
         for(auto& rs : pf.retired_resources)
         {
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs))
@@ -621,7 +622,7 @@ void Renderer::build_renderpasses()
         for(const auto& e : rp.entities)
         {
             auto* ecsmesh = Engine::get().ecs->get<ecs::Mesh>(e);
-            if(ecsmesh == nullptr)
+            if(!ecsmesh)
             {
                 ENG_ERROR("Entity {} does not have a mesh", e);
                 continue;
@@ -721,14 +722,14 @@ void Renderer::build_renderpasses()
 
 void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
-Handle<Buffer> Renderer::make_buffer(Buffer&& buffer)
+Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, std::optional<dont_alloc_tag> dont_alloc)
 {
     uint32_t order = 0;
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
     for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
     ENG_LOG("Creating buffer {} [{:.2f} {}]", buffer.name, size, units[order]);
-    backend->allocate_buffer(buffer);
+    backend->allocate_buffer(buffer, dont_alloc);
     return buffers.insert(std::move(buffer));
 }
 
@@ -739,9 +740,9 @@ void Renderer::destroy_buffer(Handle<Buffer>& buffer)
     buffer = {};
 }
 
-Handle<Image> Renderer::make_image(Image&& image)
+Handle<Image> Renderer::make_image(Image&& image, std::optional<dont_alloc_tag> dont_alloc)
 {
-    backend->allocate_image(image);
+    backend->allocate_image(image, dont_alloc);
     return images.insert(std::move(image));
 
     // sbuf -> copy()
@@ -992,12 +993,6 @@ Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
 
-void Renderer::retire_buffer(Handle<Buffer>& handle)
-{
-    get_framedata().retired_resources.emplace_back(handle);
-    handle = {};
-}
-
 void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data)
 {
     if(!handle)
@@ -1019,7 +1014,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
         if(new_size < handle->size) { ENG_WARN("Source data truncated as destination buffer is too small."); }
         sbuf->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true);
     }
-    retire_buffer(handle);
+    destroy_buffer(handle);
     handle = dsth;
 }
 
@@ -1048,7 +1043,7 @@ void Renderer::update_transform(ecs::entity entity)
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
-uint32_t Renderer::get_framedata_index(int32_t offset) { return (uint32_t)(frame_index % perframe.size()); }
+uint32_t Renderer::get_framedata_index(int32_t offset) const { return (uint32_t)(frame_index % frames_in_flight); }
 
 Renderer::FrameData& Renderer::get_framedata(int32_t offset) { return perframe.at(get_framedata_index(offset)); }
 
@@ -1063,7 +1058,7 @@ bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
         if(da.slot != db.slot) { return false; }
         if(da.size != db.size) { return false; }
         if(da.stages != db.stages) { return false; }
-        if(da.immutable_samplers == nullptr && db.immutable_samplers == nullptr) {}
+        if(!da.immutable_samplers && !db.immutable_samplers) { /*empty*/ }
         else if(da.immutable_samplers != nullptr && db.immutable_samplers != nullptr)
         {
             for(auto i = 0u; i < da.size; ++i)

@@ -23,5 +23,12 @@ using Range3D64i = Range_T<glm::i64vec3>;
 using Vec3i32 = glm::i32vec3;
 using Vec3u32 = glm::u32vec3;
 
+// Tag signifying to not allocate memory for a resource.
+struct dont_alloc_tag
+{
+    explicit constexpr dont_alloc_tag(int) {}
+};
+inline static dont_alloc_tag dont_alloc{ 0 };
+
 ENG_DEFINE_STD_HASH(Range32u, eng::hash::combine_fnv1a(t.offset, t.size));
 ENG_DEFINE_STD_HASH(Range64u, eng::hash::combine_fnv1a(t.offset, t.size));

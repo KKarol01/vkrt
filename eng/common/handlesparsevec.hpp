@@ -41,6 +41,7 @@ template <typename T> class HandleSparseVec
         if(free_list.size())
         {
             out_handle = free_list.front();
+            ENG_LOG("REUSING HANDLE {}", *out_handle);
             free_list.pop_front();
             return true;
         }

@@ -39,9 +39,9 @@
     do                                                                                                                 \
     {                                                                                                                  \
         const std::string format = ENG_FMT("[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                   \
-        if(Engine::get().msg_log.size() >= 512) { Engine::get().msg_log.pop_back(); }                                  \
+        /*if(Engine::get().msg_log.size() >= 512) { Engine::get().msg_log.pop_back(); } */                             \
         ENG_PRTLN("{}", format);                                                                                       \
-        Engine::get().msg_log.push_front(format);                                                                      \
+        /*Engine::get().msg_log.push_front(format); */                                                                 \
     }                                                                                                                  \
     while(0)
 
@@ -59,5 +59,6 @@
 #define ENG_WARN(msg, ...)
 #define ENG_LOG(msg, ...)
 #define ENG_TODO(...)
-#define ENG_ASSERT(...)
+#define ENG_ASSERT(expr, ...)                                                                                          \
+    if((bool)(expr) == false) { ENG_ERROR(__VA_ARGS__); }
 #endif

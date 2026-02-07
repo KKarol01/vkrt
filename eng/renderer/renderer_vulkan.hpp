@@ -133,20 +133,24 @@ struct PipelineMetadataVk
 
 struct BufferMetadataVk
 {
-    static void init(Buffer& a);
+    static void init(Buffer& a, std::optional<dont_alloc_tag> dont_alloc);
+    static void init(const Buffer& a, VkBufferCreateInfo& info);
     static void destroy(Buffer& a);
     VkBuffer buffer{};
-    VmaAllocation vmaa{};
-    VkDeviceAddress bda{};
+    VmaAllocation vma_alloc{};
+    VkDeviceAddress device_address{};
+    bool is_aliased{};
 };
 
 struct ImageMetadataVk
 {
-    static void init(Image& a, VkImage img = {});
+    static void init(Image& a, VkImage img = {}, std::optional<dont_alloc_tag> dont_alloc = {});
+    static void init(Image& a, VkImageCreateInfo& info);
     static void destroy(Image& a, bool deallocate = true);
     VkImage image{};
     VmaAllocation vmaa{};
     std::unordered_map<ImageView, ImageViewMetadataVk> views;
+    bool is_aliased{};
 };
 
 struct ImageViewMetadataVk
@@ -195,9 +199,9 @@ class RendererBackendVk : public IRendererBackend
     void init() override;
     void initialize_vulkan();
 
-    void allocate_buffer(Buffer& buffer) override;
+    void allocate_buffer(Buffer& buffer, std::optional<dont_alloc_tag> dont_alloc) override;
     void destroy_buffer(Buffer& buffer) override;
-    void allocate_image(Image& image) override;
+    void allocate_image(Image& image, std::optional<dont_alloc_tag> dont_alloc) override;
     void destroy_image(Image& image) override;
     void allocate_view(const ImageView& view, void** out_allocation) override;
     Sampler make_sampler(const SamplerDescriptor& info) override;
@@ -217,6 +221,12 @@ class RendererBackendVk : public IRendererBackend
     size_t get_indirect_indexed_command_size() const override;
     void make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count, uint32_t first_index,
                                        int32_t first_vertex, uint32_t first_instance) const override;
+
+    void get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs) override;
+    void get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs) override;
+    void* allocate_aliasable_memory(const RendererMemoryRequirements& reqs) override;
+    void bind_aliasable_memory(Buffer& resource, void* memory, size_t offset) override;
+    void bind_aliasable_memory(Image& resource, void* memory, size_t offset) override;
 
     VkInstance instance;
     VkDevice dev;

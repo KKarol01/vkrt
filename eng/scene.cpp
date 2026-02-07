@@ -220,7 +220,7 @@ asset::Texture* load_texture(const fastgltf::Asset& fastasset, gfx::ImageFormat 
     const auto image_index = ftex.imageIndex ? *ftex.imageIndex : ~0ull;
     if(image_index == ~0ull) { return nullptr; }
     auto* image = load_image(fastasset, format, image_index, model);
-    if(image == nullptr)
+    if(!image)
     {
         ENG_ERROR("Could not load texture ({}) image ({})", ftex.name.c_str(), texture_index);
         return nullptr;
@@ -277,12 +277,12 @@ asset::Mesh* load_mesh(const fastgltf::Asset& fastasset, const fastgltf::Node& f
     {
         const auto* geom = gltf::load_geometry(fastasset, fm, i, model);
         const auto* mat = gltf::load_material(fastasset, fm, i, model);
-        if(geom == nullptr)
+        if(!geom)
         {
             ENG_ERROR("Failed to load geometry for mesh ({}) primitive ({}).", fm.name.c_str(), i);
             continue;
         }
-        if(mat == nullptr)
+        if(!mat)
         {
             ENG_ERROR("Failed to load material for mesh ({}) primitive ({}).", fm.name.c_str(), i);
             continue;
@@ -321,7 +321,7 @@ void load_node(const fastgltf::Asset& fastasset, const fastgltf::Node& fastnode,
     if(fastnode.meshIndex)
     {
         auto* mesh = gltf::load_mesh(fastasset, fastnode, model);
-        if(mesh == nullptr)
+        if(!mesh)
         {
             ENG_ERROR("Failed to load mesh ({}) for node ({}).", fastasset.meshes.at(*fastnode.meshIndex).name.c_str(),
                       fastnode.name.c_str());
@@ -428,7 +428,7 @@ asset::Model* Scene::load_from_file(const std::filesystem::path& _path)
 
 ecs::entity Scene::instance_model(const asset::Model* model)
 {
-    if(model == nullptr) { return eng::ecs::INVALID_ENTITY; }
+    if(!model) { return eng::ecs::INVALID_ENTITY; }
 
     static constexpr auto make_hierarchy = [](const auto& self, const asset::Model& model,
                                               const asset::Model::Node& node, ecs::entity parent) -> ecs::entity {

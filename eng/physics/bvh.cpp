@@ -7,6 +7,7 @@ namespace physics
 {
 BVH::BVH(std::span<const std::byte> vertices, size_t stride, std::span<const std::byte> indices, gfx::IndexFormat index_format)
 {
+    return;
     // make sure vertices are non empty and the stride at least is one position (3 floats.
     assert(vertices.size() > 0 && stride >= 3 * sizeof(float));
 

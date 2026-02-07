@@ -449,6 +449,14 @@ struct RendererBackendCaps
     bool supports_bindless{};
 };
 
+struct RendererMemoryRequirements
+{
+    auto operator<=>(const RendererMemoryRequirements&) const = default;
+    size_t size{};
+    size_t alignment{};
+    std::array<uint32_t, 8> backend_data{}; // for storing additional backend-specific data (vulkan uses it to store memory type bits)
+};
+
 class IRendererBackend
 {
   public:
@@ -456,9 +464,9 @@ class IRendererBackend
 
     virtual void init() = 0;
 
-    virtual void allocate_buffer(Buffer& buffer) = 0;
+    virtual void allocate_buffer(Buffer& buffer, std::optional<dont_alloc_tag> dont_alloc) = 0;
     virtual void destroy_buffer(Buffer& buffer) = 0;
-    virtual void allocate_image(Image& image) = 0;
+    virtual void allocate_image(Image& image, std::optional<dont_alloc_tag> dont_alloc) = 0;
     virtual void destroy_image(Image& b) = 0;
     virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
@@ -478,6 +486,16 @@ class IRendererBackend
     virtual size_t get_indirect_indexed_command_size() const = 0;
     virtual void make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count, uint32_t first_index,
                                                int32_t first_vertex, uint32_t first_instance) const = 0;
+
+    // Gets requirements for a resource. Passing same reqs pointer multiple times accumulates requirements: max(size), max(alignment)
+    virtual void get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs) = 0;
+    // Gets requirements for a resource. Passing same reqs pointer multiple times accumulates requirements: max(size), max(alignment)
+    virtual void get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs) = 0;
+    // Allocates aliasable memory based on memory requiremets built from the set of resources that want to share the memory.
+    // Returns null if the resources cannot be in the same memory (possibly due to memory heap not supporing all the resources).
+    virtual void* allocate_aliasable_memory(const RendererMemoryRequirements& reqs) = 0;
+    virtual void bind_aliasable_memory(Buffer& resource, void* memory, size_t offset) = 0;
+    virtual void bind_aliasable_memory(Image& resource, void* memory, size_t offset) = 0;
 
     RendererBackendCaps caps{};
 };
@@ -533,11 +551,18 @@ ENG_DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
                                              t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
 ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
 // ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
+ENG_DEFINE_STD_HASH(eng::gfx::RendererMemoryRequirements,
+                    eng::hash::combine_fnv1a(t.size, t.alignment,
+                                             std::accumulate(t.backend_data.begin(), t.backend_data.end(), 0ull,
+                                                             [](auto acc, const auto& e) {
+                                                                 return eng::hash::combine_fnv1a(acc, e);
+                                                             })));
 
 namespace eng
 {
 namespace gfx
 {
+
 enum class SubmitFlags : uint32_t
 {
 };
@@ -676,9 +701,9 @@ class Renderer
     void build_renderpasses();
     void render_debug(const DebugGeometry& geom);
 
-    Handle<Buffer> make_buffer(Buffer&& buffer);
+    Handle<Buffer> make_buffer(Buffer&& buffer, std::optional<dont_alloc_tag> dont_alloc = {});
     void destroy_buffer(Handle<Buffer>& handle);
-    Handle<Image> make_image(Image&& image);
+    Handle<Image> make_image(Image&& image, std::optional<dont_alloc_tag> dont_alloc = {});
     void destroy_image(Handle<Image>& image);
     Handle<Sampler> make_sampler(const SamplerDescriptor& info);
     Handle<Shader> make_shader(const std::filesystem::path& path);
@@ -696,7 +721,6 @@ class Renderer
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
     Handle<MeshPass> make_mesh_pass(const MeshPass& info);
 
-    void retire_buffer(Handle<Buffer>& handle);
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
 
@@ -705,7 +729,7 @@ class Renderer
 
     SubmitQueue* get_queue(QueueType type);
 
-    uint32_t get_framedata_index(int32_t offset = 0);
+    uint32_t get_framedata_index(int32_t offset = 0) const;
     FrameData& get_framedata(int32_t offset = 0);
 
     SubmitQueue* gq{};

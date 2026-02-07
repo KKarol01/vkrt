@@ -108,7 +108,7 @@ void DescriptorLayoutMetadataVk::init(DescriptorLayout& a)
 
 void DescriptorLayoutMetadataVk::destroy(DescriptorLayout& a)
 {
-    if(a.md.vk == nullptr) { return; }
+    if(!a.md.vk) { return; }
     vkDestroyDescriptorSetLayout(RendererBackendVk::get_dev(), a.md.vk->layout, nullptr);
     delete a.md.vk;
     a.md.vk = nullptr;
@@ -290,13 +290,13 @@ void PipelineMetadataVk::destroy(Pipeline& a)
 {
     if(!a.md.vk) { return; }
     auto* md = a.md.vk;
-    assert(md->pipeline);
+    ENG_ASSERT(md->pipeline);
     vkDestroyPipeline(RendererBackendVk::get_dev(), md->pipeline, nullptr);
     delete a.md.vk;
     a.md.vk = nullptr;
 }
 
-void BufferMetadataVk::init(Buffer& a)
+void BufferMetadataVk::init(Buffer& a, std::optional<dont_alloc_tag> dont_alloc)
 {
     if(a.md.vk)
     {
@@ -315,45 +315,53 @@ void BufferMetadataVk::init(Buffer& a)
     a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
 
     auto& backend = RendererBackendVk::get_instance();
-    const auto vkinfo = Vks(VkBufferCreateInfo{ .size = a.capacity, .usage = to_vk(a.usage) });
+    VkBufferCreateInfo vkinfo;
+    VmaAllocationInfo vmaai{};
+    init(a, vkinfo);
     const auto vmainfo = VmaAllocationCreateInfo{
         .flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u,
         .usage = VMA_MEMORY_USAGE_AUTO,
-        .requiredFlags = cpu_map ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0u
     };
 
-    VmaAllocationInfo vmaai{};
-    VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vmaa, &vmaai));
+    if(dont_alloc) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
+    else { VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vma_alloc, &vmaai)); }
+
     if(md->buffer) { set_debug_name(md->buffer, a.name); }
     else
     {
         ENG_WARN("Could not create buffer {}", a.name);
         return;
     }
-    a.memory = vmaai.pMappedData;
+    if(cpu_map) { a.memory = vmaai.pMappedData; }
     if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
     {
         const auto vkbdai = Vks(VkBufferDeviceAddressInfo{ .buffer = md->buffer });
-        md->bda = vkGetBufferDeviceAddress(backend.dev, &vkbdai);
+        md->device_address = vkGetBufferDeviceAddress(backend.dev, &vkbdai);
     }
+}
+
+void BufferMetadataVk::init(const Buffer& a, VkBufferCreateInfo& info)
+{
+    info = Vks(VkBufferCreateInfo{ .size = a.capacity, .usage = to_vk(a.usage) });
 }
 
 void BufferMetadataVk::destroy(Buffer& a)
 {
     if(!a.md.vk)
     {
-        assert(a.capacity == 0);
+        ENG_ASSERT(a.capacity == 0);
         return;
     }
     auto& backend = RendererBackendVk::get_instance();
     auto* md = a.md.vk;
-    if(!md->buffer || !md->vmaa) { return; }
-    vmaDestroyBuffer(backend.vma, md->buffer, md->vmaa);
+    if(!md) { return; }
+    if(!md->is_aliased) { vmaDestroyBuffer(backend.vma, md->buffer, md->vma_alloc); }
+    else { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
     delete md;
     a.md.vk = nullptr;
 }
 
-void ImageMetadataVk::init(Image& a, VkImage img)
+void ImageMetadataVk::init(Image& a, VkImage img, std::optional<dont_alloc_tag> dont_alloc)
 {
     if(a.md.vk)
     {
@@ -372,19 +380,27 @@ void ImageMetadataVk::init(Image& a, VkImage img)
     }
 
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
-    const auto info = Vks(VkImageCreateInfo{ .imageType = to_vk(a.type),
-                                             .format = to_vk(a.format),
-                                             .extent = { a.width, a.height, a.depth },
-                                             .mipLevels = a.mips,
-                                             .arrayLayers = a.layers,
-                                             .samples = VK_SAMPLE_COUNT_1_BIT,
-                                             .tiling = VK_IMAGE_TILING_OPTIMAL,
-                                             .usage = to_vk(a.usage) | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                             .initialLayout = to_vk(ImageLayout::UNDEFINED) });
+    VkImageCreateInfo info;
+    init(a, info);
     if(img) { md->image = img; }
+    else if(dont_alloc) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
     else { VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr)); }
+
     if(md->image) { set_debug_name(md->image, a.name); }
     else { ENG_ERROR("Could not create image {}", a.name); }
+}
+
+void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
+{
+    info = Vks(VkImageCreateInfo{ .imageType = to_vk(a.type),
+                                  .format = to_vk(a.format),
+                                  .extent = { a.width, a.height, a.depth },
+                                  .mipLevels = a.mips,
+                                  .arrayLayers = a.layers,
+                                  .samples = VK_SAMPLE_COUNT_1_BIT,
+                                  .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                  .usage = to_vk(a.usage) | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                  .initialLayout = to_vk(ImageLayout::UNDEFINED) });
 }
 
 void ImageMetadataVk::destroy(Image& a, bool deallocate)
@@ -392,7 +408,9 @@ void ImageMetadataVk::destroy(Image& a, bool deallocate)
     if(!a.md.vk) { return; }
     auto& backend = RendererBackendVk::get_instance();
     auto* md = a.md.vk;
-    if(deallocate) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
+    if(!md) { return; }
+    if(deallocate && !md->is_aliased) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
+    else if(deallocate && md->is_aliased) { vkDestroyImage(backend.dev, md->image, nullptr); }
     for(auto& [view, vkview] : a.md.vk->views)
     {
         vkDestroyImageView(backend.dev, vkview.view, nullptr);
@@ -403,7 +421,7 @@ void ImageMetadataVk::destroy(Image& a, bool deallocate)
 
 void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
 {
-    if(out_allocation == nullptr)
+    if(!out_allocation)
     {
         ENG_ERROR("Out allocation is nullptr");
         return;
@@ -441,8 +459,8 @@ void ImageViewMetadataVk::destroy(ImageView& a)
 {
     if(!a) { return; }
     auto md = a.get_md();
-    if(md.vk == nullptr) { return; }
-    assert(md.vk->view);
+    if(!md.vk) { return; }
+    ENG_ASSERT(md.vk->view);
     auto& backend = RendererBackendVk::get_instance();
     vkDestroyImageView(backend.dev, md.vk->view, nullptr);
     delete md.vk;
@@ -474,7 +492,7 @@ void SamplerMetadataVk::init(Sampler& a)
 
 void SamplerMetadataVk::destroy(Sampler& a)
 {
-    if(a.md.vk == nullptr) { return; }
+    if(!a.md.vk) { return; }
     vkDestroySampler(RendererBackendVk::get_dev(), a.md.vk->sampler, nullptr);
     delete a.md.vk;
     a.md.vk = nullptr;
@@ -534,7 +552,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     auto& backend = RendererBackendVk::get_instance();
     auto& md = get(a);
     vkDestroySwapchainKHR(backend.dev, md.swapchain, nullptr);
-    assert(a.images.size() == a.views.size());
+    ENG_ASSERT(a.images.size() == a.views.size());
     for(auto i = 0u; i < a.images.size(); ++i)
     {
         ImageMetadataVk::destroy(a.images.at(i).get(), false);
@@ -546,7 +564,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
 
 SwapchainMetadataVk& SwapchainMetadataVk::get(Swapchain& a)
 {
-    assert(a.metadata);
+    ENG_ASSERT(a.metadata);
     return *(SwapchainMetadataVk*)a.metadata;
 }
 
@@ -987,12 +1005,12 @@ void RendererBackendVk::initialize_vulkan()
 //     // if(flags.test(RenderFlags::PAUSE_RENDERING)) { return; }
 //     // if(flags.test_clear(RenderFlags::DIRTY_GEOMETRY_BATCHES_BIT))
 //     //{
-//     //     // assert(false);
+//     //     // ENG_ASSERT(false);
 //     //     //  upload_staged_models();
 //     // }
 //     // if(flags.test_clear(RenderFlags::DIRTY_MESH_INSTANCES))
 //     //{
-//     //     // assert(false);
+//     //     // ENG_ASSERT(false);
 //     //     //  upload_transforms();
 //     // }
 //     // if(flags.test_clear(RenderFlags::DIRTY_BLAS_BIT)) { build_blas(); }
@@ -1009,13 +1027,13 @@ void RendererBackendVk::initialize_vulkan()
 //     // }
 //     // if(flags.test_clear(RenderFlags::REBUILD_RENDER_GRAPH))
 //     //{
-//     //     assert(false);
+//     //     ENG_ASSERT(false);
 //     //     // build_render_graph();
 //     //     // pipelines.threaded_compile();
 //     // }
 //     // if(flags.test_clear(RenderFlags::UPDATE_BINDLESS_SET))
 //     //{
-//     //     assert(false);
+//     //     ENG_ASSERT(false);
 //     //     submit_queue->wait_idle();
 //     //     // update_bindless_set();
 //     // }
@@ -1307,11 +1325,17 @@ void RendererBackendVk::initialize_vulkan()
 // #endif
 // }
 
-void RendererBackendVk::allocate_buffer(Buffer& buffer) { BufferMetadataVk::init(buffer); }
+void RendererBackendVk::allocate_buffer(Buffer& buffer, std::optional<dont_alloc_tag> dont_alloc)
+{
+    BufferMetadataVk::init(buffer, dont_alloc);
+}
 
 void RendererBackendVk::destroy_buffer(Buffer& buffer) { BufferMetadataVk::destroy(buffer); }
 
-void RendererBackendVk::allocate_image(Image& image) { ImageMetadataVk::init(image); }
+void RendererBackendVk::allocate_image(Image& image, std::optional<dont_alloc_tag> dont_alloc)
+{
+    ImageMetadataVk::init(image, {}, dont_alloc);
+}
 
 void RendererBackendVk::destroy_image(Image& image) { ImageMetadataVk::destroy(image); }
 
@@ -1332,7 +1356,7 @@ void RendererBackendVk::make_shader(Shader& shader) { shader.md.vk = new ShaderM
 bool RendererBackendVk::compile_shader(const Shader& shader)
 {
     auto* shmd = shader.md.vk;
-    assert(shmd);
+    ENG_ASSERT(shmd);
     static const auto read_file = [](const std::filesystem::path& file_path) {
         std::string file_path_str = file_path.string();
         std::string include_paths = eng::paths::SHADERS_DIR.string();
@@ -1375,7 +1399,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
     {
         const size_t pc_spv_file_size = pc_spv_file.tellg();
         pc_spv_file.seekg(std::ios::beg);
-        assert(pc_spv_file_size > 0);
+        ENG_ASSERT(pc_spv_file_size > 0);
         char pc_spv_hash_arr[8];
         pc_spv_file.read(pc_spv_hash_arr, 8);
         const auto pc_spv_hash = std::bit_cast<uint64_t>(pc_spv_hash_arr);
@@ -1458,7 +1482,7 @@ Sync* RendererBackendVk::make_sync(const SyncCreateInfo& info)
 
 void RendererBackendVk::destory_sync(Sync* sync)
 {
-    assert(sync);
+    ENG_ASSERT(sync);
     sync->destroy();
     delete sync;
 }
@@ -1479,15 +1503,15 @@ SubmitQueue* RendererBackendVk::get_queue(QueueType type)
 
 ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
-    auto& img = Handle<Image>{ view.image }.get();
+    auto& img = view.image.get();
     auto it = img.md.vk->views.find(view);
     ImageViewMetadataVk* retmd{};
     if(it == img.md.vk->views.end())
     {
-        void* md;
-        get_renderer().backend->allocate_view(view, &md);
-        retmd = &img.md.vk->views.emplace(view, *(ImageViewMetadataVk*)md).first->second;
-        delete md;
+        ImageViewMetadataVk* md{};
+        get_renderer().backend->allocate_view(view, (void**)&md);
+        retmd = &img.md.vk->views.emplace(view, *md).first->second;
+        delete md; // delete md here, as allocate_view currently allocates dynamic memory and we do a copy to views map
     }
     else { retmd = &it->second; }
     return ImageView::Metadata{ .vk = retmd };
@@ -1501,6 +1525,106 @@ void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_
     ENG_ASSERT(out != nullptr);
     IndirectIndexedCommand cmd{ index_count, instance_count, first_index, first_vertex, first_instance };
     memcpy(out, &cmd, sizeof(cmd));
+}
+
+void RendererBackendVk::get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs)
+{
+    VkBufferMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
+                                              .buffer = resource.md.vk->buffer };
+    VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
+    vkGetBufferMemoryRequirements2(dev, &res_reqs, &mem_reqs);
+    if(reqs.size == 0)
+    {
+        reqs.size = mem_reqs.memoryRequirements.size;
+        reqs.alignment = mem_reqs.memoryRequirements.alignment;
+        reqs.backend_data[0] = mem_reqs.memoryRequirements.memoryTypeBits;
+    }
+    else
+    {
+        reqs.size = std::max(reqs.size, mem_reqs.memoryRequirements.size);
+        reqs.alignment = std::max(reqs.alignment, mem_reqs.memoryRequirements.alignment);
+        reqs.backend_data[0] &= mem_reqs.memoryRequirements.memoryTypeBits;
+    }
+}
+
+void RendererBackendVk::get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs)
+{
+    VkImageMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
+                                             .image = resource.md.vk->image };
+    VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
+    vkGetImageMemoryRequirements2(dev, &res_reqs, &mem_reqs);
+    if(reqs.size == 0)
+    {
+        reqs.size = mem_reqs.memoryRequirements.size;
+        reqs.alignment = mem_reqs.memoryRequirements.alignment;
+        reqs.backend_data[0] = mem_reqs.memoryRequirements.memoryTypeBits;
+    }
+    else
+    {
+        reqs.size = std::max(reqs.size, mem_reqs.memoryRequirements.size);
+        reqs.alignment = std::max(reqs.alignment, mem_reqs.memoryRequirements.alignment);
+        reqs.backend_data[0] &= mem_reqs.memoryRequirements.memoryTypeBits;
+    }
+}
+
+void* RendererBackendVk::allocate_aliasable_memory(const RendererMemoryRequirements& reqs)
+{
+    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = reqs.backend_data[0] };
+    const VmaAllocationCreateInfo info{ .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
+    VmaAllocation alloc;
+    VK_CHECK(vmaAllocateMemory(vma, &vkreqs, &info, &alloc, nullptr));
+    return alloc;
+}
+
+void RendererBackendVk::bind_aliasable_memory(Buffer& resource, void* memory, size_t offset)
+{
+    auto alloc = (VmaAllocation)memory;
+    RendererMemoryRequirements reqs{};
+    get_memory_requirements(resource, reqs);
+    if(resource.md.vk && resource.md.vk->vma_alloc && !resource.md.vk->is_aliased)
+    {
+        ENG_ERROR("Resource already has dedicated memory");
+        return;
+    }
+    if(!resource.md.vk) { resource.md.vk = new BufferMetadataVk{}; }
+    ENG_ASSERT(resource.md.vk);
+    if(!resource.md.vk->buffer)
+    {
+        VkBufferCreateInfo vkinfo;
+        BufferMetadataVk::init(resource, vkinfo);
+        VK_CHECK(vkCreateBuffer(dev, &vkinfo, nullptr, &resource.md.vk->buffer));
+    }
+    if(!resource.md.vk->buffer)
+    {
+        ENG_ERROR("Buffer is null");
+        return;
+    }
+    VK_CHECK(vmaBindBufferMemory2(vma, alloc, offset, resource.md.vk->buffer, nullptr));
+    resource.md.vk->is_aliased = true;
+    resource.md.vk->vma_alloc = alloc;
+}
+
+void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, size_t offset)
+{
+    auto alloc = (VmaAllocation)memory;
+    RendererMemoryRequirements reqs{};
+    get_memory_requirements(resource, reqs);
+    if(!resource.md.vk) { resource.md.vk = new ImageMetadataVk{}; }
+    ENG_ASSERT(resource.md.vk);
+    if(!resource.md.vk->image)
+    {
+        VkImageCreateInfo vkinfo;
+        ImageMetadataVk::init(resource, vkinfo);
+        VK_CHECK(vkCreateImage(dev, &vkinfo, nullptr, &resource.md.vk->image));
+    }
+    if(!resource.md.vk->image)
+    {
+        ENG_ERROR("Image is null");
+        return;
+    }
+    VK_CHECK(vmaBindImageMemory2(vma, alloc, offset, resource.md.vk->image, nullptr));
+    resource.md.vk->is_aliased = true;
+    resource.md.vk->vmaa = alloc;
 }
 
 // todo: swapchain impl should not be here
@@ -1524,7 +1648,7 @@ ImageView Swapchain::get_view() const { return views.at(current_index); }
 //     {
 //         meshlets_to_instance.push_back(MeshletInstance{ .geometry = e->geometry, .material = e->material, .mesh_idx = instance_index });
 //     }
-//     assert(entities.size() == instance_index);
+//     ENG_ASSERT(entities.size() == instance_index);
 //     entities.push_back(settings.entity);
 //     flags.set(RenderFlags::DIRTY_TRANSFORMS_BIT);
 //     return Handle<Mesh>{ instance_index++ };
@@ -1773,7 +1897,7 @@ ImageView Swapchain::get_view() const { return views.at(current_index); }
 //     //     return ra.mesh_handle < rb.mesh_handle;
 //     // });
 //
-//     assert(false);
+//     ENG_ASSERT(false);
 //
 //// TODO: Compress mesh ids per triangle for identical blases with identical materials
 //// TODO: Remove geometry offset for indexing in shaders as all blases have only one geometry always
@@ -1884,7 +2008,7 @@ ImageView Swapchain::get_view() const { return views.at(current_index); }
 // void RendererBackendVulkan::update_ddgi()
 //{
 // #if 0
-//     // assert(false && "no allocating new pointers for images");
+//     // ENG_ASSERT(false && "no allocating new pointers for images");
 //
 //     BoundingBox scene_aabb{ .min = glm::vec3{ -2.0f }, .max = glm::vec3{ 2.0f } };
 //     /*for(const Node& node : Engine::scene()->nodes) {
