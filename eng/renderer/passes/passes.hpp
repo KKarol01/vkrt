@@ -49,13 +49,15 @@ class SSTriangle : public IPass
         pipeline = r.make_pipeline(PipelineCreateInfo{ .shaders = {
                                                            r.make_shader("triangle/triangle.vert.glsl"),
                                                            r.make_shader("triangle/triangle.frag.glsl"),
-                                                       } });
+                                                       },
+                                                       .attachments = { .count = 1, .color_formats = ImageFormat::R8G8B8A8_SRGB }, 
+                                                      });
     }
 
     void on_render_graph(RenderGraph& graph) override
     {
         graph.add_graphics_pass(
-            "sstriangle",
+            "Draw triangle",
             [this](RenderGraph::PassBuilder& pb) {
                 auto& r = get_renderer();
                 auto* w = Engine::get().window;
@@ -94,7 +96,7 @@ class SSTriangle : public IPass
             });
 
         graph.add_graphics_pass(
-            "sstriangleoutputtoswapchain",
+            "Copy to swapchain",
             [this](RenderGraph::PassBuilder& pb) {
                 auto& r = get_renderer();
                 auto* w = Engine::get().window;
@@ -109,6 +111,14 @@ class SSTriangle : public IPass
                 auto* cmd = pb.open_cmd_buf();
                 cmd->copy(graph.get_img(pass_copy_to_swap.swap).get(), graph.get_img(pass_copy_to_swap.color).get());
             });
+        graph.add_graphics_pass(
+            "Swapchain to present",
+            [this](RenderGraph::PassBuilder& pb) {
+                pass_present_swap.swap = pb.access_resource(pass_copy_to_swap.swap, ImageLayout::PRESENT,
+                                                            PipelineStage::ALL, PipelineAccess::WRITES);
+                return pass_copy_to_swap;
+            },
+            [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {});
     }
 
     Handle<Pipeline> pipeline;
