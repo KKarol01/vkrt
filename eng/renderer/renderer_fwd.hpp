@@ -320,6 +320,12 @@ enum class SamplerMipmapMode
     LINEAR,
 };
 
+enum class AllocateMemory : uint8_t
+{
+    NO,
+    YES,
+};
+
 struct ImageBlockData;
 struct Shader;
 struct DescriptorSet;

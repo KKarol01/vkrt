@@ -23,16 +23,16 @@ namespace gfx
 {
 inline static constexpr auto STAGING_APPEND = ~0ull;
 
-enum class StagingDiscard : uint8_t
+enum class DiscardContents : uint8_t
 {
-    DONT,
-    DO
+    NO,
+    YES,
 };
 
 class StagingBuffer
 {
-    static constexpr auto CAPACITY = 64ull * 1024 * 1024;
-    static constexpr auto ALIGNMENT = 512ull;
+    static constexpr size_t CAPACITY = 64ull * 1024 * 1024;
+    static constexpr size_t ALIGNMENT = 512ull;
 
     struct Allocation
     {
@@ -44,13 +44,11 @@ class StagingBuffer
   public:
     void init(SubmitQueue* queue);
     // Flushes pending transactions and optionally notifies supplied sync.
-    void flush(Sync* sync);
+    Sync* flush(Sync* sync);
     // Flushes pending transactions, waits for completions of all submissions, and resets frame's data.
     void reset();
     // Forward counter to the next frame without waiting.
     void next();
-    // Makes queue wait on all submissions.
-    void queue_wait(SubmitQueue* q, Flags<PipelineStage> stage, bool flush);
 
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     void copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier = false);
@@ -77,20 +75,21 @@ class StagingBuffer
     // Optionally discard the layer/mip before copying (saves layout transition).
     // Optionally transition back the layer/mip to original layout from transfer dst, if not, inserts RW barrier.
     size_t copy(Handle<Image> dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back = true,
-                StagingDiscard discard = StagingDiscard::DONT, Vec3i32 offset = {}, Vec3u32 extent = { ~0u, ~0u, ~0u });
+                DiscardContents discard = DiscardContents::YES, Vec3i32 offset = {}, Vec3u32 extent = { ~0u, ~0u, ~0u });
 
     // Inserts rw->rw barrier.
     void barrier();
     // Inserts image layout barrier with optional range.
     void barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range = {});
 
+    // Gets the semaphore to wait on until all issued transactions have happened.
+    Sync* get_wait_sem(bool flush = true);
+
   private:
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
-    // Get sync with reuse.
-    Sync* get_sync();
 
     // Resets the current frame. If still not enough memory, resets the other one too.
     void reset_allocator();
@@ -106,14 +105,12 @@ class StagingBuffer
     DoubleSidedAllocator allocator;
     struct DoubleBuffered
     {
-        CommandPoolVk* cmdpool{};
+        ICommandPool* cmdpool{};
         ICommandBuffer* cmd{};
         int dir{};
-        std::vector<Sync*> submissions;
+        Sync* sync{};
     } dbs[2]{};
     DoubleBuffered* db{};
-    std::vector<Sync*> syncs;
-    uint32_t frame{};
 
 #ifdef ENG_SBUF_DEBUG_STATS
     struct DebugStats

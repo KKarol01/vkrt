@@ -34,33 +34,28 @@ void StagingBuffer::init(SubmitQueue* queue)
         dbs[i].dir = alloc_dirs[i];
         dbs[i].cmdpool =
             queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        dbs[i].sync = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, ENG_FMT("staging sync {}", i) });
         ENG_ASSERT(dbs[i].cmdpool != nullptr);
     }
-    db = &dbs[frame];
+    db = &dbs[0];
 }
 
-void StagingBuffer::flush(Sync* sync)
+Sync* StagingBuffer::flush(Sync* sync)
 {
-    if(!db->cmd) { return; } // no transactions issued since previous flush
+    if(!db->cmd) { return db->sync; } // no transactions issued since previous flush
     db->cmdpool->end(db->cmd);
-    auto* submission = get_sync();
-    queue->with_cmd_buf(db->cmd).signal_sync(submission, PipelineStage::TRANSFER_BIT);
+    queue->with_cmd_buf(db->cmd).signal_sync(db->sync, PipelineStage::TRANSFER_BIT);
     if(sync != nullptr) { queue->signal_sync(sync, PipelineStage::TRANSFER_BIT); }
     queue->submit();
     db->cmd = nullptr;
-    db->submissions.push_back(submission);
+    return db->sync;
 }
 
 void StagingBuffer::reset()
 {
     flush(nullptr); // send, if any, staged transactions before optional forwarding.
-    for(auto* e : db->submissions)
-    {
-        e->wait_cpu(~0ull);
-        e->reset();
-        syncs.push_back(e);
-    }
-    db->submissions.clear();
+    db->sync->wait_cpu(~0ull);
+    db->sync->reset();
     db->cmdpool->reset();
     db->cmd = nullptr;
     allocator.reset(db->dir);
@@ -69,18 +64,8 @@ void StagingBuffer::reset()
 void StagingBuffer::next()
 {
     flush(nullptr);
-    frame = (frame + 1) & 0x1;
-    db = &dbs[frame];
-}
-
-void StagingBuffer::queue_wait(SubmitQueue* q, Flags<PipelineStage> stage, bool flush)
-{
-    ENG_ASSERT(q != nullptr && stage);
-    if(flush) { this->flush(nullptr); }
-    for(auto* s : db->submissions)
-    {
-        q->wait_sync(s, stage);
-    }
+    std::swap(dbs[0], dbs[1]);
+    db = &dbs[0];
 }
 
 void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier)
@@ -154,7 +139,7 @@ void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& 
 }
 
 size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back,
-                           StagingDiscard discard, Vec3i32 offset, Vec3u32 extent)
+                           DiscardContents discard, Vec3i32 offset, Vec3u32 extent)
 {
     ENG_ASSERT(dst && src);
     ENG_ASSERT(offset.z == 0);
@@ -178,7 +163,7 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
     const auto row_bytes = blocks.x * block_data.bytes_per_texel;
     const auto src_bytes = block_count * block_data.bytes_per_texel;
 
-    prepare_image(&img, nullptr, discard == StagingDiscard::DO, false, { { mip, 1 }, { layer, 1 } });
+    prepare_image(&img, nullptr, discard == DiscardContents::YES, false, { { mip, 1 }, { layer, 1 } });
 
     size_t bytes_uploaded = 0;
     while(bytes_uploaded < src_bytes)
@@ -233,6 +218,12 @@ void StagingBuffer::barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayo
                        PipelineAccess::TRANSFER_RW, src_layout, dst_layout, range);
 }
 
+Sync* StagingBuffer::get_wait_sem(bool flush)
+{
+    if(flush) { this->flush(nullptr); }
+    return db->sync;
+}
+
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
     auto free_space = allocator.get_free_space();
@@ -250,18 +241,6 @@ ICommandBuffer* StagingBuffer::get_cmd()
 {
     if(!db->cmd) { db->cmd = db->cmdpool->begin(); }
     return db->cmd;
-}
-
-Sync* StagingBuffer::get_sync()
-{
-    Sync* s;
-    if(syncs.size())
-    {
-        s = syncs.back();
-        syncs.pop_back();
-    }
-    else { s = Engine::get().renderer->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "staging sync" }); }
-    return s;
 }
 
 void StagingBuffer::reset_allocator()

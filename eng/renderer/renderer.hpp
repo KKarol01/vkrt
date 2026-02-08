@@ -464,9 +464,9 @@ class IRendererBackend
 
     virtual void init() = 0;
 
-    virtual void allocate_buffer(Buffer& buffer, std::optional<dont_alloc_tag> dont_alloc) = 0;
+    virtual void allocate_buffer(Buffer& buffer, AllocateMemory alloc = AllocateMemory::YES) = 0;
     virtual void destroy_buffer(Buffer& buffer) = 0;
-    virtual void allocate_image(Image& image, std::optional<dont_alloc_tag> dont_alloc) = 0;
+    virtual void allocate_image(Image& image, AllocateMemory alloc = AllocateMemory::YES) = 0;
     virtual void destroy_image(Image& b) = 0;
     virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
     virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
@@ -701,9 +701,9 @@ class Renderer
     void build_renderpasses();
     void render_debug(const DebugGeometry& geom);
 
-    Handle<Buffer> make_buffer(Buffer&& buffer, std::optional<dont_alloc_tag> dont_alloc = {});
+    Handle<Buffer> make_buffer(Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
     void destroy_buffer(Handle<Buffer>& handle);
-    Handle<Image> make_image(Image&& image, std::optional<dont_alloc_tag> dont_alloc = {});
+    Handle<Image> make_image(Image&& image, AllocateMemory allocate = AllocateMemory::YES);
     void destroy_image(Handle<Image>& image);
     Handle<Sampler> make_sampler(const SamplerDescriptor& info);
     Handle<Shader> make_shader(const std::filesystem::path& path);
@@ -735,7 +735,7 @@ class Renderer
     SubmitQueue* gq{};
     Swapchain* swapchain{};
     IRendererBackend* backend{};
-    StagingBuffer* sbuf{};
+    StagingBuffer* staging{};
 
     RenderGraph* rgraph{};
     std::vector<pass::IPass*> rgraph_passes;

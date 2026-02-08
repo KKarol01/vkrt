@@ -133,7 +133,7 @@ struct PipelineMetadataVk
 
 struct BufferMetadataVk
 {
-    static void init(Buffer& a, std::optional<dont_alloc_tag> dont_alloc);
+    static void init(Buffer& a, AllocateMemory allocate);
     static void init(const Buffer& a, VkBufferCreateInfo& info);
     static void destroy(Buffer& a);
     VkBuffer buffer{};
@@ -144,7 +144,7 @@ struct BufferMetadataVk
 
 struct ImageMetadataVk
 {
-    static void init(Image& a, VkImage img = {}, std::optional<dont_alloc_tag> dont_alloc = {});
+    static void init(Image& a, VkImage img = {}, AllocateMemory allocate = AllocateMemory::YES);
     static void init(Image& a, VkImageCreateInfo& info);
     static void destroy(Image& a, bool deallocate = true);
     VkImage image{};
@@ -199,9 +199,9 @@ class RendererBackendVk : public IRendererBackend
     void init() override;
     void initialize_vulkan();
 
-    void allocate_buffer(Buffer& buffer, std::optional<dont_alloc_tag> dont_alloc) override;
+    void allocate_buffer(Buffer& buffer, AllocateMemory allocate = AllocateMemory::YES) override;
     void destroy_buffer(Buffer& buffer) override;
-    void allocate_image(Image& image, std::optional<dont_alloc_tag> dont_alloc) override;
+    void allocate_image(Image& image, AllocateMemory allocate = AllocateMemory::YES) override;
     void destroy_image(Image& image) override;
     void allocate_view(const ImageView& view, void** out_allocation) override;
     Sampler make_sampler(const SamplerDescriptor& info) override;

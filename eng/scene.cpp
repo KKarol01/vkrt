@@ -172,7 +172,7 @@ asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat form
                                                                 gfx::ImageUsage::TRANSFER_SRC_BIT,
                                                             0, 1, gfx::ImageLayout::READ_ONLY));
     ENG_TODO("TODO: Process mips");
-    gfx::get_renderer().sbuf->copy(img, imgdata, 0, 0, true, gfx::StagingDiscard::DO);
+    gfx::get_renderer().staging->copy(img, imgdata, 0, 0, true, gfx::DiscardContents::YES);
     stbi_image_free(imgdata);
     model.images.at(image_index).name = fimg.name.c_str();
     model.images.at(image_index).render_image = img;

@@ -158,7 +158,7 @@ class RenderGraph
                         graph->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = pass->name, .native = native_handle });
                     return persistent_it.first->second.native;
                 }
-                return Engine::get().renderer->make_buffer(std::move(a), dont_alloc);
+                return Engine::get().renderer->make_buffer(std::move(a), AllocateMemory::NO);
             }();
             return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
@@ -176,7 +176,7 @@ class RenderGraph
                         graph->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = pass->name, .native = native_handle });
                     return persistent_it.first->second.native;
                 }
-                return Engine::get().renderer->make_image(std::move(a), dont_alloc);
+                return Engine::get().renderer->make_image(std::move(a), AllocateMemory::NO);
             }();
             return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
@@ -551,11 +551,11 @@ class RenderGraph
 
     void init(Renderer* r)
     {
-        gq = r->get_queue(QueueType::GRAPHICS);
+        queue = r->get_queue(QueueType::GRAPHICS);
         sems[0] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
         sems[1] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
-        cmds[0] = gq->make_command_pool();
-        cmds[1] = gq->make_command_pool();
+        cmds[0] = queue->make_command_pool();
+        cmds[1] = queue->make_command_pool();
         allocator.init([r](const RendererMemoryRequirements& reqs) {
             return r->backend->allocate_aliasable_memory(reqs);
         });
@@ -674,13 +674,16 @@ class RenderGraph
         }
     }
 
-    Sync* execute(Sync* wait_sync = nullptr)
+    Sync* execute(Sync** wait_syncs = nullptr, uint32_t wait_count = 0)
     {
         std::swap(sems[0], sems[1]);
         std::swap(cmds[0], cmds[1]);
         sems[0]->reset();
         cmds[0]->reset();
-        if(wait_sync != nullptr) { gq->wait_sync(wait_sync); }
+        for(auto i = 0u; i < wait_count; ++i)
+        {
+            queue->wait_sync(wait_syncs[i], PipelineStage::TRANSFER_BIT);
+        }
         for(auto i = 0u; i < groups.size(); ++i)
         {
             const auto& g = groups[i];
@@ -709,8 +712,8 @@ class RenderGraph
             if(layout_cmd)
             {
                 cmds[0]->end(layout_cmd);
-                gq->with_cmd_buf(layout_cmd);
-                gq->submit();
+                queue->with_cmd_buf(layout_cmd);
+                queue->submit();
             }
 
             for(auto* p : g.passes)
@@ -720,7 +723,7 @@ class RenderGraph
                 if(!p->cmd) { continue; }
                 p->cmd->end_label();
                 cmds[0]->end(p->cmd);
-                gq->with_cmd_buf(p->cmd);
+                queue->with_cmd_buf(p->cmd);
 
                 for(const auto& ra : p->accesses)
                 {
@@ -728,9 +731,9 @@ class RenderGraph
                     if(!res.is_persistent && !res.is_imported && res.last_access == ra) { destroy_resource(res); }
                 }
             }
-            gq->wait_sync(sems[0], gstages);
-            gq->signal_sync(sems[0], gstages);
-            gq->submit();
+            queue->wait_sync(sems[0], gstages);
+            queue->signal_sync(sems[0], gstages);
+            queue->submit();
         }
 
         resources.clear();
@@ -758,7 +761,7 @@ class RenderGraph
         }
     }
 
-    SubmitQueue* gq{};
+    SubmitQueue* queue{};
     ICommandPool* cmds[2]{};
     Sync* sems[2]{};
     TransientAllocator allocator;

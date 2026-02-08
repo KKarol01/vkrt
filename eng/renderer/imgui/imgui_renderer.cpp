@@ -208,7 +208,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
         assert(image);
         assert(upload_w == imtex->Width && upload_h == imtex->Height);
-        r.sbuf->copy(image, imtex->Pixels, 0, 0);
+        r.staging->copy(image, imtex->Pixels, 0, 0);
         assert(false);
         // r.sbuf->barrier(image, ImageLayout::READ_ONLY);afsdadsf
         imtex->SetStatus(ImTextureStatus_OK);

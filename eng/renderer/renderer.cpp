@@ -46,8 +46,8 @@ void Renderer::init(IRendererBackend* backend)
 
     gq = backend->get_queue(QueueType::GRAPHICS);
     swapchain = backend->make_swapchain();
-    sbuf = new StagingBuffer{};
-    sbuf->init(gq);
+    staging = new StagingBuffer{};
+    staging->init(gq);
     rgraph = new RenderGraph{};
     rgraph->init(this);
 
@@ -404,9 +404,9 @@ void Renderer::update()
     pf.swp_sem->reset();
     pf.cmdpool->reset();
 
-    sbuf->reset();
-    sbuf->next();
-    sbuf->reset();
+    staging->reset();
+    staging->next();
+    staging->reset();
     swapchain->acquire(~0ull, pf.acq_sem);
 
     if(pf.retired_resources.size() > 0)
@@ -454,7 +454,7 @@ void Renderer::update()
             if(backend->caps.supports_bindless)
             {
                 GPUMaterial gpumat{ .base_color_idx = descriptor_allocator->get_bindless(e->base_color_texture, false) };
-                sbuf->copy(bufs.materials, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+                staging->copy(bufs.materials, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
         }
@@ -465,12 +465,12 @@ void Renderer::update()
         std::swap(bufs.transforms[0], bufs.transforms[1]);
         const auto req_size = bufs.transform_count * sizeof(glm::mat4);
         resize_buffer(bufs.transforms[0], req_size, false);
-        sbuf->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
+        staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto* trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
             const auto* msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
-            sbuf->copy(bufs.transforms[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
+            staging->copy(bufs.transforms[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
         }
         new_transforms.clear();
     }
@@ -479,18 +479,18 @@ void Renderer::update()
         std::swap(bufs.lights[0], bufs.lights[1]);
         const auto req_size = bufs.light_count * sizeof(GPULight) + 4;
         resize_buffer(bufs.lights[0], req_size, false);
-        sbuf->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
+        staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
         for(auto i = 0u; i < new_lights.size(); ++i)
         {
             auto* l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
             const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
             if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate_slot(); }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
-            sbuf->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight),
+            staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight),
                        sizeof(GPULight));
         }
         const auto lc = (uint32_t)ecs_light_view.size();
-        sbuf->copy(bufs.lights[0], &lc, offsetof(GPULightsBuffer, count), 4);
+        staging->copy(bufs.lights[0], &lc, offsetof(GPULightsBuffer, count), 4);
         new_lights.clear();
     }
 
@@ -552,13 +552,10 @@ void Renderer::update()
     }
     rgraph->compile();
 
-    // sbuf->queue_wait(rgraph->gq, PipelineStage::ALL, true);
-
-    sbuf->reset();
-    Sync* rgsync = rgraph->execute(pf.acq_sem);
+    Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
+    Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
 
     gq->wait_sync(rgsync, PipelineStage::ALL)
-        //.with_cmd_buf(cmd)
         .signal_sync(pf.swp_sem, PipelineStage::ALL)
         .signal_sync(pf.ren_fen)
         .submit();
@@ -706,10 +703,10 @@ void Renderer::build_renderpasses()
 
         resize_buffer(rp.draw.indirect_buf, total_size, false);
         resize_buffer(rp.instance_buffer, instance_indices.size() * sizeof(instance_indices[0]), false);
-        sbuf->copy(rp.draw.indirect_buf, counts, 0ull);
-        sbuf->copy(rp.draw.indirect_buf, command_bytes, cmds_start);
-        sbuf->copy_value(rp.instance_buffer, (uint32_t)instance_indices.size(), offsetof(GPUInstanceIdsBuffer, count));
-        sbuf->copy(rp.instance_buffer, instance_indices, offsetof(GPUInstanceIdsBuffer, ids_us));
+        staging->copy(rp.draw.indirect_buf, counts, 0ull);
+        staging->copy(rp.draw.indirect_buf, command_bytes, cmds_start);
+        staging->copy_value(rp.instance_buffer, (uint32_t)instance_indices.size(), offsetof(GPUInstanceIdsBuffer, count));
+        staging->copy(rp.instance_buffer, instance_indices, offsetof(GPUInstanceIdsBuffer, ids_us));
         rp.draw.counts_view = BufferView{ rp.draw.indirect_buf, { 0ull, counts_size } };
         rp.draw.cmds_view = BufferView{ rp.draw.indirect_buf, { cmds_start, cmds_size } };
         rp.instance_view = BufferView{ rp.instance_buffer, { 0ull, ~0ull } };
@@ -718,14 +715,14 @@ void Renderer::build_renderpasses()
 
 void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
-Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, std::optional<dont_alloc_tag> dont_alloc)
+Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, AllocateMemory allocate)
 {
     uint32_t order = 0;
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
     for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
     ENG_LOG("Creating buffer {} [{:.2f} {}]", buffer.name, size, units[order]);
-    backend->allocate_buffer(buffer, dont_alloc);
+    backend->allocate_buffer(buffer, allocate);
     return buffers.insert(std::move(buffer));
 }
 
@@ -736,9 +733,9 @@ void Renderer::destroy_buffer(Handle<Buffer>& buffer)
     buffer = {};
 }
 
-Handle<Image> Renderer::make_image(Image&& image, std::optional<dont_alloc_tag> dont_alloc)
+Handle<Image> Renderer::make_image(Image&& image, AllocateMemory allocate)
 {
-    backend->allocate_image(image, dont_alloc);
+    backend->allocate_image(image, allocate);
     return images.insert(std::move(image));
 
     // sbuf -> copy()
@@ -900,10 +897,10 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     resize_buffer(bufs.attributes, attributes.size() * sizeof(attributes[0]), STAGING_APPEND, true);
     resize_buffer(bufs.indices, out_indices.size() * sizeof(out_indices[0]), STAGING_APPEND, true);
     resize_buffer(bufs.bspheres, bounding_spheres.size() * sizeof(bounding_spheres[0]), STAGING_APPEND, true);
-    sbuf->copy(bufs.positions, positions, STAGING_APPEND);
-    sbuf->copy(bufs.attributes, attributes, STAGING_APPEND);
-    sbuf->copy(bufs.indices, out_indices, STAGING_APPEND);
-    sbuf->copy(bufs.bspheres, bounding_spheres, STAGING_APPEND);
+    staging->copy(bufs.positions, positions, STAGING_APPEND);
+    staging->copy(bufs.attributes, attributes, STAGING_APPEND);
+    staging->copy(bufs.indices, out_indices, STAGING_APPEND);
+    staging->copy(bufs.bspheres, bounding_spheres, STAGING_APPEND);
 
     bufs.vertex_count += vertex_count;
     bufs.index_count += index_count;
@@ -1008,7 +1005,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
     if(copy_data)
     {
         if(new_size < handle->size) { ENG_WARN("Source data truncated as destination buffer is too small."); }
-        sbuf->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true);
+        staging->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true);
     }
     destroy_buffer(handle);
     handle = dsth;

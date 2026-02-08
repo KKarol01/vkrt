@@ -296,7 +296,7 @@ void PipelineMetadataVk::destroy(Pipeline& a)
     a.md.vk = nullptr;
 }
 
-void BufferMetadataVk::init(Buffer& a, std::optional<dont_alloc_tag> dont_alloc)
+void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
 {
     if(a.md.vk)
     {
@@ -323,7 +323,7 @@ void BufferMetadataVk::init(Buffer& a, std::optional<dont_alloc_tag> dont_alloc)
         .usage = VMA_MEMORY_USAGE_AUTO,
     };
 
-    if(dont_alloc) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
+    if(allocate == AllocateMemory::NO) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
     else { VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vma_alloc, &vmaai)); }
 
     if(md->buffer) { set_debug_name(md->buffer, a.name); }
@@ -361,7 +361,7 @@ void BufferMetadataVk::destroy(Buffer& a)
     a.md.vk = nullptr;
 }
 
-void ImageMetadataVk::init(Image& a, VkImage img, std::optional<dont_alloc_tag> dont_alloc)
+void ImageMetadataVk::init(Image& a, VkImage img, AllocateMemory allocate)
 {
     if(a.md.vk)
     {
@@ -383,7 +383,7 @@ void ImageMetadataVk::init(Image& a, VkImage img, std::optional<dont_alloc_tag> 
     VkImageCreateInfo info;
     init(a, info);
     if(img) { md->image = img; }
-    else if(dont_alloc) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
+    else if(allocate == AllocateMemory::NO) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
     else { VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr)); }
 
     if(md->image) { set_debug_name(md->image, a.name); }
@@ -1325,16 +1325,16 @@ void RendererBackendVk::initialize_vulkan()
 // #endif
 // }
 
-void RendererBackendVk::allocate_buffer(Buffer& buffer, std::optional<dont_alloc_tag> dont_alloc)
+void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
 {
-    BufferMetadataVk::init(buffer, dont_alloc);
+    BufferMetadataVk::init(buffer, allocate);
 }
 
 void RendererBackendVk::destroy_buffer(Buffer& buffer) { BufferMetadataVk::destroy(buffer); }
 
-void RendererBackendVk::allocate_image(Image& image, std::optional<dont_alloc_tag> dont_alloc)
+void RendererBackendVk::allocate_image(Image& image, AllocateMemory allocate)
 {
-    ImageMetadataVk::init(image, {}, dont_alloc);
+    ImageMetadataVk::init(image, {}, allocate);
 }
 
 void RendererBackendVk::destroy_image(Image& image) { ImageMetadataVk::destroy(image); }
