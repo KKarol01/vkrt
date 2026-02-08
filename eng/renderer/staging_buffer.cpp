@@ -96,8 +96,8 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
     }
     else
     {
-        get_cmd()->copy(dstb, srcb, dst_offset, src_range);
         if(insert_barrier) { barrier(); }
+        get_cmd()->copy(dstb, srcb, dst_offset, src_range);
     }
     dstb.size = std::max(dstb.size, dst_offset + src_range.size);
 }
