@@ -82,12 +82,13 @@ class RenderGraph
     {
         bool is_read() const { return (access & PipelineAccess::READS) > 0; }
         bool is_write() const { return (access & PipelineAccess::WRITES) > 0; }
+        // note: this might prove to be problematic if some resources will actually need to use none/none (
         bool is_import_only() const { return !stage && !access; }
         Handle<Resource> resource;
         Handle<ResourceAccess> prev_access;
         union {
-            BufferView buffer; // if resource->is_buffer() == true or layout == undefined
-            ImageView image;
+            BufferView buffer_view; // if resource->is_buffer() == true or layout == undefined
+            ImageView image_view;
         };
         ImageLayout layout{ ImageLayout::UNDEFINED };
         Flags<PipelineStage> stage;
@@ -114,7 +115,6 @@ class RenderGraph
             graph->resources.push_back(resource);
             const auto ret = add_access(ResourceAccess{
                 .resource = Handle<Resource>{ (uint32_t)graph->resources.size() - 1 },
-                .buffer = {},
                 .layout = ImageLayout::UNDEFINED,
                 .stage = {},
                 .access = {},
@@ -287,7 +287,7 @@ class RenderGraph
             return add_access(ResourceAccess{
                 .resource = graph->get_acc(acc).resource,
                 .prev_access = acc,
-                .image =
+                .image_view =
                     ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
                 .layout = layout,
                 .stage = stage,
@@ -301,7 +301,7 @@ class RenderGraph
             return add_access(ResourceAccess{
                 .resource = graph->get_acc(acc).resource,
                 .prev_access = acc,
-                .buffer = BufferView{ graph->get_buf(acc), range },
+                .buffer_view = BufferView{ graph->get_buf(acc), range },
                 .stage = stage,
                 .access = access,
             });
@@ -589,10 +589,11 @@ class RenderGraph
                     if(acc.is_read())
                     {
                         const auto& pacc = get_acc(acc.prev_access);
+                        auto earliest = res.last_write_group + 1;
                         // if reading, and layouts are not same, change layout and read in the next stage
-                        if(pacc.layout != acc.layout) { return res.last_read_group + 1; }
+                        if(pacc.layout != acc.layout) { earliest = std::max(earliest, res.last_read_group + 1); }
                         // if layouts are compatible, we can read at the same time.
-                        return res.last_read_group;
+                        return earliest;
                     }
                     ENG_ASSERT(false);
                     return ~0u;
@@ -696,11 +697,11 @@ class RenderGraph
                     if(res.is_buffer()) { continue; }
                     if(acc.is_import_only()) { continue; }
                     {
-                        if(acc.image.image->layout == acc.layout) { continue; }
+                        if(acc.image_view.image->layout == acc.layout) { continue; }
                     }
                     if(!layout_cmd) { layout_cmd = cmds[0]->begin(); }
                     const auto& pacc = get_acc(acc.prev_access);
-                    Handle<Image> img = acc.image.image;
+                    Handle<Image> img = acc.image_view.image;
                     layout_cmd->barrier(img.get(), pacc.stage, pacc.access, acc.stage, acc.access, pacc.layout, acc.layout);
                 }
             }

@@ -63,29 +63,13 @@ class SSTriangle : public IPass
                     pb.create_resource(Image::init("sstriangle output", w->width, w->height, 1,
                                                    ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT));
                 pass_out_color.color = pb.access_color(pass_out_color.color);
-
-
-                //auto vkimage = pb.rg->get_img(pass_out_color.color)->md.vk->image;
-                //VkImageMemoryRequirementsInfo2 info{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2, .image = vkimage };
-                //VkMemoryRequirements2 imgreqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
-                //vkGetImageMemoryRequirements2(RendererBackendVk::get_dev(), &info, &imgreqs);
-
-                //auto buf = pb.create_resource(Buffer::init("buf", 1024, BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
-                //VkBufferMemoryRequirementsInfo2 bufreqinfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
-                //                                            .buffer = pb.rg->get_buf(buf)->md.vk->buffer };
-                //VkMemoryRequirements2 bufreqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
-                //vkGetBufferMemoryRequirements2(RendererBackendVk::get_dev(), &bufreqinfo, &bufreqs);
-
-                //VkPhysicalDeviceMemoryProperties2 props{};
-                //vkGetPhysicalDeviceMemoryProperties2(RendererBackendVk::get_instance().pdev, &props);
-
                 return pass_out_color;
             },
             [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {
                 const auto* w = Engine::get().window;
                 auto* cmd = pb.open_cmd_buf();
                 const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
-                    .imageView = graph.get_acc(pass_out_color.color).image.get_md().vk->view,
+                    .imageView = graph.get_acc(pass_out_color.color).image_view.get_md().vk->view,
                     .imageLayout = to_vk(graph.get_acc(pass_out_color.color).layout),
                     .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -125,16 +109,6 @@ class SSTriangle : public IPass
                 auto* cmd = pb.open_cmd_buf();
                 cmd->copy(graph.get_img(pass_copy_to_swap.swap).get(), graph.get_img(pass_copy_to_swap.color).get());
             });
-        graph.add_graphics_pass(
-            "sstriangleswapchaintopresent",
-            [this](RenderGraph::PassBuilder& pb) {
-                auto& r = get_renderer();
-                auto* w = Engine::get().window;
-                pass_present_swap.swap = pb.access_resource(pass_copy_to_swap.swap, ImageLayout::PRESENT,
-                                                            PipelineStage::NONE, PipelineAccess::NONE);
-                return pass_present_swap;
-            },
-            [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {});
     }
 
     Handle<Pipeline> pipeline;

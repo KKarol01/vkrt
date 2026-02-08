@@ -599,8 +599,8 @@ void RendererBackendVk::initialize_vulkan()
     auto inst_ret = builder
                         .set_app_name("Example Vulkan Application")
 #ifndef NDEBUG
-                        .enable_validation_layers()
                         .enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
+                        .enable_validation_layers()
                         .use_default_debug_messenger()
 #endif
                         .require_api_version(VK_MAKE_API_VERSION(0, 1, 3, 0))
@@ -765,7 +765,7 @@ void RendererBackendVk::initialize_vulkan()
     };
 
     VmaAllocatorCreateInfo allocatorCreateInfo = {
-        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
         .physicalDevice = pdev,
         .device = dev,
         .pVulkanFunctions = &vulkanFunctions,

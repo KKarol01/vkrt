@@ -553,20 +553,21 @@ void Renderer::update()
     rgraph->compile();
 
     // sbuf->queue_wait(rgraph->gq, PipelineStage::ALL, true);
+
+    auto* cmd = pf.cmdpool->begin();
+    cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::TRANSFER_WRITE_BIT,
+                 PipelineStage::ALL, PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
+    pf.cmdpool->end(cmd);
+
     sbuf->reset();
     Sync* rgsync = rgraph->execute(pf.acq_sem);
 
-    auto* cmd = pf.cmdpool->begin();
-    cmd->barrier(swapchain->get_image().get(), PipelineStage::ALL, PipelineAccess::NONE, PipelineStage::ALL,
-                 PipelineAccess::NONE, ImageLayout::UNDEFINED, ImageLayout::PRESENT);
-    pf.cmdpool->end(cmd);
-
     gq->wait_sync(rgsync, PipelineStage::ALL)
         .with_cmd_buf(cmd)
-        .signal_sync(pf.swp_sem, PipelineStage::NONE)
+        .signal_sync(pf.swp_sem, PipelineStage::ALL)
         .signal_sync(pf.ren_fen)
         .submit();
-    gq->wait_sync(pf.swp_sem, PipelineStage::NONE).present(swapchain);
+    gq->wait_sync(pf.swp_sem, PipelineStage::ALL).present(swapchain);
     gq->wait_idle();
     ++frame_index;
 }
