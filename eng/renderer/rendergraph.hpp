@@ -682,7 +682,7 @@ class RenderGraph
         cmds[0]->reset();
         for(auto i = 0u; i < wait_count; ++i)
         {
-            queue->wait_sync(wait_syncs[i], PipelineStage::TRANSFER_BIT);
+            queue->wait_sync(wait_syncs[i], PipelineStage::ALL);
         }
         for(auto i = 0u; i < groups.size(); ++i)
         {
