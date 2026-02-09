@@ -90,15 +90,12 @@ class StagingBuffer
   private:
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
+    // Get frame dependent context
     Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
 
-    size_t get_free_space() const
-    {
-        if(head < CAPACITY) { return CAPACITY - head; }
-        return std::max(allocations[0].offset, head) - head;
-    }
+    size_t get_free_space() const { return free_head > head ? free_head - head : 0; }
 
     void* get_alloc_mem(const Allocation& alloc) const;
 
@@ -110,8 +107,9 @@ class StagingBuffer
     Buffer buffer;
     SubmitQueue* queue{};
     size_t head{};
+    size_t free_head{ CAPACITY };
     Sync* sync{};
-    std::vector<Allocation> allocations;
+    std::deque<Allocation> allocations;
     std::vector<Context> contexts;
     uint64_t last_frame{};
 };

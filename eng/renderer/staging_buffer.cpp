@@ -219,44 +219,33 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 
     const auto aligned_size = align_up2(size, ALIGNMENT);
     auto& ctx = get_context();
-    Allocation alloc = [this, aligned_size] {
-        const auto free_space = get_free_space();
-        if(free_space == 0)
-        {
-            flush(nullptr);
-            ENG_ASSERT(allocations.size());
-            Allocation alloc{};
-            size_t num_allocs = 0;
-            for(auto i = 0ull; i < allocations.size(); ++i, ++num_allocs)
-            {
-                if(i == 0)
-                {
-                    sync->wait_cpu(~0ull, allocations[i].signal_value);
-                    alloc = allocations[0];
-                }
-                else
-                {
-                    ENG_ASSERT(allocations[i].offset == allocations[i - 1].offset + allocations[i - 1].real_size);
-                    if(sync->wait_cpu(0ull, allocations[i].signal_value))
-                    {
-                        alloc.real_size += allocations[i].real_size;
-                    }
-                    else { break; }
-                }
-            }
-            ENG_ASSERT(num_allocs >= 1);
-            allocations.erase(allocations.begin(), allocations.begin() + num_allocs);
-            return alloc;
-        }
-        ENG_ASSERT(free_space % ALIGNMENT == 0);
-        return Allocation{ .offset = head, .real_size = free_space };
-    }();
 
-    alloc.real_size = std::min(aligned_size, alloc.real_size);
-    alloc.size = std::min(size, alloc.real_size);
-    alloc.signal_value = sync->get_next_signal_value();
-    head = alloc.offset + alloc.real_size;
+    if(get_free_space() == 0)
+    {
+        ENG_ASSERT(!allocations.empty());
+        flush(nullptr);
+        sync->wait_cpu(~0ull, allocations.front().signal_value);
+        head = allocations.front().offset;
+        free_head = allocations.front().offset + allocations.front().real_size;
+        allocations.pop_front();
+        while(!allocations.empty())
+        {
+            auto& a = allocations.front();
+            if(!sync->wait_cpu(0ull, a.signal_value)) { break; }
+            free_head = a.offset + a.real_size;
+            allocations.pop_front();
+        }
+    }
+
+    const auto free_space = get_free_space();
+    ENG_ASSERT(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
+    const auto real_size = std::min(free_space, aligned_size);
+    const auto alloc = Allocation{
+        .offset = head, .size = std::min(size, real_size), .real_size = real_size, .signal_value = sync->get_next_signal_value()
+    };
     allocations.push_back(alloc);
+    head = alloc.offset + alloc.real_size;
+    ENG_ASSERT(head % ALIGNMENT == 0 && head <= CAPACITY);
     return alloc;
 }
 
