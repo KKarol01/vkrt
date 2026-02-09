@@ -404,9 +404,6 @@ void Renderer::update()
     pf.swp_sem->reset();
     pf.cmdpool->reset();
 
-    staging->reset();
-    staging->next();
-    staging->reset();
     swapchain->acquire(~0ull, pf.acq_sem);
 
     if(pf.retired_resources.size() > 0)

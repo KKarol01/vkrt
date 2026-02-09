@@ -7,6 +7,7 @@
 #include <eng/engine.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/to_vk.hpp>
+#include <vulkan/vulkan_core.h>
 
 namespace eng
 {
@@ -19,53 +20,41 @@ void StagingBuffer::init(SubmitQueue* queue)
     ENG_ASSERT(queue != nullptr);
 
     const auto alloc_size = align_up2(CAPACITY, ALIGNMENT);
-    buffer = r.make_buffer(Buffer::init("staging buffer", alloc_size,
-                                        BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS));
-    ENG_ASSERT(buffer);
-    memory = buffer->memory;
+    buffer = Buffer::init("staging buffer", alloc_size,
+                          BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS);
+    r.backend->allocate_buffer(buffer);
+    ENG_ASSERT(buffer.memory);
 
-    ENG_ASSERT(memory != nullptr);
     this->queue = queue;
-    allocator = DoubleSidedAllocator{ memory, CAPACITY };
 
-    int alloc_dirs[]{ 1, -1 };
-    for(int i = 0; i < 2; ++i)
+    contexts.resize(r.frames_in_flight);
+    for(int i = 0; i < r.frames_in_flight; ++i)
     {
-        dbs[i].dir = alloc_dirs[i];
-        dbs[i].cmdpool =
-            queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-        dbs[i].sync = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, ENG_FMT("staging sync {}", i) });
-        ENG_ASSERT(dbs[i].cmdpool != nullptr);
+        contexts[i].pool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     }
-    db = &dbs[0];
+    sync = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
 }
 
-Sync* StagingBuffer::flush(Sync* sync)
+Sync* StagingBuffer::flush(Sync* signal_sync)
 {
-    if(!db->cmd) { return db->sync; } // no transactions issued since previous flush
-    db->cmdpool->end(db->cmd);
-    queue->with_cmd_buf(db->cmd).signal_sync(db->sync, PipelineStage::TRANSFER_BIT);
-    if(sync != nullptr) { queue->signal_sync(sync, PipelineStage::TRANSFER_BIT); }
+    if(!get_context().cmd) { return sync; } // no transactions issued since previous flush
+    get_context().pool->end(get_context().cmd);
+    queue->with_cmd_buf(get_context().cmd).signal_sync(sync, PipelineStage::TRANSFER_BIT);
+    if(signal_sync != nullptr) { queue->signal_sync(signal_sync, PipelineStage::TRANSFER_BIT); }
     queue->submit();
-    db->cmd = nullptr;
-    return db->sync;
+    get_context().cmd = nullptr;
+    return sync;
 }
 
 void StagingBuffer::reset()
 {
     flush(nullptr); // send, if any, staged transactions before optional forwarding.
-    db->sync->wait_cpu(~0ull);
-    db->sync->reset();
-    db->cmdpool->reset();
-    db->cmd = nullptr;
-    allocator.reset(db->dir);
-}
-
-void StagingBuffer::next()
-{
-    flush(nullptr);
-    std::swap(dbs[0], dbs[1]);
-    db = &dbs[0];
+    sync->wait_cpu(~0ull);
+    sync->reset();
+    get_context().pool->reset();
+    get_context().cmd = nullptr;
+    head = 0;
+    allocations.clear();
 }
 
 void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier)
@@ -102,8 +91,8 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
         {
             const auto upload_size = src_size - uploaded;
             auto alloc = partial_allocate(upload_size);
-            memcpy(alloc.mem, (const std::byte*)src + uploaded, alloc.size);
-            get_cmd()->copy(dstb, buffer.get(), dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
+            memcpy(get_alloc_mem(alloc), (const std::byte*)src + uploaded, alloc.size);
+            get_cmd()->copy(dstb, buffer, dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
             uploaded += alloc.size;
         }
         ENG_ASSERT(uploaded == src_size);
@@ -173,13 +162,13 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
         auto alloc = partial_allocate(remaining_bytes);
         if(alloc.size < row_bytes)
         {
-            reset_allocator();
+            reset();
             continue;
         }
 
         const auto rows_allocated = alloc.size / row_bytes;
         const auto usable_bytes = rows_allocated * row_bytes; // alloc.size rounded down
-        memcpy(alloc.mem, (std::byte*)src + bytes_uploaded, usable_bytes);
+        memcpy(get_alloc_mem(alloc), (std::byte*)src + bytes_uploaded, usable_bytes);
 
         const auto copy_offset =
             glm::i32vec3{ offset.x, offset.y + rows_uploaded, offset.z } *
@@ -195,7 +184,7 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
             .imageOffset = { copy_offset.x, copy_offset.y, copy_offset.z },
             .imageExtent = { copy_extent.x, copy_extent.y, copy_extent.z },
         });
-        get_cmd()->copy(img, buffer.get(), &copy, 1);
+        get_cmd()->copy(img, buffer, &copy, 1);
 
         bytes_uploaded += usable_bytes;
     }
@@ -221,38 +210,77 @@ void StagingBuffer::barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayo
 Sync* StagingBuffer::get_wait_sem(bool flush)
 {
     if(flush) { this->flush(nullptr); }
-    return db->sync;
+    return sync;
 }
 
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
-    auto free_space = allocator.get_free_space();
-    if(free_space < ALIGNMENT) { reset_allocator(); }
-    free_space = allocator.get_free_space();
-    const auto alloc_size = std::min(align_up2(size, ALIGNMENT), free_space);
-    ENG_ASSERT(alloc_size > 0 && alloc_size % ALIGNMENT == 0);
-    auto* mem = allocator.alloc(alloc_size, db->dir);
-    Allocation alloc{ mem, (uintptr_t)mem - (uintptr_t)memory, std::min(alloc_size, size) };
-    ENG_ASSERT(mem != nullptr);
+    if(sync->get_next_signal_value() == 0ull) { reset(); }
+
+    const auto aligned_size = align_up2(size, ALIGNMENT);
+    auto& ctx = get_context();
+    Allocation alloc = [this, aligned_size] {
+        const auto free_space = get_free_space();
+        if(free_space == 0)
+        {
+            flush(nullptr);
+            ENG_ASSERT(allocations.size());
+            Allocation alloc{};
+            size_t num_allocs = 0;
+            for(auto i = 0ull; i < allocations.size(); ++i, ++num_allocs)
+            {
+                if(i == 0)
+                {
+                    sync->wait_cpu(~0ull, allocations[i].signal_value);
+                    alloc = allocations[0];
+                }
+                else
+                {
+                    ENG_ASSERT(allocations[i].offset == allocations[i - 1].offset + allocations[i - 1].real_size);
+                    if(sync->wait_cpu(0ull, allocations[i].signal_value))
+                    {
+                        alloc.real_size += allocations[i].real_size;
+                    }
+                    else { break; }
+                }
+            }
+            ENG_ASSERT(num_allocs >= 1);
+            allocations.erase(allocations.begin(), allocations.begin() + num_allocs);
+            return alloc;
+        }
+        ENG_ASSERT(free_space % ALIGNMENT == 0);
+        return Allocation{ .offset = head, .real_size = free_space };
+    }();
+
+    alloc.real_size = std::min(aligned_size, alloc.real_size);
+    alloc.size = std::min(size, alloc.real_size);
+    alloc.signal_value = sync->get_next_signal_value();
+    head = alloc.offset + alloc.real_size;
+    allocations.push_back(alloc);
     return alloc;
+}
+
+StagingBuffer::Context& StagingBuffer::get_context()
+{
+    auto& ctx = contexts[get_renderer().get_framedata_index()];
+    if(last_frame != get_renderer().frame_index)
+    {
+        last_frame = get_renderer().frame_index;
+        ctx.pool->reset(); // can safely assume all the transactions during that frame must have had completed (render graph waits for the semaphore)
+    }
+    return ctx;
 }
 
 ICommandBuffer* StagingBuffer::get_cmd()
 {
-    if(!db->cmd) { db->cmd = db->cmdpool->begin(); }
-    return db->cmd;
+    auto& ctx = get_context();
+    if(!ctx.cmd) { ctx.cmd = ctx.pool->begin(); }
+    return ctx.cmd;
 }
 
-void StagingBuffer::reset_allocator()
+void* StagingBuffer::get_alloc_mem(const Allocation& alloc) const
 {
-    reset();
-    if(allocator.get_free_space() < ALIGNMENT)
-    {
-        // reset next frame, as it hogs up all the memory.
-        next();
-        reset();
-    }
-    ENG_ASSERT(allocator.get_free_space() >= ALIGNMENT);
+    return (void*)((char*)buffer.memory + alloc.offset);
 }
 
 void StagingBuffer::prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,

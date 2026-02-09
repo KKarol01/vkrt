@@ -335,22 +335,22 @@ void Sync::signal_cpu(uint64_t value)
     this->value = value;
 }
 
-VkResult Sync::wait_cpu(size_t timeout, uint64_t value) const
+bool Sync::wait_cpu(size_t timeout, uint64_t value) const
 {
     if(type == UNKNOWN)
     {
         ENG_ERROR("Sync object was not initialized.");
-        return VK_ERROR_UNKNOWN;
+        return false;
     }
     if(value == ~0ull) { value = this->value; }
-    if(type == FENCE) { return vkWaitForFences(RendererBackendVk::get_dev(), 1, &fence, true, timeout); }
+    if(type == FENCE) { return vkWaitForFences(RendererBackendVk::get_dev(), 1, &fence, true, timeout) == VK_SUCCESS; }
     else if(type == TIMELINE_SEMAPHORE)
     {
         const auto info = Vks(VkSemaphoreWaitInfo{ .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &value });
-        return vkWaitSemaphores(RendererBackendVk::get_dev(), &info, timeout);
+        return vkWaitSemaphores(RendererBackendVk::get_dev(), &info, timeout) == VK_SUCCESS;
     }
     ENG_ERROR("Sync object of type {} cannot be waited on.", to_string(type));
-    return VK_ERROR_UNKNOWN;
+    return false;
 }
 
 uint64_t Sync::signal_gpu(uint64_t value)
@@ -465,7 +465,7 @@ VkResult SubmitQueue::submit()
     return sres;
 }
 
-VkResult SubmitQueue::submit_wait(uint64_t timeout)
+bool SubmitQueue::submit_wait(uint64_t timeout)
 {
     bool is_fence_temp = false;
     Sync* sfence{};

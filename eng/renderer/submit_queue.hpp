@@ -171,10 +171,11 @@ struct Sync
     void init(const SyncCreateInfo& info);
     void destroy();
     void signal_cpu(uint64_t value = ~0ull);
-    VkResult wait_cpu(size_t timeout, uint64_t value = ~0ull) const;
+    bool wait_cpu(size_t timeout, uint64_t value = ~0ull) const;
     uint64_t signal_gpu(uint64_t value = ~0ull);
     uint64_t wait_gpu(uint64_t value = ~0ull);
     void reset(uint64_t value = 0);
+    uint64_t get_next_signal_value() const { return value + 1; }
 
     SyncType type{};
     uint64_t value{};
@@ -210,7 +211,7 @@ class SubmitQueue
     SubmitQueue& signal_sync(Sync* sync, Flags<PipelineStage> stages = PipelineStage::ALL, uint64_t value = ~0ull);
     SubmitQueue& with_cmd_buf(ICommandBuffer* cmd);
     VkResult submit();
-    VkResult submit_wait(uint64_t timeout);
+    bool submit_wait(uint64_t timeout);
     void present(Swapchain* swapchain);
     void wait_idle();
 

@@ -6,9 +6,6 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
 #include <eng/renderer/renderer.hpp>
-#include <eng/common/doublesidedalloc.hpp>
-
-#include <vulkan/vulkan_core.h>
 
 #include <unordered_map>
 #include <vector>
@@ -36,19 +33,24 @@ class StagingBuffer
 
     struct Allocation
     {
-        void* mem{};
         size_t offset{};
-        size_t size{}; // min of realsize and user-requested size
+        size_t size{};
+        size_t real_size{}; // not min'd down to user req size, if alloc happened to be bigger
+        uint64_t signal_value{};
+    };
+
+    struct Context
+    {
+        ICommandPool* pool{};
+        ICommandBuffer* cmd{};
     };
 
   public:
     void init(SubmitQueue* queue);
     // Flushes pending transactions and optionally notifies supplied sync.
-    Sync* flush(Sync* sync);
-    // Flushes pending transactions, waits for completions of all submissions, and resets frame's data.
+    Sync* flush(Sync* signal_sync);
+    // Flushes pending transactions and waits for completions of all submissions.
     void reset();
-    // Forward counter to the next frame without waiting.
-    void next();
 
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     void copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier = false);
@@ -88,43 +90,30 @@ class StagingBuffer
   private:
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
+    Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
 
-    // Resets the current frame. If still not enough memory, resets the other one too.
-    void reset_allocator();
+    size_t get_free_space() const
+    {
+        if(head < CAPACITY) { return CAPACITY - head; }
+        return std::max(allocations[0].offset, head) - head;
+    }
+
+    void* get_alloc_mem(const Allocation& alloc) const;
+
     void prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
                        ImageMipLayerRange dst_range = { { 0u, ~0u }, { 0u, ~0u } },
                        ImageMipLayerRange src_range = { { 0u, ~0u }, { 0u, ~0u } });
     bool translate_dst_offset(Handle<Buffer> dst, size_t& offset, size_t size);
 
-    Handle<Buffer> buffer;
-    void* memory{};
+    Buffer buffer;
     SubmitQueue* queue{};
-
-    DoubleSidedAllocator allocator;
-    struct DoubleBuffered
-    {
-        ICommandPool* cmdpool{};
-        ICommandBuffer* cmd{};
-        int dir{};
-        Sync* sync{};
-    } dbs[2]{};
-    DoubleBuffered* db{};
-
-#ifdef ENG_SBUF_DEBUG_STATS
-    struct DebugStats
-    {
-        void reset();
-        uint32_t flush_count{};
-        uint32_t linalloc_count{};
-        uint32_t freealloc_count{};
-        uint32_t buf_resize_count{};
-        uint32_t transaction_count{};
-        uint32_t sync_count{};
-        uint32_t cmd_count{};
-    } debugstats;
-#endif
+    size_t head{};
+    Sync* sync{};
+    std::vector<Allocation> allocations;
+    std::vector<Context> contexts;
+    uint64_t last_frame{};
 };
 } // namespace gfx
 } // namespace eng
