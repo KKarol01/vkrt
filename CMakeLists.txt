@@ -133,7 +133,15 @@ add_executable(eng
 target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
-# target_compile_options(eng PRIVATE )
+target_compile_options(eng PRIVATE
+    -Wall -Wextra -Werror -Wpedantic
+    -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=missing-field-initializers
+    -Wno-error=missing-designated-field-initializers
+)
+set_target_properties(eng PROPERTIES 
+    RUNTIME_OUTPUT_NAME_DEBUG "${CMAKE_PROJECT_NAME}Debug"
+    RUNTIME_OUTPUT_NAME_RELEASE "${CMAKE_PROJECT_NAME}"
+)
 target_link_libraries(eng
     PUBLIC
         glm 

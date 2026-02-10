@@ -310,6 +310,7 @@ enum class QueueType
 
 enum class SamplerReductionMode
 {
+    NONE,
     MIN,
     MAX
 };
@@ -350,7 +351,6 @@ struct ImageMipLayerRange;
 struct ImageLayerRange;
 struct ImageBlit;
 struct ImageCopy;
-struct SamplerDescriptor;
 struct Sampler;
 struct Texture;
 struct MaterialDescriptor;
@@ -385,6 +385,8 @@ struct SamplerMetadataVk;
 struct BufferMetadataVk;
 class RenderGraph;
 struct IDescriptorSetAllocator;
+class ICommandPool;
+class ICommandBuffer;
 
 namespace pass
 {
@@ -537,7 +539,7 @@ inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
 
     default:
     {
-        ENG_ASSERT("Unhandled case");
+        ENG_ERROR("Undefined case");
         return ImageAspect::NONE;
     }
     }
@@ -555,7 +557,7 @@ inline ImageViewType get_view_type_from_image(ImageType type)
         return ImageViewType::TYPE_3D;
     default:
     {
-        ENG_ASSERT("Unhandled case");
+        ENG_ERROR("Undefined case");
         return ImageViewType::NONE;
     }
     }

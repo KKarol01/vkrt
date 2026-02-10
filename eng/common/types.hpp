@@ -25,6 +25,7 @@ using Range3D32u = Range_T<glm::u32vec3>;
 using Range3D64i = Range_T<glm::i64vec3>;
 using Vec3i32 = glm::i32vec3;
 using Vec3u32 = glm::u32vec3;
+using Color4f = glm::f32vec4;
 
 } // namespace eng
 

@@ -183,14 +183,11 @@ void Renderer::init_helper_geom()
 
 void Renderer::init_pipelines()
 {
-    auto linear_sampler = make_sampler(SamplerDescriptor{});
-    auto nearest_sampler = make_sampler(SamplerDescriptor{ .filtering = { ImageFilter::NEAREST, ImageFilter::NEAREST } });
-    auto hiz_sampler = make_sampler(SamplerDescriptor{
-        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE },
-        .mipmap_mode = SamplerMipmapMode::NEAREST,
-        .reduction_mode = SamplerReductionMode::MIN });
-
+    auto linear_sampler = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageAddressing::REPEAT));
+    auto nearest_sampler = make_sampler(Sampler::init(ImageFilter::NEAREST, ImageAddressing::REPEAT));
+    auto hiz_sampler = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageFilter::LINEAR, ImageAddressing::CLAMP_EDGE,
+                                                  ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
+                                                  SamplerMipmapMode::NEAREST, 0.0f, 1000.0f, 0.0f, SamplerReductionMode::MIN));
     Handle<Sampler> imsamplers[3]{};
     imsamplers[ENG_SAMPLER_LINEAR] = linear_sampler;
     imsamplers[ENG_SAMPLER_NEAREST] = nearest_sampler;
@@ -263,9 +260,9 @@ void Renderer::init_pipelines()
 
 void Renderer::init_perframes()
 {
-    auto* ew = Engine::get().window;
-    perframe.resize(frames_in_flight);
-    for(auto i = 0u; i < frames_in_flight; ++i)
+    // auto* ew = Engine::get().window;
+    perframe.resize(frame_delay);
+    for(auto i = 0u; i < frame_delay; ++i)
     {
         auto& pf = perframe[i];
         // auto& gb = pf.gbuffer;
@@ -393,15 +390,14 @@ void Renderer::instance_entity(ecs::entity e)
 
 void Renderer::update()
 {
-    auto* ew = Engine::get().window;
+    // auto* ew = Engine::get().window;
+    // const auto& ppf = perframe.at(current_frame % perframe.size()); // get previous frame res
     auto& pf = get_framedata();
-    const auto& ppf = perframe.at(frame_index % perframe.size()); // get previous frame res
-
     pf.ren_fen->wait_cpu(~0ull);
     pf.ren_fen->reset();
-    pf.acq_sem->reset();
-    pf.ren_sem->reset();
-    pf.swp_sem->reset();
+    // pf.acq_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
+    // pf.ren_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
+    // pf.swp_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
     pf.cmdpool->reset();
 
     swapchain->acquire(~0ull, pf.acq_sem);
@@ -409,14 +405,15 @@ void Renderer::update()
     if(pf.retired_resources.size() > 0)
     {
         ENG_LOG("Removing {} retired resources", pf.retired_resources.size());
+        staging->get_wait_sem()->wait_cpu(~0ull);
         for(auto& rs : pf.retired_resources)
         {
-            if(auto* buf = std::get_if<Handle<Buffer>>(&rs))
+            if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 backend->destroy_buffer(buf->get());
                 buffers.erase(*buf);
             }
-            else if(auto* img = std::get_if<Handle<Image>>(&rs))
+            else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 backend->destroy_image(img->get());
                 images.erase(*img);
@@ -484,20 +481,20 @@ void Renderer::update()
             if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate_slot(); }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
             staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight),
-                       sizeof(GPULight));
+                          sizeof(GPULight));
         }
         const auto lc = (uint32_t)ecs_light_view.size();
         staging->copy(bufs.lights[0], &lc, offsetof(GPULightsBuffer, count), 4);
         new_lights.clear();
     }
 
-    const auto view = Engine::get().camera->get_view();
-    const auto proj = Engine::get().camera->get_projection();
-    const auto invview = glm::inverse(view);
-    const auto invproj = glm::inverse(proj);
+    // const auto view = Engine::get().camera->get_view();
+    // const auto proj = Engine::get().camera->get_projection();
+    // const auto invview = glm::inverse(view);
+    // const auto invproj = glm::inverse(proj);
 
-    static auto prev_view = view;
-    if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
+    // static auto prev_view = view;
+    // if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
 
     // ENG_ASSERT(false);
     //  GPUEngConstantsBuffer cb{
@@ -552,13 +549,13 @@ void Renderer::update()
     Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
 
-    gq->wait_sync(rgsync, PipelineStage::ALL)
-        .signal_sync(pf.swp_sem, PipelineStage::ALL)
-        .signal_sync(pf.ren_fen)
-        .submit();
-    gq->wait_sync(pf.swp_sem, PipelineStage::ALL).present(swapchain);
-    gq->wait_idle();
-    ++frame_index;
+    auto* cmd = pf.cmdpool->begin();
+    pf.cmdpool->end(cmd);
+
+    gq->wait_sync(rgsync).with_cmd_buf(cmd).signal_sync(pf.swp_sem).signal_sync(pf.ren_fen).submit();
+    gq->wait_sync(pf.swp_sem).present(swapchain);
+    // gq->wait_idle();
+    ++current_frame;
 }
 
 void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd)
@@ -649,7 +646,7 @@ void Renderer::build_renderpasses()
         rp.draw.batches.reserve(rp.mesh_instances.size());
         for(auto i = 0u; i < rp.mesh_instances.size(); ++i)
         {
-            const auto& geom = rp.mesh_instances[i].geometry.get();
+            // const auto& geom = rp.mesh_instances[i].geometry.get();
             const auto& material = rp.mesh_instances[i].material.get();
             const auto& mp = material.mesh_pass->effects[rpti].get();
             if(i == 0 || rp.draw.batches.back().pipeline != mp.pipeline)
@@ -726,7 +723,8 @@ Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, AllocateMemory allocate)
 void Renderer::destroy_buffer(Handle<Buffer>& buffer)
 {
     ENG_ASSERT(buffer);
-    get_framedata().retired_resources.push_back(buffer);
+    get_framedata().retired_resources.push_back(FrameData::RetiredResource{
+        buffer, staging->get_wait_sem(), staging->get_wait_sem()->get_next_signal_value() - 1 });
     buffer = {};
 }
 
@@ -761,8 +759,18 @@ Handle<Image> Renderer::make_image(Image&& image, AllocateMemory allocate)
 void Renderer::destroy_image(Handle<Image>& image)
 {
     ENG_ASSERT(image);
-    get_framedata().retired_resources.push_back(image);
+    get_framedata().retired_resources.push_back(FrameData::RetiredResource{
+        image, staging->get_wait_sem(), staging->get_wait_sem()->get_next_signal_value() - 1 });
     image = {};
+}
+
+Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
+{
+    const auto found_handle = samplers.find(sampler);
+    if(found_handle) { return found_handle; }
+    backend->allocate_sampler(sampler);
+    auto ret = samplers.insert(std::move(sampler));
+    return ret.handle;
 }
 
 // Handle<BufferView> Renderer::make_view(const BufferViewDescriptor& info)
@@ -789,10 +797,10 @@ void Renderer::destroy_image(Handle<Image>& image)
 //     return it.handle;
 // }
 
-Handle<Sampler> Renderer::make_sampler(const SamplerDescriptor& info)
-{
-    return samplers.insert(backend->make_sampler(info));
-}
+// Handle<Sampler> Renderer::make_sampler(const SamplerDescriptor& info)
+//{
+//     return samplers.insert(backend->make_sampler(info));
+// }
 
 Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
 {
@@ -1033,9 +1041,10 @@ void Renderer::update_transform(ecs::entity entity)
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
-uint32_t Renderer::get_framedata_index(int32_t offset) const { return (uint32_t)(frame_index % frames_in_flight); }
-
-Renderer::FrameData& Renderer::get_framedata(int32_t offset) { return perframe.at(get_framedata_index(offset)); }
+Renderer::FrameData& Renderer::get_framedata(int32_t offset)
+{
+    return perframe[((int32_t)current_frame + offset) % frame_delay];
+}
 
 bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {

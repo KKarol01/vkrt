@@ -6,6 +6,7 @@
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/renderer/staging_buffer.hpp>
+#include <eng/common/hash.hpp>
 
 namespace eng
 {
@@ -24,8 +25,17 @@ class IPass
     virtual void on_render_graph(RenderGraph& graph) = 0;
 };
 
+struct HashContainer
+{
+    explicit consteval HashContainer(const char* cstr) : cstr(cstr), hash(hash::combine_fnv1a(cstr)) {}
+    const char* cstr;
+    uint64_t hash;
+};
+
 class SSTriangle : public IPass
 {
+    inline static constinit HashContainer name = HashContainer{ "SSTriangle" };
+
     struct SSTrianglePass
     {
         Handle<RenderGraph::ResourceAccess> color;
@@ -50,7 +60,7 @@ class SSTriangle : public IPass
                                                            r.make_shader("triangle/triangle.vert.glsl"),
                                                            r.make_shader("triangle/triangle.frag.glsl"),
                                                        },
-                                                       .attachments = { .count = 1, .color_formats = ImageFormat::R8G8B8A8_SRGB }, 
+                                                       .attachments = { .count = 1, .color_formats = {ImageFormat::R8G8B8A8_SRGB} }, 
                                                       });
     }
 
@@ -59,7 +69,6 @@ class SSTriangle : public IPass
         graph.add_graphics_pass(
             "Draw triangle",
             [this](RenderGraph::PassBuilder& pb) {
-                auto& r = get_renderer();
                 auto* w = Engine::get().window;
                 pass_out_color.color =
                     pb.create_resource(Image::init("sstriangle output", w->width, w->height, 1,
@@ -99,7 +108,6 @@ class SSTriangle : public IPass
             "Copy to swapchain",
             [this](RenderGraph::PassBuilder& pb) {
                 auto& r = get_renderer();
-                auto* w = Engine::get().window;
                 pass_copy_to_swap.swap = pb.import_resource(r.swapchain->get_image());
                 pass_copy_to_swap.color = pb.access_resource(pass_out_color.color, ImageLayout::TRANSFER_SRC,
                                                              PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
@@ -118,7 +126,7 @@ class SSTriangle : public IPass
                                                             PipelineStage::ALL, PipelineAccess::WRITES);
                 return pass_copy_to_swap;
             },
-            [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {});
+            [](RenderGraph& graph, RenderGraph::PassBuilder& pb) {});
     }
 
     Handle<Pipeline> pipeline;

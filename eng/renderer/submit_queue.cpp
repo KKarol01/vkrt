@@ -109,9 +109,9 @@ void CommandBufferVk::blit(const Image& dst, const Image& src, const ImageBlit& 
                    1, &vkblit, to_vk(blit.filter));
 }
 
-void CommandBufferVk::clear_color(const Image& image, float color)
+void CommandBufferVk::clear_color(const Image& image, const Color4f& color)
 {
-    const auto clear = VkClearColorValue{ .float32 = color };
+    const auto clear = VkClearColorValue{ .float32 = { color.x, color.y, color.z, color.a } };
     const auto range =
         VkImageSubresourceRange{ to_vk(ImageAspect::COLOR), 0u, VK_REMAINING_MIP_LEVELS, 0u, VK_REMAINING_ARRAY_LAYERS };
     vkCmdClearColorImage(cmd, image.md.vk->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
@@ -298,7 +298,7 @@ void Sync::init(const SyncCreateInfo& info)
         VK_CHECK(vkCreateFence(RendererBackendVk::get_dev(), &vkinfo, nullptr, &fence));
         if(name.size()) { set_debug_name(fence, name); }
     }
-    else
+    else if(type == BINARY_SEMAPHORE || type == TIMELINE_SEMAPHORE)
     {
         auto vkinfo = Vks(VkSemaphoreCreateInfo{});
         const auto timeline_info =
@@ -380,7 +380,7 @@ void Sync::reset(uint64_t value)
 }
 
 SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
-    : dev(dev), queue(queue), family_idx(family_idx), fence(get_renderer().make_sync({ SyncType::FENCE }))
+    : dev(dev), queue(queue), family_idx(family_idx), fence(get_renderer().make_sync({ SyncType::FENCE, 0, "" }))
 {
 }
 
@@ -423,7 +423,7 @@ SubmitQueue& SubmitQueue::with_cmd_buf(ICommandBuffer* cmd)
     return *this;
 }
 
-VkResult SubmitQueue::submit()
+void SubmitQueue::submit()
 {
     for(auto& [sync, stage] : submission.pushed_syncs)
     {
@@ -459,10 +459,8 @@ VkResult SubmitQueue::submit()
         .signalSemaphoreInfoCount = (uint32_t)sig_sems.size(),
         .pSignalSemaphoreInfos = sig_sems.data(),
     });
-    const auto sres = vkQueueSubmit2(queue, 1, &vk_info, submission.fence ? submission.fence->fence : nullptr);
-    VK_CHECK(sres);
+    VK_CHECK(vkQueueSubmit2(queue, 1, &vk_info, submission.fence ? submission.fence->fence : nullptr));
     submission = Submission{};
-    return sres;
 }
 
 bool SubmitQueue::submit_wait(uint64_t timeout)
@@ -477,10 +475,10 @@ bool SubmitQueue::submit_wait(uint64_t timeout)
     }
     else { sfence = submission.fence; }
     ENG_ASSERT(sfence);
-    const auto sres = submit();
-    const auto res = sfence->wait_cpu(timeout);
+    submit();
+    const auto wait_result = sfence->wait_cpu(timeout);
     if(is_fence_temp) { sfence->reset(); }
-    return res;
+    return wait_result;
 }
 
 void SubmitQueue::present(Swapchain* swapchain)

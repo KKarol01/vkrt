@@ -63,7 +63,7 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
         return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
     };
 
-    const auto fast_iterate = [&fastasset, &vertices, &get_vertex_component](int comp, const auto& fastacc,
+    const auto fast_iterate = [&fastasset, &get_vertex_component](int comp, const auto& fastacc,
                                                                              gfx::VertexComponent gfxcomp) {
         const auto cb = [&get_vertex_component, &gfxcomp]<size_t comps>(const auto& vec, auto idx) {
             float v[comps]{};

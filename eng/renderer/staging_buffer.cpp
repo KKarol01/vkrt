@@ -27,8 +27,8 @@ void StagingBuffer::init(SubmitQueue* queue)
 
     this->queue = queue;
 
-    contexts.resize(r.frames_in_flight);
-    for(int i = 0; i < r.frames_in_flight; ++i)
+    contexts.resize(r.frame_delay);
+    for(auto i = 0u; i < r.frame_delay; ++i)
     {
         contexts[i].pool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     }
@@ -140,10 +140,10 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
                                       std::max(img.depth >> mip, 1u) };
 
     const auto block_data = get_block_data(img.format);
-    if(extent.x == ~0) { extent.x = img.width; }
-    if(extent.y == ~0) { extent.y = img.height; }
-    if(extent.z == ~0) { extent.z = img.depth; }
-    ENG_ASSERT(extent.z == 1);
+    if(extent.x == ~0u) { extent.x = img.width; }
+    if(extent.y == ~0u) { extent.y = img.height; }
+    if(extent.z == ~0u) { extent.z = img.depth; }
+    ENG_ASSERT(extent.z == 1u);
 
     const glm::u32vec3 blocks =
         glm::u32vec3{ extent.x, extent.y, extent.z } /
@@ -218,7 +218,6 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
     if(sync->get_next_signal_value() == 0ull) { reset(); }
 
     const auto aligned_size = align_up2(size, ALIGNMENT);
-    auto& ctx = get_context();
 
     if(get_free_space() == 0)
     {
@@ -232,6 +231,7 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
         {
             auto& a = allocations.front();
             if(!sync->wait_cpu(0ull, a.signal_value)) { break; }
+            ENG_ASSERT(free_head == a.offset);
             free_head = a.offset + a.real_size;
             allocations.pop_front();
         }
@@ -251,10 +251,10 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 
 StagingBuffer::Context& StagingBuffer::get_context()
 {
-    auto& ctx = contexts[get_renderer().get_framedata_index()];
-    if(last_frame != get_renderer().frame_index)
+    auto& ctx = contexts[get_renderer().current_frame % get_renderer().frame_delay];
+    if(last_frame != get_renderer().current_frame)
     {
-        last_frame = get_renderer().frame_index;
+        last_frame = get_renderer().current_frame;
         ctx.pool->reset(); // can safely assume all the transactions during that frame must have had completed (render graph waits for the semaphore)
     }
     return ctx;

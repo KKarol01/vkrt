@@ -34,22 +34,22 @@
 #include <eng/camera.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
-static float halton(int i, int b)
-{
-    /* Creates a halton sequence of values between 0 and 1.
-        https://en.wikipedia.org/wiki/Halton_sequence
-        Used for jittering based on a constant set of 2D points. */
-    float f = 1.0;
-    float r = 0.0;
-    while(i > 0)
-    {
-        f = f / float(b);
-        r = r + f * float(i % b);
-        i = i / b;
-    }
-
-    return r;
-}
+// static float halton(int i, int b)
+//{
+//    /* Creates a halton sequence of values between 0 and 1.
+//        https://en.wikipedia.org/wiki/Halton_sequence
+//        Used for jittering based on a constant set of 2D points. */
+//    float f = 1.0;
+//    float r = 0.0;
+//    while(i > 0)
+//    {
+//        f = f / float(b);
+//        r = r + f * float(i % b);
+//        i = i / b;
+//    }
+//
+//    return r;
+//}
 
 namespace eng
 {
@@ -76,7 +76,7 @@ void DescriptorLayoutMetadataVk::init(DescriptorLayout& a)
                 vkimsamps.resize(e.size);
                 for(auto i = 0u; i < e.size; ++i)
                 {
-                    vkimsamps[i] = e.immutable_samplers[i]->md.vk->sampler;
+                    vkimsamps[i] = e.immutable_samplers[i]->md.as_vk()->sampler;
                 }
             }
             bindings.push_back(VkDescriptorSetLayoutBinding{
@@ -138,7 +138,7 @@ void PipelineLayoutMetadataVk::destroy(PipelineLayout& a)
 {
     // destroy layout
     // free metadata
-    ENG_TODO();
+    ENG_ASSERT(false);
 }
 
 void PipelineMetadataVk::init(const Pipeline& a)
@@ -469,33 +469,33 @@ void ImageViewMetadataVk::destroy(ImageView& a)
 
 void SamplerMetadataVk::init(Sampler& a)
 {
-    if(a.md.vk != nullptr) { return; }
-    auto vkinfo = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(a.info.filtering[1]),
-                                           .minFilter = gfx::to_vk(a.info.filtering[0]),
-                                           .mipmapMode = gfx::to_vk(a.info.mipmap_mode),
-                                           .addressModeU = gfx::to_vk(a.info.addressing[0]),
-                                           .addressModeV = gfx::to_vk(a.info.addressing[1]),
-                                           .addressModeW = gfx::to_vk(a.info.addressing[2]),
-                                           .mipLodBias = a.info.mip_lod[2],
-                                           .minLod = a.info.mip_lod[0],
-                                           .maxLod = a.info.mip_lod[1] });
+    if(a.md.as_vk() != nullptr) { return; }
+    auto vkinfo = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(a.filtering.mag),
+                                           .minFilter = gfx::to_vk(a.filtering.min),
+                                           .mipmapMode = gfx::to_vk(a.mip_blending),
+                                           .addressModeU = gfx::to_vk(a.addressing.u),
+                                           .addressModeV = gfx::to_vk(a.addressing.v),
+                                           .addressModeW = gfx::to_vk(a.addressing.w),
+                                           .mipLodBias = a.lod.bias,
+                                           .minLod = a.lod.min,
+                                           .maxLod = a.lod.max });
     auto vkreduction = Vks(VkSamplerReductionModeCreateInfo{});
-    if(a.info.reduction_mode)
+    if(a.reduction_mode != SamplerReductionMode::NONE)
     {
-        vkreduction.reductionMode = gfx::to_vk(*a.info.reduction_mode);
+        vkreduction.reductionMode = gfx::to_vk(a.reduction_mode);
         vkinfo.pNext = &vkreduction;
     }
     auto* md = new SamplerMetadataVk{};
-    a.md.vk = md;
+    a.md.ptr = md;
     VK_CHECK(vkCreateSampler(RendererBackendVk::get_dev(), &vkinfo, {}, &md->sampler));
 }
 
 void SamplerMetadataVk::destroy(Sampler& a)
 {
-    if(!a.md.vk) { return; }
-    vkDestroySampler(RendererBackendVk::get_dev(), a.md.vk->sampler, nullptr);
-    delete a.md.vk;
-    a.md.vk = nullptr;
+    if(!a.md.as_vk()) { return; }
+    vkDestroySampler(RendererBackendVk::get_dev(), a.md.as_vk()->sampler, nullptr);
+    delete a.md.as_vk();
+    a.md.ptr = nullptr;
 }
 
 void SwapchainMetadataVk::init(Swapchain& a)
@@ -506,8 +506,8 @@ void SwapchainMetadataVk::init(Swapchain& a)
         return;
     }
     Swapchain::acquire_impl = &acquire;
-    a.images.resize(Renderer::frames_in_flight);
-    a.views.resize(Renderer::frames_in_flight);
+    a.images.resize(Renderer::frame_delay);
+    a.views.resize(Renderer::frame_delay);
     auto* md = new SwapchainMetadataVk{};
     a.metadata = md;
 
@@ -516,7 +516,7 @@ void SwapchainMetadataVk::init(Swapchain& a)
     auto& backend = RendererBackendVk::get_instance();
     const auto sinfo = Vks(VkSwapchainCreateInfoKHR{
         .surface = backend.window_surface,
-        .minImageCount = Renderer::frames_in_flight,
+        .minImageCount = Renderer::frame_delay,
         .imageFormat = to_vk(image_format),
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent = VkExtent2D{ (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height },
@@ -530,7 +530,7 @@ void SwapchainMetadataVk::init(Swapchain& a)
 
     std::vector<VkImage> vkimgs(a.images.size());
     VK_CHECK(vkCreateSwapchainKHR(backend.dev, &sinfo, nullptr, &md->swapchain));
-    VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &Renderer::frames_in_flight, vkimgs.data()));
+    VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &Renderer::frame_delay, vkimgs.data()));
 
     for(uint32_t i = 0; i < vkimgs.size(); ++i)
     {
@@ -627,10 +627,6 @@ void RendererBackendVk::initialize_vulkan()
     auto phys_rets = selector.require_present()
                          .set_surface(window_surface)
                          .set_minimum_version(1, 3)
-                         .add_desired_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
-                         .add_desired_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
-                         .add_desired_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
-                         .add_desired_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
                          .add_required_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)        // for imgui
                          .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME) // for imgui
                          .require_present()
@@ -649,6 +645,13 @@ void RendererBackendVk::initialize_vulkan()
         ENG_ERROR("Failed to select Vulkan Physical Device.");
         return;
     }
+
+    phys_ret.enable_extensions_if_present({
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_RAY_QUERY_EXTENSION_NAME,
+    });
 
     supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
                           phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
@@ -710,7 +713,7 @@ void RendererBackendVk::initialize_vulkan()
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
     if(supports_raytracing)
     {
-        device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&rayq_features);
+        device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&maint5_features).add_pNext(&rayq_features);
     }
     auto dev_ret = device_builder.build();
     if(!dev_ret)
@@ -1344,12 +1347,7 @@ void RendererBackendVk::allocate_view(const ImageView& view, void** out_allocati
     ImageViewMetadataVk::init(view, out_allocation);
 }
 
-Sampler RendererBackendVk::make_sampler(const SamplerDescriptor& info)
-{
-    Sampler s{ info };
-    SamplerMetadataVk::init(s);
-    return s;
-}
+void RendererBackendVk::allocate_sampler(Sampler& sampler) { SamplerMetadataVk::init(sampler); }
 
 void RendererBackendVk::make_shader(Shader& shader) { shader.md.vk = new ShaderMetadataVk{}; }
 

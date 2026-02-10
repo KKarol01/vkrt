@@ -33,7 +33,7 @@ class ICommandBuffer
     virtual void copy(const Image& dst, const Image& src) = 0;
     virtual void blit(const Image& dst, const Image& src, const ImageBlit& blit) = 0;
 
-    virtual void clear_color(const Image& image, float color) = 0;
+    virtual void clear_color(const Image& image, const Color4f& color) = 0;
     virtual void clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil = {}) = 0;
 
     virtual void bind_index(const Buffer& index, uint32_t offset, VkIndexType type) = 0;
@@ -46,10 +46,10 @@ class ICommandBuffer
     virtual void set_viewports(const VkViewport* viewports, uint32_t count) = 0;
     virtual void set_scissors(const VkRect2D* scissors, uint32_t count) = 0;
 
+    // todo: hide those?
     virtual void begin_rendering(const VkRenderingInfo& info) = 0;
     virtual void end_rendering() = 0;
 
-    virtual void before_draw_dispatch() = 0;
     virtual void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset) = 0;
     virtual void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
                               uint32_t vertex_offset, uint32_t instance_offset) = 0;
@@ -82,34 +82,34 @@ class CommandBufferVk : public ICommandBuffer
     void blit(const Image& dst, const Image& src, const ImageBlit& blit) override;
 
     // color out/color rw -> clear -> color out/color rw/attachment optimal
-    void clear_color(const Image& image, float color) override;
+    void clear_color(const Image& image, const Color4f& color) override;
     // late z /ds rw -> clear -> early z/ds rw/attachment optimal
     void clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil) override;
 
-    void bind_index(const Buffer& index, uint32_t offset, VkIndexType type);
-    void bind_pipeline(const Pipeline& pipeline);
-    void bind_sets(const void* sets, uint32_t count = 1);
-    void bind_resources(uint32_t slot, std::span<DescriptorResource> resources);
+    void bind_index(const Buffer& index, uint32_t offset, VkIndexType type) override;
+    void bind_pipeline(const Pipeline& pipeline) override;
+    void bind_sets(const void* sets, uint32_t count = 1) override;
+    void bind_resources(uint32_t slot, std::span<DescriptorResource> resources) override;
 
-    void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range);
+    void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range) override;
 
-    void set_viewports(const VkViewport* viewports, uint32_t count);
-    void set_scissors(const VkRect2D* scissors, uint32_t count);
+    void set_viewports(const VkViewport* viewports, uint32_t count) override;
+    void set_scissors(const VkRect2D* scissors, uint32_t count) override;
 
-    void begin_rendering(const VkRenderingInfo& info);
-    void end_rendering();
+    void begin_rendering(const VkRenderingInfo& info) override;
+    void end_rendering() override;
 
     void before_draw_dispatch();
-    void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset);
+    void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset) override;
     void draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset, uint32_t vertex_offset,
-                      uint32_t instance_offset);
+                      uint32_t instance_offset) override;
     // Draw using
     void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
-                                     size_t count_offset, uint32_t max_draw_count, uint32_t stride);
-    void dispatch(uint32_t x, uint32_t y, uint32_t z);
+                                     size_t count_offset, uint32_t max_draw_count, uint32_t stride) override;
+    void dispatch(uint32_t x, uint32_t y, uint32_t z) override;
 
-    void begin_label(const std::string& label);
-    void end_label();
+    void begin_label(const std::string& label) override;
+    void end_label() override;
 
     VkCommandBuffer cmd{};
     const Pipeline* current_pipeline{};
@@ -210,7 +210,7 @@ class SubmitQueue
     SubmitQueue& wait_sync(Sync* sync, Flags<PipelineStage> stages = PipelineStage::ALL, uint64_t value = ~0ull);
     SubmitQueue& signal_sync(Sync* sync, Flags<PipelineStage> stages = PipelineStage::ALL, uint64_t value = ~0ull);
     SubmitQueue& with_cmd_buf(ICommandBuffer* cmd);
-    VkResult submit();
+    void submit();
     bool submit_wait(uint64_t timeout);
     void present(Swapchain* swapchain);
     void wait_idle();

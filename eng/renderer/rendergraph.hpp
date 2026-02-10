@@ -347,8 +347,8 @@ class RenderGraph
             {
                 // buckets are reused across frames. to make sure the previous frame is not using this bucket, when the next frame tries to allocate it,
                 // we check if it either has never been touched, or it was freed in the current frame, or if enough frames have passed since.
-                const auto frame = get_renderer().frame_index;
-                const auto wait = get_renderer().frames_in_flight;
+                const auto frame = get_renderer().current_frame;
+                const auto wait = get_renderer().frame_delay;
                 return freed_at == ~0ull || freed_at == frame || (frame - freed_at) >= wait;
             }
             bool can_be_merged_with_buddy(const Bucket& buddy) const
@@ -356,8 +356,8 @@ class RenderGraph
                 ENG_ASSERT(page == buddy.page && size == buddy.size);
                 // can only merge up if enough frames have passed or buckets were freed during the same frame. otherwise it will consolidate back to one page-sized
                 // bucket with is_free() returning false for the next frame, even though the previous frame only used 64kbs.
-                const auto frame = get_renderer().frame_index;
-                const auto wait = get_renderer().frames_in_flight;
+                const auto frame = get_renderer().current_frame;
+                const auto wait = get_renderer().frame_delay;
                 return freed_at == buddy.freed_at || (freed_at == ~0ull && (frame - buddy.freed_at) >= wait) ||
                        (buddy.freed_at == ~0ull && (frame - freed_at) >= wait) ||
                        (frame - freed_at >= wait && frame - buddy.freed_at >= wait);
@@ -389,7 +389,7 @@ class RenderGraph
                 ENG_ASSERT(false, "Allocation too big for page");
                 return nullptr;
             }
-            const auto frame = get_renderer().frame_index;
+            const auto frame = get_renderer().current_frame;
             if(last_alloc_frame != frame)
             {
                 // first alloc of render frame, try defrag.
@@ -436,7 +436,7 @@ class RenderGraph
 
             auto bucket = allocit->second;
             allocations.erase(allocit);
-            bucket.freed_at = get_renderer().frame_index;
+            bucket.freed_at = get_renderer().current_frame;
             merge_buddies(bucket); // merge freed this frame for better reuse within one frame
             buckets.insert(bucket);
         }

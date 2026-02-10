@@ -1,7 +1,7 @@
 #include <eng/camera.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
-#include <glfw/glfw3.h>
+#include <GLFW/glfw3.h>
 #include <eng/engine.hpp>
 #include <eng/common/logger.hpp>
 
@@ -24,7 +24,7 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
 {
     GLFWwindow* window = Engine::get().window->window;
-    projection = infinitePerspectiveFovReverseZRH_ZO(glm::radians(75.0f), 1280.0f, 768.0f, 0.1f);
+    projection = infinitePerspectiveFovReverseZRH_ZO(fov_radians, 1280.0f, 768.0f, min_dist);
     projection[1][1] *= -1.0f;
 
     double pos[2];

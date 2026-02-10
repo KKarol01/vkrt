@@ -12,18 +12,16 @@
 #define ENG_PRT(msg, ...) std::cout << ENG_FMT(msg, __VA_ARGS__)
 #define ENG_PRTLN(msg, ...) ENG_PRT(msg, __VA_ARGS__) << '\n'
 
-#ifdef _MSC_VER
+#if defined(__clang__)
+#define ENG_BREAKPOINT __builtin_debugtrap
+#elif defined(_MSC_VER)
 #define ENG_BREAKPOINT __debugbreak
 #else
 #define ENG_BREAKPOINT []() { assert(false); }
 #endif
 
-#define ENG_ASSERT(expr, msg, ...)                                                                                     \
-    if((bool)(expr) == false)                                                                                          \
-    {                                                                                                                  \
-        ENG_PRTLN("[ASSERT FAILED][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                                  \
-        ENG_BREAKPOINT();                                                                                              \
-    }
+#define ENG_ASSERT(expr, ...)                                                                                          \
+    if((bool)(expr) == false) { ENG_BREAKPOINT(); }
 
 #define ENG_ERROR(msg, ...)                                                                                            \
     do                                                                                                                 \

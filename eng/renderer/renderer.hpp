@@ -214,7 +214,7 @@ struct ShaderEffect
 
 struct MeshPass
 {
-    static MeshPass init(const std::string& name) { return MeshPass{ .name = name }; }
+    static MeshPass init(const std::string& name) { return MeshPass{ .name = name, .effects = {} }; }
     MeshPass& set(RenderPassType type, Handle<ShaderEffect> effect)
     {
         effects[(int)type] = effect;
@@ -265,17 +265,17 @@ struct Buffer
 {
     static Buffer init(const std::string& name, size_t capacity, Flags<BufferUsage> usage)
     {
-        return Buffer{ .name = name, .usage = usage, .capacity = capacity, .size = 0ull, .memory = {} };
+        return Buffer{ .name = name, .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = { .vk = {} } };
     }
 
     std::string name;
     Flags<BufferUsage> usage{};
     size_t capacity{};
     size_t size{};
+    void* memory{};
     union Metadata {
         BufferMetadataVk* vk;
     } md;
-    void* memory{};
 };
 
 struct Image
@@ -301,6 +301,7 @@ struct Image
             .layers = layers,
             .usage = usage,
             .layout = layout,
+            .md = { .vk = {} },
         };
     }
 
@@ -349,22 +350,55 @@ struct ImageCopy
     Vec3u32 extent{};
 };
 
-struct SamplerDescriptor
-{
-    auto operator<=>(const SamplerDescriptor& a) const = default;
-    std::array<ImageFilter, 2> filtering{ ImageFilter::LINEAR, ImageFilter::LINEAR }; // [min, mag]
-    std::array<ImageAddressing, 3> addressing{ ImageAddressing::REPEAT, ImageAddressing::REPEAT, ImageAddressing::REPEAT }; // u, v, w
-    std::array<float, 3> mip_lod{ 0.0f, 1000.0f, 0.0f }; // min, max, bias
-    SamplerMipmapMode mipmap_mode{ SamplerMipmapMode::LINEAR };
-    std::optional<SamplerReductionMode> reduction_mode{};
-};
-
 struct Sampler
 {
-    auto operator==(const Sampler& a) const { return info == a.info; }
-    SamplerDescriptor info;
-    union Metadata {
-        SamplerMetadataVk* vk;
+    static Sampler init(ImageFilter filtering, ImageAddressing addressing)
+    {
+        return init(filtering, filtering, addressing, addressing, addressing);
+    }
+    static Sampler init(ImageFilter min, ImageFilter mag, ImageAddressing u, ImageAddressing v, ImageAddressing w,
+                        SamplerMipmapMode mip_blending = SamplerMipmapMode::LINEAR, float lod_min = 0.0f, float lod_max = 1000.0f,
+                        float lod_base = 0.0f, SamplerReductionMode reduction = SamplerReductionMode::NONE)
+    {
+        return Sampler{
+            .filtering = { min, mag },
+            .addressing = { u, v, w },
+            .mip_blending = mip_blending,
+            .reduction_mode = reduction,
+            .lod = { lod_min, lod_max, lod_base },
+        };
+    }
+    bool operator==(const Sampler& a) const
+    {
+        return filtering == a.filtering && addressing == a.addressing && mip_blending == a.mip_blending &&
+               reduction_mode == a.reduction_mode && lod == a.lod;
+    }
+    struct Filtering
+    {
+        auto operator<=>(const Filtering&) const = default;
+        ImageFilter min{ ImageFilter::LINEAR };
+        ImageFilter mag{ ImageFilter::LINEAR };
+    } filtering;
+    struct Addressing
+    {
+        auto operator<=>(const Addressing&) const = default;
+        ImageAddressing u{ ImageAddressing::REPEAT };
+        ImageAddressing v{ ImageAddressing::REPEAT };
+        ImageAddressing w{ ImageAddressing::REPEAT };
+    } addressing;
+    SamplerMipmapMode mip_blending{ SamplerMipmapMode::LINEAR };
+    SamplerReductionMode reduction_mode{ SamplerReductionMode::NONE };
+    struct Lod
+    {
+        auto operator<=>(const Lod&) const = default;
+        float min{ 0.0f };
+        float max{ 1000.0f };
+        float bias{ 0.0f };
+    } lod;
+    struct Metadata
+    {
+        SamplerMetadataVk* as_vk() const { return (SamplerMetadataVk*)ptr; }
+        void* ptr{};
     } md;
 };
 
@@ -469,7 +503,7 @@ class IRendererBackend
     virtual void allocate_image(Image& image, AllocateMemory alloc = AllocateMemory::YES) = 0;
     virtual void destroy_image(Image& b) = 0;
     virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
-    virtual Sampler make_sampler(const SamplerDescriptor& info) = 0;
+    virtual void allocate_sampler(Sampler& sampler) = 0;
     virtual void make_shader(Shader& shader) = 0;
     virtual bool compile_shader(const Shader& shader) = 0;
     virtual bool compile_layout(DescriptorLayout& layout) = 0;
@@ -546,11 +580,13 @@ ENG_DEFINE_STD_HASH(eng::gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.
 ENG_DEFINE_STD_HASH(eng::gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
 ENG_DEFINE_STD_HASH(eng::gfx::MeshPass, eng::hash::combine_fnv1a(t.name));
 ENG_DEFINE_STD_HASH(eng::gfx::ShaderEffect, eng::hash::combine_fnv1a(t.pipeline));
-ENG_DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
-                    eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],
-                                             t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
-ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.info));
-// ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
+// ENG_DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
+//                     eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],
+//                                              t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
+ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.filtering.min, t.filtering.mag, t.addressing.u,
+                                                                t.addressing.v, t.addressing.w, t.mip_blending,
+                                                                t.reduction_mode, t.lod.min, t.lod.max, t.lod.bias));
+//  ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
 ENG_DEFINE_STD_HASH(eng::gfx::RendererMemoryRequirements,
                     eng::hash::combine_fnv1a(t.size, t.alignment,
                                              std::accumulate(t.backend_data.begin(), t.backend_data.end(), 0ull,
@@ -576,7 +612,7 @@ enum class RenderOrder
 class Renderer
 {
   public:
-    static inline uint32_t frames_in_flight = 2;
+    static inline uint32_t frame_delay = 2;
 
     struct InstanceBatch
     {
@@ -650,7 +686,13 @@ class Renderer
         Sync* ren_fen{};
         Handle<Buffer> constants{};
 
-        std::vector<std::variant<Handle<Buffer>, Handle<Image>>> retired_resources;
+        struct RetiredResource
+        {
+            std::variant<Handle<Buffer>, Handle<Image>> resource;
+            Sync* sync{};
+            size_t wait_value{};
+        };
+        std::vector<RetiredResource> retired_resources;
     };
 
     struct DebugGeomBuffers
@@ -705,7 +747,7 @@ class Renderer
     void destroy_buffer(Handle<Buffer>& handle);
     Handle<Image> make_image(Image&& image, AllocateMemory allocate = AllocateMemory::YES);
     void destroy_image(Handle<Image>& image);
-    Handle<Sampler> make_sampler(const SamplerDescriptor& info);
+    Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const std::filesystem::path& path);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
     Handle<PipelineLayout> make_layout(const PipelineLayout& info);
@@ -729,7 +771,6 @@ class Renderer
 
     SubmitQueue* get_queue(QueueType type);
 
-    uint32_t get_framedata_index(int32_t offset = 0) const;
     FrameData& get_framedata(int32_t offset = 0);
 
     SubmitQueue* gq{};
@@ -752,7 +793,7 @@ class Renderer
 
     HandleSparseVec<Buffer> buffers;
     HandleSparseVec<Image> images;
-    HandleSparseVec<Sampler> samplers;
+    HandleFlatSet<Sampler> samplers;
     // HandleFlatSet<BufferView> buffer_views;
     // HandleFlatSet<ImageView> image_views;
     // std::unordered_map<Handle<Image>, std::vector<ImageView>> image_views_cache;
@@ -797,7 +838,8 @@ class Renderer
     Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<FrameData> perframe;
-    uint64_t frame_index{};
+    uint64_t current_frame{}; // monotonically increasing counter
+    //uint64_t frame_index{};   // swapchain acquire index
 };
 
 inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
@@ -807,10 +849,10 @@ inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
 // clang-format off
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes.at(*handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);

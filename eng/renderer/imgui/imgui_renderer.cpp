@@ -1,8 +1,7 @@
 #include "imgui_renderer.hpp"
-#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/renderer.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/staging_buffer.hpp>
-#include <eng/renderer/bindlesspool.hpp>
 #include <eng/engine.hpp>
 #include <third_party/imgui/imgui.h>
 #include <third_party/imgui/imgui_internal.h>
@@ -20,7 +19,6 @@ void ImGuiRenderer::init()
     auto& r = get_renderer();
 
     IMGUI_CHECKVERSION();
-    void* user_data;
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
@@ -32,7 +30,6 @@ void ImGuiRenderer::init()
     unsigned char* pixels;
     int width, height;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-    size_t upload_size = width * height * 4 * sizeof(char);
 
     pipeline = r.make_pipeline(PipelineCreateInfo{
         .shaders = { r.make_shader("imgui/imgui.vert.glsl"), r.make_shader("imgui/imgui.frag.glsl") },
@@ -51,15 +48,15 @@ void ImGuiRenderer::init()
         .culling = CullFace::NONE,
     });
 
-    sampler = r.make_sampler(gfx::SamplerDescriptor{
-        .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
-        .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE } });
+    // sampler = r.make_sampler(gfx::SamplerDescriptor{
+    //     .filtering = { ImageFilter::LINEAR, ImageFilter::LINEAR },
+    //     .addressing = { ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE } });
 
     vertex_buffer = r.make_buffer(Buffer::init("imgui vertex buffer", 1024 * 1024, BufferUsage::STORAGE_BIT));
     index_buffer = r.make_buffer(Buffer::init("imgui index buffer", 1024 * 1024, BufferUsage::INDEX_BIT));
 }
 
-void ImGuiRenderer::update(CommandBufferVk* cmd, ImageView output)
+void ImGuiRenderer::update(ICommandBuffer* cmd, ImageView output)
 {
     // auto& r = get_renderer();
     // ImGui_ImplGlfw_NewFrame();
@@ -206,10 +203,10 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         const int upload_y = (imtex->Status == ImTextureStatus_WantCreate) ? 0 : imtex->UpdateRect.y;
         const int upload_w = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Width : imtex->UpdateRect.w;
         const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
-        assert(image);
-        assert(upload_w == imtex->Width && upload_h == imtex->Height);
+        ENG_ASSERT(image);
+        ENG_ASSERT(upload_x == 0 && upload_y == 0 && upload_w == imtex->Width && upload_h == imtex->Height);
         r.staging->copy(image, imtex->Pixels, 0, 0);
-        assert(false);
+        ENG_ASSERT(false);
         // r.sbuf->barrier(image, ImageLayout::READ_ONLY);afsdadsf
         imtex->SetStatus(ImTextureStatus_OK);
     }

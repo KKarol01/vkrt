@@ -204,7 +204,7 @@ class RendererBackendVk : public IRendererBackend
     void allocate_image(Image& image, AllocateMemory allocate = AllocateMemory::YES) override;
     void destroy_image(Image& image) override;
     void allocate_view(const ImageView& view, void** out_allocation) override;
-    Sampler make_sampler(const SamplerDescriptor& info) override;
+    void allocate_sampler(Sampler& sampler) override;
     void make_shader(Shader& shader) override;
     bool compile_shader(const Shader& shader) override;
     bool compile_layout(DescriptorLayout& layout) override;

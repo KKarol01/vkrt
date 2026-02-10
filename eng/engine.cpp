@@ -24,19 +24,19 @@ static void on_window_resize(GLFWwindow* window, int w, int h)
 
 static void on_window_focus(GLFWwindow* window, int focus) { eng::Engine::get().window->on_focus(focus > 0); }
 
-static void eng_ui_reload_dll(HMODULE hnew)
-{
-    // UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
-    //         .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
-    //// TODO: transition data
-    // UIContext context{
-    //     .engine = &Engine::get(),
-    //     .imgui_ctx = nullptr,
-    //     .alloc_cbs = { malloc, free },
-    // };
-    //_ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
-    // Engine::get().ui = _ui;
-}
+// static void eng_ui_reload_dll(HMODULE hnew)
+//{
+//      UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
+//              .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
+//     // TODO: transition data
+//      UIContext context{
+//          .engine = &Engine::get(),
+//          .imgui_ctx = nullptr,
+//          .alloc_cbs = { malloc, free },
+//      };
+//     _ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
+//      Engine::get().ui = _ui;
+// }
 
 // static void eng_vkrenderer_reload_dll(HMODULE hnew) {
 //     UI _ui{ .init = (eng_ui_init_t)GetProcAddress(hnew, "eng_ui_init"),
