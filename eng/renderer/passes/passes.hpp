@@ -25,17 +25,8 @@ class IPass
     virtual void on_render_graph(RenderGraph& graph) = 0;
 };
 
-struct HashContainer
-{
-    explicit consteval HashContainer(const char* cstr) : cstr(cstr), hash(hash::combine_fnv1a(cstr)) {}
-    const char* cstr;
-    uint64_t hash;
-};
-
 class SSTriangle : public IPass
 {
-    inline static constinit HashContainer name = HashContainer{ "SSTriangle" };
-
     struct SSTrianglePass
     {
         Handle<RenderGraph::ResourceAccess> color;

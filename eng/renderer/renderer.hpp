@@ -214,7 +214,7 @@ struct ShaderEffect
 
 struct MeshPass
 {
-    static MeshPass init(const std::string& name) { return MeshPass{ .name = name, .effects = {} }; }
+    static MeshPass init(const std::string& name) { return MeshPass{ .name = name }; }
     MeshPass& set(RenderPassType type, Handle<ShaderEffect> effect)
     {
         effects[(int)type] = effect;
@@ -265,7 +265,7 @@ struct Buffer
 {
     static Buffer init(const std::string& name, size_t capacity, Flags<BufferUsage> usage)
     {
-        return Buffer{ .name = name, .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = { .vk = {} } };
+        return Buffer{ .name = name, .usage = usage, .capacity = capacity, .size = 0ull, .memory = {} };
     }
 
     std::string name;
@@ -301,7 +301,6 @@ struct Image
             .layers = layers,
             .usage = usage,
             .layout = layout,
-            .md = { .vk = {} },
         };
     }
 
@@ -689,8 +688,7 @@ class Renderer
         struct RetiredResource
         {
             std::variant<Handle<Buffer>, Handle<Image>> resource;
-            Sync* sync{};
-            size_t wait_value{};
+            size_t deleted_at_frame{};
         };
         std::vector<RetiredResource> retired_resources;
     };
@@ -794,9 +792,6 @@ class Renderer
     HandleSparseVec<Buffer> buffers;
     HandleSparseVec<Image> images;
     HandleFlatSet<Sampler> samplers;
-    // HandleFlatSet<BufferView> buffer_views;
-    // HandleFlatSet<ImageView> image_views;
-    // std::unordered_map<Handle<Image>, std::vector<ImageView>> image_views_cache;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
     HandleFlatSet<DescriptorLayout, std::hash<DescriptorLayout>, LayoutCompatibilityChecker<DescriptorLayout>> dlayouts;
@@ -824,22 +819,13 @@ class Renderer
     SlotAllocator gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
-    // Handle<DescriptorPool> bindless_pool;
-    // Handle<DescriptorSet> bindless_set;
-    // Handle<PipelineLayout> bindless_pplayout;
     Handle<PipelineLayout> common_playout;
     Handle<Pipeline> default_unlit_pipeline;
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
-    Handle<Pipeline> hiz_pipeline;
-    // Handle<Sampler> hiz_sampler; // moved to immutable samplers
-    Handle<Pipeline> cull_pipeline;
-    Handle<Pipeline> cullzout_pipeline;
-    Handle<Pipeline> fwdp_cull_lights_pipeline;
     ImGuiRenderer* imgui_renderer{};
     std::vector<FrameData> perframe;
     uint64_t current_frame{}; // monotonically increasing counter
-    //uint64_t frame_index{};   // swapchain acquire index
 };
 
 inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }

@@ -405,9 +405,11 @@ void Renderer::update()
     if(pf.retired_resources.size() > 0)
     {
         ENG_LOG("Removing {} retired resources", pf.retired_resources.size());
-        staging->get_wait_sem()->wait_cpu(~0ull);
+        auto remove_until = pf.retired_resources.begin();
         for(auto& rs : pf.retired_resources)
         {
+            if(current_frame - rs.deleted_at_frame < frame_delay) { break; }
+            ++remove_until;
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 backend->destroy_buffer(buf->get());
@@ -419,7 +421,7 @@ void Renderer::update()
                 images.erase(*img);
             }
         }
-        pf.retired_resources.clear();
+        pf.retired_resources.erase(pf.retired_resources.begin(), remove_until);
     }
 
     build_renderpasses();
@@ -723,8 +725,7 @@ Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, AllocateMemory allocate)
 void Renderer::destroy_buffer(Handle<Buffer>& buffer)
 {
     ENG_ASSERT(buffer);
-    get_framedata().retired_resources.push_back(FrameData::RetiredResource{
-        buffer, staging->get_wait_sem(), staging->get_wait_sem()->get_next_signal_value() - 1 });
+    get_framedata().retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
     buffer = {};
 }
 
@@ -759,8 +760,7 @@ Handle<Image> Renderer::make_image(Image&& image, AllocateMemory allocate)
 void Renderer::destroy_image(Handle<Image>& image)
 {
     ENG_ASSERT(image);
-    get_framedata().retired_resources.push_back(FrameData::RetiredResource{
-        image, staging->get_wait_sem(), staging->get_wait_sem()->get_next_signal_value() - 1 });
+    get_framedata().retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
     image = {};
 }
 
@@ -772,35 +772,6 @@ Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
     auto ret = samplers.insert(std::move(sampler));
     return ret.handle;
 }
-
-// Handle<BufferView> Renderer::make_view(const BufferViewDescriptor& info)
-//{
-//     auto& res = Handle{ info.buffer }.get();
-//     const auto ret = buffer_views.insert(BufferView{ .buffer = info.buffer, .range = info.range });
-//     return ret.handle;
-// }
-
-// ImageView Renderer::make_view(const ImageViewDescriptor& info)
-//{
-//     auto& img = Handle{ info.image }.get();
-//     auto view = ImageView{ .name = info.name,
-//                            .image = info.image,
-//                            .type = info.view_type ? *info.view_type : img.deduce_view_type(),
-//                            .format = info.format ? *info.format : img.format,
-//                            .aspect = info.aspect ? *info.aspect : img.deduce_aspect(),
-//                            .mips = info.mips,
-//                            .layers = info.layers };
-//     const auto found_handle = image_views.find(view);
-//     if(!found_handle) { backend->make_view(view); }
-//     auto it = image_views.insert(view);
-//     if(!found_handle) { image_views_cache[info.image].push_back(it.handle); }
-//     return it.handle;
-// }
-
-// Handle<Sampler> Renderer::make_sampler(const SamplerDescriptor& info)
-//{
-//     return samplers.insert(backend->make_sampler(info));
-// }
 
 Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
 {
