@@ -704,7 +704,6 @@ class RenderGraph
                     if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
                     Handle<Image> img = acc.image_view.image;
                     layout_cmd->barrier(img.get(), pacc.stage, pacc.access, acc.stage, acc.access, pacc.layout, acc.layout);
-                    img->layout = acc.layout;
                 }
             }
 
@@ -727,6 +726,8 @@ class RenderGraph
                 for(const auto& ra : p->accesses)
                 {
                     auto& res = get_res(ra);
+                    // todo: maybe pool handles here? renderer already does that, soo...
+                    // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
                     if(!res.is_persistent && !res.is_imported && res.last_access == ra) { destroy_resource(res); }
                 }
             }
