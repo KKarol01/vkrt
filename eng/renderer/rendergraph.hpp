@@ -83,7 +83,7 @@ class RenderGraph
         bool is_read() const { return (access & PipelineAccess::READS) > 0; }
         bool is_write() const { return (access & PipelineAccess::WRITES) > 0; }
         // note: this might prove to be problematic if some resources will actually need to use none/none (
-        bool is_import_only() const { return !stage && !access; }
+        bool is_import_only() const { return !prev_access; }
         Handle<Resource> resource;
         Handle<ResourceAccess> prev_access;
         union {
@@ -310,7 +310,7 @@ class RenderGraph
         ICommandBuffer* open_cmd_buf()
         {
             ENG_ASSERT(pass->cmd == nullptr);
-            pass->cmd = graph->cmds[0]->begin();
+            pass->cmd = graph->cmd_pools[0]->begin();
             pass->cmd->begin_label(pass->name);
             return pass->cmd;
         }
@@ -554,8 +554,8 @@ class RenderGraph
         queue = r->get_queue(QueueType::GRAPHICS);
         sems[0] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
         sems[1] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
-        cmds[0] = queue->make_command_pool();
-        cmds[1] = queue->make_command_pool();
+        cmd_pools[0] = queue->make_command_pool();
+        cmd_pools[1] = queue->make_command_pool();
         allocator.init([r](const RendererMemoryRequirements& reqs) {
             return r->backend->allocate_aliasable_memory(reqs);
         });
@@ -677,12 +677,12 @@ class RenderGraph
     Sync* execute(Sync** wait_syncs = nullptr, uint32_t wait_count = 0)
     {
         std::swap(sems[0], sems[1]);
-        std::swap(cmds[0], cmds[1]);
+        std::swap(cmd_pools[0], cmd_pools[1]);
         sems[0]->reset();
-        cmds[0]->reset();
+        cmd_pools[0]->reset();
         for(auto i = 0u; i < wait_count; ++i)
         {
-            queue->wait_sync(wait_syncs[i], PipelineStage::ALL);
+            queue->wait_sync(wait_syncs[i]);
         }
         for(auto i = 0u; i < groups.size(); ++i)
         {
@@ -699,19 +699,18 @@ class RenderGraph
                     const auto& res = get_res(pa);
                     if(res.is_buffer()) { continue; }
                     if(acc.is_import_only()) { continue; }
-                    {
-                        if(acc.image_view.image->layout == acc.layout) { continue; }
-                    }
-                    if(!layout_cmd) { layout_cmd = cmds[0]->begin(); }
                     const auto& pacc = get_acc(acc.prev_access);
+                    if(pacc.layout == acc.layout) { continue; }
+                    if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
                     Handle<Image> img = acc.image_view.image;
                     layout_cmd->barrier(img.get(), pacc.stage, pacc.access, acc.stage, acc.access, pacc.layout, acc.layout);
+                    img->layout = acc.layout;
                 }
             }
 
             if(layout_cmd)
             {
-                cmds[0]->end(layout_cmd);
+                cmd_pools[0]->end(layout_cmd);
                 queue->with_cmd_buf(layout_cmd);
                 queue->submit();
             }
@@ -722,7 +721,7 @@ class RenderGraph
                 p->exec_cb(*this, pb);
                 if(!p->cmd) { continue; }
                 p->cmd->end_label();
-                cmds[0]->end(p->cmd);
+                cmd_pools[0]->end(p->cmd);
                 queue->with_cmd_buf(p->cmd);
 
                 for(const auto& ra : p->accesses)
@@ -762,7 +761,7 @@ class RenderGraph
     }
 
     SubmitQueue* queue{};
-    ICommandPool* cmds[2]{};
+    ICommandPool* cmd_pools[2]{};
     Sync* sems[2]{};
     TransientAllocator allocator;
 
