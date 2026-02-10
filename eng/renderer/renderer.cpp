@@ -546,6 +546,7 @@ void Renderer::update()
     {
         pass->on_render_graph(*rgraph);
     }
+    //imgui_renderer->update(rgraph, imgui_input);
     rgraph->compile();
 
     Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
@@ -733,28 +734,6 @@ Handle<Image> Renderer::make_image(Image&& image, AllocateMemory allocate)
 {
     backend->allocate_image(image, allocate);
     return images.insert(std::move(image));
-
-    // sbuf -> copy()
-    //  auto h = images.insert(backend->make_image(info));
-    //  h->default_view = make_view(ImageViewDescriptor{ .name = ENG_FMT("{}_default", info.name), .image = h });
-    //  if(info.data.size_bytes())
-    //{
-    //      sbuf->copy(h, info.data.data(), false);
-    //      for(auto i = 0u; i < info.mips - 1; ++i)
-    //      {
-    //          const Range3D32i srcsz{
-    //              { 0, 0, 0 }, { std::max(info.width >> i, 1u), std::max(info.height >> i, 1u), std::max(info.depth >> i, 1u) }
-    //          };
-    //          const Range3D32i dstsz{ { 0, 0, 0 },
-    //                                  { std::max(srcsz.size.x >> 1, 1), std::max(srcsz.size.y >> 1, 1),
-    //                                    std::max(srcsz.size.z >> 1, 1) } };
-    //          sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::TRANSFER_SRC, ImageSubRange{ { i, 1 }, { 0, 1 } });
-    //          sbuf->blit(h, h, ImageBlit{ { i, { 0, 1 } }, { i + 1, { 0, 1 } }, srcsz, dstsz });
-    //          sbuf->barrier(h, ImageLayout::TRANSFER_SRC, ImageLayout::READ_ONLY, ImageSubRange{ { i, 1 }, { 0, 1 } });
-    //      }
-    //      sbuf->barrier(h, ImageLayout::TRANSFER_DST, ImageLayout::READ_ONLY, ImageSubRange{ { info.mips - 1, 1 }, { 0, 1 } });
-    //  }
-    //  return h;
 }
 
 void Renderer::destroy_image(Handle<Image>& image)

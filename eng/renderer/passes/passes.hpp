@@ -65,6 +65,7 @@ class SSTriangle : public IPass
                     pb.create_resource(Image::init("sstriangle output", w->width, w->height, 1,
                                                    ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT));
                 pass_out_color.color = pb.access_color(pass_out_color.color);
+                get_renderer().imgui_input = *pass_out_color.color;
                 return pass_out_color;
             },
             [this](RenderGraph& graph, RenderGraph::PassBuilder& pb) {
@@ -94,6 +95,9 @@ class SSTriangle : public IPass
                 cmd->draw(3, 1, 0, 0);
                 cmd->end_rendering();
             });
+
+        get_renderer().imgui_renderer->update(&graph, pass_out_color.color);
+        pass_out_color.color = Handle<RenderGraph::ResourceAccess>{ get_renderer().imgui_input };
 
         graph.add_graphics_pass(
             "Copy to swapchain",

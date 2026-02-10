@@ -32,8 +32,24 @@ namespace gfx
 
 struct DescriptorResource
 {
-    DescriptorType type;
-    const void* view{};
+    template <typename View>
+    static DescriptorResource init(DescriptorType type, const View& view, uint32_t binding = ~0u, uint32_t element = ~0u)
+    {
+        // clang-format off
+        switch(type) 
+        {
+            case DescriptorType::STORAGE_BUFFER: return DescriptorResource{ .type = type, .buffer_view = view, .binding = binding, .array_element = element };
+            case DescriptorType::SAMPLED_IMAGE:  return DescriptorResource{ .type = type, .image_view = view, .binding = binding, .array_element = element };
+            case DescriptorType::STORAGE_IMAGE:  return DescriptorResource{ .type = type, .image_view = view, .binding = binding, .array_element = element };
+            default: { ENG_ERROR("Unhandled case"); return {}; }
+        }
+        // clang-format on
+    }
+    DescriptorType type{ DescriptorType::UNDEFINED };
+    union {
+        BufferView buffer_view;
+        ImageView image_view;
+    };
     uint32_t binding{ ~0u };       //~0u infers from position in array
     uint32_t array_element{ ~0u }; // if not ~0u, binding is an array
 };
@@ -777,6 +793,7 @@ class Renderer
     StagingBuffer* staging{};
 
     RenderGraph* rgraph{};
+    uint32_t imgui_input; // todo: this is very temp
     std::vector<pass::IPass*> rgraph_passes;
 
     enum class DebugOutput

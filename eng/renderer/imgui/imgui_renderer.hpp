@@ -3,6 +3,7 @@
 #include <vector>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
+#include <eng/renderer/rendergraph.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
 
 struct ImTextureData;
@@ -16,7 +17,7 @@ class ImGuiRenderer
 {
   public:
     void init();
-    void update(ICommandBuffer* cmd, ImageView output);
+    void update(RenderGraph* graph, Handle<RenderGraph::ResourceAccess> output);
 
   private:
     void handle_imtexture(ImTextureData* imtex);
@@ -26,11 +27,10 @@ class ImGuiRenderer
 
   private:
     Handle<Pipeline> pipeline;
-    // Handle<Sampler> sampler;
     Handle<Buffer> vertex_buffer;
     Handle<Buffer> index_buffer;
     std::vector<Handle<Image>> images;
-    // std::vector<Handle<Texture>> textures;
+    uint32_t output;
 };
 
 } // namespace gfx

@@ -76,26 +76,26 @@ DescriptorSetAllocatorBindlessVk::DescriptorSetAllocatorBindlessVk(const Pipelin
 
 void DescriptorSetAllocatorBindlessVk::bind_resources(uint32_t slot, std::span<const DescriptorResource> resources)
 {
+    uint32_t first_binding = ~0u;
     for(auto i = 0u; i < resources.size(); ++i)
     {
         const auto& res = resources[i];
+        uint32_t binding = res.binding == ~0u ? i : res.binding;
+        if(i == 0) { first_binding = binding; }
         uint32_t idx;
-        if(res.type == DescriptorType::STORAGE_BUFFER)
-        {
-            idx = bind_resource(*static_cast<const BufferView*>(res.view));
-        }
+        if(res.type == DescriptorType::STORAGE_BUFFER) { idx = bind_resource(res.buffer_view); }
         else if(res.type == DescriptorType::STORAGE_IMAGE || res.type == DescriptorType::SAMPLED_IMAGE)
         {
-            idx = bind_resource(*static_cast<const ImageView*>(res.view), res.type == DescriptorType::STORAGE_IMAGE);
+            idx = bind_resource(res.image_view, res.type == DescriptorType::STORAGE_IMAGE);
         }
         else
         {
             ENG_ERROR("Unrecognized type");
             continue;
         }
-        push_values[slot + i] = idx;
+        push_values[binding + i] = idx;
     }
-    push_ranges.push_back({ slot, (uint32_t)resources.size() });
+    push_ranges.push_back({ first_binding, (uint32_t)resources.size() });
 }
 
 uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const ImageView& view, bool is_storage)
