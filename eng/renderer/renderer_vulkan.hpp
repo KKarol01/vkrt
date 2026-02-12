@@ -12,7 +12,6 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/handlemap.hpp>
 #include <eng/common/handleflatset.hpp>
-#include <eng/common/handlesparsevec.hpp>
 
 namespace eng
 {

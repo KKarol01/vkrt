@@ -16,7 +16,7 @@
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/common/hash.hpp>
-#include <eng/common/handlesparsevec.hpp>
+#include <eng/common/slotmap.hpp>
 #include <eng/common/handleflatset.hpp>
 #include <eng/common/callback.hpp>
 #include <eng/common/slotallocator.hpp>
@@ -289,8 +289,10 @@ struct Buffer
     size_t capacity{};
     size_t size{};
     void* memory{};
-    union Metadata {
-        BufferMetadataVk* vk;
+    struct Metadata
+    {
+        BufferMetadataVk* as_vk() const { return (BufferMetadataVk*)ptr; }
+        void* ptr{};
     } md;
 };
 
@@ -330,8 +332,10 @@ struct Image
     uint32_t layers{ 1u };
     Flags<ImageUsage> usage{ ImageUsage::NONE };
     ImageLayout layout{ ImageLayout::UNDEFINED };
-    union Metadata {
-        ImageMetadataVk* vk;
+    struct Metadata
+    {
+        ImageMetadataVk* as_vk() const { return (ImageMetadataVk*)ptr; }
+        void* ptr{};
     } md;
 };
 
@@ -806,8 +810,8 @@ class Renderer
     bool mlt_occ_cull_enable{ true };
     bool mlt_frust_cull_enable{ true };
 
-    HandleSparseVec<Buffer> buffers;
-    HandleSparseVec<Image> images;
+    Slotmap<Buffer, 128> buffers;
+    Slotmap<Image, 128> images;
     HandleFlatSet<Sampler> samplers;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
@@ -818,7 +822,7 @@ class Renderer
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
 
-    HandleSparseVec<Geometry> geometries;
+    Slotmap<Geometry, 128> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
     // HandleFlatSet<Texture> textures;
@@ -850,9 +854,9 @@ inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
 } // namespace gfx
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(*handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(*handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(*handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes.at(*handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });

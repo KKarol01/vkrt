@@ -222,8 +222,6 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         ENG_ASSERT(image);
         ENG_ASSERT(upload_x == 0 && upload_y == 0 && upload_w == imtex->Width && upload_h == imtex->Height);
         r.staging->copy(image, imtex->Pixels, 0, 0);
-        // ENG_ASSERT(false);
-        //  r.sbuf->barrier(image, ImageLayout::READ_ONLY);afsdadsf
         imtex->SetStatus(ImTextureStatus_OK);
     }
 }

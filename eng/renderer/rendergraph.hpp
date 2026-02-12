@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <span>
+#include <string_view>
+#include <memory>
 #include <variant>
 #include <unordered_set>
 #include <unordered_map>
@@ -43,6 +45,7 @@ class RenderGraph
 
     using SetupFunc = Callback<void(PassBuilder&)>;
     using ExecFunc = Callback<void(RenderGraph&, PassBuilder&)>;
+    using PassDataDeleter = Callback<void(void*)>;
 
     struct Pass
     {
@@ -61,6 +64,7 @@ class RenderGraph
         std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
         Flags<PipelineStage> stage_mask{};
         ICommandBuffer* cmd{};
+        std::unique_ptr<void, PassDataDeleter> pass_data;
     };
 
     struct Resource
@@ -561,16 +565,16 @@ class RenderGraph
         });
     }
 
-    void add_graphics_pass(const std::string& name, const SetupFunc& setup_cb, const ExecFunc& exec_cb)
+    void add_graphics_pass(std::string_view name, const SetupFunc& setup_cb, const ExecFunc& exec_cb)
     {
-        passes.push_back(Pass{ .name = name, .type = Pass::Type::GRAPHICS, .exec_cb = exec_cb });
+        passes.push_back(Pass{ .name = { name.data(), name.size() }, .type = Pass::Type::GRAPHICS, .exec_cb = exec_cb });
         PassBuilder pb{ &passes.back(), this };
         return setup_cb(pb);
     }
 
-    void add_compute_pass(const std::string& name, const SetupFunc& setup_cb, const ExecFunc& exec_cb)
+    void add_compute_pass(std::string_view name, const SetupFunc& setup_cb, const ExecFunc& exec_cb)
     {
-        passes.push_back(Pass{ .name = name, .type = Pass::Type::COMPUTE, .exec_cb = exec_cb });
+        passes.push_back(Pass{ .name = { name.data(), name.size() }, .type = Pass::Type::COMPUTE, .exec_cb = exec_cb });
         PassBuilder pb{ &passes.back(), this };
         return setup_cb(pb);
     }

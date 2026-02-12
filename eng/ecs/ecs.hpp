@@ -34,10 +34,10 @@ template <typename... Components> struct View;
 struct ComponentIdGenerator
 {
     // call through free function get_id() or get_id_bit()
-    template <typename Component> static component_id_t _generate()
+    template <typename Component> static component_id_t generate_()
     {
         static component_id_t id = _id.fetch_add(1);
-        assert(id < MAX_COMPONENTS);
+        ENG_ASSERT(id < MAX_COMPONENTS);
         return id;
     }
     inline static std::atomic<component_id_t> _id{};
@@ -45,7 +45,7 @@ struct ComponentIdGenerator
 
 template <typename Component> component_id_t get_id()
 {
-    return ComponentIdGenerator::_generate<std::remove_cvref_t<Component>>();
+    return ComponentIdGenerator::generate_<std::remove_cvref_t<Component>>();
 }
 
 template <typename Component> component_id_t get_id_bit() { return component_id_t{ 1 } << get_id<Component>(); }
@@ -84,12 +84,12 @@ template <typename T> class ComponentPool : public IComponentPool
         if(!it)
         {
             ENG_WARN("Overwriting already existing component for entity {}. Skipping.", e);
-            assert(false);
+            ENG_ASSERT(false);
             return *static_cast<T*>(get(it.index));
         }
         if(it.index < components.size()) { components.at(it.index) = T{ std::forward<Args>(args)... }; }
         else if(it.index == components.size()) { components.emplace_back(std::forward<Args>(args)...); }
-        else { assert(false); }
+        else { ENG_ASSERT(false); }
         return *static_cast<T*>(get(e));
     }
 
@@ -157,7 +157,7 @@ class Registry
         if(e == INVALID_ENTITY)
         {
             ENG_WARN("Max entity reached");
-            assert(false);
+            ENG_ASSERT(false);
             return e;
         }
         if(it.index < metadatas.size()) { metadatas.at(it.index) = EntityMetadata{}; }
@@ -205,11 +205,11 @@ class Registry
     // removes the entity, and all of it's children, and all of their components.
     void erase(entity e)
     {
-        assert(false);
+        ENG_ASSERT(false);
         // todo: erase from views
         if(!is_valid(e)) { return; }
         auto it = entities.get(e);
-        assert(it);
+        ENG_ASSERT(it);
         auto& md = metadatas.at(it.index);
         for(auto i = 0u; i < MAX_COMPONENTS; ++i)
         {
@@ -331,7 +331,7 @@ class Registry
             }
             views_on_add(dst_entity, srcmd.signature);
         });
-        assert(cloned_parents.empty());
+        ENG_ASSERT(cloned_parents.empty());
         return root;
     }
 

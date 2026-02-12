@@ -112,6 +112,7 @@ class StagingBuffer
     std::deque<Allocation> allocations;
     std::vector<Context> contexts;
     uint64_t last_frame{};
+    uint64_t last_clean{};
 };
 } // namespace gfx
 } // namespace eng

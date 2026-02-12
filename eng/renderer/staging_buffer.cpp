@@ -219,10 +219,12 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 
     const auto aligned_size = align_up2(size, ALIGNMENT);
 
-    if(get_free_space() == 0)
+    // second part makes sure that there are no tens of thousands allocations in the vector, as it hogs up the memory
+    if(get_free_space() == 0 || (allocations.size() > 0 && get_renderer().current_frame - last_clean > 100))
     {
         ENG_ASSERT(!allocations.empty());
         flush(nullptr);
+        last_clean = get_renderer().current_frame;
         sync->wait_cpu(~0ull, allocations.front().signal_value);
         head = allocations.front().offset;
         free_head = allocations.front().offset + allocations.front().real_size;

@@ -17,9 +17,6 @@
 #include <vk-bootstrap/src/VkBootstrap.h>
 #include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
-// #include <imgui/imgui.h>
-// #include <imgui/backends/imgui_impl_glfw.h>
-// #include <imgui/backends/imgui_impl_vulkan.h>
 #include <eng/engine.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
@@ -298,14 +295,14 @@ void PipelineMetadataVk::destroy(Pipeline& a)
 
 void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
 {
-    if(a.md.vk)
+    if(a.md.as_vk())
     {
         ENG_ERROR("Trying to init already init buffer");
         return;
     }
 
     auto* md = new BufferMetadataVk{};
-    a.md.vk = md;
+    a.md.ptr = md;
     const auto cpu_map = a.usage.test(gfx::BufferUsage::CPU_ACCESS);
     if(a.capacity == 0)
     {
@@ -347,23 +344,23 @@ void BufferMetadataVk::init(const Buffer& a, VkBufferCreateInfo& info)
 
 void BufferMetadataVk::destroy(Buffer& a)
 {
-    if(!a.md.vk)
+    if(!a.md.as_vk())
     {
         ENG_ASSERT(a.capacity == 0);
         return;
     }
     auto& backend = RendererBackendVk::get_instance();
-    auto* md = a.md.vk;
+    auto* md = a.md.as_vk();
     if(!md) { return; }
     if(!md->is_aliased) { vmaDestroyBuffer(backend.vma, md->buffer, md->vma_alloc); }
     else { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
     delete md;
-    a.md.vk = nullptr;
+    a.md.ptr = nullptr;
 }
 
 void ImageMetadataVk::init(Image& a, VkImage img, AllocateMemory allocate)
 {
-    if(a.md.vk)
+    if(a.md.as_vk())
     {
         ENG_ERROR("Trying to init already init image");
         return;
@@ -371,7 +368,7 @@ void ImageMetadataVk::init(Image& a, VkImage img, AllocateMemory allocate)
 
     auto& backend = RendererBackendVk::get_instance();
     auto* md = new ImageMetadataVk{};
-    a.md.vk = md;
+    a.md.ptr = md;
 
     if(a.width + a.height + a.depth == 0)
     {
@@ -405,18 +402,18 @@ void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
 
 void ImageMetadataVk::destroy(Image& a, bool deallocate)
 {
-    if(!a.md.vk) { return; }
+    if(!a.md.as_vk()) { return; }
     auto& backend = RendererBackendVk::get_instance();
-    auto* md = a.md.vk;
+    auto* md = a.md.as_vk();
     if(!md) { return; }
     if(deallocate && !md->is_aliased) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
     else if(deallocate && md->is_aliased) { vkDestroyImage(backend.dev, md->image, nullptr); }
-    for(auto& [view, vkview] : a.md.vk->views)
+    for(auto& [view, vkview] : a.md.as_vk()->views)
     {
         vkDestroyImageView(backend.dev, vkview.view, nullptr);
     }
-    delete a.md.vk;
-    a.md.vk = nullptr;
+    delete a.md.as_vk();
+    a.md.ptr = nullptr;
 }
 
 void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
@@ -435,14 +432,14 @@ void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
 
     auto& backend = RendererBackendVk::get_instance();
     auto& img = view.image.get();
-    ENG_ASSERT(img.md.vk != nullptr);
+    ENG_ASSERT(img.md.ptr != nullptr);
 
     const auto src_layer = view.src_subresource / img.mips;
     const auto src_mip = view.src_subresource % img.mips;
     const auto dst_layer = view.dst_subresource / img.mips;
     const auto dst_mip = view.dst_subresource % img.mips;
     const auto vkinfo =
-        Vks(VkImageViewCreateInfo{ .image = view.image->md.vk->image,
+        Vks(VkImageViewCreateInfo{ .image = view.image->md.as_vk()->image,
                                    .viewType = to_vk(view.type),
                                    .format = to_vk(view.format),
                                    .subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip,
@@ -541,7 +538,7 @@ void SwapchainMetadataVk::init(Swapchain& a)
         img.height = sinfo.imageExtent.height;
         img.usage = image_usage_flags;
         ImageMetadataVk::init(img, vkimgs.at(i));
-        a.images[i] = Engine::get().renderer->images.insert(std::move(img));
+        a.images[i] = Handle<Image>{ *Engine::get().renderer->images.insert(std::move(img)) };
         a.views[i] = ImageView::init(a.images[i]);
     }
 }
@@ -556,7 +553,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     for(auto i = 0u; i < a.images.size(); ++i)
     {
         ImageMetadataVk::destroy(a.images.at(i).get(), false);
-        Engine::get().renderer->images.erase(a.images.at(i));
+        Engine::get().renderer->images.erase(*a.images.at(i));
     }
     delete &md;
     a = Swapchain{};
@@ -1502,13 +1499,13 @@ SubmitQueue* RendererBackendVk::get_queue(QueueType type)
 ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
     auto& img = view.image.get();
-    auto it = img.md.vk->views.find(view);
+    auto it = img.md.as_vk()->views.find(view);
     ImageViewMetadataVk* retmd{};
-    if(it == img.md.vk->views.end())
+    if(it == img.md.as_vk()->views.end())
     {
         ImageViewMetadataVk* md{};
         get_renderer().backend->allocate_view(view, (void**)&md);
-        retmd = &img.md.vk->views.emplace(view, *md).first->second;
+        retmd = &img.md.as_vk()->views.emplace(view, *md).first->second;
         delete md; // delete md here, as allocate_view currently allocates dynamic memory and we do a copy to views map
     }
     else { retmd = &it->second; }
@@ -1528,7 +1525,7 @@ void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_
 void RendererBackendVk::get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs)
 {
     VkBufferMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
-                                              .buffer = resource.md.vk->buffer };
+                                              .buffer = resource.md.as_vk()->buffer };
     VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
     vkGetBufferMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
@@ -1548,7 +1545,7 @@ void RendererBackendVk::get_memory_requirements(const Buffer& resource, Renderer
 void RendererBackendVk::get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs)
 {
     VkImageMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
-                                             .image = resource.md.vk->image };
+                                             .image = resource.md.as_vk()->image };
     VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
     vkGetImageMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
@@ -1579,27 +1576,27 @@ void RendererBackendVk::bind_aliasable_memory(Buffer& resource, void* memory, si
     auto alloc = (VmaAllocation)memory;
     RendererMemoryRequirements reqs{};
     get_memory_requirements(resource, reqs);
-    if(resource.md.vk && resource.md.vk->vma_alloc && !resource.md.vk->is_aliased)
+    if(resource.md.as_vk() && resource.md.as_vk()->vma_alloc && !resource.md.as_vk()->is_aliased)
     {
         ENG_ERROR("Resource already has dedicated memory");
         return;
     }
-    if(!resource.md.vk) { resource.md.vk = new BufferMetadataVk{}; }
-    ENG_ASSERT(resource.md.vk);
-    if(!resource.md.vk->buffer)
+    if(!resource.md.as_vk()) { resource.md.ptr = new BufferMetadataVk{}; }
+    ENG_ASSERT(resource.md.as_vk());
+    if(!resource.md.as_vk()->buffer)
     {
         VkBufferCreateInfo vkinfo;
         BufferMetadataVk::init(resource, vkinfo);
-        VK_CHECK(vkCreateBuffer(dev, &vkinfo, nullptr, &resource.md.vk->buffer));
+        VK_CHECK(vkCreateBuffer(dev, &vkinfo, nullptr, &resource.md.as_vk()->buffer));
     }
-    if(!resource.md.vk->buffer)
+    if(!resource.md.as_vk()->buffer)
     {
         ENG_ERROR("Buffer is null");
         return;
     }
-    VK_CHECK(vmaBindBufferMemory2(vma, alloc, offset, resource.md.vk->buffer, nullptr));
-    resource.md.vk->is_aliased = true;
-    resource.md.vk->vma_alloc = alloc;
+    VK_CHECK(vmaBindBufferMemory2(vma, alloc, offset, resource.md.as_vk()->buffer, nullptr));
+    resource.md.as_vk()->is_aliased = true;
+    resource.md.as_vk()->vma_alloc = alloc;
 }
 
 void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, size_t offset)
@@ -1607,22 +1604,22 @@ void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, siz
     auto alloc = (VmaAllocation)memory;
     RendererMemoryRequirements reqs{};
     get_memory_requirements(resource, reqs);
-    if(!resource.md.vk) { resource.md.vk = new ImageMetadataVk{}; }
-    ENG_ASSERT(resource.md.vk);
-    if(!resource.md.vk->image)
+    if(!resource.md.ptr) { resource.md.ptr = new ImageMetadataVk{}; }
+    ENG_ASSERT(resource.md.ptr);
+    if(!resource.md.as_vk()->image)
     {
         VkImageCreateInfo vkinfo;
         ImageMetadataVk::init(resource, vkinfo);
-        VK_CHECK(vkCreateImage(dev, &vkinfo, nullptr, &resource.md.vk->image));
+        VK_CHECK(vkCreateImage(dev, &vkinfo, nullptr, &resource.md.as_vk()->image));
     }
-    if(!resource.md.vk->image)
+    if(!resource.md.as_vk()->image)
     {
         ENG_ERROR("Image is null");
         return;
     }
-    VK_CHECK(vmaBindImageMemory2(vma, alloc, offset, resource.md.vk->image, nullptr));
-    resource.md.vk->is_aliased = true;
-    resource.md.vk->vmaa = alloc;
+    VK_CHECK(vmaBindImageMemory2(vma, alloc, offset, resource.md.as_vk()->image, nullptr));
+    resource.md.as_vk()->is_aliased = true;
+    resource.md.as_vk()->vmaa = alloc;
 }
 
 // todo: swapchain impl should not be here

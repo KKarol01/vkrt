@@ -51,6 +51,7 @@
     do                                                                                                                 \
     {                                                                                                                  \
         MessageBoxA(NULL, ENG_FMT("[ERROR][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__).c_str(), NULL, MB_OK);    \
+        std::terminate();                                                                                              \
     }                                                                                                                  \
     while(0)
 #endif

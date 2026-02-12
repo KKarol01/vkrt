@@ -58,7 +58,7 @@ class SSTriangle : public IPass
     void on_render_graph(RenderGraph& graph) override
     {
         graph.add_graphics_pass(
-            "Draw triangle",
+            "Draw triangle1",
             [this](RenderGraph::PassBuilder& pb) {
                 auto* w = Engine::get().window;
                 pass_out_color.color =

@@ -413,12 +413,12 @@ void Renderer::update()
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 backend->destroy_buffer(buf->get());
-                buffers.erase(*buf);
+                buffers.erase(*(*buf));
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 backend->destroy_image(img->get());
-                images.erase(*img);
+                images.erase(*(*img));
             }
         }
         pf.retired_resources.erase(pf.retired_resources.begin(), remove_until);
@@ -546,7 +546,7 @@ void Renderer::update()
     {
         pass->on_render_graph(*rgraph);
     }
-    //imgui_renderer->update(rgraph, imgui_input);
+    // imgui_renderer->update(rgraph, imgui_input);
     rgraph->compile();
 
     Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
@@ -720,7 +720,9 @@ Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, AllocateMemory allocate)
     for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
     ENG_LOG("Creating buffer {} [{:.2f} {}]", buffer.name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
-    return buffers.insert(std::move(buffer));
+    auto it = buffers.insert(std::move(buffer));
+    if(!it) { return Handle<Buffer>{}; }
+    return Handle<Buffer>{ *it };
 }
 
 void Renderer::destroy_buffer(Handle<Buffer>& buffer)
@@ -733,7 +735,9 @@ void Renderer::destroy_buffer(Handle<Buffer>& buffer)
 Handle<Image> Renderer::make_image(Image&& image, AllocateMemory allocate)
 {
     backend->allocate_image(image, allocate);
-    return images.insert(std::move(image));
+    auto it = images.insert(std::move(image));
+    if(!it) { return Handle<Image>{}; }
+    return Handle<Image>{ *it };
 }
 
 void Renderer::destroy_image(Handle<Image>& image)
@@ -867,7 +871,8 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
             static_cast<float>(out_vertices.size() * sizeof(out_vertices[0])) / 1024.0f,
             static_cast<float>(out_indices.size() * sizeof(out_indices[0])) / 1024.0f);
 
-    return handle;
+    if(!handle) { return Handle<Geometry>{}; }
+    return Handle<Geometry>{ *handle };
 }
 
 void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<float>& out_vertices,
