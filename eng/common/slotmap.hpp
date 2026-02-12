@@ -20,17 +20,37 @@ template <typename UserType, size_t PAGE_SIZE, typename IndexType = uint32_t> cl
   private:
     struct Storage
     {
-        union {
-            UserType data;
-            Index next;
-        };
+        Index& as_index() { return std::get<0>(data); }
+        UserType& as_user() { return std::get<1>(data); }
+        const Index& as_index() const { return std::get<0>(data); }
+        const UserType& as_user() const { return std::get<1>(data); }
+        bool is_index() const { return data.index() == 0; }
+        std::variant<Index, UserType> data;
     };
 
     using Page = Storage*;
 
   public:
-    UserType& at(Index index) { return get_storage(index).data; }
-    const UserType& at(Index index) const { return get_storage(index).data; }
+    UserType& at(Index index)
+    {
+        auto& storage = get_storage(index);
+        if(storage.is_index())
+        {
+            ENG_ASSERT(false);
+            return at(Index{});
+        }
+        return storage.as_user();
+    }
+    const UserType& at(Index index) const
+    {
+        auto& storage = get_storage(index);
+        if(storage.is_index())
+        {
+            ENG_ASSERT(false);
+            return at(Index{});
+        }
+        return storage.as_user();
+    }
     UserType& at(IndexType index) { return at(Index{ index }); }
     const UserType& at(IndexType index) const { return at(Index{ index }); }
 
@@ -46,8 +66,9 @@ template <typename UserType, size_t PAGE_SIZE, typename IndexType = uint32_t> cl
         }
         const auto index = free;
         auto& storage = get_storage(index);
-        free = storage.next;
-        std::construct_at(&storage.data, std::forward<Args>(args)...);
+        ENG_ASSERT(storage.is_index());
+        free = storage.as_index();
+        storage.data = UserType{ std::forward<Args>(args)... };
         return index;
     }
 
@@ -55,8 +76,12 @@ template <typename UserType, size_t PAGE_SIZE, typename IndexType = uint32_t> cl
     {
         if(!index) { return; }
         auto& storage = get_storage(index);
-        storage.data.~UserType();
-        std::construct_at(&storage.next, free);
+        if(storage.is_index())
+        {
+            ENG_ASSERT(false);
+            return;
+        }
+        storage.data = free;
         free = index;
     }
 
@@ -87,16 +112,16 @@ template <typename UserType, size_t PAGE_SIZE, typename IndexType = uint32_t> cl
         // if indextype is u8, we can index max [0, 255], so 256 elements, then if our pagesize is 8,
         // page number 32 will have 256th element, so the last one we can index.
         if(pages.size() == max_pages) { return; }
-        pages.push_back(reinterpret_cast<Storage*>(::operator new(sizeof(UserType) * PAGE_SIZE,
-                                                                  std::align_val_t{ alignof(UserType) }))); // allocate aligned storage
+        pages.push_back(new Storage[PAGE_SIZE]); // allocate aligned storage
         const auto page_index = pages.size() - 1;
         auto& page = pages.back();
         for(auto i = 0ull; i < PAGE_SIZE - 1; ++i)
         {
-            std::construct_at(&page[i].next, make_index(page_index, i + 1)); // construct a chain of free list from first element to the last
+            page[i].data = make_index(page_index, i + 1); // construct a chain of free list from first element to the last
         }
-        std::construct_at(&page[PAGE_SIZE - 1].next, free); // put current free in the last element
-        free = page[0].next;                                // make first element of this page current free
+        page[PAGE_SIZE - 1].data = free; // put current free in the last element
+        free = page[0].as_index();       // make first element of this page current free
+        if(page_index == 0) { page[0].data = UserType{}; }
     }
 
     Storage& get_storage(Index index)
