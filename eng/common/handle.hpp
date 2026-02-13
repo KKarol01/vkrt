@@ -14,13 +14,13 @@ namespace eng
 // std::uintptr_t to allow storing regular pointers.
 template <typename T> struct HandleStorage
 {
-    using type = uint32_t;
+    using storage_type = uint32_t;
 };
 
 #define ENG_DEFINE_HANDLE_STORAGE(type, storage)                                                                       \
     template <> struct ::eng::HandleStorage<type>                                                                      \
     {                                                                                                                  \
-        using type = storage;                                                                                          \
+        using storage_type = storage;                                                                                  \
     }
 
 struct GenerateHandle
@@ -30,7 +30,7 @@ inline constexpr GenerateHandle generate_handle{};
 
 template <typename T> struct HandleGenerator
 {
-    static HandleStorage<T>::type gen() { return ++counter; }
+    static HandleStorage<T>::storage_type gen() { return ++counter; }
     inline static std::atomic<typename HandleStorage<T>::storage_type> counter{ 0 };
 };
 
@@ -40,7 +40,7 @@ template <typename T> struct HandleDispatcher
 
 template <typename T> struct Handle
 {
-    using storage_type = typename HandleStorage<T>::type;
+    using storage_type = typename HandleStorage<T>::storage_type;
     constexpr Handle() = default;
     constexpr explicit Handle(storage_type handle) : handle{ handle } {}
     explicit Handle(GenerateHandle) : handle{ HandleGenerator<T>::gen() } {}

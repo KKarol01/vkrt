@@ -553,7 +553,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     for(auto i = 0u; i < a.images.size(); ++i)
     {
         ImageMetadataVk::destroy(a.images.at(i).get(), false);
-        Engine::get().renderer->images.erase(*a.images.at(i));
+        Engine::get().renderer->images.erase(SlotIndex::init(*a.images.at(i)));
     }
     delete &md;
     a = Swapchain{};

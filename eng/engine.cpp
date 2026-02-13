@@ -142,7 +142,7 @@ void Engine::init(int argc, char* argv[])
     ui->init();
 }
 
-void Engine::destroy() { this->~Engine(); }
+void Engine::destroy() { Engine::~Engine(); }
 
 void Engine::start()
 {

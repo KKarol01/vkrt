@@ -413,12 +413,12 @@ void Renderer::update()
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 backend->destroy_buffer(buf->get());
-                buffers.erase(*(*buf));
+                buffers.erase(SlotIndex::init(*(*buf)));
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 backend->destroy_image(img->get());
-                images.erase(*(*img));
+                images.erase(SlotIndex::init(*(*img)));
             }
         }
         pf.retired_resources.erase(pf.retired_resources.begin(), remove_until);

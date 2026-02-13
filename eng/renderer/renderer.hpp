@@ -445,30 +445,17 @@ struct BLASInstanceSettings
     ecs::entity entity;
 };
 
-struct VsmData
-{
-    Handle<Buffer> constants_buffer;
-    Handle<Buffer> free_allocs_buffer;
-    Handle<Image> shadow_map_0;
-    // VkImageView view_shadow_map_0_general{};
-    Handle<Image> dir_light_page_table;
-    // VkImageView view_dir_light_page_table_general{};
-    Handle<Image> dir_light_page_table_rgb8;
-    // VkImageView view_dir_light_page_table_rgb8_general{};
-};
-
-struct Swapchain
-{
-    using acquire_impl_fptr = uint32_t (*)(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence);
-    static inline acquire_impl_fptr acquire_impl{};
-    uint32_t acquire(uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* fence = nullptr);
-    Handle<Image> get_image() const;
-    ImageView get_view() const;
-    void* metadata{};
-    std::vector<Handle<Image>> images;
-    std::vector<ImageView> views;
-    uint32_t current_index{ 0ul };
-};
+// struct VsmData
+//{
+//     Handle<Buffer> constants_buffer;
+//     Handle<Buffer> free_allocs_buffer;
+//     Handle<Image> shadow_map_0;
+//     // VkImageView view_shadow_map_0_general{};
+//     Handle<Image> dir_light_page_table;
+//     // VkImageView view_dir_light_page_table_general{};
+//     Handle<Image> dir_light_page_table_rgb8;
+//     // VkImageView view_dir_light_page_table_rgb8_general{};
+// };
 
 struct DebugGeometry
 {
@@ -617,6 +604,19 @@ namespace eng
 {
 namespace gfx
 {
+
+struct Swapchain
+{
+    using acquire_impl_fptr = uint32_t (*)(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence);
+    static inline acquire_impl_fptr acquire_impl{};
+    uint32_t acquire(uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* fence = nullptr);
+    Handle<Image> get_image() const;
+    ImageView get_view() const;
+    void* metadata{};
+    std::vector<Handle<Image>> images;
+    std::vector<ImageView> views;
+    uint32_t current_index{ 0ul };
+};
 
 enum class SubmitFlags : uint32_t
 {
@@ -810,8 +810,8 @@ class Renderer
     bool mlt_occ_cull_enable{ true };
     bool mlt_frust_cull_enable{ true };
 
-    Slotmap<Buffer> buffers;
-    Slotmap<Image> images;
+    Slotmap<Buffer, 1024> buffers;
+    Slotmap<Image, 1024> images;
     HandleFlatSet<Sampler> samplers;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
@@ -822,7 +822,7 @@ class Renderer
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
 
-    Slotmap<Geometry> geometries;
+    Slotmap<Geometry, 1024> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
     // HandleFlatSet<Texture> textures;
@@ -854,9 +854,9 @@ inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
 } // namespace gfx
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(*handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(*handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(*handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(SlotIndex::init(*handle)); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(SlotIndex::init(*handle)); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(SlotIndex::init(*handle)); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes.at(*handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });

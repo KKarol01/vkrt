@@ -387,7 +387,17 @@ class RenderGraph;
 struct IDescriptorSetAllocator;
 class ICommandPool;
 class ICommandBuffer;
+} // namespace gfx
+} // namespace eng
 
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, uint64_t);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Image, uint64_t);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Geometry, uint64_t);
+
+namespace eng
+{
+namespace gfx
+{
 namespace pass
 {
 class IPass;
