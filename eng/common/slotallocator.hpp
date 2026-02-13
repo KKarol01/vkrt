@@ -1,44 +1,37 @@
 #pragma once
 
+#include <algorithm>
 #include <vector>
-#include <bit>
+#include <cstdint>
+#include <eng/common/logger.hpp>
 
-class SlotAllocator
+template <typename IndexType = uint32_t> class SlotAllocator
 {
   public:
-    using index_t = size_t;
-    static inline constexpr size_t NUM_BITS = sizeof(index_t) * 8;
-
-    index_t allocate_slot()
+    IndexType allocate()
     {
-        for(index_t i = 0; i < pages.size(); ++i)
+        if(free_list.size() > 0)
         {
-            auto& page = pages.at(i);
-            const auto bit = std::countl_one(page);
-            if(bit == NUM_BITS) { continue; }
-            page |= make_bit_mask(bit);
-            return i * NUM_BITS + bit;
+            const auto index = free_list.back();
+            free_list.pop_back();
+            return index;
         }
-        pages.push_back(make_bit_mask(0));
-        return (pages.size() - 1) * NUM_BITS;
+        if(counter == ~IndexType{})
+        {
+            ENG_ASSERT(false);
+            return counter;
+        }
+        return counter++;
     }
 
-    void free_slot(index_t slot)
+    bool erase(IndexType index)
     {
-        const auto page = slot / NUM_BITS;
-        const auto bit = slot % NUM_BITS;
-        if(pages.size() <= page) { return; }
-        pages.at(page) &= ~make_bit_mask(bit);
-    }
-
-    bool has(index_t slot) const
-    {
-        const auto page = slot / NUM_BITS;
-        const auto bit = slot % NUM_BITS;
-        return page < pages.size() && (pages.at(page) & make_bit_mask(bit));
+        if(std::find(free_list.begin(), free_list.end(), index) != free_list.end()) { return false; }
+        free_list.push_back(index);
+        return true;
     }
 
   private:
-    static index_t make_bit_mask(index_t bit_idx) { return index_t{ 1 } << (NUM_BITS - 1 - bit_idx); }
-    std::vector<index_t> pages;
+    IndexType counter{};
+    std::vector<IndexType> free_list;
 };

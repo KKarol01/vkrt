@@ -810,8 +810,8 @@ class Renderer
     bool mlt_occ_cull_enable{ true };
     bool mlt_frust_cull_enable{ true };
 
-    Slotmap<Buffer, 128> buffers;
-    Slotmap<Image, 128> images;
+    Slotmap<Buffer> buffers;
+    Slotmap<Image> images;
     HandleFlatSet<Sampler> samplers;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
@@ -822,7 +822,7 @@ class Renderer
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
 
-    Slotmap<Geometry, 128> geometries;
+    Slotmap<Geometry> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
     // HandleFlatSet<Texture> textures;
@@ -836,8 +836,8 @@ class Renderer
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
-    SlotAllocator gpu_resource_allocator;
-    SlotAllocator gpu_light_allocator;
+    SlotAllocator<uint32_t> gpu_resource_allocator;
+    SlotAllocator<uint32_t> gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
     Handle<PipelineLayout> common_playout;

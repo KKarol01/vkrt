@@ -150,7 +150,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
         views.vkbuffer = buf.md.as_vk()->buffer;
         for(const auto& e : views.slots)
         {
-            storage_buffer_slots.free_slot(e.slot);
+            storage_buffer_slots.erase(e.slot);
             // pending_frees.push_back(FreedResource{ &storage_buffer_slots, e.slot, get_renderer().frame_index });
         }
         views.slots.clear();
@@ -160,7 +160,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
         std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.buffer == view; });
 
     if(vit != views.slots.end()) { return vit->slot; }
-    const auto alloc = (uint32_t)storage_buffer_slots.allocate_slot();
+    const auto alloc = (uint32_t)storage_buffer_slots.allocate();
     views.slots.push_back(Views::Slot{ .slot = alloc, .buffer = view, .is_storage = true });
     write_descriptor(DescriptorType::STORAGE_BUFFER, &view, alloc);
     return alloc;
@@ -181,12 +181,12 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is
         {
             if(e.is_storage)
             {
-                storage_image_slots.free_slot(e.slot);
+                storage_image_slots.erase(e.slot);
                 // pending_frees.push_back(FreedResource{ &storage_image_slots, e.slot, get_renderer().frame_index });
             }
             else
             {
-                sampled_image_slots.free_slot(e.slot);
+                sampled_image_slots.erase(e.slot);
                 // pending_frees.push_back(FreedResource{ &sampled_image_slots, e.slot, get_renderer().frame_index });
             }
         }
@@ -197,7 +197,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is
         std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.image == view; });
 
     if(vit != views.slots.end()) { return vit->slot; }
-    const auto alloc = (uint32_t)storage_buffer_slots.allocate_slot();
+    const auto alloc = (uint32_t)storage_buffer_slots.allocate();
     views.slots.push_back(Views::Slot{ .slot = alloc, .image = view, .is_storage = is_storage });
     write_descriptor(is_storage ? DescriptorType::STORAGE_BUFFER : DescriptorType::SAMPLED_IMAGE, &view, alloc);
     return alloc;

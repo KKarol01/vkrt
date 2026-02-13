@@ -377,7 +377,7 @@ void Renderer::instance_entity(ecs::entity e)
     }
     new_transforms.push_back(e);
     ++bufs.transform_count;
-    mesh->gpu_resource = gpu_resource_allocator.allocate_slot();
+    mesh->gpu_resource = gpu_resource_allocator.allocate();
     for(const auto& rmesh : mesh->asset->render_meshes)
     {
         const auto& mpeffect = rmesh->material->mesh_pass->effects;
@@ -480,7 +480,7 @@ void Renderer::update()
         {
             auto* l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
             const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
-            if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate_slot(); }
+            if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate(); }
             GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
             staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight),
                           sizeof(GPULight));

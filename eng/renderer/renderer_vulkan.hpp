@@ -10,7 +10,6 @@
 #include <eng/renderer/vulkan_structs.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
-#include <eng/common/handlemap.hpp>
 #include <eng/common/handleflatset.hpp>
 
 namespace eng

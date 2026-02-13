@@ -12,7 +12,6 @@
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
-#include <eng/common/handlemap.hpp>
 #include <eng/physics/bvh.hpp>
 
 namespace eng
