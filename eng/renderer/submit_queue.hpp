@@ -39,7 +39,7 @@ class ICommandBuffer
     virtual void bind_index(const Buffer& index, uint32_t offset, VkIndexType type) = 0;
     virtual void bind_pipeline(const Pipeline& pipeline) = 0;
     virtual void bind_sets(const void* sets, uint32_t count = 1) = 0;
-    virtual void bind_resources(uint32_t slot, std::span<DescriptorResource> resources) = 0;
+    virtual void bind_set(uint32_t slot, std::span<DescriptorResource> resources) = 0;
 
     virtual void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range) = 0;
 
@@ -89,7 +89,7 @@ class CommandBufferVk : public ICommandBuffer
     void bind_index(const Buffer& index, uint32_t offset, VkIndexType type) override;
     void bind_pipeline(const Pipeline& pipeline) override;
     void bind_sets(const void* sets, uint32_t count = 1) override;
-    void bind_resources(uint32_t slot, std::span<DescriptorResource> resources) override;
+    void bind_set(uint32_t slot, std::span<DescriptorResource> resources) override;
 
     void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range) override;
 

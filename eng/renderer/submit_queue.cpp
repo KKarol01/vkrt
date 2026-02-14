@@ -153,7 +153,7 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
     }
 }
 
-void CommandBufferVk::bind_resources(uint32_t slot, std::span<DescriptorResource> resources)
+void CommandBufferVk::bind_set(uint32_t slot, std::span<DescriptorResource> resources)
 {
     ENG_ASSERT(current_pipeline && current_pipeline->info.layout);
     rebind_desc_sets = true;
