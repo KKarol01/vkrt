@@ -74,25 +74,42 @@ DescriptorSetAllocatorBindlessVk::DescriptorSetAllocatorBindlessVk(const Pipelin
     set = pool.allocate(layout0, 0);
 }
 
-void DescriptorSetAllocatorBindlessVk::bind_resources(uint32_t slot, std::span<const DescriptorResource> resources)
+void DescriptorSetAllocatorBindlessVk::bind_set(uint32_t slot, std::span<const DescriptorResource> resources,
+                                                const PipelineLayout& layout)
 {
+    slot = 0; // slot 0, because bindless requires all pipeline layouts to be the same and have one descriptor layout/descriptor table
+    if(layout.layout.size() != 1)
+    {
+        ENG_ASSERT(false, "Invalid slot index {}", slot);
+        return;
+    }
+    const auto& setlayout = layout.layout[slot].get();
     for(auto i = 0u; i < resources.size(); ++i)
     {
         const auto& res = resources[i];
-        uint32_t binding = res.binding == ~0u ? i : res.binding;
-        uint32_t idx;
-        if(res.type == DescriptorType::STORAGE_BUFFER) { idx = bind_resource(res.buffer_view); }
-        else if(res.type == DescriptorType::STORAGE_IMAGE || res.type == DescriptorType::SAMPLED_IMAGE)
+        ENG_ASSERT(res.binding != ~0u && res.index != ~0u);
+        uint32_t bindless_index;
+        switch(res.type)
         {
-            idx = bind_resource(res.image_view, res.type == DescriptorType::STORAGE_IMAGE);
+        case DescriptorType::STORAGE_BUFFER:
+        {
+            bindless_index = bind_resource(res.buffer_view);
+            break;
         }
-        else
+        case DescriptorType::STORAGE_IMAGE:
+        case DescriptorType::SAMPLED_IMAGE:
         {
-            ENG_ERROR("Unrecognized type");
+            bindless_index = bind_resource(res.image_view, res.type == DescriptorType::STORAGE_IMAGE);
+            break;
+        }
+        default:
+        {
+            ENG_ASSERT("Unhandle case");
             continue;
         }
-        push_values[binding + i] = idx;
-        push_ranges.push_back({ binding, 1 });
+        }
+        push_values[res.binding] = bindless_index;
+        push_ranges.push_back({ res.binding, 1 });
     }
 }
 
@@ -151,7 +168,6 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
         for(const auto& e : views.slots)
         {
             storage_buffer_slots.erase(e.slot);
-            // pending_frees.push_back(FreedResource{ &storage_buffer_slots, e.slot, get_renderer().frame_index });
         }
         views.slots.clear();
     }

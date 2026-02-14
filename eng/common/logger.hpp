@@ -21,7 +21,11 @@
 #endif
 
 #define ENG_ASSERT(expr, ...)                                                                                          \
-    if((bool)(expr) == false) { ENG_BREAKPOINT(); }
+    if((bool)(expr) == false)                                                                                          \
+    {                                                                                                                  \
+        ENG_BREAKPOINT();                                                                                              \
+        __VA_OPT__(ENG_LOG(__VA_ARGS__));                                                                              \
+    }
 
 #define ENG_ERROR(msg, ...)                                                                                            \
     do                                                                                                                 \

@@ -32,26 +32,25 @@ namespace gfx
 
 struct DescriptorResource
 {
-    template <typename View>
-    static DescriptorResource init(DescriptorType type, const View& view, uint32_t binding = ~0u, uint32_t element = ~0u)
+    static DescriptorResource as_sampled(uint32_t binding, const ImageView& view, uint32_t index = 0)
     {
-        // clang-format off
-        switch(type) 
-        {
-            case DescriptorType::STORAGE_BUFFER: return DescriptorResource{ .type = type, .buffer_view = view, .binding = binding, .array_element = element };
-            case DescriptorType::SAMPLED_IMAGE:  return DescriptorResource{ .type = type, .image_view = view, .binding = binding, .array_element = element };
-            case DescriptorType::STORAGE_IMAGE:  return DescriptorResource{ .type = type, .image_view = view, .binding = binding, .array_element = element };
-            default: { ENG_ERROR("Unhandled case"); return {}; }
-        }
-        // clang-format on
+        return DescriptorResource{ .type = DescriptorType::SAMPLED_IMAGE, .image_view = view, .binding = binding, .index = index };
     }
-    DescriptorType type{ DescriptorType::UNDEFINED };
+    static DescriptorResource as_storage(uint32_t binding, const BufferView& view, uint32_t index = 0)
+    {
+        return DescriptorResource{ .type = DescriptorType::STORAGE_BUFFER, .buffer_view = view, .binding = binding, .index = index };
+    }
+    static DescriptorResource as_storage(uint32_t binding, const ImageView& view, uint32_t index = 0)
+    {
+        return DescriptorResource{ .type = DescriptorType::STORAGE_IMAGE, .image_view = view, .binding = binding, .index = index };
+    }
+    DescriptorType type{};
     union {
         BufferView buffer_view;
         ImageView image_view;
     };
-    uint32_t binding{ ~0u };       //~0u infers from position in array
-    uint32_t array_element{ ~0u }; // if not ~0u, binding is an array
+    uint32_t binding{ ~0u };
+    uint32_t index{ ~0u };
 };
 
 struct ImageBlockData
@@ -102,6 +101,7 @@ struct PushRange
 
 struct PipelineLayout
 {
+    inline static Handle<PipelineLayout> common_layout;
     bool operator==(const PipelineLayout& a) const { return layout == a.layout && push_range == a.push_range; }
     bool is_compatible(const PipelineLayout& a) const;
     std::vector<Handle<DescriptorLayout>> layout{};
@@ -840,7 +840,6 @@ class Renderer
     SlotAllocator<uint32_t> gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
-    Handle<PipelineLayout> common_playout;
     Handle<Pipeline> default_unlit_pipeline;
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;

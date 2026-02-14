@@ -146,6 +146,12 @@ void PipelineMetadataVk::init(const Pipeline& a)
         return;
     }
 
+    if(!a.info.layout)
+    {
+        ENG_ASSERT(false, "No pipeline layout");
+        return;
+    }
+
     auto vkdev = RendererBackendVk::get_dev();
     auto* md = a.md.vk;
 

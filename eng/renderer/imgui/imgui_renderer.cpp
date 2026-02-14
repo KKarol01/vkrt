@@ -34,7 +34,6 @@ void ImGuiRenderer::init()
 
     pipeline = r.make_pipeline(PipelineCreateInfo{
         .shaders = { r.make_shader("imgui/imgui.vert.glsl"), r.make_shader("imgui/imgui.frag.glsl") },
-        .layout = r.common_playout,
         .attachments = { .count = 1,
                          .color_formats = { ImageFormat::R8G8B8A8_SRGB },
                          .blend_states = { PipelineCreateInfo::BlendState{
@@ -136,10 +135,8 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
             }
 
             {
-                DescriptorResource vertex_buffer_desc{ .type = DescriptorType::STORAGE_BUFFER,
-                                                       .buffer_view = BufferView::init(vertex_buffer),
-                                                       .binding = 4 };
-                cmd->bind_resources(0, { &vertex_buffer_desc, 1 });
+                DescriptorResource bindresources[]{ DescriptorResource::as_storage(4, BufferView::init(vertex_buffer)) };
+                cmd->bind_resources(0, bindresources);
             }
 
             cmd->begin_rendering(rendering_info);
@@ -185,10 +182,10 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
                     scissor.extent.width = (uint32_t)(clip_max.x - clip_min.x);
                     scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
-                    DescriptorResource texture{ .type = DescriptorType::SAMPLED_IMAGE,
-                                                .image_view = ImageView::init(Handle<Image>{ (uint32_t)imcmd->GetTexID() - 1 }),
-                                                .binding = 5 };
-                    cmd->bind_resources(1, { &texture, 1 });
+                    DescriptorResource bindresources[]{
+                        DescriptorResource::as_sampled(5, ImageView::init(Handle<Image>{ (uint32_t)imcmd->GetTexID() - 1 }))
+                    };
+                    cmd->bind_resources(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
                                       imcmd->VtxOffset + global_vtx_offset, 0);
                 }

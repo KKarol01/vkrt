@@ -137,6 +137,7 @@ target_compile_options(eng PRIVATE
     -Wall -Wextra -Werror -Wpedantic
     -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=missing-field-initializers
     -Wno-error=missing-designated-field-initializers
+    -Wmissing-designated-field-initializers
 )
 set_target_properties(eng PROPERTIES 
     RUNTIME_OUTPUT_NAME_DEBUG "${CMAKE_PROJECT_NAME}Debug"

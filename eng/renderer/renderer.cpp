@@ -202,11 +202,11 @@ void Renderer::init_pipelines()
                 { DescriptorType::SAMPLED_IMAGE, BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL },
                 { DescriptorType::SEPARATE_SAMPLER, BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, imsamplers },
             } });
-        common_playout = make_layout(PipelineLayout{
+        PipelineLayout::common_layout = make_layout(PipelineLayout{
             .layout = { common_dlayout },
             .push_range = { ShaderStage::ALL, PushRange::MAX_PUSH_BYTES },
         });
-        descriptor_allocator = new DescriptorSetAllocatorBindlessVk{ common_playout.get() };
+        descriptor_allocator = new DescriptorSetAllocatorBindlessVk{ PipelineLayout::common_layout.get() };
     }
     else
     {
@@ -797,7 +797,12 @@ Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
-    if(!p.info.layout) { p.info.layout = common_playout; }
+    if(backend->caps.supports_bindless)
+    {
+        // with bindless, all pipeline layout should be the same
+        ENG_ASSERT(!info.layout)
+    }
+    if(!p.info.layout) { p.info.layout = PipelineLayout::common_layout; }
     const auto found_handle = pipelines.find(p);
     if(!found_handle) { backend->make_pipeline(p); }
     auto it = pipelines.insert(std::move(p));

@@ -155,8 +155,9 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
 
 void CommandBufferVk::bind_resources(uint32_t slot, std::span<DescriptorResource> resources)
 {
+    ENG_ASSERT(current_pipeline && current_pipeline->info.layout);
     rebind_desc_sets = true;
-    descriptor_allocator->bind_resources(slot, resources);
+    descriptor_allocator->bind_set(slot, resources, current_pipeline->info.layout.get());
 }
 
 void CommandBufferVk::push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range)

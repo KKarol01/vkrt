@@ -52,7 +52,7 @@ class IDescriptorSetAllocator
   public:
     virtual ~IDescriptorSetAllocator() = default;
 
-    virtual void bind_resources(uint32_t slot, std::span<const DescriptorResource> resources) = 0;
+    virtual void bind_set(uint32_t slot, std::span<const DescriptorResource> resources, const PipelineLayout& layout) = 0;
 
     virtual uint32_t get_bindless(const ImageView& view, bool is_storage) { return ~0u; }
     virtual uint32_t get_bindless(const BufferView& view) { return ~0u; }
@@ -91,7 +91,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
     ~DescriptorSetAllocatorBindlessVk() override = default;
 
-    void bind_resources(uint32_t slot, std::span<const DescriptorResource> resources) override;
+    void bind_set(uint32_t slot, std::span<const DescriptorResource> resources, const PipelineLayout& layout) override;
 
     uint32_t get_bindless(const ImageView& view, bool is_storage) override;
     uint32_t get_bindless(const BufferView& view) override;

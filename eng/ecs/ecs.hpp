@@ -156,8 +156,7 @@ class Registry
         const auto e = entities.get(it);
         if(e == INVALID_ENTITY)
         {
-            ENG_WARN("Max entity reached");
-            ENG_ASSERT(false);
+            ENG_ASSERT(false, "Max entity reached");
             return e;
         }
         if(it.index < metadatas.size()) { metadatas.at(it.index) = EntityMetadata{}; }
