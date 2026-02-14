@@ -59,6 +59,18 @@ class ICommandBuffer
 
     virtual void begin_label(const std::string& label) = 0;
     virtual void end_label() = 0;
+
+    virtual void wait_sync(Sync* sync, Flags<PipelineStage> stage = PipelineStage::ALL);
+    virtual void signal_sync(Sync* sync, Flags<PipelineStage> stage = PipelineStage::ALL);
+
+    struct SyncDep
+    {
+        Sync* sync{};
+        uint64_t value;
+        Flags<PipelineStage> stage;
+        bool wait{}; // or signal
+    };
+    std::vector<SyncDep> sync_deps;
 };
 
 class CommandBufferVk : public ICommandBuffer
@@ -176,6 +188,7 @@ struct Sync
     uint64_t wait_gpu(uint64_t value = ~0ull);
     void reset(uint64_t value = 0);
     uint64_t get_next_signal_value() const { return value + 1; }
+    uint64_t get_current_wait_value() const { return value; }
 
     SyncType type{};
     uint64_t value{};

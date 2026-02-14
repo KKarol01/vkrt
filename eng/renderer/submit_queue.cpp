@@ -13,6 +13,16 @@ namespace eng
 namespace gfx
 {
 
+void ICommandBuffer::wait_sync(Sync* sync, Flags<PipelineStage> stage)
+{
+    sync_deps.emplace_back(sync, sync->get_current_wait_value(), stage, true);
+}
+
+void ICommandBuffer::signal_sync(Sync* sync, Flags<PipelineStage> stage)
+{
+    sync_deps.emplace_back(sync, sync->signal_gpu(), stage, false);
+}
+
 void CommandBufferVk::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
                               Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access)
 {
@@ -435,6 +445,16 @@ void SubmitQueue::submit()
     std::vector<VkSemaphoreSubmitInfo> sig_sems(submission.signal_sems.size());
     std::vector<VkCommandBufferSubmitInfo> cmds(submission.cmds.size());
 
+    for(auto i = 0u; i < cmds.size(); ++i)
+    {
+        cmds[i] = Vks(VkCommandBufferSubmitInfo{ .commandBuffer = ((CommandBufferVk*)submission.cmds[i])->cmd });
+        for(const auto& dep : submission.cmds[i]->sync_deps)
+        {
+            if(dep.wait) { wait_sync(dep.sync, dep.stage, dep.value); }
+            else { signal_sync(dep.sync, dep.stage, dep.value); }
+        }
+        submission.cmds[i]->sync_deps.clear();
+    }
     for(auto i = 0u; i < wait_sems.size(); ++i)
     {
         wait_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.wait_sems[i]->semaphore,
@@ -447,11 +467,6 @@ void SubmitQueue::submit()
                                                  .value = submission.signal_values[i],
                                                  .stageMask = to_vk(submission.signal_stages[i]) });
     }
-    for(auto i = 0u; i < cmds.size(); ++i)
-    {
-        cmds[i] = Vks(VkCommandBufferSubmitInfo{ .commandBuffer = ((CommandBufferVk*)submission.cmds[i])->cmd });
-    }
-
     const auto vk_info = Vks(VkSubmitInfo2{
         .waitSemaphoreInfoCount = (uint32_t)wait_sems.size(),
         .pWaitSemaphoreInfos = wait_sems.data(),
