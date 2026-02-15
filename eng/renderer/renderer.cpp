@@ -11,7 +11,6 @@
 #include <eng/common/paths.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
-#include <eng/ui.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
 #include <assets/shaders/bindless_structures.glsli>

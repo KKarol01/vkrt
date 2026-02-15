@@ -8,7 +8,6 @@
 #include <stb/stb_image.h>
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
-#include <eng/ui.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/paths.hpp>
@@ -63,8 +62,7 @@ asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf:
         return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
     };
 
-    const auto fast_iterate = [&fastasset, &get_vertex_component](int comp, const auto& fastacc,
-                                                                             gfx::VertexComponent gfxcomp) {
+    const auto fast_iterate = [&fastasset, &get_vertex_component](int comp, const auto& fastacc, gfx::VertexComponent gfxcomp) {
         const auto cb = [&get_vertex_component, &gfxcomp]<size_t comps>(const auto& vec, auto idx) {
             float v[comps]{};
             for(auto i = 0u; i < comps; ++i)
@@ -392,17 +390,7 @@ std::expected<asset::Model, std::string> GLTFModelImporter::load_model(const std
 } // namespace import
 } // namespace asset
 
-void Scene::init()
-{
-    asset::import::file_importers[".glb"] = std::make_unique<asset::import::GLTFModelImporter>();
-
-    Engine::get().ui->add_tab(UI::Tab{
-        .name = "Scene", .location = UI::Location::LEFT_PANE, .cb_func = [this] { ui_draw_scene(); } });
-    Engine::get().ui->add_tab(UI::Tab{
-        .name = "Inspector", .location = UI::Location::RIGHT_PANE, .cb_func = [this] { ui_draw_inspector(); } });
-    Engine::get().ui->add_tab(UI::Tab{
-        .name = "Manipulate", .location = UI::Location::CENTER_PANE, .cb_func = [this] { ui_draw_manipulate(); } });
-}
+void Scene::init() { asset::import::file_importers[".glb"] = std::make_unique<asset::import::GLTFModelImporter>(); }
 
 asset::Model* Scene::load_from_file(const std::filesystem::path& _path)
 {
@@ -527,62 +515,58 @@ void Scene::update()
 
 void Scene::ui_draw_scene()
 {
-    if(ImGui::Begin("Scene", 0, ImGuiWindowFlags_HorizontalScrollbar))
-    {
-        const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity e, bool expand, const auto& self) -> void {
-            ui.scene.nodes[e].expanded = expand;
-            for(auto ch : reg->get_children(e))
-            {
-                self(reg, ch, expand, self);
-            }
-        };
-
-        const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
-            const auto enode = reg->get<ecs::Node>(e);
-            const auto& echildren = reg->get_children(e);
-            ImGui::PushID((int)e);
-            auto& ui_node = ui.scene.nodes[e];
-            // ImGui::BeginGroup();
-            if(echildren.size())
-            {
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().ItemSpacing * 0.5f);
-                if(ImGui::ArrowButton("expand_btn", ui_node.expanded ? ImGuiDir_Down : ImGuiDir_Right))
-                {
-                    ui_node.expanded = !ui_node.expanded;
-                }
-                ImGui::PopStyleVar(1);
-                ImGui::SameLine();
-            }
-            {
-                bool is_sel = e == ui.scene.sel_entity;
-                auto cpos = ImGui::GetCursorScreenPos();
-                ImGui::SetCursorScreenPos(cpos + ImVec2{ -ImGui::GetStyle().ItemSpacing.x * 0.5f, 0.0f });
-                ImGui::GetItemRectSize();
-                if(ImGui::Selectable(enode->name.c_str(), &is_sel)) { ui.scene.sel_entity = e; }
-            }
-            // ImGui::EndGroup();
-            if(ImGui::IsItemClicked() && ImGui::IsMouseDoubleClicked(0))
-            {
-                expand_hierarchy(reg, e, !ui_node.expanded, expand_hierarchy);
-            }
-
-            if(ui_node.expanded)
-            {
-                ImGui::Indent();
-                for(const auto& ec : echildren)
-                {
-                    self(reg, ec, self);
-                }
-                ImGui::Unindent();
-            }
-            ImGui::PopID();
-        };
-        for(const auto& e : scene)
+    const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity e, bool expand, const auto& self) -> void {
+        ui.scene.nodes[e].expanded = expand;
+        for(auto ch : reg->get_children(e))
         {
-            draw_hierarchy(Engine::get().ecs, e, draw_hierarchy);
+            self(reg, ch, expand, self);
         }
+    };
+
+    const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
+        const auto enode = reg->get<ecs::Node>(e);
+        const auto& echildren = reg->get_children(e);
+        ImGui::PushID((int)e);
+        auto& ui_node = ui.scene.nodes[e];
+        // ImGui::BeginGroup();
+        if(echildren.size())
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().ItemSpacing * 0.5f);
+            if(ImGui::ArrowButton("expand_btn", ui_node.expanded ? ImGuiDir_Down : ImGuiDir_Right))
+            {
+                ui_node.expanded = !ui_node.expanded;
+            }
+            ImGui::PopStyleVar(1);
+            ImGui::SameLine();
+        }
+        {
+            bool is_sel = e == ui.scene.sel_entity;
+            auto cpos = ImGui::GetCursorScreenPos();
+            ImGui::SetCursorScreenPos(cpos + ImVec2{ -ImGui::GetStyle().ItemSpacing.x * 0.5f, 0.0f });
+            ImGui::GetItemRectSize();
+            if(ImGui::Selectable(enode->name.c_str(), &is_sel)) { ui.scene.sel_entity = e; }
+        }
+        // ImGui::EndGroup();
+        if(ImGui::IsItemClicked() && ImGui::IsMouseDoubleClicked(0))
+        {
+            expand_hierarchy(reg, e, !ui_node.expanded, expand_hierarchy);
+        }
+
+        if(ui_node.expanded)
+        {
+            ImGui::Indent();
+            for(const auto& ec : echildren)
+            {
+                self(reg, ec, self);
+            }
+            ImGui::Unindent();
+        }
+        ImGui::PopID();
+    };
+    for(const auto& e : scene)
+    {
+        draw_hierarchy(Engine::get().ecs, e, draw_hierarchy);
     }
-    ImGui::End();
 }
 
 void Scene::ui_draw_inspector()

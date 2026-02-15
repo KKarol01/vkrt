@@ -13,8 +13,12 @@ namespace eng
 
 struct Window;
 class Camera;
-class UI;
 class Scene;
+
+namespace ui
+{
+class UI;
+}
 
 namespace ecs
 {
@@ -80,7 +84,7 @@ class Engine
     ecs::Registry* ecs{};
     gfx::Renderer* renderer{};
 
-    UI* ui{};
+    ui::UI* ui{};
     Scene* scene{};
 
     double get_time_secs();

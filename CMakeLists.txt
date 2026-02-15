@@ -48,7 +48,7 @@ target_compile_definitions(build_header_only
         VMA_DYNAMIC_VULKAN_FUNCTIONS=0
     PUBLIC
         STB_INCLUDE_LINE_GLSL
-        $<IF:$<STREQUAL:$<PLATFORM_ID>,Windows>,VK_USE_PLATFORM_WIN32_KHR, VK_USE_PLATFORM_XCB_KHR>
+        $<IF:$<STREQUAL:$<PLATFORM_ID>,Windows>, VK_USE_PLATFORM_WIN32_KHR, VK_USE_PLATFORM_XCB_KHR>
         VK_VERSION_1_3
         WIN32_LEAN_AND_MEAN
 )
@@ -124,11 +124,11 @@ add_executable(eng
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
     
-    "eng/ui.cpp"
+    
     "eng/to_string.cpp" 
 
     "eng/physics/bvh.cpp"
-)
+ "eng/ui/ui.cpp")
 
 target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
 target_compile_features(eng PRIVATE cxx_std_23)

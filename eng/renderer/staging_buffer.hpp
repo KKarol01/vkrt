@@ -95,7 +95,7 @@ class StagingBuffer
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
 
-    size_t get_free_space() const { return free_head > head ? free_head - head : 0; }
+    size_t get_free_space() const { return CAPACITY - head; }
 
     void* get_alloc_mem(const Allocation& alloc) const;
 
@@ -107,12 +107,9 @@ class StagingBuffer
     Buffer buffer;
     SubmitQueue* queue{};
     size_t head{};
-    size_t free_head{ CAPACITY };
     Sync* sync{};
-    std::deque<Allocation> allocations;
     std::vector<Context> contexts;
     uint64_t last_frame{};
-    uint64_t last_clean{};
 };
 } // namespace gfx
 } // namespace eng

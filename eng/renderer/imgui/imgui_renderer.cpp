@@ -27,6 +27,9 @@ void ImGuiRenderer::init()
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.IniSavingRate = 1.0f;
+
+    ImGui::LoadIniSettingsFromDisk("imgui.ini");
 
     unsigned char* pixels;
     int width, height;
@@ -55,14 +58,12 @@ void ImGuiRenderer::init()
 void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAccess> output)
 {
     auto& r = get_renderer();
+
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
 
     ui_callbacks.signal();
-
-    ImGui::Begin("asdf");
-    ImGui::End();
 
     ImGui::Render();
 
@@ -97,8 +98,8 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
             this->output = get_renderer().imgui_input;
         },
         [this, &r](RenderGraph& graph, RenderGraph::PassBuilder& builder) {
-            r.gq->wait_sync(r.staging->get_wait_sem()); // todo: maybe allow rendergraph passes to inject semaphores?
             auto* cmd = builder.open_cmd_buf();
+            cmd->wait_sync(r.staging->get_wait_sem());
             ImDrawData* draw_data = ImGui::GetDrawData();
 
             Handle<RenderGraph::ResourceAccess> output{ this->output };
@@ -136,7 +137,7 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
 
             {
                 DescriptorResource bindresources[]{ DescriptorResource::as_storage(4, BufferView::init(vertex_buffer)) };
-                cmd->bind_resources(0, bindresources);
+                cmd->bind_set(0, bindresources);
             }
 
             cmd->begin_rendering(rendering_info);
@@ -185,7 +186,7 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
                     DescriptorResource bindresources[]{
                         DescriptorResource::as_sampled(5, ImageView::init(Handle<Image>{ (uint32_t)imcmd->GetTexID() - 1 }))
                     };
-                    cmd->bind_resources(1, bindresources);
+                    cmd->bind_set(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
                                       imcmd->VtxOffset + global_vtx_offset, 0);
                 }

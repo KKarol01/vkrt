@@ -54,7 +54,6 @@ void StagingBuffer::reset()
     get_context().pool->reset();
     get_context().cmd = nullptr;
     head = 0;
-    allocations.clear();
 }
 
 void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier)
@@ -219,25 +218,7 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 
     const auto aligned_size = align_up2(size, ALIGNMENT);
 
-    // second part makes sure that there are no tens of thousands allocations in the vector, as it hogs up the memory
-    if(get_free_space() == 0 || (allocations.size() > 0 && get_renderer().current_frame - last_clean > 100))
-    {
-        ENG_ASSERT(!allocations.empty());
-        flush(nullptr);
-        last_clean = get_renderer().current_frame;
-        sync->wait_cpu(~0ull, allocations.front().signal_value);
-        head = allocations.front().offset;
-        free_head = allocations.front().offset + allocations.front().real_size;
-        allocations.pop_front();
-        while(!allocations.empty())
-        {
-            auto& a = allocations.front();
-            if(!sync->wait_cpu(0ull, a.signal_value)) { break; }
-            ENG_ASSERT(free_head == a.offset);
-            free_head = a.offset + a.real_size;
-            allocations.pop_front();
-        }
-    }
+    if(get_free_space() == 0) { reset(); }
 
     const auto free_space = get_free_space();
     ENG_ASSERT(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
@@ -245,7 +226,6 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
     const auto alloc = Allocation{
         .offset = head, .size = std::min(size, real_size), .real_size = real_size, .signal_value = sync->get_next_signal_value()
     };
-    allocations.push_back(alloc);
     head = alloc.offset + alloc.real_size;
     ENG_ASSERT(head % ALIGNMENT == 0 && head <= CAPACITY);
     return alloc;

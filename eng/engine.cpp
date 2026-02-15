@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <filesystem>
 #include <GLFW/glfw3.h>
+#include <eng/ui/ui.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
@@ -9,7 +10,6 @@
 #include <eng/common/paths.hpp>
 #include <eng/camera.hpp>
 #include <eng/scene.hpp>
-#include <eng/ui.hpp>
 #include <eng/ecs/ecs.hpp>
 
 static void on_mouse_move(GLFWwindow* window, double px, double py)
@@ -126,7 +126,7 @@ void Engine::init(int argc, char* argv[])
     window = new Window{ 1280.0f, 768.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};
-    ui = new eng::UI{};
+    ui = new ui::UI{};
     scene = new eng::Scene{};
 
     window->init();
@@ -154,7 +154,6 @@ void Engine::start()
             const float now = get_time_secs();
             on_update.signal();
             camera->update();
-            ui->update();
             scene->update();
             renderer->update();
             ++tick;
