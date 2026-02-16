@@ -25,15 +25,15 @@ void Renderer::init() {}
 
 void Renderer::update()
 {
-    //for(auto e : Engine::get().scene->scene)
+    // for(auto e : Engine::get().scene->scene)
     //{
-    //     Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
-    //         if(Engine::get().ecs->has<ecs::Mesh>(e))
-    //         {
-    //             Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
-    //         };
-    //     });
-    //}
+    //      Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
+    //          if(Engine::get().ecs->has<ecs::Mesh>(e))
+    //          {
+    //              Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
+    //          };
+    //      });
+    // }
 
     // Engine::get().renderer->rgraph->add_pass(
     //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::DEFAULT_UNLIT - 1 },
@@ -105,7 +105,7 @@ void App::on_init()
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
     glm::uvec3 resolution(10, 5, 10); // lights per axis
 
-    //uint32_t numLights = resolution.x * resolution.y * resolution.z;
+    // uint32_t numLights = resolution.x * resolution.y * resolution.z;
     glm::vec3 step = (aabbMax - aabbMin) / glm::vec3(resolution - 1u);
 
     //{
@@ -128,7 +128,7 @@ void App::on_init()
     //}
 
     auto light_aggregate = ecs->create();
-    ecs->emplace(light_aggregate, ecs::Node{ .name = "Lights" }, ecs::Transform::from(glm::vec3{}));
+    ecs->add_components(light_aggregate, ecs::Node{ .name = "Lights" }, ecs::Transform::from(glm::vec3{}));
     for(uint32_t z = 0; z < resolution.z; ++z)
     {
         for(uint32_t y = 0; y < resolution.y; ++y)
@@ -140,8 +140,8 @@ void App::on_init()
 
                 auto light = ecs->create();
                 ecs->make_child(light_aggregate, light); // so they look nice in the scene hierarchy
-                ecs->emplace(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
-                             ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
+                ecs->add_components(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
+                                    ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
                 // Engine::get().renderer->add_light(light);
             }
         }

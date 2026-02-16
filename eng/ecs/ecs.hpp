@@ -129,7 +129,7 @@ class Registry
     }
 
   public:
-    bool has(entity_id eid) { return entities.has(eid.slot()) && get_md(eid).version == eid.version(); }
+    bool has(entity_id eid) const { return entities.has(eid.slot()) && get_md(eid).version == eid.version(); }
 
     entity_id create()
     {
@@ -160,6 +160,7 @@ class Registry
         }
         entities.erase(eid.slot());
         hierarchy.erase(md.hierarchy_key);
+        md.sig = {};
         ++md.version;
     }
 
@@ -171,7 +172,7 @@ class Registry
             ENG_ERROR("Invalid entity {}", *eid);
             return null_component;
         }
-        return get_pool<Component>().get(eid.slot());
+        return get_pool<Component>().get(entity{ eid.slot() });
     }
 
     template <typename... Components> void add_components(entity_id eid, Components&&... components)
@@ -183,7 +184,7 @@ class Registry
         }
 
         const signature sig{ (ComponentPool<Components>::get_bit() | ...) };
-        auto& md = metadatas[get_index(eid)];
+        auto& md = get_md(eid);
         if((sig & md.sig).any())
         {
             ENG_ERROR("Entity {} already has some of these components {}", *eid, (sig & md.sig).to_string());
@@ -192,7 +193,7 @@ class Registry
 
         const auto emplace_component = [this, eid]<typename T>(auto&& comp) {
             auto& pool = get_pool<T>();
-            pool.emplace(eid, std::forward<decltype(comp)>(comp));
+            pool.emplace(entity{ eid.slot() }, std::forward<decltype(comp)>(comp));
         };
         (emplace_component.template operator()<Components>(std::forward<Components>(components)), ...);
         md.sig |= sig;
@@ -201,12 +202,12 @@ class Registry
     template <typename... Components> void erase_components(entity_id eid)
     {
         const signature sig{ (ComponentPool<Components>::get_bit() | ...) };
-        auto& md = metadatas[get_index(eid)];
+        auto& md = metadatas[eid.slot()];
         ENG_ASSERT((md.sig & sig) == sig);
 
         const auto remove_component = [this, eid]<typename T>() {
             auto& pool = get_pool<T>();
-            pool.erase(eid);
+            pool.erase(entity{ eid.slot() });
         };
         (remove_component.template operator()<Components>(), ...);
         md.sig &= ~sig;
@@ -227,7 +228,7 @@ class Registry
         hierarchy.make_child(get_md(parentid).hierarchy_key, get_md(childid).hierarchy_key);
     }
 
-    entity_id get_parent(entity_id eid)
+    entity_id get_parent(entity_id eid) const
     {
         if(!has(eid))
         {
@@ -237,6 +238,17 @@ class Registry
         const auto p = hierarchy.get_parent(get_md(eid).hierarchy_key);
         if(!p) { return entity_id{}; }
         return hierarchy.at(p);
+    }
+
+    bool has_children(entity_id eid) const
+    {
+        if(!has(eid))
+        {
+            ENG_ERROR("Entity {} is invalid", *eid);
+            return false;
+        }
+        const auto& md = get_md(eid);
+        return (bool)hierarchy.get_first_child(md.hierarchy_key);
     }
 
     void loop_over_children(entity_id eid, const auto& callback)
@@ -273,7 +285,7 @@ class Registry
     }
 
     template <typename... Components>
-    view_id get_view(std::optional<component_update_callback_t> on_update_callback = {})
+    void add_on_update(std::optional<component_update_callback_t> on_update_callback = {})
     {
         const auto sig = get_signature<Components...>();
         const auto sigint = sig.to_ulong();
@@ -290,6 +302,7 @@ class Registry
 
   private:
     EntityMetadata& get_md(entity_id eid) { return metadatas[eid.slot()]; }
+    const EntityMetadata& get_md(entity_id eid) const { return metadatas[eid.slot()]; }
 
     template <typename Component> ComponentPool<Component>& get_pool()
     {
@@ -298,11 +311,13 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*pools[idx]);
     }
 
+    //View& get_view()
+
     SparseSet<entity::storage_type> entities;
     IndexedHierarchy<entity_id> hierarchy;
     std::vector<EntityMetadata> metadatas;
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools;
-    std::unordered_map<view_id, View> views;
+    std::unordered_map<component_id, View> views;
 };
 
 } // namespace ecs

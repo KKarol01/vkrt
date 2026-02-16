@@ -59,6 +59,7 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
+    Engine::get().ecs->get_view
     ecs_mesh_view =
         Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>([this](ecs::entity_id e) { instance_entity(e); },
                                                                [this](ecs::entity_id e, ecs::signature sig) {

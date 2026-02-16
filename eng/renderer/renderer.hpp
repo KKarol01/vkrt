@@ -829,8 +829,6 @@ class Renderer
     HandleFlatSet<Material> materials;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::entity_id> new_transforms;
-    ecs::View<ecs::Transform, ecs::Mesh> ecs_mesh_view;
-    ecs::View<ecs::Light> ecs_light_view;
     RenderPasses render_passes;
     std::vector<ecs::entity_id> new_lights;
 

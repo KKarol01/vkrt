@@ -7,7 +7,7 @@
 int main(int argc, char* argv[])
 {
     {
-        using namespace eng::ecs2;
+        using namespace eng::ecs;
 
         Registry reg;
 

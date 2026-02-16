@@ -105,7 +105,7 @@ class Scene
                 int bvh_level{};
                 // bool selected{};
             };
-            ecs::entity_id sel_entity{ ecs::INVALID_ENTITY };
+            ecs::entity_id sel_entity{};
             std::unordered_map<ecs::entity_id, Node> nodes;
         };
 

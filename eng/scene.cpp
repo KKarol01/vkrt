@@ -416,16 +416,16 @@ asset::Model* Scene::load_from_file(const std::filesystem::path& _path)
 
 ecs::entity_id Scene::instance_model(const asset::Model* model)
 {
-    if(!model) { return eng::ecs::INVALID_ENTITY; }
+    if(!model) { return ecs::entity_id{}; }
 
     static constexpr auto make_hierarchy = [](const auto& self, const asset::Model& model,
                                               const asset::Model::Node& node, ecs::entity_id parent) -> ecs::entity_id {
         auto* ecsr = Engine::get().ecs;
         auto entity = ecsr->create();
-        ecsr->emplace(entity, ecs::Node{ node.name, &model });
-        ecsr->emplace(entity, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
-        if(node.mesh != ~0u) { ecsr->emplace(entity, ecs::Mesh{ &model.meshes.at(node.mesh), ~0u }); }
-        if(parent != ecs::INVALID_ENTITY) { ecsr->make_child(parent, entity); }
+        ecsr->add_components(entity, ecs::Node{ node.name, &model });
+        ecsr->add_components(entity, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
+        if(node.mesh != ~0u) { ecsr->add_components(entity, ecs::Mesh{ &model.meshes.at(node.mesh), ~0u }); }
+        if(!parent) { ecsr->make_child(parent, entity); }
         for(const auto& e : node.children)
         {
             self(self, model, model.nodes.at(e), entity);
@@ -433,20 +433,15 @@ ecs::entity_id Scene::instance_model(const asset::Model* model)
         return entity;
     };
 
-    const auto instance = make_hierarchy(make_hierarchy, *model, model->nodes.at(model->root_node), ecs::INVALID_ENTITY);
+    const auto instance = make_hierarchy(make_hierarchy, *model, model->nodes.at(model->root_node), ecs::entity_id{});
     scene.push_back(instance);
     return instance;
 }
 
 void Scene::update_transform(ecs::entity_id entity)
 {
-    if(entity == ecs::INVALID_ENTITY) { return; }
-    auto* et = Engine::get().ecs->get<ecs::Transform>(entity);
-    if(!et)
-    {
-        ENG_WARN("Entity does not have transform component.");
-        return;
-    }
+    if(!entity) { return; }
+    auto& et = Engine::get().ecs->get<ecs::Transform>(entity);
     pending_transforms.push_back(entity);
 }
 
@@ -465,7 +460,7 @@ void Scene::update()
         {
             auto p = e;
             auto passes = true;
-            while(p != ecs::INVALID_ENTITY)
+            while(p)
             {
                 p = Engine::get().ecs->get_parent(p);
                 if(visited.contains(p))
@@ -484,10 +479,10 @@ void Scene::update()
             std::stack<ecs::entity_id> visit;
             std::stack<glm::mat4> trs;
             visit.push(e);
-            if(p != ecs::INVALID_ENTITY)
+            if(p)
             {
-                auto* pt = Engine::get().ecs->get<ecs::Transform>(p);
-                trs.push(pt->global);
+                auto& pt = Engine::get().ecs->get<ecs::Transform>(p);
+                trs.push(pt.global);
             }
             else { trs.push(glm::identity<glm::mat4>()); }
 
@@ -498,15 +493,13 @@ void Scene::update()
                 auto pt = trs.top();
                 visit.pop();
                 trs.pop();
-                auto* t = Engine::get().ecs->get<ecs::Transform>(e);
-                t->global = t->local * pt;
+                auto& t = Engine::get().ecs->get<ecs::Transform>(e);
+                t.global = t.local * pt;
                 Engine::get().renderer->update_transform(e);
-                const auto& ech = Engine::get().ecs->get_children(e);
-                for(auto i = 0u; i < ech.size(); ++i)
-                {
-                    trs.push(t->global);
-                    visit.push(ech[i]);
-                }
+                Engine::get().ecs->loop_over_children(e, [&t, &trs, &visit](auto e) {
+                    trs.push(t.global);
+                    visit.push(e);
+                });
             }
         }
         pending_transforms.clear();
@@ -517,19 +510,15 @@ void Scene::ui_draw_scene()
 {
     const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity_id e, bool expand, const auto& self) -> void {
         ui.scene.nodes[e].expanded = expand;
-        for(auto ch : reg->get_children(e))
-        {
-            self(reg, ch, expand, self);
-        }
+        reg->loop_over_children(e, [&](ecs::entity_id ch) { self(reg, ch, expand, self); });
     };
 
     const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity_id e, const auto& self) -> void {
         const auto enode = reg->get<ecs::Node>(e);
-        const auto& echildren = reg->get_children(e);
-        ImGui::PushID((int)e);
+        ImGui::PushID((int)*e);
         auto& ui_node = ui.scene.nodes[e];
         // ImGui::BeginGroup();
-        if(echildren.size())
+        if(reg->has_children(e))
         {
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().ItemSpacing * 0.5f);
             if(ImGui::ArrowButton("expand_btn", ui_node.expanded ? ImGuiDir_Down : ImGuiDir_Right))
@@ -544,7 +533,7 @@ void Scene::ui_draw_scene()
             auto cpos = ImGui::GetCursorScreenPos();
             ImGui::SetCursorScreenPos(cpos + ImVec2{ -ImGui::GetStyle().ItemSpacing.x * 0.5f, 0.0f });
             ImGui::GetItemRectSize();
-            if(ImGui::Selectable(enode->name.c_str(), &is_sel)) { ui.scene.sel_entity = e; }
+            if(ImGui::Selectable(enode.name.c_str(), &is_sel)) { ui.scene.sel_entity = e; }
         }
         // ImGui::EndGroup();
         if(ImGui::IsItemClicked() && ImGui::IsMouseDoubleClicked(0))
@@ -555,10 +544,7 @@ void Scene::ui_draw_scene()
         if(ui_node.expanded)
         {
             ImGui::Indent();
-            for(const auto& ec : echildren)
-            {
-                self(reg, ec, self);
-            }
+            reg->loop_over_children(e, [&](ecs::entity_id ec) { self(reg, ec, self); });
             ImGui::Unindent();
         }
         ImGui::PopID();
@@ -571,15 +557,15 @@ void Scene::ui_draw_scene()
 
 void Scene::ui_draw_inspector()
 {
-    if(ui.scene.sel_entity == ecs::INVALID_ENTITY) { return; }
+    if(!ui.scene.sel_entity) { return; }
 
     auto* ecs = Engine::get().ecs;
     auto& entity = ui.scene.sel_entity;
     auto& uie = ui.scene.nodes.at(entity);
-    auto* ctransform = ecs->get<ecs::Transform>(entity);
-    auto* cnode = ecs->get<ecs::Node>(entity);
-    auto* cmesh = ecs->get<ecs::Mesh>(entity);
-    auto* clight = ecs->get<ecs::Light>(entity);
+    auto& ctransform = ecs->get<ecs::Transform>(entity);
+    auto& cnode = ecs->get<ecs::Node>(entity);
+    auto& cmesh = ecs->get<ecs::Mesh>(entity);
+    auto& clight = ecs->get<ecs::Light>(entity);
 
     ENG_ASSERT(false);
 
@@ -659,13 +645,13 @@ void Scene::ui_draw_inspector()
 
 void Scene::ui_draw_manipulate()
 {
-    if(ui.scene.sel_entity == ecs::INVALID_ENTITY) { return; }
+    if(!ui.scene.sel_entity) { return; }
 
     auto* ecs = Engine::get().ecs;
     auto& entity = ui.scene.sel_entity;
-    auto* ctransform = ecs->get<ecs::Transform>(entity);
-    auto* cnode = ecs->get<ecs::Node>(entity);
-    auto* cmesh = ecs->get<ecs::Mesh>(entity);
+    auto& ctransform = ecs->get<ecs::Transform>(entity);
+    auto& cnode = ecs->get<ecs::Node>(entity);
+    auto& cmesh = ecs->get<ecs::Mesh>(entity);
 
     auto& io = ImGui::GetIO();
     auto& style = ImGui::GetStyle();
@@ -683,10 +669,10 @@ void Scene::ui_draw_manipulate()
     const auto window_pos = ImGui::GetWindowPos();
     glm::mat4 tr{ 1.0f };
     ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
-    auto translation = ctransform->global;
+    auto translation = ctransform.global;
     glm::mat4 delta;
     if(ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::OPERATION::TRANSLATE, ImGuizmo::MODE::LOCAL,
-                            &ctransform->local[0][0]))
+                            &ctransform.local[0][0]))
     {
         update_transform(entity);
     }
