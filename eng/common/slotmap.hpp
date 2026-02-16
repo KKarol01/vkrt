@@ -82,7 +82,7 @@ template <typename UserType, size_t PAGE_SIZE> class Slotmap
     }
 
     void for_each(const auto& callback) {
-        for(auto i=0ull;)
+        //for(auto i=0ull;)
     }
 
   private:

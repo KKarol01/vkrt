@@ -6,20 +6,13 @@
 #include <vector>
 #include <variant>
 #include <eng/common/logger.hpp>
+#include <eng/common/handle.hpp>
 
 template <typename UserType> class IndexedHierarchy
 {
   public:
-    struct element_id
-    {
-        using storage = uint32_t;
-        element_id() = default;
-        explicit element_id(storage val) : entity(val) {}
-        storage operator*() const { return entity; }
-        explicit operator bool() const { return entity != ~storage{}; }
-        auto operator<=>(const element_id&) const = default;
-        storage entity{ ~storage{} };
-    };
+    struct element_id_t;
+    using element_id = eng::TypedIntegral<element_id_t, uint32_t>;
 
   private:
     struct Element
@@ -53,7 +46,7 @@ template <typename UserType> class IndexedHierarchy
             return idx;
         }
         elements.push_back(Element{ UserType{ std::forward<Args>(args)... } });
-        return element_id{ (typename element_id::storage)elements.size() - 1 };
+        return element_id{ (typename element_id::storage_type)elements.size() - 1 };
     }
 
     void make_child(element_id parentid, element_id childid)

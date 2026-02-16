@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <eng/common/logger.hpp>
+#include <eng/common/handle.hpp>
 
 template <typename IndexType = uint32_t> class SlotAllocator
 {
@@ -37,4 +38,37 @@ template <typename IndexType = uint32_t> class SlotAllocator
   private:
     IndexType counter{};
     std::vector<IndexType> free_list;
+};
+
+class VersionedSlotAllocator
+{
+  public:
+    struct Slot : public eng::TypedIntegral<Slot, uint64_t>
+    {
+        using TypedIntegral<Slot, uint64_t>::TypedIntegral;
+        Slot(uint32_t slot, uint32_t version) : TypedIntegral(((uint64_t)version << 32) | (uint64_t)slot) {}
+        auto operator<=>(const Slot&) const = default;
+        void inc_version() { *this = Slot{ slot(), version() + 1 }; }
+        uint32_t slot() const { return (uint32_t)handle; }
+        uint32_t version() const { return (uint32_t)(handle >> 32); }
+    };
+
+    Slot allocate()
+    {
+        if(free_list < slots.size()) { return slots[free_list++]; }
+        slots.emplace_back(slots.size(), 0);
+        ++free_list;
+        return slots.back();
+    }
+
+    void erase(Slot slot)
+    {
+        if(!has(slot)) { return; }
+        
+    }
+
+    bool has(Slot slot) const { return slot && slot.slot() < slots.size() && slot == slots[slot.slot()]; }
+
+    std::vector<Slot> slots;
+    size_t free_list{};
 };

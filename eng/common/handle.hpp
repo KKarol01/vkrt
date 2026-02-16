@@ -39,7 +39,7 @@ template <typename T> struct HandleDispatcher
 {
 };
 
-template <std::integral StorageType> struct TypedIntegral
+template <typename T, std::integral StorageType> struct TypedIntegral
 {
     using storage_type = StorageType;
     constexpr TypedIntegral() = default;
@@ -51,9 +51,9 @@ template <std::integral StorageType> struct TypedIntegral
 };
 
 template <typename T, std::integral StorageType = typename HandleStorage<T>::storage_type>
-struct Handle : TypedIntegral<StorageType>
+struct Handle : TypedIntegral<T, StorageType>
 {
-    using TypedIntegral<StorageType>::TypedIntegral;
+    using TypedIntegral<T, StorageType>::TypedIntegral;
     auto* operator->() { return HandleDispatcher<T>{}(*this); }
     const auto* operator->() const { return HandleDispatcher<T>{}(*this); }
     auto& get() { return *HandleDispatcher<T>{}(*this); }

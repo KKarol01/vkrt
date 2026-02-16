@@ -29,22 +29,30 @@ namespace ecs
 using component_id = uint32_t;
 
 // This is the client's versioned handle. Internally it's made from entity_t
-struct entity_id_t;
+struct entity_t;
 struct view_id_t;
-using entity_id = Handle<entity_id_t, uint64_t>;
-using view_id = Handle<view_id_t, component_id>;
-using component_update_callback_t = Callback<void(entity_id eid, signature updated)>;
-// using component_delete_callback_t = Callback<void(entity_id eid)>; // no delete for now
+struct entity_id : public TypedIntegral<entity_id, uint64_t>
+{
+    explicit entity_id() : entity_id(~0u, ~0u) {}
+    entity_id(uint32_t slot, uint32_t version) : TypedIntegral(((uint64_t)version << 32) | (uint64_t)slot) {}
+    auto operator<=>(const entity_id&) const = default;
+    uint32_t slot() const { return (uint32_t)handle; }
+    uint32_t version() const { return (uint32_t)(handle >> 32); }
+};
+using view_id = TypedIntegral<view_id_t, component_id>;
+using entity = TypedIntegral<entity_t, uint32_t>;
 
 inline static constexpr size_t MAX_COMPONENTS = std::numeric_limits<component_id>::digits;
 inline static std::atomic_uint32_t component_id_generator{};
 
 using signature = std::bitset<MAX_COMPONENTS>;
+using component_update_callback_t = Callback<void(entity_id eid, signature updated)>;
+// using component_delete_callback_t = Callback<void(entity_id eid)>; // no delete for now
 
 struct IComponentPool
 {
     virtual ~IComponentPool() = default;
-    virtual void erase(entity_id entity) = 0;
+    virtual void erase(entity e) = 0;
 };
 
 template <typename Component> struct ComponentPool : public IComponentPool
@@ -56,19 +64,19 @@ template <typename Component> struct ComponentPool : public IComponentPool
     }
     static component_id get_bit() { return component_id{ 1 } << get_index(); }
 
-    Component& get(entity_id entity)
+    Component& get(entity e)
     {
-        const auto idx = entities.get(*entity);
-        if(!idx) { ENG_ERROR("Invalid entity {}", *entity); }
+        const auto idx = entities.get(*e);
+        if(!idx) { ENG_ERROR("Invalid entity {}", *e); }
         return components[*idx];
     }
 
-    template <typename... Args> void emplace(entity_id entity, Args&&... args)
+    template <typename... Args> void emplace(entity e, Args&&... args)
     {
-        const auto it = entities.insert(*entity);
+        const auto it = entities.insert(*e);
         if(!it)
         {
-            ENG_ERROR("Overwriting entity {}", *entity);
+            ENG_ERROR("Overwriting entity {}", *e);
             return;
         }
         if(*it < components.size()) { std::construct_at<Component>(&components[*it], std::forward<Args>(args)...); }
@@ -79,12 +87,12 @@ template <typename Component> struct ComponentPool : public IComponentPool
         }
     }
 
-    void erase(entity_id entity) override
+    void erase(entity e) override
     {
-        const auto it = entities.erase(*entity);
+        const auto it = entities.erase(*e);
         if(!it)
         {
-            ENG_ERROR("Trying to delete invalid entity {}", *entity);
+            ENG_ERROR("Trying to delete invalid entity {}", *e);
             return;
         }
         components[*it] = std::move(components.back());
@@ -101,6 +109,7 @@ class Registry
     {
         signature sig;
         IndexedHierarchy<entity_id>::element_id hierarchy_key;
+        uint32_t version{};
     };
 
     struct View
@@ -120,54 +129,54 @@ class Registry
     }
 
   public:
-    bool has(entity_id eid) { return entities.has(SlotIndex::init(*eid)); }
+    bool has(entity_id eid) { return entities.has(eid.slot()) && get_md(eid).version == eid.version(); }
 
     entity_id create()
     {
-        if(slots.size() == MAX_ENTITY)
+        auto eit = entities.insert();
+        if(!eit)
         {
             ENG_ASSERT(false, "Too many entities");
-            return entity_id{ *SlotIndex{} };
+            return entity_id{};
         }
-        const auto index = entities.insert(slots.insert());
-        if(metadatas.size() == index.index) { metadatas.emplace_back(); }
-        metadatas[index.index].hierarchy_key = hierarchy.insert(*index);
-        return entity_id{ *index };
+        if(metadatas.size() == *eit) { metadatas.emplace_back(); }
+        const auto version = metadatas[*eit].version;
+        const auto eid = entity_id{ *eit, version };
+        metadatas[*eit].hierarchy_key = hierarchy.insert(eid);
+        return entity_id{ *eit, version };
     }
 
     void erase(entity_id eid)
     {
-        const auto index = SlotIndex::init(*eid);
-        if(!entities.has(index))
+        if(!has(eid))
         {
             ENG_ERROR("Tried to delete stale entity {}", *eid);
             return;
         }
-        auto& md = metadatas[index.index];
+        auto& md = get_md(eid);
         for(auto i = 0u; i < md.sig.size(); ++i)
         {
-            if(md.sig.test(i)) { pools[i]->erase(eid); }
+            if(md.sig.test(i)) { pools[i]->erase(entity{ eid.slot() }); }
         }
-        slots.erase(entities.at(index));
+        entities.erase(eid.slot());
         hierarchy.erase(md.hierarchy_key);
-        entities.erase(index);
-        md = {};
+        ++md.version;
     }
 
     template <typename Component> Component& get(entity_id eid)
     {
-        if(!entities.has(SlotIndex::init(*eid)))
+        if(!has(eid))
         {
             static Component null_component = {};
             ENG_ERROR("Invalid entity {}", *eid);
             return null_component;
         }
-        return get_pool<Component>().get(eid);
+        return get_pool<Component>().get(eid.slot());
     }
 
     template <typename... Components> void add_components(entity_id eid, Components&&... components)
     {
-        if(!entities.has(SlotIndex::init(*eid)))
+        if(!has(eid))
         {
             ENG_ERROR("Invalid entity {}", *eid);
             return;
@@ -266,13 +275,13 @@ class Registry
     template <typename... Components>
     view_id get_view(std::optional<component_update_callback_t> on_update_callback = {})
     {
-        const auto sig = get_signature<Components>();
+        const auto sig = get_signature<Components...>();
         const auto sigint = sig.to_ulong();
         if(!views.contains(sig))
         {
             views.emplace(sigint, View{ sig });
-            //for(auto i = 0ull; i <)
-            //    ;
+            // for(auto i = 0ull; i <)
+            //     ;
         }
         auto& view = views.at(sigint);
         if(on_update_callback) { view.on_update_callbacks += *on_update_callback; }
@@ -280,9 +289,7 @@ class Registry
     }
 
   private:
-    EntityMetadata& get_md(entity_id eid) { return metadatas[get_index(eid)]; }
-    entity_t get_index(entity_id eid) const { return SlotIndex::init(*eid).index; }
-    entity_t get_version(entity_id eid) const { return SlotIndex::init(*eid).version; }
+    EntityMetadata& get_md(entity_id eid) { return metadatas[eid.slot()]; }
 
     template <typename Component> ComponentPool<Component>& get_pool()
     {
@@ -291,11 +298,10 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*pools[idx]);
     }
 
-    SparseSet<entity_t, 1024> slots;
-    Slotmap<entity_t, 1024> entities; // for versioning entities and keeping lifetimes
-    std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools;
+    SparseSet<entity::storage_type> entities;
     IndexedHierarchy<entity_id> hierarchy;
     std::vector<EntityMetadata> metadatas;
+    std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools;
     std::unordered_map<view_id, View> views;
 };
 
