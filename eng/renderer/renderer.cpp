@@ -59,24 +59,25 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    ecs_mesh_view = Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>([this](ecs::entity e) { instance_entity(e); },
-                                                                           [this](ecs::entity e, ecs::signature sig) {
-                                                                               if(sig.test(ecs::get_id<ecs::Transform>()))
-                                                                               {
-                                                                                   new_transforms.push_back(e);
-                                                                               }
-                                                                               if(sig.test(ecs::get_id<ecs::Mesh>()))
-                                                                               {
-                                                                                   ENG_TODO();
-                                                                                   ENG_ASSERT(false);
-                                                                               }
-                                                                           });
+    ecs_mesh_view =
+        Engine::get().ecs->get_view<ecs::Transform, ecs::Mesh>([this](ecs::entity_id e) { instance_entity(e); },
+                                                               [this](ecs::entity_id e, ecs::signature sig) {
+                                                                   if(sig.test(ecs::get_id<ecs::Transform>()))
+                                                                   {
+                                                                       new_transforms.push_back(e);
+                                                                   }
+                                                                   if(sig.test(ecs::get_id<ecs::Mesh>()))
+                                                                   {
+                                                                       ENG_TODO();
+                                                                       ENG_ASSERT(false);
+                                                                   }
+                                                               });
     ecs_light_view = Engine::get().ecs->get_view<ecs::Light>(
-        [this](ecs::entity e) {
+        [this](ecs::entity_id e) {
             new_lights.push_back(e);
             ++bufs.light_count;
         },
-        [this](ecs::entity e, ecs::signature sig) { new_lights.push_back(e); });
+        [this](ecs::entity_id e, ecs::signature sig) { new_lights.push_back(e); });
 
     // Engine::get().ui->add_tab(UI::Tab{
     //     "Debug",
@@ -361,7 +362,7 @@ void Renderer::init_rgraph_passes()
     //                                                                                rgraphpasses->swapcbufsview, swapchain });
 }
 
-void Renderer::instance_entity(ecs::entity e)
+void Renderer::instance_entity(ecs::entity_id e)
 {
     if(!Engine::get().ecs->has<ecs::Transform, ecs::Mesh>(e))
     {
@@ -463,9 +464,9 @@ void Renderer::update()
         staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
-            const auto* trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
-            const auto* msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
-            staging->copy(bufs.transforms[0], &trs->global, msh->gpu_resource * sizeof(trs->global), sizeof(trs->global));
+            const auto& trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
+            const auto& msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
+            staging->copy(bufs.transforms[0], &trs.global, msh.gpu_resource * sizeof(trs.global), sizeof(trs.global));
         }
         new_transforms.clear();
     }
@@ -477,11 +478,11 @@ void Renderer::update()
         staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
         for(auto i = 0u; i < new_lights.size(); ++i)
         {
-            auto* l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
-            const auto* t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
-            if(l->gpu_index == ~0u) { l->gpu_index = gpu_light_allocator.allocate(); }
-            GPULight gpul{ t->pos(), l->range, l->color, l->intensity, (uint32_t)l->type };
-            staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l->gpu_index * sizeof(GPULight),
+            auto& l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
+            const auto& t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
+            if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
+            GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
+            staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
                           sizeof(GPULight));
         }
         const auto lc = (uint32_t)ecs_light_view.size();
@@ -992,7 +993,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
     resize_buffer(handle, new_size, copy_data);
 }
 
-void Renderer::update_transform(ecs::entity entity)
+void Renderer::update_transform(ecs::entity_id entity)
 {
     if(Engine::get().ecs->get<ecs::Mesh>(entity)) { new_transforms.push_back(entity); }
     if(Engine::get().ecs->get<ecs::Light>(entity)) { new_lights.push_back(entity); }

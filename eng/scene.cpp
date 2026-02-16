@@ -414,12 +414,12 @@ asset::Model* Scene::load_from_file(const std::filesystem::path& _path)
     return nullptr;
 }
 
-ecs::entity Scene::instance_model(const asset::Model* model)
+ecs::entity_id Scene::instance_model(const asset::Model* model)
 {
     if(!model) { return eng::ecs::INVALID_ENTITY; }
 
     static constexpr auto make_hierarchy = [](const auto& self, const asset::Model& model,
-                                              const asset::Model::Node& node, ecs::entity parent) -> ecs::entity {
+                                              const asset::Model::Node& node, ecs::entity_id parent) -> ecs::entity_id {
         auto* ecsr = Engine::get().ecs;
         auto entity = ecsr->create();
         ecsr->emplace(entity, ecs::Node{ node.name, &model });
@@ -438,7 +438,7 @@ ecs::entity Scene::instance_model(const asset::Model* model)
     return instance;
 }
 
-void Scene::update_transform(ecs::entity entity)
+void Scene::update_transform(ecs::entity_id entity)
 {
     if(entity == ecs::INVALID_ENTITY) { return; }
     auto* et = Engine::get().ecs->get<ecs::Transform>(entity);
@@ -455,10 +455,10 @@ void Scene::update()
     // Relies on pending transforms not having child nodes of other nodes (no two nodes from the same hierarchy)
     if(pending_transforms.size())
     {
-        std::unordered_set<ecs::entity> visited;
+        std::unordered_set<ecs::entity_id> visited;
 
         // leave only those entities, who have no ancestors in the pending trs.
-        std::vector<ecs::entity> filtered;
+        std::vector<ecs::entity_id> filtered;
         filtered.reserve(pending_transforms.size());
         visited.insert(pending_transforms.begin(), pending_transforms.end());
         for(auto e : pending_transforms)
@@ -481,7 +481,7 @@ void Scene::update()
         for(auto e : pending_transforms)
         {
             const auto p = Engine::get().ecs->get_parent(e);
-            std::stack<ecs::entity> visit;
+            std::stack<ecs::entity_id> visit;
             std::stack<glm::mat4> trs;
             visit.push(e);
             if(p != ecs::INVALID_ENTITY)
@@ -515,7 +515,7 @@ void Scene::update()
 
 void Scene::ui_draw_scene()
 {
-    const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity e, bool expand, const auto& self) -> void {
+    const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity_id e, bool expand, const auto& self) -> void {
         ui.scene.nodes[e].expanded = expand;
         for(auto ch : reg->get_children(e))
         {
@@ -523,7 +523,7 @@ void Scene::ui_draw_scene()
         }
     };
 
-    const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity e, const auto& self) -> void {
+    const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity_id e, const auto& self) -> void {
         const auto enode = reg->get<ecs::Node>(e);
         const auto& echildren = reg->get_children(e);
         ImGui::PushID((int)e);

@@ -5,6 +5,7 @@
 #include <concepts>
 #include <atomic>
 #include <cassert>
+#include <type_traits>
 
 namespace eng
 {
@@ -38,23 +39,25 @@ template <typename T> struct HandleDispatcher
 {
 };
 
-template <typename T> struct Handle
+template <std::integral StorageType> struct TypedIntegral
 {
-    using storage_type = typename HandleStorage<T>::storage_type;
-    constexpr Handle() = default;
-    constexpr explicit Handle(storage_type handle) : handle{ handle } {}
-    explicit Handle(GenerateHandle) : handle{ HandleGenerator<T>::gen() } {}
+    using storage_type = StorageType;
+    constexpr TypedIntegral() = default;
+    constexpr explicit TypedIntegral(storage_type handle) : handle{ handle } {}
     constexpr storage_type operator*() const { return handle; }
-    constexpr auto operator<=>(const Handle& h) const = default;
+    constexpr auto operator<=>(const TypedIntegral& h) const = default;
     constexpr explicit operator bool() const { return handle != ~storage_type{}; }
+    storage_type handle{ ~storage_type{} };
+};
 
+template <typename T, std::integral StorageType = typename HandleStorage<T>::storage_type>
+struct Handle : TypedIntegral<StorageType>
+{
+    using TypedIntegral<StorageType>::TypedIntegral;
     auto* operator->() { return HandleDispatcher<T>{}(*this); }
     const auto* operator->() const { return HandleDispatcher<T>{}(*this); }
-
     auto& get() { return *HandleDispatcher<T>{}(*this); }
     auto& get() const { return *HandleDispatcher<T>{}(*this); }
-
-    storage_type handle{ ~storage_type{} };
 };
 
 #define ENG_DEFINE_HANDLE_ALL_GETTERS(type, body)                                                                      \

@@ -136,6 +136,7 @@ target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_compile_options(eng PRIVATE
     -Wall -Wextra -Werror -Wpedantic
     -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=missing-field-initializers
+    -Wno-error=unused-lambda-capture
     -Wno-error=missing-designated-field-initializers
     -Wmissing-designated-field-initializers
 )

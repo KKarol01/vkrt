@@ -437,12 +437,12 @@ struct MeshDescriptor
 
 struct InstanceSettings
 {
-    ecs::entity entity;
+    ecs::entity_id entity;
 };
 
 struct BLASInstanceSettings
 {
-    ecs::entity entity;
+    ecs::entity_id entity;
 };
 
 // struct VsmData
@@ -679,7 +679,7 @@ class Renderer
             IndirectBatch draw;
             Handle<Buffer> instance_buffer;
             BufferView instance_view;
-            std::vector<ecs::entity> entities;
+            std::vector<ecs::entity_id> entities;
             std::vector<MeshInstance> mesh_instances;
         };
         Pass& get(RenderPassType type) { return passes[(int)type]; }
@@ -754,7 +754,7 @@ class Renderer
     void init_bufs();
     void init_rgraph_passes();
 
-    void instance_entity(ecs::entity e);
+    void instance_entity(ecs::entity_id e);
 
     void update();
     void render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd);
@@ -785,7 +785,7 @@ class Renderer
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
 
     // void instance_blas(const BLASInstanceSettings& settings);
-    void update_transform(ecs::entity entity);
+    void update_transform(ecs::entity_id entity);
 
     SubmitQueue* get_queue(QueueType type);
 
@@ -828,11 +828,11 @@ class Renderer
     // HandleFlatSet<Texture> textures;
     HandleFlatSet<Material> materials;
     std::vector<Handle<Material>> new_materials;
-    std::vector<ecs::entity> new_transforms;
+    std::vector<ecs::entity_id> new_transforms;
     ecs::View<ecs::Transform, ecs::Mesh> ecs_mesh_view;
     ecs::View<ecs::Light> ecs_light_view;
     RenderPasses render_passes;
-    std::vector<ecs::entity> new_lights;
+    std::vector<ecs::entity_id> new_lights;
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;

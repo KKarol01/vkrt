@@ -30,8 +30,6 @@ template <typename UserType, size_t PAGE_SIZE> class Slotmap
     using Page = Storage*;
 
   public:
-    Slotmap() {}
-
     UserType& at(SlotIndex index)
     {
         if(!index) { return null_object; }
@@ -77,14 +75,25 @@ template <typename UserType, size_t PAGE_SIZE> class Slotmap
     bool has(SlotIndex index) const
     {
         if(!index) { return false; }
-        size_t page_index = *index / PAGE_SIZE;
+        size_t page_index = index.index / PAGE_SIZE;
         if(page_index >= pages.size()) { return false; }
         const auto& storage = get_storage(index);
         return storage.is_occupied == 1 && storage.version == index.version;
     }
 
+    void for_each(const auto& callback) {
+        for(auto i=0ull;)
+    }
+
   private:
     Storage& get_storage(SlotIndex index)
+    {
+        size_t page_index = index.index / PAGE_SIZE;
+        size_t elem_index = index.index % PAGE_SIZE;
+        return pages[page_index][elem_index];
+    }
+
+    const Storage& get_storage(SlotIndex index) const
     {
         size_t page_index = index.index / PAGE_SIZE;
         size_t elem_index = index.index % PAGE_SIZE;

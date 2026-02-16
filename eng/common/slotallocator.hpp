@@ -31,6 +31,9 @@ template <typename IndexType = uint32_t> class SlotAllocator
         return true;
     }
 
+    // Returns the number of active slots
+    size_t size() const { return counter - (IndexType)free_list.size(); }
+
   private:
     IndexType counter{};
     std::vector<IndexType> free_list;

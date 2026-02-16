@@ -105,8 +105,8 @@ class Scene
                 int bvh_level{};
                 // bool selected{};
             };
-            ecs::entity sel_entity{ ecs::INVALID_ENTITY };
-            std::unordered_map<ecs::entity, Node> nodes;
+            ecs::entity_id sel_entity{ ecs::INVALID_ENTITY };
+            std::unordered_map<ecs::entity_id, Node> nodes;
         };
 
         Scene scene;
@@ -116,9 +116,9 @@ class Scene
     void init();
 
     asset::Model* load_from_file(const std::filesystem::path& path);
-    ecs::entity instance_model(const asset::Model* model);
+    ecs::entity_id instance_model(const asset::Model* model);
 
-    void update_transform(ecs::entity entity);
+    void update_transform(ecs::entity_id entity);
 
   public:
     void update();
@@ -127,8 +127,8 @@ class Scene
     void ui_draw_manipulate();
 
     std::unordered_map<std::filesystem::path, asset::Model> loaded_models;
-    std::vector<ecs::entity> scene;
-    std::vector<ecs::entity> pending_transforms;
+    std::vector<ecs::entity_id> scene;
+    std::vector<ecs::entity_id> pending_transforms;
 
     std::vector<Handle<gfx::Geometry>> geometries;
     std::vector<Handle<gfx::Image>> images;
