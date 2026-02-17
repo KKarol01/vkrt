@@ -91,13 +91,17 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
         idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
     }
 
-    graph->add_graphics_pass(
+    struct ImPassData
+    {
+    };
+    graph->add_graphics_pass<ImPassData>(
         "imgui",
         [this, output](RenderGraph::PassBuilder& builder) {
             get_renderer().imgui_input = *builder.access_color(output);
             this->output = get_renderer().imgui_input;
+            return ImPassData{};
         },
-        [this, &r](RenderGraph& graph, RenderGraph::PassBuilder& builder) {
+        [this, &r](RenderGraph& graph, RenderGraph::PassBuilder& builder, const ImPassData&) {
             auto* cmd = builder.open_cmd_buf();
             cmd->wait_sync(r.staging->get_wait_sem());
             ImDrawData* draw_data = ImGui::GetDrawData();

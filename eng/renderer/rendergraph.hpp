@@ -43,8 +43,8 @@ class RenderGraph
         std::variant<Color, DepthStencil> value;
     };
 
-    using SetupFunc = Callback<void(PassBuilder&)>;
-    using ExecFunc = Callback<void(RenderGraph&, PassBuilder&)>;
+    template <typename UserData> using SetupFunc = Callback<UserData(PassBuilder&)>;
+    template <typename UserData> using ExecFunc = Callback<void(RenderGraph&, PassBuilder&, const UserData&)>;
     using PassDataDeleter = Callback<void(void*)>;
 
     struct Pass
@@ -55,16 +55,33 @@ class RenderGraph
             GRAPHICS,
             COMPUTE,
         };
+        virtual ~Pass() = default;
         bool is_graphics() const { return type == Type::GRAPHICS; }
         bool is_compute() const { return type == Type::COMPUTE; }
+        virtual void execute(RenderGraph& graph) = 0;
         std::string name;
         Type type{ Type::NONE };
-        ExecFunc exec_cb{};
         std::vector<Handle<ResourceAccess>> accesses;
-        std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
+        // std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
         Flags<PipelineStage> stage_mask{};
         ICommandBuffer* cmd{};
-        std::unique_ptr<void, PassDataDeleter> pass_data;
+    };
+    template <typename UserData> struct UserPass : public Pass
+    {
+        UserPass(const std::string& name, Type type, const ExecFunc<UserData>& exec_func)
+        {
+            this->name = name;
+            this->type = type;
+            this->exec_cb = exec_func;
+        }
+        ~UserPass() override = default;
+        void execute(RenderGraph& graph) override
+        {
+            PassBuilder pb{ this, &graph };
+            exec_cb(graph, pb, user_data);
+        };
+        ExecFunc<UserData> exec_cb{};
+        UserData user_data;
     };
 
     struct Resource
@@ -113,7 +130,6 @@ class RenderGraph
 
     struct PassBuilder
     {
-
         Handle<ResourceAccess> add_resource(const Resource& resource, const std::optional<Clear>& clear = {})
         {
             graph->resources.push_back(resource);
@@ -385,9 +401,8 @@ class RenderGraph
             // todo: this should also somehow check memory types whether the resource will be compatible
             //       with the memory the allocator is managing.
             ENG_ASSERT(reqs.size > 0 && reqs.alignment > 0 && is_pow2(reqs.alignment));
-            const auto aligned =
-                next_power_of_2(std::max(align_up2(reqs.size, reqs.alignment), MIN_ALLOC)); // 65kbs rounds up to 128kbs :(
-            ENG_ASSERT(is_pow2(aligned));
+            // 65kbs rounds up to 128kbs :(
+            const auto aligned = next_power_of_2(std::max(align_up2(reqs.size, reqs.alignment), MIN_ALLOC));
             if(PAGE_SIZE < aligned)
             {
                 ENG_ASSERT(false, "Allocation too big for page");
@@ -565,18 +580,24 @@ class RenderGraph
         });
     }
 
-    void add_graphics_pass(std::string_view name, const SetupFunc& setup_cb, const ExecFunc& exec_cb)
+    template <typename UserData>
+    UserData add_graphics_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_cb)
     {
-        passes.push_back(Pass{ .name = { name.data(), name.size() }, .type = Pass::Type::GRAPHICS, .exec_cb = exec_cb });
-        PassBuilder pb{ &passes.back(), this };
-        return setup_cb(pb);
+        auto& pass = static_cast<UserPass<UserData>&>(*passes.emplace_back(std::make_unique<UserPass<UserData>>(UserPass<UserData>{
+            std::string{ name.data(), name.size() }, Pass::Type::GRAPHICS, exec_cb })));
+        PassBuilder pb{ &*passes.back(), this };
+        pass.user_data = setup_cb(pb);
+        return pass.user_data;
     }
 
-    void add_compute_pass(std::string_view name, const SetupFunc& setup_cb, const ExecFunc& exec_cb)
+    template <typename UserData>
+    UserData add_compute_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_cb)
     {
-        passes.push_back(Pass{ .name = { name.data(), name.size() }, .type = Pass::Type::COMPUTE, .exec_cb = exec_cb });
-        PassBuilder pb{ &passes.back(), this };
-        return setup_cb(pb);
+        auto& pass = static_cast<UserPass<UserData>&>(*passes.emplace_back(std::make_unique<UserPass<UserData>>(UserPass<UserData>{
+            std::string{ name.data(), name.size() }, Pass::Type::COMPUTE, exec_cb })));
+        PassBuilder pb{ &*passes.back(), this };
+        pass.user_data = setup_cb(pb);
+        return pass.user_data;
     }
 
     void compile()
@@ -618,10 +639,10 @@ class RenderGraph
         uint32_t last_gid = 0;
         for(auto& p : passes)
         {
-            const auto gid = calc_earliest_group(p.accesses);
+            const auto gid = calc_earliest_group(p->accesses);
             last_gid = std::max(last_gid, gid);
-            groups[gid].passes.push_back(&p);
-            update_access_groups(p.accesses, gid);
+            groups[gid].passes.push_back(&*p);
+            update_access_groups(p->accesses, gid);
         }
         groups.resize(last_gid + 1);
 
@@ -720,8 +741,7 @@ class RenderGraph
 
             for(auto* p : g.passes)
             {
-                PassBuilder pb{ p, this };
-                p->exec_cb(*this, pb);
+                p->execute(*this);
                 if(!p->cmd) { continue; }
                 p->cmd->end_label();
                 cmd_pools[0]->end(p->cmd);
@@ -773,7 +793,7 @@ class RenderGraph
     std::unordered_map<uint64_t, PersistentStorage> persistent_resources;
     std::vector<Resource> resources;
     std::vector<ResourceAccess> accesses;
-    std::vector<Pass> passes;
+    std::vector<std::unique_ptr<Pass>> passes;
     std::unordered_map<std::string, Handle<Pass>> namedpasses;
     std::vector<ExecutionGroup> groups;
 };
