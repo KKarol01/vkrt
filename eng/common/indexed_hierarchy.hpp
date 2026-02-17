@@ -12,7 +12,7 @@ template <typename UserType> class IndexedHierarchy
 {
   public:
     struct element_id_t;
-    using element_id = eng::TypedIntegral<element_id_t, uint32_t>;
+    using element_id = eng::TypedId<element_id_t, uint32_t>;
 
   private:
     struct Element

@@ -12,28 +12,27 @@ int main(int argc, char* argv[])
 
         Registry reg;
 
-        struct A
-        {
-        };
+        // struct A
+        //{
+        // };
 
-        auto e1 = reg.create();
-        reg.add_components<A>(e1, A{});
-        reg.erase(e1);
-        e1 = reg.create();
-        reg.add_components<A>(e1, A{});
-        reg.erase_components<A>(e1);
+        // auto e1 = reg.create();
+        // reg.add_components<A>(e1, A{});
+        // reg.erase(e1);
+        // e1 = reg.create();
+        // reg.add_components<A>(e1, A{});
+        // reg.erase_components<A>(e1);
 
-        /*auto e1 = reg.create();
-        auto e2 = reg.create();
-        auto e3 = reg.create();
+        // auto e1 = reg.create();
+        // auto e2 = reg.create();
+        // auto e3 = reg.create();
 
-        reg.erase(e3);
-        reg.erase(e1);
+        // reg.erase(e3);
+        // reg.erase(e1);
 
-        auto e4 = reg.create();
-        auto e5 = reg.create();
-        auto e6 = reg.create();
-*/
+        // auto e4 = reg.create();
+        // auto e5 = reg.create();
+        // auto e6 = reg.create();
 
         // std::set<entity_id> eids;
         // std::vector<entity_id> eidsvec;
@@ -57,9 +56,9 @@ int main(int argc, char* argv[])
         //     auto e = reg.create();
         //     ENG_ASSERT(eids.insert(e).second);
         //     eidsvec.push_back(e);
-        //     if(e.slot() % 3 == 0) { reg.add_components<A>(e, A{ e.slot() }); }
-        //     if(e.slot() % 3 == 1) { reg.add_components<B>(e, B{ e.slot() }); }
-        //     if(e.slot() % 3 == 2) { reg.add_components<C>(e, C{ e.slot() }); }
+        //     if(*e.get_slot() % 3 == 0) { reg.add_components<A>(e, A{ *e.get_slot() }); }
+        //     if(*e.get_slot() % 3 == 1) { reg.add_components<B>(e, B{ *e.get_slot() }); }
+        //     if(*e.get_slot() % 3 == 2) { reg.add_components<C>(e, C{ *e.get_slot() }); }
         // }
 
         // std::mt19937 gen{ 0 };
@@ -78,20 +77,30 @@ int main(int argc, char* argv[])
         // for(auto i = 0ull; i < removed.size(); ++i)
         //{
         //     auto e = reg.create();
-        //     ENG_ASSERT(e.version() == 1 && removed.contains(entity_id{ e.slot(), 0 }));
+        //     ENG_ASSERT(e.get_version() == 1 && removed.contains(entity_id{ e.get_slot(), 0 }));
+        // }
+
+        // for(auto i = 0u; i < reg.metadatas.size(); ++i)
+        //{
+        //     if(!reg.has(entity_id{ slot_id{ i }, 0 })) { continue; }
+        //     if(i % 3 == 0)
+        //     {
+        //         ENG_ASSERT(reg.has<A>(entity_id{ slot_id{ i }, 0 }) && reg.get<A>(entity_id{ slot_id{ i }, 0 }).val == i);
+        //     }
+        //     else if(i % 3 == 1)
+        //     {
+        //         ENG_ASSERT(reg.has<B>(entity_id{ slot_id{ i }, 0 }) && reg.get<B>(entity_id{ slot_id{ i }, 0 }).val == i);
+        //     }
+        //     else if(i % 3 == 2)
+        //     {
+        //         ENG_ASSERT(reg.has<C>(entity_id{ slot_id{ i }, 0 }) && reg.get<C>(entity_id{ slot_id{ i }, 0 }).val == i);
+        //     }
         // }
 
         //{
         //    auto e = reg.create();
-        //    ENG_ASSERT(e.version() == 0 && !removed.contains(e));
+        //    ENG_ASSERT(e.get_version() == 0 && !removed.contains(e));
         //}
-
-        // for(auto i = 0ull; i < reg.entities.size(); ++i)
-        //{
-        //     if(reg.entities.at(i) % 3 == 0) { ENG_ASSERT(reg.has<A>(entity_id{ (uint32_t)reg.entities.at(i), 0 }) && reg.get<A>(entity_id{(uint32_t)reg.entities.at(i), 0}).val == reg.entities.at(i)); }
-        //     if(reg.entities.at(i) % 3 == 1) { ENG_ASSERT(reg.has<B>(entity_id{ (uint32_t)reg.entities.at(i), 0 }) && reg.get<B>(entity_id{(uint32_t)reg.entities.at(i), 0}).val == reg.entities.at(i)); }
-        //     if(reg.entities.at(i) % 3 == 2) { ENG_ASSERT(reg.has<C>(entity_id{ (uint32_t)reg.entities.at(i), 0 }) && reg.get<C>(entity_id{(uint32_t)reg.entities.at(i), 0}).val == reg.entities.at(i)); }
-        // }
 
         int x = 1;
 

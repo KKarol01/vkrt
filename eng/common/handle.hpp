@@ -39,22 +39,22 @@ template <typename T> struct HandleDispatcher
 {
 };
 
-template <typename T, std::integral StorageType> struct TypedIntegral
+template <typename T, std::integral StorageType> struct TypedId
 {
     using storage_type = StorageType;
-    constexpr TypedIntegral() = default;
-    constexpr explicit TypedIntegral(storage_type handle) : handle{ handle } {}
+    constexpr TypedId() = default;
+    constexpr explicit TypedId(storage_type handle) : handle{ handle } {}
     constexpr storage_type operator*() const { return handle; }
-    constexpr bool operator==(const TypedIntegral& a) const { return (bool)*this && a && handle == a.handle; }
-    constexpr auto operator<=>(const TypedIntegral& a) const { return handle <=> a.handle; }
+    constexpr bool operator==(const TypedId& a) const { return (bool)*this && a && handle == a.handle; }
+    constexpr auto operator<=>(const TypedId& a) const { return handle <=> a.handle; }
     constexpr explicit operator bool() const { return handle != ~storage_type{}; }
     storage_type handle{ ~storage_type{} };
 };
 
 template <typename T, std::integral StorageType = typename HandleStorage<T>::storage_type>
-struct Handle : TypedIntegral<T, StorageType>
+struct Handle : TypedId<T, StorageType>
 {
-    using TypedIntegral<T, StorageType>::TypedIntegral;
+    using TypedId<T, StorageType>::TypedId;
     auto* operator->() { return HandleDispatcher<T>{}(*this); }
     const auto* operator->() const { return HandleDispatcher<T>{}(*this); }
     auto& get() { return *HandleDispatcher<T>{}(*this); }
@@ -75,10 +75,10 @@ struct Handle : TypedIntegral<T, StorageType>
 
 namespace std
 {
-template <typename T, typename K> class hash<::eng::TypedIntegral<T, K>>
+template <typename T, typename K> class hash<::eng::TypedId<T, K>>
 {
   public:
-    size_t operator()(const ::eng::TypedIntegral<T, K>& h) const { return *h; }
+    size_t operator()(const ::eng::TypedId<T, K>& h) const { return *h; }
 };
 
 template <typename T> class hash<::eng::Handle<T>>

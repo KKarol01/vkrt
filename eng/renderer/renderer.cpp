@@ -59,16 +59,19 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    Engine::get().ecs->add_on_update<ecs::Transform, ecs::Mesh>([this](ecs::entity_id eid, ecs::signature sig) {
-        const auto& ecsmesh = Engine::get().ecs->get<ecs::Mesh>(eid);
-        if(ecsmesh.gpu_resource == ~0u) { instance_entity(eid); }
-        new_transforms.push_back(eid);
-    });
-    Engine::get().ecs->add_on_update<ecs::Light>([this](ecs::entity_id eid, auto _) {
-        const auto& ecslight = Engine::get().ecs->get<ecs::Light>(eid);
-        if(ecslight.gpu_index == ~0u) { ++bufs.light_count; }
-        new_lights.push_back(eid);
-    });
+    Engine::get().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::entity_id eid) { instance_entity(eid); },
+                                                                     [this](ecs::entity_id eid, ecs::signature comp) {
+                                                                         new_transforms.push_back(eid);
+                                                                     },
+                                                                     [](ecs::entity_id eid) { ENG_ASSERT(false); });
+    Engine::get().ecs->register_callbacks<ecs::Light>(
+        [this](ecs::entity_id eid) {
+            auto& ecslight = Engine::get().ecs->get<ecs::Light>(eid);
+            if(ecslight.gpu_index == ~0u) { ++bufs.light_count; }
+            new_lights.push_back(eid);
+        },
+        [this](ecs::entity_id eid, ecs::signature comp) { new_lights.push_back(eid); },
+        [](ecs::entity_id eid) { ENG_ASSERT(false); });
 
     // Engine::get().ui->add_tab(UI::Tab{
     //     "Debug",

@@ -19,9 +19,8 @@ template <typename IndexType = uint32_t, size_t PAGE_SIZE = 4096> class SparseSe
     {
         explicit operator bool() const { return valid; }
         index_t operator*() const { return dense; }
-        index_t dense{ ~index_t{} };  // Index to dense.
-        index_t sparse{ ~index_t{} }; // Index to sparse. (stable)
-        bool valid{ false };          // Was find, insertion or deletion successful.
+        index_t dense{ ~index_t{} }; // Index to dense.
+        bool valid{ false };         // Was find, insertion or deletion successful.
     };
 
     auto begin() { return dense_array.begin(); }
@@ -107,7 +106,7 @@ template <typename IndexType = uint32_t, size_t PAGE_SIZE = 4096> class SparseSe
         const auto idx = sparse_to_dense(sparse);
         std::swap(dense_array.at(idx), dense_array.at(--next_free)); // swap to reuse on later inserts
         sparse_to_dense(dense_array.at(idx)) = idx; // update the sparse index of the last element that got moved to new position
-        return Iterator{ idx, sparse, true };
+        return Iterator{ idx, true };
     }
 
   private:
@@ -125,7 +124,7 @@ template <typename IndexType = uint32_t, size_t PAGE_SIZE = 4096> class SparseSe
 
     Iterator make_iterator(index_t sparse, bool is_valid) const
     {
-        return Iterator{ sparse_to_dense(sparse), sparse, is_valid };
+        return Iterator{ sparse_to_dense(sparse), is_valid };
     }
 
     std::vector<page_t> sparse_array; // map entry to index to key
