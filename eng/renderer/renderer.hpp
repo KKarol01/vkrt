@@ -785,7 +785,7 @@ class Renderer
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
 
     // void instance_blas(const BLASInstanceSettings& settings);
-    void update_transform(ecs::entity_id entity);
+    // void update_transform(ecs::entity_id entity);
 
     SubmitQueue* get_queue(QueueType type);
 

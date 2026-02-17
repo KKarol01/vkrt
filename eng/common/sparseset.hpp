@@ -18,101 +18,117 @@ template <typename IndexType = uint32_t, size_t PAGE_SIZE = 4096> class SparseSe
     struct Iterator
     {
         explicit operator bool() const { return valid; }
-        index_t operator*() const { return index; }
-        index_t index{ ~index_t{} }; // Index to dense.
-        bool valid{ false };         // Was find, insertion or deletion successful.
+        index_t operator*() const { return dense; }
+        index_t dense{ ~index_t{} };  // Index to dense.
+        index_t sparse{ ~index_t{} }; // Index to sparse. (stable)
+        bool valid{ false };          // Was find, insertion or deletion successful.
     };
 
-    auto begin() { return dense.begin(); }
-    auto end() { return dense.begin() + free_list_head; }
+    auto begin() { return dense_array.begin(); }
+    auto end() { return dense_array.begin() + next_free; }
+    auto begin() const { return dense_array.begin(); }
+    auto end() const { return dense_array.begin() + next_free; }
 
     // indexes dense.
-    index_t at(size_t idx) const { return dense.at(idx); }
+    index_t at(size_t dense) const { return dense_array.at(dense); }
 
-    bool has(index_t e) const
+    bool has(index_t sparse) const
     {
-        const auto pi = get_page_index(e);
-        const auto ipi = get_in_page_index(e);
-        if(sparse.size() <= pi || !sparse.at(get_page_index(e))) { return false; }
-        const auto s = sparse.at(pi).get()[ipi];
-        return s < size() && dense.at(s) == e;
+        const auto pi = get_page_index(sparse);
+        const auto ipi = get_in_page_index(sparse);
+        if(sparse_array.size() <= pi || !sparse_array.at(get_page_index(sparse))) { return false; }
+        const auto s = sparse_array.at(pi).get()[ipi];
+        return s < size() && dense_array.at(s) == sparse;
     }
 
-    size_t size() const { return free_list_head; }
+    size_t size() const { return next_free; }
 
     // extracts key from dense. may return ~key_t on invalid iterator.
     index_t get(Iterator it) const
     {
-        if(!it || size() <= it.index) { return ~index_t{}; }
-        return dense.at(it.index);
+        if(!it || size() <= it.dense) { return ~index_t{}; }
+        return dense_array.at(it.dense);
     }
 
     // extracts from sparse. is false when sparse set does not have the key.
-    Iterator get(index_t e) const
+    Iterator get(index_t sparse) const
     {
-        if(has(e)) { return make_iterator(e, true); }
+        if(has(sparse)) { return make_iterator(sparse, true); }
         return Iterator{};
     }
 
     // inserts new key. iterator is false if no insertion happened.
-    Iterator insert(index_t e)
+    Iterator insert(index_t sparse)
     {
-        if(has(e)) { return make_iterator(e, false); }
-        if(free_list_head > MAX_INDEX)
+        if(has(sparse)) { return make_iterator(sparse, false); }
+        if(next_free > MAX_INDEX)
         {
             assert(false && "Too many indices");
             return make_iterator(MAX_INDEX, false);
         }
 
         // get page and allocate new if page is full
-        const auto page = get_page_index(e);
-        if(sparse.size() <= page) { sparse.resize(page + 1); }
-        if(!sparse.at(page)) { sparse.at(page).reset(new index_t[PAGE_SIZE]); }
+        const auto page = get_page_index(sparse);
+        if(sparse_array.size() <= page) { sparse_array.resize(page + 1); }
+        if(!sparse_array.at(page))
+        {
+            sparse_array.at(page).reset(new index_t[PAGE_SIZE]);
+            memset(&sparse_array[page].get()[0], 0, sizeof(index_t) * PAGE_SIZE);
+        }
 
         // insert element into dense. use free list head as index.
         // if some elements were removed via std::swap, reuse them
-        assert(free_list_head <= dense.size());
-        get_sparse(e) = free_list_head;
-        if(dense.size() == free_list_head) { dense.push_back(e); }
-        else { dense.at(free_list_head) = e; }
+        assert(next_free <= dense_array.size());
+        sparse_to_dense(sparse) = next_free;
+        if(dense_array.size() == next_free) { dense_array.push_back(sparse); }
+        else { dense_array.at(next_free) = sparse; }
 
-        ++free_list_head;
-        return make_iterator(e, true);
+        ++next_free;
+        return make_iterator(sparse, true);
     }
 
     // generates unique value and inserts it. useful for entity creation
     Iterator insert()
     {
-        if(free_list_head > MAX_INDEX)
+        if(next_free > MAX_INDEX)
         {
             assert(false && "Too many indices");
             return make_iterator(MAX_INDEX, false);
         }
-        if(free_list_head == dense.size()) { dense.push_back(free_list_head); }
-        return insert(dense.at(free_list_head));
+        if(next_free == dense_array.size()) { dense_array.push_back(next_free); }
+        return insert(dense_array.at(next_free));
     }
 
     // Returns index to dense at which deletion (if any) happened.
     // This is mainly used to delete from secondary vectors that keep associated data.
-    Iterator erase(index_t e)
+    Iterator erase(index_t sparse)
     {
-        if(!has(e)) { return Iterator{}; }
-        const auto idx = get_sparse(e);
-        std::swap(dense.at(idx), dense.at(--free_list_head)); // swap to reuse on later inserts
-        get_sparse(dense.at(idx)) = idx; // update the sparse index of the last element that got moved to new position
-        return Iterator{ idx, true };
+        if(!has(sparse)) { return Iterator{}; }
+        const auto idx = sparse_to_dense(sparse);
+        std::swap(dense_array.at(idx), dense_array.at(--next_free)); // swap to reuse on later inserts
+        sparse_to_dense(dense_array.at(idx)) = idx; // update the sparse index of the last element that got moved to new position
+        return Iterator{ idx, sparse, true };
     }
 
   private:
-    index_t& get_sparse(index_t e) { return sparse.at(get_page_index(e)).get()[get_in_page_index(e)]; }
-    const index_t& get_sparse(index_t e) const { return sparse.at(get_page_index(e)).get()[get_in_page_index(e)]; }
+    const index_t& sparse_to_dense(index_t sparse) const
+    {
+        return sparse_array.at(get_page_index(sparse)).get()[get_in_page_index(sparse)];
+    }
+    index_t& sparse_to_dense(index_t sparse)
+    {
+        return sparse_array.at(get_page_index(sparse)).get()[get_in_page_index(sparse)];
+    }
 
-    size_t get_page_index(index_t e) const { return e / PAGE_SIZE; }
-    size_t get_in_page_index(index_t e) const { return e % PAGE_SIZE; }
+    size_t get_page_index(index_t sparse) const { return sparse / PAGE_SIZE; }
+    size_t get_in_page_index(index_t sparse) const { return sparse % PAGE_SIZE; }
 
-    Iterator make_iterator(index_t e, bool is_valid) const { return Iterator{ get_sparse(e), is_valid }; }
+    Iterator make_iterator(index_t sparse, bool is_valid) const
+    {
+        return Iterator{ sparse_to_dense(sparse), sparse, is_valid };
+    }
 
-    std::vector<page_t> sparse; // map entry to index to key
-    std::vector<index_t> dense; // keys
-    size_t free_list_head{};    // index to dense
+    std::vector<page_t> sparse_array; // map entry to index to key
+    std::vector<index_t> dense_array; // keys
+    size_t next_free{};               // index to dense
 };

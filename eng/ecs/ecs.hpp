@@ -20,6 +20,7 @@
 #include <eng/common/indexed_hierarchy.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/callback.hpp>
+#include <eng/common/hash.hpp>
 
 namespace eng
 {
@@ -34,6 +35,7 @@ struct view_id_t;
 struct entity_id : public TypedIntegral<entity_id, uint64_t>
 {
     explicit entity_id() : entity_id(~0u, ~0u) {}
+    explicit entity_id(storage_type raw_value) : TypedIntegral(raw_value) {}
     entity_id(uint32_t slot, uint32_t version) : TypedIntegral(((uint64_t)version << 32) | (uint64_t)slot) {}
     auto operator<=>(const entity_id&) const = default;
     uint32_t slot() const { return (uint32_t)handle; }
@@ -43,16 +45,28 @@ using view_id = TypedIntegral<view_id_t, component_id>;
 using entity = TypedIntegral<entity_t, uint32_t>;
 
 inline static constexpr size_t MAX_COMPONENTS = std::numeric_limits<component_id>::digits;
-inline static std::atomic_uint32_t component_id_generator{};
+inline std::atomic_uint32_t component_id_generator{};
 
 using signature = std::bitset<MAX_COMPONENTS>;
-using component_update_callback_t = Callback<void(entity_id eid, signature updated)>;
+using component_update_callback_t = void(entity_id eid, signature updated);
 // using component_delete_callback_t = Callback<void(entity_id eid)>; // no delete for now
+
+} // namespace ecs
+} // namespace eng
+
+ENG_DEFINE_STD_HASH(eng::ecs::entity_id, *t);
+ENG_DEFINE_STD_HASH(eng::ecs::entity, *t);
+
+namespace eng
+{
+namespace ecs
+{
 
 struct IComponentPool
 {
     virtual ~IComponentPool() = default;
     virtual void erase(entity e) = 0;
+    SparseSet<entity::storage_type, 1024> entities; // for packing components
 };
 
 template <typename Component> struct ComponentPool : public IComponentPool
@@ -99,7 +113,6 @@ template <typename Component> struct ComponentPool : public IComponentPool
         components.pop_back();
     }
 
-    SparseSet<entity_id::storage_type, 1024> entities; // for packing componets
     std::vector<Component> components;
 };
 
@@ -130,20 +143,27 @@ class Registry
 
   public:
     bool has(entity_id eid) const { return entities.has(eid.slot()) && get_md(eid).version == eid.version(); }
+    template <typename... Components> bool has(entity_id eid) const
+    {
+        const auto sig = get_signature<Components...>();
+        return has(eid) && (get_md(eid).sig & sig) == sig;
+    }
 
     entity_id create()
     {
-        auto eit = entities.insert();
+        const auto eit = entities.insert();
         if(!eit)
         {
             ENG_ASSERT(false, "Too many entities");
             return entity_id{};
         }
-        if(metadatas.size() == *eit) { metadatas.emplace_back(); }
-        const auto version = metadatas[*eit].version;
-        const auto eid = entity_id{ *eit, version };
-        metadatas[*eit].hierarchy_key = hierarchy.insert(eid);
-        return entity_id{ *eit, version };
+        const auto slot = eit.sparse;
+        if(slot == metadatas.size()) { metadatas.emplace_back(); }
+        auto& md = metadatas[slot];
+        const auto version = md.version;
+        const auto eid = entity_id{ slot, version };
+        md.hierarchy_key = hierarchy.insert(eid);
+        return entity_id{ slot, version };
     }
 
     void erase(entity_id eid)
@@ -158,10 +178,11 @@ class Registry
         {
             if(md.sig.test(i)) { pools[i]->erase(entity{ eid.slot() }); }
         }
-        entities.erase(eid.slot());
+        auto it = entities.erase(eid.slot());
+        ENG_ASSERT(it && it.sparse == eid.slot());
         hierarchy.erase(md.hierarchy_key);
-        md.sig = {};
-        ++md.version;
+        md = {};
+        md.version = eid.version() + 1;
     }
 
     template <typename Component> Component& get(entity_id eid)
@@ -195,15 +216,19 @@ class Registry
             auto& pool = get_pool<T>();
             pool.emplace(entity{ eid.slot() }, std::forward<decltype(comp)>(comp));
         };
-        (emplace_component.template operator()<Components>(std::forward<Components>(components)), ...);
+        const auto old_sig = md.sig;
         md.sig |= sig;
+        (emplace_component.template operator()<Components>(std::forward<Components>(components)), ...);
+        on_entity_sig_change(eid, old_sig, md.sig);
     }
 
     template <typename... Components> void erase_components(entity_id eid)
     {
         const signature sig{ (ComponentPool<Components>::get_bit() | ...) };
-        auto& md = metadatas[eid.slot()];
+        auto& md = get_md(eid);
         ENG_ASSERT((md.sig & sig) == sig);
+
+        ENG_ASSERT(false, "Implement removing from view");
 
         const auto remove_component = [this, eid]<typename T>() {
             auto& pool = get_pool<T>();
@@ -285,19 +310,47 @@ class Registry
     }
 
     template <typename... Components>
-    void add_on_update(std::optional<component_update_callback_t> on_update_callback = {})
+    void add_on_update(std::optional<Callback<component_update_callback_t>> on_update_callback = {})
     {
         const auto sig = get_signature<Components...>();
         const auto sigint = sig.to_ulong();
-        if(!views.contains(sig))
+        if(!views.contains(sigint))
         {
-            views.emplace(sigint, View{ sig });
-            // for(auto i = 0ull; i <)
-            //     ;
+            View view{};
+            view.sig = sig;
+            // can be nullptr if no components were inserted
+            const IComponentPool* const smallest_component_pool = [this] {
+                std::array<component_id, sizeof...(Components)> arr = { (component_id)ComponentPool<Components>::get_index()... };
+                IComponentPool* smallest{};
+                for(auto idx : arr)
+                {
+                    if(!smallest || pools[idx]->entities.size() < smallest->entities.size())
+                    {
+                        smallest = &*pools[idx];
+                    }
+                }
+                return smallest;
+            }();
+            if(smallest_component_pool)
+            {
+                for(auto e : smallest_component_pool->entities)
+                {
+                    if(has<Components...>(entity_id{ e })) { view.entities.push_back(entity_id{ e }); }
+                }
+            }
+            views.emplace(sigint, std::move(view));
         }
         auto& view = views.at(sigint);
         if(on_update_callback) { view.on_update_callbacks += *on_update_callback; }
-        return sigint;
+    }
+
+    template <typename... Components> void notify_update(entity_id eid)
+    {
+        const auto sig = get_signature<Components...>();
+        for(const auto& [viewsig, view] : views)
+        {
+            if((viewsig & sig).any()) { view.on_update_callbacks.signal(eid, sig); }
+        }
     }
 
   private:
@@ -311,450 +364,23 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*pools[idx]);
     }
 
-    //View& get_view()
+    void on_entity_sig_change(entity_id eid, signature old_sig, signature new_sig)
+    {
+        for(auto& [viewsig, view] : views)
+        {
+            const auto old_sig_passed = (viewsig & old_sig) == viewsig;
+            const auto new_sig_passes = (viewsig & new_sig) == viewsig;
+            if(!old_sig_passed && new_sig_passes) { view.entities.push_back(eid); }
+            else if(old_sig_passed && !new_sig_passes) { ENG_ASSERT(false, "Implement entity removing"); }
+        }
+    }
 
     SparseSet<entity::storage_type> entities;
     IndexedHierarchy<entity_id> hierarchy;
     std::vector<EntityMetadata> metadatas;
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools;
-    std::unordered_map<component_id, View> views;
+    std::unordered_map<signature, View> views;
 };
 
 } // namespace ecs
-
-// namespace ecs
-//{
-// using entity_id = uint32_t;
-// using component_id = uint32_t;
-// inline static constexpr entity_id INVALID_ENTITY = ~entity_id{};
-// inline static constexpr entity_id MAX_COMPONENTS = sizeof(component_id) * 8;
-// using signature = std::bitset<MAX_COMPONENTS>;
-//
-// template <typename... Components> struct View;
-//
-// struct ComponentIdGenerator
-//{
-//     // call through free function get_id() or get_id_bit()
-//     template <typename Component> static component_id generate_()
-//     {
-//         static component_id id = _id.fetch_add(1);
-//         ENG_ASSERT(id < MAX_COMPONENTS);
-//         return id;
-//     }
-//     inline static std::atomic<component_id> _id{};
-// };
-//
-// template <typename Component> inline component_id get_id()
-//{
-//     return ComponentIdGenerator::generate_<std::remove_cvref_t<Component>>();
-// }
-//
-// template <typename Component> inline component_id get_id_bit() { return component_id{ 1 } << get_id<Component>(); }
-//
-// class IComponentPool
-//{
-//   public:
-//     virtual ~IComponentPool() = default;
-//     virtual void* get(entity_id entity) = 0;
-//     virtual void erase(entity_id entity) = 0;
-//     virtual void clone_components(entity_id from, entity_id to) = 0;
-// };
-//
-// template <typename T> class ComponentPool : public IComponentPool
-//{
-//   public:
-//     auto begin() { return components.begin(); }
-//     auto end() { return components.begin() + size(); }
-//
-//     void* get(entity_id e) final
-//     {
-//         const auto it = entities.get(e);
-//         if(!it)
-//         {
-//             ENG_ERROR("Invalid entity {} for component {}", e, get_id<T>());
-//             return nullptr;
-//         }
-//         return &components.at(it.index);
-//     }
-//
-//     template <typename... Args>
-//     T& emplace(entity_id e, Args&&... args)
-//         requires std::constructible_from<T, Args...>
-//     {
-//         const auto it = entities.insert(e);
-//         if(!it)
-//         {
-//             ENG_WARN("Overwriting already existing component for entity {}. Skipping.", e);
-//             ENG_ASSERT(false);
-//             return *static_cast<T*>(get(it.index));
-//         }
-//         if(it.index < components.size()) { components.at(it.index) = T{ std::forward<Args>(args)... }; }
-//         else if(it.index == components.size()) { components.emplace_back(std::forward<Args>(args)...); }
-//         else { ENG_ASSERT(false); }
-//         return *static_cast<T*>(get(e));
-//     }
-//
-//     void erase(entity_id e) final
-//     {
-//         const auto it = entities.erase(e);
-//         if(!it) { return; }
-//         components.at(it.index) = std::move(components.back());
-//         components.pop_back();
-//     }
-//
-//     void clone_components(entity_id src, entity_id dst) final
-//     {
-//         const auto srcit = entities.get(src);
-//         auto dstit = entities.get(dst);
-//         if(!srcit)
-//         {
-//             ENG_ERROR("Invalid source entity for component cloning: {}", src);
-//             return;
-//         }
-//         if(!dstit)
-//         {
-//             ENG_ERROR("Invalid destination entity for component cloning: {}", dst);
-//             return;
-//         }
-//         components[*dstit] = components[*srcit];
-//     }
-//
-//     size_t size() const { return entities.size(); }
-//
-//   private:
-//     SparseSet<uint32_t, 1024> entities;
-//     std::vector<T> components;
-// };
-//
-// class Registry
-//{
-//     struct EntityMetadata
-//     {
-//         signature signature{};
-//         entity_id parent{ INVALID_ENTITY };
-//         std::vector<ecs::entity_id> children;
-//     };
-//
-//   public:
-//     struct View
-//     {
-//         using on_add_callback_t = void(ecs::entity_id);
-//         using on_update_callback_t = void(ecs::entity_id, signature);
-//
-//         Registry* registry{};
-//         std::vector<ecs::entity_id> entities;
-//         Signal<on_add_callback_t> on_add;
-//         Signal<on_update_callback_t> on_update;
-//     };
-//
-//     // get the components vector to iterate over
-//     template <typename Component> std::span<const Component> get_components() const
-//     {
-//         const auto& arr = get_comp_arr<Component>();
-//         return std::span{ arr.begin(), arr.end() };
-//     }
-//
-//     // creates new entity
-//     entity_id create()
-//     {
-//         const auto it = entities.insert();
-//         const auto e = entities.get(it);
-//         if(e == INVALID_ENTITY)
-//         {
-//             ENG_ASSERT(false, "Max entity reached");
-//             return e;
-//         }
-//         if(it.index < metadatas.size()) { metadatas.at(it.index) = EntityMetadata{}; }
-//         else { metadatas.emplace_back(); }
-//         return e;
-//     }
-//
-//     // check if registry has the entity
-//     bool has(entity_id e) const { return e != INVALID_ENTITY && entities.has(e); }
-//
-//     // check if the entity has the components
-//     template <typename... Components> bool has(entity_id e) const
-//     {
-//         if(is_valid(e))
-//         {
-//             const auto mask = signature{ (get_id_bit<Components>() | ...) };
-//             return (get_md(e).signature & mask) == mask;
-//         }
-//         return false;
-//     }
-//
-//     // get the component from the entity. may return nullptr
-//     template <typename Component> Component* get(entity_id e)
-//     {
-//         if(!is_valid(e) || !has<Component>(e)) { return nullptr; }
-//         return static_cast<Component*>(component_arrays.at(get_id<Component>())->get(e));
-//     }
-//
-//     // get the component from the entity. may return nullptr
-//     template <typename Component> const Component* get(entity_id e) const
-//     {
-//         return const_cast<Registry*>(this)->get<Component>(e);
-//     }
-//
-//     // attach compontents to the entity
-//     template <typename... Components> void emplace(entity_id e, Components&&... comps)
-//     {
-//         if(!is_valid(e)) { return; }
-//         const signature compids = (get_id_bit<Components>() | ...);
-//         get_md(e).signature |= compids;
-//         ((get_comp_arr<Components>().emplace(e, std::forward<Components>(comps))), ...);
-//         views_on_add(e, compids);
-//     }
-//
-//     // removes the entity, and all of it's children, and all of their components.
-//     void erase(entity_id e)
-//     {
-//         ENG_ASSERT(false);
-//         // todo: erase from views
-//         if(!is_valid(e)) { return; }
-//         auto it = entities.get(e);
-//         ENG_ASSERT(it);
-//         auto& md = metadatas.at(it.index);
-//         for(auto i = 0u; i < MAX_COMPONENTS; ++i)
-//         {
-//             if(md.signature.test(i)) { component_arrays.at(i)->erase(e); }
-//         }
-//         if(md.parent != INVALID_ENTITY) { remove_child(md.parent, e); }
-//         for(auto c : md.children)
-//         {
-//             erase(c);
-//         }
-//         auto eraseit = entities.erase(e);
-//         metadatas.at(eraseit.index) = std::move(metadatas.back());
-//         metadatas.pop_back();
-//     }
-//
-//     // remove the component from the entity.
-//     template <typename Component> void erase(entity_id e)
-//     {
-//         // todo: remove from views
-//         if(!is_valid(e)) { return; }
-//         auto& md = get_md(e);
-//         const auto idx = get_id<Component>();
-//         if(md.signature.test(idx))
-//         {
-//             component_arrays.at(idx)->erase(e);
-//             md.signature.reset(idx);
-//         }
-//     }
-//
-//     // get the parent of the entity. INVALID_ENTITY if there is no parent.
-//     entity_id get_parent(entity_id e) const
-//     {
-//         if(!is_valid(e)) { return INVALID_ENTITY; }
-//         return get_md(e).parent;
-//     }
-//
-//     // get children of the entity.
-//     std::span<const entity_id> get_children(entity_id e) const
-//     {
-//         if(is_valid(e)) { return get_md(e).children; }
-//         return {};
-//     }
-//
-//     // attach a child to a to-be-parent node.
-//     void make_child(entity_id p, entity_id c)
-//     {
-//         if(is_valid(p) && is_valid(c))
-//         {
-//             auto& pmd = get_md(p);
-//             auto& cmd = get_md(c);
-//             if(cmd.parent == p) { return; }
-//             if(cmd.parent != INVALID_ENTITY) { remove_child(cmd.parent, c); }
-//             cmd.parent = p;
-//             auto& ch = pmd.children;
-//             const auto it = std::lower_bound(ch.begin(), ch.end(), c);
-//             if(it != ch.end() && *it == c)
-//             {
-//                 ENG_ERROR("Entity {} is already a child of Entity {}", c, p);
-//                 return;
-//             }
-//             ch.insert(it, c);
-//         }
-//     }
-//
-//     // remove a child from a parent.
-//     void remove_child(entity_id p, entity_id c)
-//     {
-//         if(is_valid(p) && is_valid(c))
-//         {
-//             get_md(c).parent = INVALID_ENTITY;
-//             auto& ch = get_md(p).children;
-//             const auto it = std::lower_bound(ch.begin(), ch.end(), c);
-//             if(it != ch.end() && *it == c) { ch.erase(it); }
-//         }
-//     }
-//
-//     // preorder traversal
-//     void traverse_hierarchy(entity_id e, const auto& callback)
-//     {
-//         if(!is_valid(e)) { return; }
-//         const auto dfs = [this, &callback](const auto& self, entity_id e) -> void {
-//             callback(e);
-//             auto& ch = get_md(e).children;
-//             for(auto c : ch)
-//             {
-//                 self(self, c);
-//             }
-//         };
-//         dfs(dfs, e);
-//     }
-//
-//     // clones entity with it's component and children/parent hierarchy
-//     entity_id clone(entity_id src)
-//     {
-//         if(!is_valid(src)) { return INVALID_ENTITY; }
-//         std::stack<entity_id> cloned_parents;
-//         entity_id root = INVALID_ENTITY;
-//         traverse_hierarchy(src, [this, &cloned_parents, &root](auto src_entity) {
-//             auto dst_entity = create();
-//             if(root == INVALID_ENTITY) { root = dst_entity; }
-//             if(cloned_parents.size())
-//             {
-//                 auto cloned_parent = cloned_parents.top();
-//                 cloned_parents.pop();
-//                 make_child(cloned_parent, dst_entity);
-//             }
-//             EntityMetadata& srcmd = get_md(src_entity);
-//             for(auto i = 0u; i < MAX_COMPONENTS; ++i)
-//             {
-//                 if(srcmd.signature.test(i))
-//                 {
-//                     component_arrays.at(i)->clone_components(src_entity, dst_entity);
-//                     get_md(dst_entity).signature.set(i, true);
-//                 }
-//             }
-//             for(auto i = 0u; i < srcmd.children.size(); ++i)
-//             {
-//                 cloned_parents.push(dst_entity);
-//             }
-//             views_on_add(dst_entity, srcmd.signature);
-//         });
-//         ENG_ASSERT(cloned_parents.empty());
-//         return root;
-//     }
-//
-//     // Notify on_update on any view that cares about any of the components in the template.
-//     template <typename... Components> void update(entity_id e)
-//     {
-//         const auto sig = signature{ (get_id_bit<Components>() | ...) };
-//         for(auto i = 0u; i < viewsigs.size(); ++i)
-//         {
-//             const auto& vsig = viewsigs.at(i);
-//             if((sig & vsig).any()) { views.at(i).on_update.signal(e, sig); }
-//         }
-//     }
-//
-//     // Obtains a view of the entities that have all of the specified components.
-//     // Optionally, takes callbacks that are called when entities get removed or added.
-//     template <typename... Components>
-//     ecs::View<Components...> get_view(std::optional<Callback<View::on_add_callback_t>> on_add = std::nullopt,
-//                                       std::optional<Callback<View::on_update_callback_t>> on_update = std::nullopt)
-//     {
-//         const auto sig = signature{ (get_id_bit<Components>() | ...) };
-//         View* rview{};
-//         for(auto i = 0u; i < viewsigs.size(); ++i)
-//         {
-//             if(sig == viewsigs.at(i))
-//             {
-//                 rview = &views.at(i);
-//                 break;
-//             }
-//         }
-//         if(!rview)
-//         {
-//             viewsigs.push_back(sig);
-//             rview = &views.emplace_back();
-//             rview->registry = this;
-//             for(auto i = 0u; i < entities.size(); ++i)
-//             {
-//                 auto e = entities.at(i);
-//                 const auto& md = metadatas.at(i);
-//                 if((sig & md.signature) == sig) { rview->entities.push_back(e); }
-//             }
-//         }
-//         if(on_add) { rview->on_add += *on_add; }
-//         if(on_update) { rview->on_update += *on_update; }
-//         return ecs::View<Components...>{ rview };
-//     }
-//
-//     // checks if entity is valid and is registered.
-//     bool is_valid(entity_id e) const { return e != INVALID_ENTITY && has(e); }
-//
-//     template <typename Component, typename CompNoRef = std::remove_cvref_t<Component>> auto& get_comp_arr()
-//     {
-//         auto& comparr = component_arrays.at(get_id<CompNoRef>());
-//         if(!comparr) { comparr = std::make_unique<ComponentPool<CompNoRef>>(); }
-//         return *static_cast<ComponentPool<CompNoRef>*>(&*comparr);
-//     }
-//
-//     // broadcasts to views new entity or new component.
-//     // mask is used to skip views that already contain this entity.
-//     // mask should only contain bits of newly added components.
-//     void views_on_add(entity_id e, signature mask = signature{})
-//     {
-//         if(e == INVALID_ENTITY) { return; }
-//         const auto& md = get_md(e);
-//         const auto prevsig = md.signature ^ mask;
-//         for(auto i = 0u; i < viewsigs.size(); ++i)
-//         {
-//             const auto viewsig = viewsigs.at(i);
-//             // only add an entity, when before it couldn't pass the view's signature
-//             // due to lacking required components, and now it can.
-//             if((prevsig & viewsig) != viewsig && (md.signature & viewsig) == viewsig)
-//             {
-//                 auto& view = views.at(i);
-//                 view.entities.push_back(e);
-//                 view.on_add.signal(e);
-//             }
-//         }
-//     }
-//
-//     EntityMetadata& get_md(entity_id e) { return metadatas.at(entities.get(e).index); }
-//     const EntityMetadata& get_md(entity_id e) const { return metadatas.at(entities.get(e).index); }
-//
-//     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> component_arrays;
-//     std::deque<View> views;
-//     std::vector<signature> viewsigs; // corresponds 1:1 to views
-//     SparseSet<uint32_t, 1024> entities;
-//     std::vector<EntityMetadata> metadatas; // corresponds 1:1 to entities in dense array
-// };
-//
-// template <typename... Components> struct View
-//{
-//     struct Iterator
-//     {
-//         using difference_type = ptrdiff_t;
-//         using value_type = std::tuple<entity_id, Components...>;
-//         using pointer = std::tuple<entity_id, std::add_pointer_t<Components>...>;
-//         using reference = std::tuple<entity_id, std::add_lvalue_reference_t<Components>...>;
-//         using iterator_category = std::random_access_iterator_tag;
-//
-//         // clang-format off
-//          Iterator(Registry::View* rview, ecs::entity_id* e) : rview(rview), e(e) {}
-//          bool operator==(Iterator it) const { return rview == it.rview && e == it.e; }
-//          bool operator!=(Iterator it) const { return !(*this == it); }
-//          Iterator& operator++() { ++e; return *this; }
-//          Iterator& operator--() { --e; return *this; }
-//          reference operator*() { return reference{ *e, *rview->registry->get<Components>(*e)... }; }
-//          reference operator->() { return Iterator::operator*(); }
-//         // clang-format on
-//
-//         Registry::View* rview{};
-//         entity_id* e{};
-//     };
-//
-//     auto begin() { return Iterator{ rview, rview->entities.data() }; }
-//     auto end() { return Iterator{ rview, rview->entities.data() + rview->entities.size() }; }
-//     auto size() const { return rview->entities.size(); }
-//
-//     Registry::View* rview{};
-// };
-//
-// } // namespace ecs
 } // namespace eng

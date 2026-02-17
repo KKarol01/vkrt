@@ -24,10 +24,10 @@ template <typename UserType> class IndexedHierarchy
         UserType& as_user() { return std::get<1>(data); }
         const UserType& as_user() const { return std::get<1>(data); }
         std::variant<element_id, UserType> data;
-        element_id parent{};       // not ~0 if has parent
-        element_id first_child{};  // not ~0 if has children
-        element_id prev_sibling{}; // not ~0 if has parent
-        element_id next_sibling{}; // not ~0 if has parent
+        element_id parent{};       // not false if has parent
+        element_id first_child{};  // not false if has children
+        element_id prev_sibling{}; // not false if has parent
+        element_id next_sibling{}; // not false if has parent
     };
 
   public:
@@ -80,7 +80,7 @@ template <typename UserType> class IndexedHierarchy
         }
     }
 
-    // Unparents element and removes it's siblings
+    // Unparents element and removes from sibling chain
     void detach(element_id element)
     {
         if(!element) { return; }
@@ -104,6 +104,16 @@ template <typename UserType> class IndexedHierarchy
     {
         if(!element) { return; }
         detach(element);
+        if(auto fc = get_first_child(element))
+        {
+            auto child = fc;
+            do
+            {
+                get(child).parent = {};
+                child = get_next_sibling(child);
+            }
+            while(child != fc);
+        }
         auto& elem = elements[*element];
         elem = {};
         elem.data = next_free;

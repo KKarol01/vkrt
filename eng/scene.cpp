@@ -422,10 +422,9 @@ ecs::entity_id Scene::instance_model(const asset::Model* model)
                                               const asset::Model::Node& node, ecs::entity_id parent) -> ecs::entity_id {
         auto* ecsr = Engine::get().ecs;
         auto entity = ecsr->create();
-        ecsr->add_components(entity, ecs::Node{ node.name, &model });
-        ecsr->add_components(entity, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
+        ecsr->add_components(entity, ecs::Node{ node.name, &model }, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
         if(node.mesh != ~0u) { ecsr->add_components(entity, ecs::Mesh{ &model.meshes.at(node.mesh), ~0u }); }
-        if(!parent) { ecsr->make_child(parent, entity); }
+        if(parent) { ecsr->make_child(parent, entity); }
         for(const auto& e : node.children)
         {
             self(self, model, model.nodes.at(e), entity);
@@ -440,8 +439,7 @@ ecs::entity_id Scene::instance_model(const asset::Model* model)
 
 void Scene::update_transform(ecs::entity_id entity)
 {
-    if(!entity) { return; }
-    auto& et = Engine::get().ecs->get<ecs::Transform>(entity);
+    auto& ecstrs = Engine::get().ecs->get<ecs::Transform>(entity);
     pending_transforms.push_back(entity);
 }
 
@@ -495,7 +493,9 @@ void Scene::update()
                 trs.pop();
                 auto& t = Engine::get().ecs->get<ecs::Transform>(e);
                 t.global = t.local * pt;
-                Engine::get().renderer->update_transform(e);
+
+                ENG_ASSERT(false);
+                // Engine::get().renderer->update_transform(e);
                 Engine::get().ecs->loop_over_children(e, [&t, &trs, &visit](auto e) {
                     trs.push(t.global);
                     visit.push(e);

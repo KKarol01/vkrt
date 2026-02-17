@@ -45,7 +45,8 @@ template <typename T, std::integral StorageType> struct TypedIntegral
     constexpr TypedIntegral() = default;
     constexpr explicit TypedIntegral(storage_type handle) : handle{ handle } {}
     constexpr storage_type operator*() const { return handle; }
-    constexpr auto operator<=>(const TypedIntegral& h) const = default;
+    constexpr bool operator==(const TypedIntegral& a) const { return (bool)*this && a && handle == a.handle; }
+    constexpr auto operator<=>(const TypedIntegral& a) const { return handle <=> a.handle; }
     constexpr explicit operator bool() const { return handle != ~storage_type{}; }
     storage_type handle{ ~storage_type{} };
 };
@@ -74,6 +75,12 @@ struct Handle : TypedIntegral<T, StorageType>
 
 namespace std
 {
+template <typename T, typename K> class hash<::eng::TypedIntegral<T, K>>
+{
+  public:
+    size_t operator()(const ::eng::TypedIntegral<T, K>& h) const { return *h; }
+};
+
 template <typename T> class hash<::eng::Handle<T>>
 {
   public:
