@@ -17,7 +17,7 @@ class ImGuiRenderer
 {
   public:
     void init();
-    void update(RenderGraph* graph, Handle<RenderGraph::ResourceAccess> output);
+    void update(RenderGraph* graph, RenderGraph::AccessId output);
 
   private:
     void handle_imtexture(ImTextureData* imtex);

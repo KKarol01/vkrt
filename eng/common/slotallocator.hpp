@@ -10,15 +10,12 @@ struct SlotAllocator
 {
     uint32_t allocate()
     {
-        if(next_free == ~0u)
+        if(next_free == ~0u) { return ~0u; }
+        if(slots.size() == next_free)
         {
-            used.push_back(true);
-            return slots.emplace_back(slots.size());
-        }
-        if(next_free >= slots.size() || used[next_free])
-        {
-            ENG_ASSERT(false);
-            return ~0u;
+            slots.emplace_back(next_free);
+            used.emplace_back(true);
+            return next_free++;
         }
         const auto slot = next_free;
         next_free = slots[slot];
@@ -35,9 +32,9 @@ struct SlotAllocator
         next_free = slot;
     }
 
-    bool has(uint32_t slot) const { return slot != ~0u && slot < used.size() && used[slot]; }
+    bool has(uint32_t slot) const { return slot < used.size() && used[slot]; }
 
     std::vector<uint32_t> slots;
     std::vector<bool> used;
-    uint32_t next_free{ ~0u };
+    uint32_t next_free{};
 };

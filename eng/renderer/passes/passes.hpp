@@ -29,16 +29,16 @@ class SSTriangle : public IPass
 {
     struct SSTrianglePass
     {
-        Handle<RenderGraph::ResourceAccess> color;
+        RenderGraph::AccessId color;
     };
     struct SSCopyToSwapPass
     {
-        Handle<RenderGraph::ResourceAccess> color;
-        Handle<RenderGraph::ResourceAccess> swap;
+        RenderGraph::AccessId color;
+        RenderGraph::AccessId swap;
     };
     struct SSSwapPresent
     {
-        Handle<RenderGraph::ResourceAccess> swap;
+        RenderGraph::AccessId swap;
     };
 
   public:
@@ -96,7 +96,7 @@ class SSTriangle : public IPass
             });
 
         get_renderer().imgui_renderer->update(&graph, dt1.color);
-        dt1.color = Handle<RenderGraph::ResourceAccess>{ get_renderer().imgui_input };
+        dt1.color = RenderGraph::AccessId{ get_renderer().imgui_input };
 
         auto cp2s = graph.add_graphics_pass<SSCopyToSwapPass>(
             "Copy to swapchain",

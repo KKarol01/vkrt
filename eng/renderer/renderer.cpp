@@ -59,19 +59,19 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    Engine::get().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::entity_id eid) { instance_entity(eid); },
-                                                                     [this](ecs::entity_id eid, ecs::signature comp) {
+    Engine::get().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::EntityId eid) { instance_entity(eid); },
+                                                                     [this](ecs::EntityId eid, ecs::Signature comp) {
                                                                          new_transforms.push_back(eid);
                                                                      },
-                                                                     [](ecs::entity_id eid) { ENG_ASSERT(false); });
+                                                                     [](ecs::EntityId eid) { ENG_ASSERT(false); });
     Engine::get().ecs->register_callbacks<ecs::Light>(
-        [this](ecs::entity_id eid) {
+        [this](ecs::EntityId eid) {
             auto& ecslight = Engine::get().ecs->get<ecs::Light>(eid);
             if(ecslight.gpu_index == ~0u) { ++bufs.light_count; }
             new_lights.push_back(eid);
         },
-        [this](ecs::entity_id eid, ecs::signature comp) { new_lights.push_back(eid); },
-        [](ecs::entity_id eid) { ENG_ASSERT(false); });
+        [this](ecs::EntityId eid, ecs::Signature comp) { new_lights.push_back(eid); },
+        [](ecs::EntityId eid) { ENG_ASSERT(false); });
 
     // Engine::get().ui->add_tab(UI::Tab{
     //     "Debug",
@@ -356,7 +356,7 @@ void Renderer::init_rgraph_passes()
     //                                                                                rgraphpasses->swapcbufsview, swapchain });
 }
 
-void Renderer::instance_entity(ecs::entity_id e)
+void Renderer::instance_entity(ecs::EntityId e)
 {
     if(!Engine::get().ecs->has<ecs::Transform, ecs::Mesh>(e))
     {

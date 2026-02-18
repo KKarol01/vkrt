@@ -55,7 +55,7 @@ void ImGuiRenderer::init()
     index_buffer = r.make_buffer(Buffer::init("imgui index buffer", 1024 * 1024, BufferUsage::INDEX_BIT));
 }
 
-void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAccess> output)
+void ImGuiRenderer::update(RenderGraph* graph, RenderGraph::AccessId output)
 {
     auto& r = get_renderer();
 
@@ -106,7 +106,7 @@ void ImGuiRenderer::update(RenderGraph* graph, Handle<RenderGraph::ResourceAcces
             cmd->wait_sync(r.staging->get_wait_sem());
             ImDrawData* draw_data = ImGui::GetDrawData();
 
-            Handle<RenderGraph::ResourceAccess> output{ this->output };
+            RenderGraph::AccessId output{ this->output };
             const auto& img = graph.get_res(output).as_image().get();
 
             VkRenderingAttachmentInfo r_col_atts[]{

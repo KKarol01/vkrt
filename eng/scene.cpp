@@ -414,12 +414,12 @@ asset::Model* Scene::load_from_file(const std::filesystem::path& _path)
     return nullptr;
 }
 
-ecs::entity_id Scene::instance_model(const asset::Model* model)
+ecs::EntityId Scene::instance_model(const asset::Model* model)
 {
-    if(!model) { return ecs::entity_id{}; }
+    if(!model) { return ecs::EntityId{}; }
 
     static constexpr auto make_hierarchy = [](const auto& self, const asset::Model& model,
-                                              const asset::Model::Node& node, ecs::entity_id parent) -> ecs::entity_id {
+                                              const asset::Model::Node& node, ecs::EntityId parent) -> ecs::EntityId {
         auto* ecsr = Engine::get().ecs;
         auto entity = ecsr->create();
         ecsr->add_components(entity, ecs::Node{ node.name, &model }, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
@@ -432,12 +432,12 @@ ecs::entity_id Scene::instance_model(const asset::Model* model)
         return entity;
     };
 
-    const auto instance = make_hierarchy(make_hierarchy, *model, model->nodes.at(model->root_node), ecs::entity_id{});
+    const auto instance = make_hierarchy(make_hierarchy, *model, model->nodes.at(model->root_node), ecs::EntityId{});
     scene.push_back(instance);
     return instance;
 }
 
-void Scene::update_transform(ecs::entity_id entity)
+void Scene::update_transform(ecs::EntityId entity)
 {
     auto& ecstrs = Engine::get().ecs->get<ecs::Transform>(entity);
     pending_transforms.push_back(entity);
@@ -448,10 +448,10 @@ void Scene::update()
     // Relies on pending transforms not having child nodes of other nodes (no two nodes from the same hierarchy)
     if(pending_transforms.size())
     {
-        std::unordered_set<ecs::entity_id> visited;
+        std::unordered_set<ecs::EntityId> visited;
 
         // leave only those entities, who have no ancestors in the pending trs.
-        std::vector<ecs::entity_id> filtered;
+        std::vector<ecs::EntityId> filtered;
         filtered.reserve(pending_transforms.size());
         visited.insert(pending_transforms.begin(), pending_transforms.end());
         for(auto e : pending_transforms)
@@ -474,7 +474,7 @@ void Scene::update()
         for(auto e : pending_transforms)
         {
             const auto p = Engine::get().ecs->get_parent(e);
-            std::stack<ecs::entity_id> visit;
+            std::stack<ecs::EntityId> visit;
             std::stack<glm::mat4> trs;
             visit.push(e);
             if(p)
@@ -508,12 +508,12 @@ void Scene::update()
 
 void Scene::ui_draw_scene()
 {
-    const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::entity_id e, bool expand, const auto& self) -> void {
+    const auto expand_hierarchy = [this](ecs::Registry* reg, ecs::EntityId e, bool expand, const auto& self) -> void {
         ui.scene.nodes[e].expanded = expand;
-        reg->loop_over_children(e, [&](ecs::entity_id ch) { self(reg, ch, expand, self); });
+        reg->loop_over_children(e, [&](ecs::EntityId ch) { self(reg, ch, expand, self); });
     };
 
-    const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::entity_id e, const auto& self) -> void {
+    const auto draw_hierarchy = [&, this](ecs::Registry* reg, ecs::EntityId e, const auto& self) -> void {
         const auto enode = reg->get<ecs::Node>(e);
         ImGui::PushID((int)*e);
         auto& ui_node = ui.scene.nodes[e];
@@ -544,7 +544,7 @@ void Scene::ui_draw_scene()
         if(ui_node.expanded)
         {
             ImGui::Indent();
-            reg->loop_over_children(e, [&](ecs::entity_id ec) { self(reg, ec, self); });
+            reg->loop_over_children(e, [&](ecs::EntityId ec) { self(reg, ec, self); });
             ImGui::Unindent();
         }
         ImGui::PopID();

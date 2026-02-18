@@ -16,10 +16,11 @@ int main(int argc, char* argv[])
         //{
         // };
 
-        // auto e1 = reg.create();
+         auto e1 = reg.create();
         // reg.add_components<A>(e1, A{});
-        // reg.erase(e1);
-        // e1 = reg.create();
+         reg.erase(e1);
+         auto e1_2 = reg.create();
+         ENG_ASSERT(!reg.has(e1) && reg.has(e1_2));
         // reg.add_components<A>(e1, A{});
         // reg.erase_components<A>(e1);
 

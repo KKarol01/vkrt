@@ -26,78 +26,82 @@ namespace eng
 {
 namespace ecs
 {
+/*
+    Ecs is a system that generates handles (64 bit for now, but could be compressed)
+    and allows users to attach structures to them which can be queried later.
+    Each handle has 32bit versioning number which is used to prevent stale handles
+    when it's been recycled when doing create->erase->create. During erase version is
+    bumped by 1.
 
-struct slot_t;
-using slot_id = TypedId<slot_t, uint32_t>;
-struct entity_id : public TypedId<entity_id, uint64_t>
+    Typical usage is as follows:
+    e = create()
+    add_components<A, B, C, ...>(e, A{}, B{}, C{}, ...)
+
+    Then some system may wish to iterate over all registered components of type A{}.
+    Let's assume it's Transform component.
+    It would do as follows
+
+*/
+
+struct Slot;
+using SlotId = TypedId<Slot, uint32_t>;
+struct EntityId : public TypedId<EntityId, uint64_t>
 {
-    explicit entity_id(storage_type handle) : TypedId(handle) {}
-    explicit entity_id() : entity_id(slot_id{}, ~0u) {}
-    entity_id(slot_id slot, uint32_t version) : TypedId(((uint64_t)version << 32) | (uint64_t)*slot) {}
-    auto operator<=>(const entity_id&) const = default;
-    slot_id get_slot() const { return slot_id{ (uint32_t)handle }; }
+    explicit EntityId(storage_type handle) : TypedId(handle) {}
+    explicit EntityId() : EntityId(SlotId{}, ~0u) {}
+    EntityId(SlotId slot, uint32_t version) : TypedId(((uint64_t)version << 32) | (uint64_t)*slot) {}
+    auto operator<=>(const EntityId&) const = default;
+    SlotId get_slot() const { return SlotId{ (uint32_t)handle }; }
     uint32_t get_version() const { return (uint32_t)(handle >> 32); }
 };
-using component_id = uint32_t;
-inline static constexpr uint32_t MAX_COMPONENTS = std::numeric_limits<component_id>::digits;
-struct view_id_t;
-using view_id = TypedId<view_id_t, component_id>;
-using signature = std::bitset<MAX_COMPONENTS>;
-using view_on_entity_insert_t = void(entity_id eid);
-using view_on_entity_update_t = void(entity_id eid, signature updated);
-using view_on_entity_remove_t = void(entity_id eid);
-using component = void(entity_id eid, signature updated);
+using ComponentId = uint32_t;
+inline static constexpr uint32_t MAX_COMPONENTS = std::numeric_limits<ComponentId>::digits;
+using Signature = std::bitset<MAX_COMPONENTS>;
+using ViewEntityInsertedFunc = void(EntityId eid);
+using ViewEntityUpdatedFunc = void(EntityId eid, Signature updated);
+using ViewEntityRemovedFunc = void(EntityId eid);
 
 struct ComponentTraits
 {
-    template <typename Component> static component_id get_id()
+    // Gets stable unique 0-based index for component
+    template <typename Component> static ComponentId get_id()
     {
         static auto id = counter.fetch_add(1);
         ENG_ASSERT(id < MAX_COMPONENTS);
         return id;
     }
-    template <typename... Components> static signature get_signature()
+    // Returns bit mask of given components
+    template <typename... Components> static Signature get_signature()
     {
-        return signature{ (0 | ... | (1ull << get_id<Components>())) };
+        return Signature{ (0 | ... | (1ull << get_id<Components>())) };
     }
-    inline static std::atomic<component_id> counter{};
+    inline static std::atomic<ComponentId> counter{};
 };
 
-template <typename... Components> inline bool test_signature(signature sig)
+template <typename... Components> inline bool test_signature(Signature sig)
 {
     const auto csig = ComponentTraits::get_signature<Components...>();
     return (csig & sig) == csig;
 }
 
-} // namespace ecs
-} // namespace eng
-
-ENG_DEFINE_STD_HASH(eng::ecs::entity_id, *t);
-ENG_DEFINE_STD_HASH(eng::ecs::slot_id, *t);
-
-namespace eng
-{
-namespace ecs
-{
-
 struct IComponentPool
 {
     virtual ~IComponentPool() = default;
-    bool has(slot_id e) const { return entities.has(*e); }
-    virtual void erase(slot_id e) = 0;
-    SparseSet<slot_id::storage_type, 1024> entities; // for packing components
+    bool has(SlotId e) const { return entities.has(*e); }
+    virtual void erase(SlotId e) = 0;
+    SparseSet<SlotId::storage_type, 1024> entities; // for packing components
 };
 
 template <typename Component> struct ComponentPool : public IComponentPool
 {
-    Component& get(slot_id e)
+    Component& get(SlotId e)
     {
         const auto idx = entities.get(*e);
         if(!idx) { ENG_ERROR("Invalid entity {}", *e); }
         return components[*idx];
     }
 
-    template <typename... Args> void emplace(slot_id e, Args&&... args)
+    template <typename... Args> void emplace(SlotId e, Args&&... args)
     {
         const auto it = entities.insert(*e);
         if(!it)
@@ -113,7 +117,7 @@ template <typename Component> struct ComponentPool : public IComponentPool
         }
     }
 
-    void erase(slot_id e) override
+    void erase(SlotId e) override
     {
         const auto it = entities.erase(*e);
         if(!it)
@@ -132,56 +136,57 @@ class Registry
 {
     struct EntityMetadata
     {
-        signature sig;
-        IndexedHierarchy<entity_id>::element_id hierarchy_key;
+        bool has_components(Signature csig) const { return (csig & sig) == csig; }
+        Signature sig;
+        IndexedHierarchy<EntityId>::element_id hierarchy_key;
         uint32_t version{};
     };
 
     struct View
     {
         // checks if an entity with given signature has required components by the view
-        bool test_sig(signature esig) const { return (sig & esig) == sig; }
-        signature sig;
-        std::vector<entity_id> entities;
-        Signal<view_on_entity_insert_t> on_insert_callbacks;
-        Signal<view_on_entity_update_t> on_update_callbacks;
-        Signal<view_on_entity_remove_t> on_remove_callbacks;
+        bool test_sig(Signature esig) const { return (sig & esig) == sig; }
+        Signature sig;
+        std::vector<EntityId> entities;
+        Signal<ViewEntityInsertedFunc> on_insert_callbacks;
+        Signal<ViewEntityUpdatedFunc> on_update_callbacks;
+        Signal<ViewEntityRemovedFunc> on_remove_callbacks;
     };
 
     // For internal use. Generated by some counter.
     using entity_t = uint32_t;
     inline static constexpr size_t MAX_ENTITY = ~entity_t{};
 
-    template <typename... Components> static signature get_signature()
+    template <typename... Components> static Signature get_signature()
     {
         return (ComponentTraits::get_signature<Components>() | ...);
     }
 
   public:
-    bool has(entity_id eid) const { return slots.has(*eid.get_slot()) && eid.get_version() == get_md(eid).version; }
-    template <typename... Components> bool has(entity_id eid) const
+    bool has(EntityId eid) const { return slots.has(*eid.get_slot()) && eid.get_version() == get_md(eid).version; }
+    template <typename... Components> bool has(EntityId eid) const
     {
         const auto sig = get_signature<Components...>();
         return has(eid) && (get_md(eid).sig & sig) == sig;
     }
 
-    entity_id create()
+    EntityId create()
     {
-        const auto slot = slot_id{ slots.allocate() };
+        const auto slot = SlotId{ slots.allocate() };
         if(!slot)
         {
             ENG_ASSERT(false, "Too many entities");
-            return entity_id{};
+            return EntityId{};
         }
         if(*slot == metadatas.size()) { metadatas.emplace_back(); }
         auto& md = metadatas[*slot];
         const auto version = md.version;
-        const auto eid = entity_id{ slot, version };
+        const auto eid = EntityId{ slot, version };
         md.hierarchy_key = hierarchy.insert(eid);
-        return entity_id{ slot, version };
+        return EntityId{ slot, version };
     }
 
-    void erase(entity_id eid)
+    void erase(EntityId eid)
     {
         if(!has(eid))
         {
@@ -196,7 +201,7 @@ class Registry
         md.version = eid.get_version() + 1;
     }
 
-    template <typename Component> Component& get(entity_id eid)
+    template <typename Component> Component& get(EntityId eid)
     {
         if(!has(eid))
         {
@@ -207,7 +212,7 @@ class Registry
         return get_pool<Component>().get(eid.get_slot());
     }
 
-    template <typename... Components> void add_components(entity_id eid, Components&&... components)
+    template <typename... Components> void add_components(EntityId eid, Components&&... components)
     {
         if(!has(eid))
         {
@@ -215,7 +220,7 @@ class Registry
             return;
         }
 
-        const signature sig = ComponentTraits::get_signature<Components...>();
+        const Signature sig = ComponentTraits::get_signature<Components...>();
         auto& md = get_md(eid);
         if((sig & md.sig).any())
         {
@@ -233,12 +238,26 @@ class Registry
         on_entity_sig_change(eid, old_sig, md.sig);
     }
 
-    template <typename... Components> void erase_components(entity_id eid)
+    template <typename... Components> void erase_components(EntityId eid)
     {
-        try_erase_components(eid, ComponentTraits::get_signature<Components...>());
+        erase_components(eid, ComponentTraits::get_signature<Components...>());
     }
 
-    void make_child(entity_id parentid, entity_id childid)
+    template <typename... Components> void iterate_over_components(const auto& callback)
+    {
+
+        // const IComponentPool* const pool = try_find_smallest_pool<Components...>();
+        // const Signature sig = get_signature<Components...>();
+        // if(!pool) { return; }
+        // for(auto e : pool->entities)
+        //{
+        //     if (metadatas[e].has_components(sig)) {
+
+        //    }
+        //}
+    }
+
+    void make_child(EntityId parentid, EntityId childid)
     {
         if(!has(parentid))
         {
@@ -253,19 +272,19 @@ class Registry
         hierarchy.make_child(get_md(parentid).hierarchy_key, get_md(childid).hierarchy_key);
     }
 
-    entity_id get_parent(entity_id eid) const
+    EntityId get_parent(EntityId eid) const
     {
         if(!has(eid))
         {
             ENG_ERROR("Entity {} is invalid", *eid);
-            return entity_id{};
+            return EntityId{};
         }
         const auto p = hierarchy.get_parent(get_md(eid).hierarchy_key);
-        if(!p) { return entity_id{}; }
+        if(!p) { return EntityId{}; }
         return hierarchy.at(p);
     }
 
-    bool has_children(entity_id eid) const
+    bool has_children(EntityId eid) const
     {
         if(!has(eid))
         {
@@ -276,7 +295,7 @@ class Registry
         return (bool)hierarchy.get_first_child(md.hierarchy_key);
     }
 
-    void loop_over_children(entity_id eid, const auto& callback)
+    void loop_over_children(EntityId eid, const auto& callback)
     {
         if(!has(eid))
         {
@@ -295,87 +314,55 @@ class Registry
         while(child != first);
     }
 
-    void traverse_hierarchy(entity_id eid, const auto& callback)
+    void traverse_hierarchy(EntityId eid, const auto& callback)
     {
         if(!has(eid))
         {
             ENG_ERROR("Invalid entity {}", *eid.get_slot());
             return;
         }
-        const auto traverse = [&](entity_id id, const auto& self) -> void {
+        const auto traverse = [&](EntityId id, const auto& self) -> void {
             callback(id);
-            loop_over_children(id, [&](entity_id id) { self(id, self); });
+            loop_over_children(id, [&](EntityId id) { self(id, self); });
         };
         traverse(eid, traverse);
     }
 
     template <typename... Components>
-    void register_callbacks(std::optional<Callback<view_on_entity_insert_t>> on_insert_callback = {},
-                            std::optional<Callback<view_on_entity_update_t>> on_update_callback = {},
-                            std::optional<Callback<view_on_entity_remove_t>> on_remove_callback = {})
+    void register_callbacks(std::optional<Callback<ViewEntityInsertedFunc>> on_insert_callback = {},
+                            std::optional<Callback<ViewEntityUpdatedFunc>> on_update_callback = {},
+                            std::optional<Callback<ViewEntityRemovedFunc>> on_remove_callback = {})
     {
-        const auto sig = get_signature<Components...>();
-        if(!views.contains(sig))
-        {
-            View view{};
-            view.sig = sig;
-            // can be nullptr if no components were inserted
-            const IComponentPool* const smallest_component_pool = [this] {
-                std::array<component_id, sizeof...(Components)> arr = { ComponentTraits::get_id<Components>()... };
-                IComponentPool* smallest{};
-                for(auto idx : arr)
-                {
-                    if(!smallest || pools[idx]->entities.size() < smallest->entities.size())
-                    {
-                        smallest = &*pools[idx];
-                    }
-                }
-                return smallest;
-            }();
-            if(smallest_component_pool)
-            {
-                for(auto e : smallest_component_pool->entities)
-                {
-                    const auto eid = entity_id{ slot_id{ e }, metadatas[e].version };
-                    if(has<Components...>(eid)) { view.entities.push_back(eid); }
-                }
-            }
-            views.emplace(sig, std::move(view));
-        }
-        auto& view = views.at(sig);
+        auto& view = get_view(get_signature<Components...>());
         if(on_insert_callback) { view.on_insert_callbacks += *on_insert_callback; }
         if(on_update_callback) { view.on_update_callbacks += *on_update_callback; }
         if(on_remove_callback) { view.on_remove_callbacks += *on_remove_callback; }
     }
 
-    template <typename... Components> void signal_components_update(entity_id eid)
+    template <typename... Components> void signal_components_update(EntityId eid)
     {
         notify_entity_views(eid, get_signature<Components...>());
     }
 
   private:
-    EntityMetadata& get_md(entity_id eid) { return metadatas[*eid.get_slot()]; }
-    const EntityMetadata& get_md(entity_id eid) const { return metadatas[*eid.get_slot()]; }
+    EntityMetadata& get_md(EntityId eid) { return metadatas[*eid.get_slot()]; }
+    const EntityMetadata& get_md(EntityId eid) const { return metadatas[*eid.get_slot()]; }
 
-    void try_erase_components(entity_id eid, signature sig)
+    void erase_components(EntityId eid, Signature sig)
     {
         if(!has(eid))
         {
             ENG_ERROR("Invalid entity {}", *eid.get_slot());
             return;
         }
-        signature remsig = {};
+        auto& md = get_md(eid);
+        if((md.sig & sig).none()) { return; }
         for(auto i = 0ull; i < sig.size(); ++i)
         {
-            if(sig[i] && pools[i]->has(eid.get_slot()))
-            {
-                remsig.set(i);
-                pools[i]->erase(eid.get_slot());
-            }
+            if(sig[i]) { pools[i]->erase(eid.get_slot()); }
         }
-        auto& md = get_md(eid);
-        const auto newsig = md.sig & (~remsig);
-        on_entity_sig_change(eid, md.sig, newsig);
+        const auto newsig = md.sig & (~sig);
+        if((md.sig & sig).any()) { on_entity_sig_change(eid, md.sig, newsig); }
         md.sig = newsig;
     }
 
@@ -386,7 +373,23 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*pools[id]);
     }
 
-    void on_entity_sig_change(entity_id eid, signature old_sig, signature new_sig)
+    View& get_view(Signature sig)
+    {
+        auto it = views.emplace(sig, View{});
+        if(!it.second) { return it.first->second; }
+        View& view = it.first->second;
+        view.sig = sig;
+        if(auto* smallest_component_pool = try_find_smallest_pool<Components...>())
+        {
+            for(auto e : smallest_component_pool->entities)
+            {
+                const auto eid = EntityId{ SlotId{ e }, metadatas[e].version };
+                if(has<Components...>(eid)) { view.entities.push_back(eid); }
+            }
+        }
+    }
+
+    void on_entity_sig_change(EntityId eid, Signature old_sig, Signature new_sig)
     {
         for(auto& [viewsig, view] : views)
         {
@@ -406,7 +409,7 @@ class Registry
         }
     }
 
-    void notify_entity_views(entity_id eid, signature updated_comps)
+    void notify_entity_views(EntityId eid, Signature updated_comps)
     {
         for(auto& [viewsig, view] : views)
         {
@@ -417,12 +420,40 @@ class Registry
         }
     }
 
+    template <typename... Components> IComponentPool* try_find_smallest_pool()
+    {
+        static_assert(sizeof...(Components) > 0);
+        std::array<ComponentId, sizeof...(Components)> arr = { ComponentTraits::get_id<Components>()... };
+        IComponentPool* smallest = &*pools[arr[0]];
+        for(auto i = 1ull; i < arr.size(); ++i)
+        {
+            const auto idx = arr[i];
+            if(!smallest || pools[idx]->entities.size() < smallest->entities.size()) { smallest = &*pools[idx]; }
+        }
+        return smallest;
+    }
+
+    IComponentPool* try_find_smallest_pool(Signature sig)
+    {
+        std::array<ComponentId, sizeof...(Components)> arr = { ComponentTraits::get_id<Components>()... };
+        IComponentPool* smallest = &*pools[arr[0]];
+        for(auto i = 1ull; i < arr.size(); ++i)
+        {
+            const auto idx = arr[i];
+            if(!smallest || pools[idx]->entities.size() < smallest->entities.size()) { smallest = &*pools[idx]; }
+        }
+        return smallest;
+    }
+
     SlotAllocator slots;
     std::vector<EntityMetadata> metadatas;
-    IndexedHierarchy<entity_id> hierarchy;
+    IndexedHierarchy<EntityId> hierarchy;
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools;
-    std::unordered_map<signature, View> views;
+    std::unordered_map<Signature, View> views;
 };
 
 } // namespace ecs
 } // namespace eng
+
+ENG_DEFINE_STD_HASH(eng::ecs::EntityId, *t);
+ENG_DEFINE_STD_HASH(eng::ecs::SlotId, *t);

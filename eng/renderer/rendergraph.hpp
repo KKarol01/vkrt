@@ -24,8 +24,11 @@ class RenderGraph
 {
   public:
     struct Resource;
-    struct ResourceAccess;
+    struct Access;
     struct PassBuilder;
+
+    using ResourceId = Handle<Resource>;
+    using AccessId = Handle<Access>;
 
     struct Clear
     {
@@ -55,32 +58,32 @@ class RenderGraph
             GRAPHICS,
             COMPUTE,
         };
+        Pass() = default;
+        Pass(const std::string& name, Type type) : name(name), type(type) {}
         virtual ~Pass() = default;
         bool is_graphics() const { return type == Type::GRAPHICS; }
         bool is_compute() const { return type == Type::COMPUTE; }
         virtual void execute(RenderGraph& graph) = 0;
-        std::string name;
+        std::string name; // name. for debugging and gpu labels
         Type type{ Type::NONE };
-        std::vector<Handle<ResourceAccess>> accesses;
+        std::vector<AccessId> accesses;
         // std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
-        Flags<PipelineStage> stage_mask{};
-        ICommandBuffer* cmd{};
+        Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
+        ICommandBuffer* cmd{};             // if not null, needs to be executed
     };
     template <typename UserData> struct UserPass : public Pass
     {
         UserPass(const std::string& name, Type type, const ExecFunc<UserData>& exec_func)
+            : Pass(name, type), exec_func(exec_func)
         {
-            this->name = name;
-            this->type = type;
-            this->exec_cb = exec_func;
         }
         ~UserPass() override = default;
         void execute(RenderGraph& graph) override
         {
             PassBuilder pb{ this, &graph };
-            exec_cb(graph, pb, user_data);
+            exec_func(graph, pb, user_data);
         };
-        ExecFunc<UserData> exec_cb{};
+        ExecFunc<UserData> exec_func{};
         UserData user_data;
     };
 
@@ -91,7 +94,7 @@ class RenderGraph
         Handle<Buffer> as_buffer() const { return std::get<0>(native); }
         Handle<Image> as_image() const { return std::get<1>(native); }
         NativeResource native;
-        Handle<ResourceAccess> last_access;
+        AccessId last_access;
         uint32_t last_read_group{ ~0u };
         uint32_t last_write_group{ ~0u };
         bool is_persistent{};
@@ -99,14 +102,14 @@ class RenderGraph
         void* alloc{}; // from transient allocator if not persistent
     };
 
-    struct ResourceAccess
+    struct Access
     {
         bool is_read() const { return (access & PipelineAccess::READS) > 0; }
         bool is_write() const { return (access & PipelineAccess::WRITES) > 0; }
         // note: this might prove to be problematic if some resources will actually need to use none/none (
         bool is_import_only() const { return !prev_access; }
         Handle<Resource> resource;
-        Handle<ResourceAccess> prev_access;
+        AccessId prev_access;
         union {
             BufferView buffer_view; // if resource->is_buffer() == true or layout == undefined
             ImageView image_view;
@@ -130,10 +133,10 @@ class RenderGraph
 
     struct PassBuilder
     {
-        Handle<ResourceAccess> add_resource(const Resource& resource, const std::optional<Clear>& clear = {})
+        AccessId add_resource(const Resource& resource, const std::optional<Clear>& clear = {})
         {
             graph->resources.push_back(resource);
-            const auto ret = add_access(ResourceAccess{
+            const auto ret = add_access(Access{
                 .resource = Handle<Resource>{ (uint32_t)graph->resources.size() - 1 },
                 .layout = ImageLayout::UNDEFINED,
                 .stage = {},
@@ -145,7 +148,7 @@ class RenderGraph
             return ret;
         }
 
-        Handle<ResourceAccess> import_resource(const Resource::NativeResource& resource, const std::optional<Clear>& clear = {})
+        AccessId import_resource(const Resource::NativeResource& resource, const std::optional<Clear>& clear = {})
         {
             const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
                                          [&resource](const auto& e) { return e.native == resource; });
@@ -165,7 +168,7 @@ class RenderGraph
             return &it->second;
         }
 
-        Handle<ResourceAccess> create_resource(Buffer&& a, bool persistent = false)
+        AccessId create_resource(Buffer&& a, bool persistent = false)
         {
             ENG_ASSERT(a.name.size() > 0);
             Resource::NativeResource native = [this, &a, persistent] -> Resource::NativeResource {
@@ -183,7 +186,7 @@ class RenderGraph
             return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
 
-        Handle<ResourceAccess> create_resource(Image&& a, bool persistent = false, const std::optional<Clear>& clear = {})
+        AccessId create_resource(Image&& a, bool persistent = false, const std::optional<Clear>& clear = {})
         {
             ENG_ASSERT(a.name.size() > 0);
             Resource::NativeResource native = [this, &a, persistent] -> Resource::NativeResource {
@@ -201,19 +204,19 @@ class RenderGraph
             return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
 
-        Handle<ResourceAccess> add_access(const ResourceAccess& a)
+        AccessId add_access(const Access& a)
         {
             graph->accesses.push_back(a);
-            const auto ret = Handle<ResourceAccess>{ (uint32_t)graph->accesses.size() - 1 };
+            const auto ret = AccessId{ (uint32_t)graph->accesses.size() - 1 };
             graph->get_res(ret).last_access = ret;
             pass->accesses.push_back(ret);
             pass->stage_mask |= a.stage;
             return ret;
         }
 
-        Handle<ResourceAccess> sample_texture(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {},
-                                              std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                              Range32u layers = { 0u, ~0u })
+        AccessId sample_texture(AccessId acc, std::optional<ImageFormat> format = {},
+                                   std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
+                                   Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -223,7 +226,7 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, type, mips, layers);
         }
 
-        Handle<ResourceAccess> access_depth(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {})
+        AccessId access_depth(AccessId acc, std::optional<ImageFormat> format = {})
         {
             const auto stage = PipelineStage::EARLY_Z_BIT | PipelineStage::LATE_Z_BIT;
             const auto access = PipelineAccess::DS_RW;
@@ -231,8 +234,7 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
         }
 
-        Handle<ResourceAccess> access_color(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {},
-                                            std::optional<ImageViewType> type = {})
+        AccessId access_color(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
         {
             const auto stage = PipelineStage::COLOR_OUT_BIT;
             const auto access = PipelineAccess::COLOR_RW_BIT;
@@ -240,9 +242,8 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
         }
 
-        Handle<ResourceAccess> read_image(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {},
-                                          std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                          Range32u layers = { 0u, ~0u })
+        AccessId read_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -252,9 +253,8 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, type, mips, layers);
         }
 
-        Handle<ResourceAccess> write_image(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {},
-                                           std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                           Range32u layers = { 0u, ~0u })
+        AccessId write_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -264,9 +264,9 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, type, mips, layers);
         }
 
-        Handle<ResourceAccess> read_write_image(Handle<ResourceAccess> acc, std::optional<ImageFormat> format = {},
-                                                std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                                Range32u layers = { 0u, ~0u })
+        AccessId read_write_image(AccessId acc, std::optional<ImageFormat> format = {},
+                                     std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
+                                     Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -276,7 +276,7 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, type, mips, layers);
         }
 
-        Handle<ResourceAccess> read_buffer(Handle<ResourceAccess> acc, Range64u range = { 0ull, ~0ull })
+        AccessId read_buffer(AccessId acc, Range64u range = { 0ull, ~0ull })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::VERTEX_BIT | PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -285,26 +285,25 @@ class RenderGraph
             return access_resource(acc, stage, access, range);
         }
 
-        Handle<ResourceAccess> write_buffer(Handle<ResourceAccess> acc, Range64u range = { 0ull, ~0ull })
+        AccessId write_buffer(AccessId acc, Range64u range = { 0ull, ~0ull })
         {
             const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
             const auto access = PipelineAccess::STORAGE_RW;
             return access_resource(acc, stage, access, range);
         }
 
-        Handle<ResourceAccess> read_write_buffer(Handle<ResourceAccess> acc, Range64u range = { 0ull, ~0ull })
+        AccessId read_write_buffer(AccessId acc, Range64u range = { 0ull, ~0ull })
         {
             const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
             const auto access = PipelineAccess::STORAGE_RW;
             return access_resource(acc, stage, access, range);
         }
 
-        Handle<ResourceAccess> access_resource(Handle<ResourceAccess> acc, ImageLayout layout, Flags<PipelineStage> stage,
-                                               Flags<PipelineAccess> access, std::optional<ImageFormat> format = {},
-                                               std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                               Range32u layers = { 0u, ~0u })
+        AccessId access_resource(AccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                                    std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                    Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
-            return add_access(ResourceAccess{
+            return add_access(Access{
                 .resource = graph->get_acc(acc).resource,
                 .prev_access = acc,
                 .image_view =
@@ -315,10 +314,10 @@ class RenderGraph
             });
         }
 
-        Handle<ResourceAccess> access_resource(Handle<ResourceAccess> acc, Flags<PipelineStage> stage,
-                                               Flags<PipelineAccess> access, Range64u range = { 0ull, ~0ull })
+        AccessId access_resource(AccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                                    Range64u range = { 0ull, ~0ull })
         {
-            return add_access(ResourceAccess{
+            return add_access(Access{
                 .resource = graph->get_acc(acc).resource,
                 .prev_access = acc,
                 .buffer_view = BufferView{ graph->get_buf(acc), range },
@@ -562,11 +561,11 @@ class RenderGraph
     };
 
     // utility funcs for easy access to resources
-    ResourceAccess& get_acc(Handle<ResourceAccess> a) { return accesses[*a]; }
+    Access& get_acc(AccessId a) { return accesses[*a]; }
     Resource& get_res(Handle<Resource> a) { return resources[*a]; }
-    Resource& get_res(Handle<ResourceAccess> a) { return resources[*get_acc(a).resource]; }
-    Handle<Buffer> get_buf(Handle<ResourceAccess> a) { return get_res(a).as_buffer(); }
-    Handle<Image> get_img(Handle<ResourceAccess> a) { return get_res(a).as_image(); }
+    Resource& get_res(AccessId a) { return resources[*get_acc(a).resource]; }
+    Handle<Buffer> get_buf(AccessId a) { return get_res(a).as_buffer(); }
+    Handle<Image> get_img(AccessId a) { return get_res(a).as_image(); }
 
     void init(Renderer* r)
     {
@@ -581,20 +580,20 @@ class RenderGraph
     }
 
     template <typename UserData>
-    UserData add_graphics_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_cb)
+    UserData add_graphics_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_func)
     {
         auto& pass = static_cast<UserPass<UserData>&>(*passes.emplace_back(std::make_unique<UserPass<UserData>>(UserPass<UserData>{
-            std::string{ name.data(), name.size() }, Pass::Type::GRAPHICS, exec_cb })));
+            std::string{ name.data(), name.size() }, Pass::Type::GRAPHICS, exec_func })));
         PassBuilder pb{ &*passes.back(), this };
         pass.user_data = setup_cb(pb);
         return pass.user_data;
     }
 
     template <typename UserData>
-    UserData add_compute_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_cb)
+    UserData add_compute_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_func)
     {
         auto& pass = static_cast<UserPass<UserData>&>(*passes.emplace_back(std::make_unique<UserPass<UserData>>(UserPass<UserData>{
-            std::string{ name.data(), name.size() }, Pass::Type::COMPUTE, exec_cb })));
+            std::string{ name.data(), name.size() }, Pass::Type::COMPUTE, exec_func })));
         PassBuilder pb{ &*passes.back(), this };
         pass.user_data = setup_cb(pb);
         return pass.user_data;
@@ -602,7 +601,7 @@ class RenderGraph
 
     void compile()
     {
-        const auto calc_earliest_group = [this](const std::vector<Handle<ResourceAccess>>& accesses) {
+        const auto calc_earliest_group = [this](const std::vector<AccessId>& accesses) -> uint32_t {
             return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& val) {
                 return std::max(max, [this, &val] {
                     const auto& acc = get_acc(val);
@@ -614,6 +613,7 @@ class RenderGraph
                     if(acc.is_read())
                     {
                         const auto& pacc = get_acc(acc.prev_access);
+                        // if reading, we need to at least wait for previous writes, if any
                         auto earliest = res.last_write_group + 1;
                         // if reading, and layouts are not same, change layout and read in the next stage
                         if(pacc.layout != acc.layout) { earliest = std::max(earliest, res.last_read_group + 1); }
@@ -625,7 +625,7 @@ class RenderGraph
                 }());
             });
         };
-        const auto update_access_groups = [this](const std::vector<Handle<ResourceAccess>>& accesses, uint32_t gid) {
+        const auto update_access_groups = [this](const std::vector<AccessId>& accesses, uint32_t gid) {
             std::for_each(accesses.begin(), accesses.end(), [this, gid](auto a) {
                 const auto& acc = get_acc(a);
                 auto& res = get_res(a);
@@ -792,7 +792,7 @@ class RenderGraph
 
     std::unordered_map<uint64_t, PersistentStorage> persistent_resources;
     std::vector<Resource> resources;
-    std::vector<ResourceAccess> accesses;
+    std::vector<Access> accesses;
     std::vector<std::unique_ptr<Pass>> passes;
     std::unordered_map<std::string, Handle<Pass>> namedpasses;
     std::vector<ExecutionGroup> groups;
