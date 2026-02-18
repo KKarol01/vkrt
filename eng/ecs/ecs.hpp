@@ -44,7 +44,7 @@ namespace ecs
 */
 
 struct Slot;
-using SlotId = TypedId<Slot, uint32_t>;
+using SlotId = IndexedHierarchy::NodeId;
 struct EntityId : public TypedId<EntityId, uint64_t>
 {
     explicit EntityId(storage_type handle) : TypedId(handle) {}
@@ -88,6 +88,7 @@ struct IComponentPool
 {
     virtual ~IComponentPool() = default;
     bool has(SlotId e) const { return entities.has(*e); }
+    size_t size() const { return entities.size(); }
     virtual void erase(SlotId e) = 0;
     SparseSet<SlotId::storage_type, 1024> entities; // for packing components
 };
@@ -138,8 +139,6 @@ class Registry
     {
         bool has_components(Signature csig) const { return (csig & sig) == csig; }
         Signature sig;
-        IndexedHierarchy<EntityId>::element_id hierarchy_key;
-        uint32_t version{};
     };
 
     struct View
@@ -163,27 +162,24 @@ class Registry
     }
 
   public:
-    bool has(EntityId eid) const { return slots.has(*eid.get_slot()) && eid.get_version() == get_md(eid).version; }
+    bool has(EntityId eid) const { return hierarchy.has(eid.get_slot()) && eid == entities[*eid.get_slot()]; }
     template <typename... Components> bool has(EntityId eid) const
     {
-        const auto sig = get_signature<Components...>();
-        return has(eid) && (get_md(eid).sig & sig) == sig;
+        return has(eid) && get_md(eid).has_components(get_signature<Components...>());
     }
 
     EntityId create()
     {
-        const auto slot = SlotId{ slots.allocate() };
-        if(!slot)
+        const auto hnid = hierarchy.create();
+        if(!hnid)
         {
             ENG_ASSERT(false, "Too many entities");
             return EntityId{};
         }
-        if(*slot == metadatas.size()) { metadatas.emplace_back(); }
-        auto& md = metadatas[*slot];
-        const auto version = md.version;
-        const auto eid = EntityId{ slot, version };
-        md.hierarchy_key = hierarchy.insert(eid);
-        return EntityId{ slot, version };
+        if(*hnid == metadatas.size()) { metadatas.emplace_back(); }
+        if(*hnid == entities.size()) { entities.emplace_back(EntityId{ hnid, 0 }); }
+        ENG_ASSERT(hnid == entities[*hnid].get_slot());
+        return entities[*hnid];
     }
 
     void erase(EntityId eid)
@@ -194,11 +190,8 @@ class Registry
             return;
         }
         erase_components(eid);
-        auto& md = get_md(eid);
-        slots.erase(*eid.get_slot());
-        hierarchy.erase(md.hierarchy_key);
-        md = {};
-        md.version = eid.get_version() + 1;
+        hierarchy.erase(eid.get_slot());
+        entities[*eid.get_slot()] = EntityId{ eid.get_slot(), eid.get_version() + 1 };
     }
 
     template <typename Component> Component& get(EntityId eid)
@@ -240,21 +233,19 @@ class Registry
 
     template <typename... Components> void erase_components(EntityId eid)
     {
-        erase_components(eid, ComponentTraits::get_signature<Components...>());
+        erase_components(eid, Signature{ ~ComponentId{} });
     }
 
     template <typename... Components> void iterate_over_components(const auto& callback)
     {
-
-        // const IComponentPool* const pool = try_find_smallest_pool<Components...>();
-        // const Signature sig = get_signature<Components...>();
-        // if(!pool) { return; }
-        // for(auto e : pool->entities)
-        //{
-        //     if (metadatas[e].has_components(sig)) {
-
-        //    }
-        //}
+        const IComponentPool* const pool = try_find_smallest_pool<Components...>();
+        const Signature sig = get_signature<Components...>();
+        if(!pool) { return; }
+        for(auto e : pool->entities)
+        {
+            if(!metadatas[e].has_components(sig)) { continue; }
+            callback(entities[e], get_pool<Components>().get(SlotId{ e })...);
+        }
     }
 
     void make_child(EntityId parentid, EntityId childid)
@@ -269,7 +260,7 @@ class Registry
             ENG_ERROR("Entity {} is invalid", *childid);
             return;
         }
-        hierarchy.make_child(get_md(parentid).hierarchy_key, get_md(childid).hierarchy_key);
+        hierarchy.make_child(parentid.get_slot(), childid.get_slot());
     }
 
     EntityId get_parent(EntityId eid) const
@@ -279,9 +270,9 @@ class Registry
             ENG_ERROR("Entity {} is invalid", *eid);
             return EntityId{};
         }
-        const auto p = hierarchy.get_parent(get_md(eid).hierarchy_key);
+        const auto p = hierarchy.get_parent(eid.get_slot());
         if(!p) { return EntityId{}; }
-        return hierarchy.at(p);
+        return entities[*p];
     }
 
     bool has_children(EntityId eid) const
@@ -291,8 +282,7 @@ class Registry
             ENG_ERROR("Entity {} is invalid", *eid);
             return false;
         }
-        const auto& md = get_md(eid);
-        return (bool)hierarchy.get_first_child(md.hierarchy_key);
+        return (bool)hierarchy.get_first_child(eid.get_slot());
     }
 
     void loop_over_children(EntityId eid, const auto& callback)
@@ -302,16 +292,15 @@ class Registry
             ENG_ERROR("Entity {} is invalid", *eid);
             return;
         }
-        auto first = hierarchy.get_first_child(get_md(eid).hierarchy_key);
+        auto first = hierarchy.get_first_child(eid.get_slot());
         if(!first) { return; }
-        auto child = first;
+        auto it = first;
         do
         {
-            auto next = hierarchy.get_next_sibling(child);
-            callback(hierarchy.at(child));
-            child = next;
+            callback(entities[*it]);
+            it = hierarchy.get_next_sibling(it);
         }
-        while(child != first);
+        while(it != first);
     }
 
     void traverse_hierarchy(EntityId eid, const auto& callback)
@@ -344,7 +333,7 @@ class Registry
         notify_entity_views(eid, get_signature<Components...>());
     }
 
-  private:
+    // private:
     EntityMetadata& get_md(EntityId eid) { return metadatas[*eid.get_slot()]; }
     const EntityMetadata& get_md(EntityId eid) const { return metadatas[*eid.get_slot()]; }
 
@@ -359,7 +348,7 @@ class Registry
         if((md.sig & sig).none()) { return; }
         for(auto i = 0ull; i < sig.size(); ++i)
         {
-            if(sig[i]) { pools[i]->erase(eid.get_slot()); }
+            if(sig[i] && md.sig[i]) { pools[i]->erase(eid.get_slot()); }
         }
         const auto newsig = md.sig & (~sig);
         if((md.sig & sig).any()) { on_entity_sig_change(eid, md.sig, newsig); }
@@ -379,14 +368,14 @@ class Registry
         if(!it.second) { return it.first->second; }
         View& view = it.first->second;
         view.sig = sig;
-        if(auto* smallest_component_pool = try_find_smallest_pool<Components...>())
+        if(auto* pool = try_find_smallest_pool(sig))
         {
-            for(auto e : smallest_component_pool->entities)
+            for(auto e : pool->entities)
             {
-                const auto eid = EntityId{ SlotId{ e }, metadatas[e].version };
-                if(has<Components...>(eid)) { view.entities.push_back(eid); }
+                if(metadatas[e].has_components(sig)) { view.entities.push_back(entities[e]); }
             }
         }
+        return view;
     }
 
     void on_entity_sig_change(EntityId eid, Signature old_sig, Signature new_sig)
@@ -411,43 +400,36 @@ class Registry
 
     void notify_entity_views(EntityId eid, Signature updated_comps)
     {
+        if(!get_md(eid).has_components(updated_comps))
+        {
+            ENG_ASSERT(false);
+            return;
+        }
         for(auto& [viewsig, view] : views)
         {
-            if((updated_comps & view.sig).any() && view.test_sig(get_md(eid).sig))
-            {
-                view.on_update_callbacks.signal(eid, updated_comps);
-            }
+            if((updated_comps & view.sig).any()) { view.on_update_callbacks.signal(eid, updated_comps); }
         }
     }
 
     template <typename... Components> IComponentPool* try_find_smallest_pool()
     {
-        static_assert(sizeof...(Components) > 0);
-        std::array<ComponentId, sizeof...(Components)> arr = { ComponentTraits::get_id<Components>()... };
-        IComponentPool* smallest = &*pools[arr[0]];
-        for(auto i = 1ull; i < arr.size(); ++i)
-        {
-            const auto idx = arr[i];
-            if(!smallest || pools[idx]->entities.size() < smallest->entities.size()) { smallest = &*pools[idx]; }
-        }
-        return smallest;
+        return try_find_smallest_pool(get_signature<Components...>());
     }
 
     IComponentPool* try_find_smallest_pool(Signature sig)
     {
-        std::array<ComponentId, sizeof...(Components)> arr = { ComponentTraits::get_id<Components>()... };
-        IComponentPool* smallest = &*pools[arr[0]];
-        for(auto i = 1ull; i < arr.size(); ++i)
+        if(sig.none()) { return nullptr; }
+        IComponentPool* smallest{};
+        for(auto i = 0ull; i < sig.size(); ++i)
         {
-            const auto idx = arr[i];
-            if(!smallest || pools[idx]->entities.size() < smallest->entities.size()) { smallest = &*pools[idx]; }
+            if(sig[i] && (!smallest || smallest->size())) { smallest = &*pools[i]; }
         }
         return smallest;
     }
 
-    SlotAllocator slots;
+    IndexedHierarchy hierarchy;
+    std::vector<EntityId> entities;
     std::vector<EntityMetadata> metadatas;
-    IndexedHierarchy<EntityId> hierarchy;
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools;
     std::unordered_map<Signature, View> views;
 };

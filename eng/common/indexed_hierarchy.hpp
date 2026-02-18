@@ -7,90 +7,78 @@
 #include <variant>
 #include <eng/common/logger.hpp>
 #include <eng/common/handle.hpp>
+#include <eng/common/slotallocator.hpp>
 
-template <typename UserType> class IndexedHierarchy
+class IndexedHierarchy
 {
+    struct Node;
+
   public:
-    struct element_id_t;
-    using element_id = eng::TypedId<element_id_t, uint32_t>;
+    using NodeId = eng::TypedId<Node, uint32_t>;
 
   private:
-    struct Element
+    struct Node
     {
-        inline static Element null_object{};
         bool is_single_child() const { return prev_sibling == next_sibling; }
-        bool is_used() const { return data.index() != 0; }
-        element_id as_next_free() const { return std::get<0>(data); }
-        UserType& as_user() { return std::get<1>(data); }
-        const UserType& as_user() const { return std::get<1>(data); }
-        std::variant<element_id, UserType> data;
-        element_id parent{};       // not false if has parent
-        element_id first_child{};  // not false if has children
-        element_id prev_sibling{}; // not false if has parent
-        element_id next_sibling{}; // not false if has parent
+        NodeId parent{};       // not false if has parent
+        NodeId first_child{};  // not false if has children
+        NodeId prev_sibling{}; // not false if has parent
+        NodeId next_sibling{}; // not false if has parent
     };
 
   public:
-    UserType& at(element_id index) { return elements[*index].as_user(); }
-    const UserType& at(element_id index) const { return elements[*index].as_user(); }
+    bool has(NodeId id) const { return id && slots.has(*id); }
 
-    template <typename... Args> element_id insert(Args&&... args)
+    NodeId create()
     {
-        if(next_free)
-        {
-            const auto idx = next_free;
-            auto& elem = elements[*idx];
-            assert(!elem.is_used());
-            next_free = elem.as_next_free();
-            elem.data = UserType{ std::forward<Args>(args)... };
-            return idx;
-        }
-        elements.push_back(Element{ UserType{ std::forward<Args>(args)... } });
-        return element_id{ (typename element_id::storage_type)elements.size() - 1 };
+        if(slots.size() == ~NodeId::storage_type{}) { return NodeId{}; }
+        const auto slot = slots.allocate();
+        if(nodes.size() == slot) { nodes.emplace_back(); }
+        return NodeId{ slot };
     }
 
-    void make_child(element_id parentid, element_id childid)
+    void make_child(NodeId parentid, NodeId childid)
     {
-        if(!parentid || !childid || parentid == childid)
+        if(!has(parentid) || !has(childid) || parentid == childid)
         {
             assert(false);
             return;
         }
 
-        Element* parent = &get(parentid);
-        Element* child = &get(childid);
+        Node& parent = get(parentid);
+        Node& child = get(childid);
 
-        ENG_ASSERT(!child->parent); // not implemented
-        child->parent = parentid;
+        ENG_ASSERT(!child.parent); // not implemented
+        child.parent = parentid;
 
-        if(!parent->first_child)
+        if(!parent.first_child)
         {
-            parent->first_child = childid;
-            child->next_sibling = childid;
-            child->prev_sibling = childid;
+            parent.first_child = childid;
+            child.next_sibling = childid;
+            child.prev_sibling = childid;
         }
         else
         {
-            element_id first = parent->first_child;
-            element_id last = get(first).prev_sibling;
-            child->next_sibling = first;
-            child->prev_sibling = last;
+            NodeId first = parent.first_child;
+            NodeId last = get(first).prev_sibling;
+            child.next_sibling = first;
+            child.prev_sibling = last;
             get(last).next_sibling = childid;
             get(first).prev_sibling = childid;
         }
     }
 
-    // Unparents element and removes from sibling chain
-    void detach(element_id element)
+    // Unparents node and removes from sibling chain
+    void detach(NodeId id)
     {
-        if(!element) { return; }
-        Element& child = get(element);
+        if(!has(id)) { return; }
+        Node& child = get(id);
         if(!child.parent) { return; }
-        Element& parent = get(child.parent);
+        Node& parent = get(child.parent);
         if(child.is_single_child()) { parent.first_child = {}; }
         else
         {
-            if(parent.first_child == element) { parent.first_child = child.next_sibling; }
+            if(parent.first_child == id) { parent.first_child = child.next_sibling; }
             get(child.prev_sibling).next_sibling = child.next_sibling;
             get(child.next_sibling).prev_sibling = child.prev_sibling;
         }
@@ -99,48 +87,52 @@ template <typename UserType> class IndexedHierarchy
         child.prev_sibling = {};
     }
 
-    // Removes the element from the hierarchy and destroys the object
-    void erase(element_id element)
+    // Removes the node from the hierarchy and unparents it's children, and breaks their siblings relation.
+    void erase(NodeId id)
     {
-        if(!element) { return; }
-        detach(element);
-        if(auto fc = get_first_child(element))
+        if(!has(id)) { return; }
+        detach(id);
+        if(auto fc = get_first_child(id))
         {
             auto child = fc;
             do
             {
-                get(child).parent = {};
+                auto& node = get(child);
                 child = get_next_sibling(child);
+                node.parent = {};
+                node.next_sibling = {};
+                node.prev_sibling = {};
             }
             while(child != fc);
         }
-        auto& elem = elements[*element];
-        elem = {};
-        elem.data = next_free;
-        next_free = element;
+        nodes[*id] = {};
+        slots.erase(*id);
     }
 
     // Return false if no parent
-    element_id get_parent(element_id element) const { return get(element).parent; }
+    NodeId get_parent(NodeId id) const { return get(id).parent; }
 
     // Return false if no children
-    element_id get_first_child(element_id element) const { return get(element).first_child; }
+    NodeId get_first_child(NodeId id) const { return get(id).first_child; }
 
     // Siblings are circular. false If child has no parent
-    element_id get_next_sibling(element_id element) const { return get(element).next_sibling; }
+    NodeId get_next_sibling(NodeId id) const { return get(id).next_sibling; }
 
   private:
-    Element& get(element_id index)
+    Node& get(NodeId id)
     {
-        if(!index) { return Element::null_object; }
-        return elements[*index];
-    }
-    const Element& get(element_id index) const
-    {
-        if(!index) { return Element::null_object; }
-        return elements[*index];
+        if(!has(id))
+        {
+            assert(false);
+            return null_object;
+        }
+        return nodes[*id];
     }
 
-    std::vector<Element> elements;
-    element_id next_free{};
+    const Node& get(NodeId id) const { return const_cast<IndexedHierarchy*>(this)->get(id); }
+
+    inline static Node null_object =
+        Node{ .parent = NodeId{}, .first_child = NodeId{}, .prev_sibling = NodeId{}, .next_sibling = NodeId{} };
+    SlotAllocator slots;
+    std::vector<Node> nodes;
 };

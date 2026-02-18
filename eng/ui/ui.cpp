@@ -31,7 +31,7 @@ void UI::init()
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this] { draw(); };
 }
 
-void UI::dock_window(window_id window, uint32_t* dock_id)
+void UI::dock_window(WindowId window, uint32_t* dock_id)
 {
     layout.emplace_back(window, dock_id);
     redo_layout = true;

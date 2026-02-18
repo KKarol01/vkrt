@@ -16,7 +16,7 @@ class UI;
 
 inline UI& get_ui() { return *Engine::get().ui; }
 
-using window_id = IndexedHierarchy<Window>::element_id;
+using WindowId = TypedId<Window, uint32_t>;
 
 struct Window
 {
@@ -36,30 +36,34 @@ class UI
   public:
     void init();
 
-    window_id make_window(const std::string& title, const Window::draw_callback_type& draw_callback)
+    WindowId make_window(const std::string& title, const Window::draw_callback_type& draw_callback)
     {
-        window_id window = windows.insert(title, draw_callback);
-        root_windows.push_back(window);
-        return window;
+        const auto hnid = hierarchy.create();
+        if(windows.size() == *hnid) { windows.emplace_back(title, draw_callback); }
+        else { windows[*hnid] = Window{ title, draw_callback }; }
+        const auto id = WindowId{ *hnid };
+        root_windows.push_back(id);
+        return id;
     }
 
-    void make_child(window_id parent_id, window_id child_id)
+    void make_child(WindowId parent_id, WindowId child_id)
     {
         std::erase(root_windows, child_id);
-        windows.make_child(parent_id, child_id);
+        hierarchy.make_child(IndexedHierarchy::NodeId{ *parent_id }, IndexedHierarchy::NodeId{ *child_id });
     }
 
-    Window& get_window(window_id id) { return windows.at(id); }
+    Window& get_window(WindowId id) { return windows[*id]; }
 
-    void dock_window(window_id window, uint32_t* dock_id);
+    void dock_window(WindowId window, uint32_t* dock_id);
 
     void draw();
 
     SceneUI sceneui;
 
-    IndexedHierarchy<Window> windows;
-    std::vector<window_id> root_windows;
-    std::vector<std::pair<window_id, uint32_t*>> layout;
+    IndexedHierarchy hierarchy;
+    std::vector<WindowId> root_windows;
+    std::vector<Window> windows;
+    std::vector<std::pair<WindowId, uint32_t*>> layout; // todo: get rid of the pointer...
     bool redo_layout = true;
 
     uint32_t dock_id{ ~0u };
