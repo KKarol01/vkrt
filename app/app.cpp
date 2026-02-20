@@ -99,7 +99,7 @@ void App::on_init()
     // ecs->update<ecs::Transform>(e1);
 
     renderer.init();
-    const auto* e = Engine::get().scene->load_from_file("cyberpunk.glb");
+    // const auto* e = Engine::get().scene->load_from_file("cyberpunk.glb");
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
@@ -127,28 +127,28 @@ void App::on_init()
     //    auto x = s.get(it);
     //}
 
-    auto light_aggregate = ecs->create();
-    ecs->add_components(light_aggregate, ecs::Node{ .name = "Lights" }, ecs::Transform::from(glm::vec3{}));
-    for(uint32_t z = 0; z < resolution.z; ++z)
-    {
-        for(uint32_t y = 0; y < resolution.y; ++y)
-        {
-            for(uint32_t x = 0; x < resolution.x; ++x)
-            {
-                uint32_t i = x + y * resolution.x + z * resolution.x * resolution.y;
-                glm::vec3 pos = aabbMin + glm::vec3(x, y, z) * step;
+    // auto light_aggregate = ecs->create();
+    // ecs->add_components(light_aggregate, ecs::Node{ .name = "Lights" }, ecs::Transform::from(glm::vec3{}));
+    // for(uint32_t z = 0; z < resolution.z; ++z)
+    //{
+    //     for(uint32_t y = 0; y < resolution.y; ++y)
+    //     {
+    //         for(uint32_t x = 0; x < resolution.x; ++x)
+    //         {
+    //             uint32_t i = x + y * resolution.x + z * resolution.x * resolution.y;
+    //             glm::vec3 pos = aabbMin + glm::vec3(x, y, z) * step;
 
-                auto light = ecs->create();
-                ecs->make_child(light_aggregate, light); // so they look nice in the scene hierarchy
-                ecs->add_components(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
-                                    ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
-                // Engine::get().renderer->add_light(light);
-            }
-        }
-    }
-    Engine::get().scene->scene.push_back(light_aggregate);
+    //            auto light = ecs->create();
+    //            ecs->make_child(light_aggregate, light); // so they look nice in the scene hierarchy
+    //            ecs->add_components(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
+    //                                ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
+    //            // Engine::get().renderer->add_light(light);
+    //        }
+    //    }
+    //}
+    // Engine::get().scene->scene.push_back(light_aggregate);
 
-    Engine::get().scene->instance_model(e);
+    // Engine::get().scene->instance_model(e);
 }
 
 void App::on_update() { renderer.update(); }

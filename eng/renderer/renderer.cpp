@@ -280,21 +280,21 @@ void Renderer::init_perframes()
         pf.ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         pf.constants =
-            make_buffer(Buffer::init(ENG_FMT("constants_{}", i), sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
+            make_buffer(ENG_FMT("constants_{}", i), Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
     }
 }
 
 void Renderer::init_bufs()
 {
-    bufs.positions = make_buffer(Buffer::init("vertex positions", 1024, BufferUsage::STORAGE_BIT));
-    bufs.attributes = make_buffer(Buffer::init("vertex attributes", 1024, BufferUsage::STORAGE_BIT));
-    bufs.indices = make_buffer(Buffer::init("vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT));
-    bufs.bspheres = make_buffer(Buffer::init("bounding spheres", 1024, BufferUsage::STORAGE_BIT));
-    bufs.materials = make_buffer(Buffer::init("materials", 1024, BufferUsage::STORAGE_BIT));
+    bufs.positions = make_buffer("vertex positions", Buffer::init(1024, BufferUsage::STORAGE_BIT));
+    bufs.attributes = make_buffer("vertex attributes", Buffer::init(1024, BufferUsage::STORAGE_BIT));
+    bufs.indices = make_buffer("vertex indices", Buffer::init(1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT));
+    bufs.bspheres = make_buffer("bounding spheres", Buffer::init(1024, BufferUsage::STORAGE_BIT));
+    bufs.materials = make_buffer("materials", Buffer::init(1024, BufferUsage::STORAGE_BIT));
     for(uint32_t i = 0; i < 2; ++i)
     {
-        bufs.transforms[i] = make_buffer(Buffer::init(ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT));
-        bufs.lights[i] = make_buffer(Buffer::init(ENG_FMT("lights {}", i), 1024, BufferUsage::STORAGE_BIT));
+        bufs.transforms[i] = make_buffer(ENG_FMT("trs {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
+        bufs.lights[i] = make_buffer(ENG_FMT("lights {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
     }
     {
         const auto* w = Engine::get().window;
@@ -358,27 +358,28 @@ void Renderer::init_rgraph_passes()
 
 void Renderer::instance_entity(ecs::EntityId e)
 {
-    if(!Engine::get().ecs->has<ecs::Transform, ecs::Mesh>(e))
-    {
-        ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", *e);
-        return;
-    }
-    auto& mesh = Engine::get().ecs->get<ecs::Mesh>(e);
-    if(mesh.gpu_resource != ~0u)
-    {
-        ENG_WARN("Entity {} with mesh {} is already instanced {}", *e, mesh.asset->name, mesh.gpu_resource);
-        return;
-    }
-    ++bufs.transform_count;
-    mesh.gpu_resource = gpu_resource_allocator.allocate();
-    for(const auto& rmesh : mesh.asset->render_meshes)
-    {
-        const auto& mpeffect = rmesh->material->mesh_pass->effects;
-        for(auto i = 0u; i < mpeffect.size(); ++i)
-        {
-            if(mpeffect.at(i)) { render_passes.get((RenderPassType)i).entities.push_back(e); }
-        }
-    }
+    ENG_ASSERT(false);
+    // if(!Engine::get().ecs->has<ecs::Transform, ecs::Mesh>(e))
+    //{
+    //     ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", *e);
+    //     return;
+    // }
+    // auto& mesh = Engine::get().ecs->get<ecs::Mesh>(e);
+    // if(mesh.gpu_resource != ~0u)
+    //{
+    //     ENG_WARN("Entity {} with mesh {} is already instanced {}", *e, mesh.asset->name, mesh.gpu_resource);
+    //     return;
+    // }
+    //++bufs.transform_count;
+    // mesh.gpu_resource = gpu_resource_allocator.allocate();
+    // for(const auto& rmesh : mesh.asset->render_meshes)
+    //{
+    //     const auto& mpeffect = rmesh->material->mesh_pass->effects;
+    //     for(auto i = 0u; i < mpeffect.size(); ++i)
+    //     {
+    //         if(mpeffect.at(i)) { render_passes.get((RenderPassType)i).entities.push_back(e); }
+    //     }
+    // }
 }
 
 void Renderer::update()
@@ -406,12 +407,12 @@ void Renderer::update()
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 backend->destroy_buffer(buf->get());
-                buffers.erase(SlotIndex::init(*(*buf)));
+                buffers.erase(SlotIndex<uint32_t>{ buf->handle });
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 backend->destroy_image(img->get());
-                images.erase(SlotIndex::init(*(*img)));
+                images.erase(SlotIndex<uint32_t>{ img->handle });
             }
         }
         pf.retired_resources.erase(pf.retired_resources.begin(), remove_until);
@@ -451,35 +452,37 @@ void Renderer::update()
     }
     if(new_transforms.size())
     {
-        std::swap(bufs.transforms[0], bufs.transforms[1]);
-        const auto req_size = bufs.transform_count * sizeof(glm::mat4);
-        resize_buffer(bufs.transforms[0], req_size, false);
-        staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
-        for(auto i = 0u; i < new_transforms.size(); ++i)
-        {
-            const auto& trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
-            const auto& msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
-            staging->copy(bufs.transforms[0], &trs.global, msh.gpu_resource * sizeof(trs.global), sizeof(trs.global));
-        }
-        new_transforms.clear();
+        ENG_ASSERT(false);
+        // std::swap(bufs.transforms[0], bufs.transforms[1]);
+        // const auto req_size = bufs.transform_count * sizeof(glm::mat4);
+        // resize_buffer(bufs.transforms[0], req_size, false);
+        // staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
+        // for(auto i = 0u; i < new_transforms.size(); ++i)
+        //{
+        //     const auto& trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
+        //     const auto& msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
+        //     staging->copy(bufs.transforms[0], &trs.global, msh.gpu_resource * sizeof(trs.global), sizeof(trs.global));
+        // }
+        // new_transforms.clear();
     }
     if(new_lights.size())
     {
-        std::swap(bufs.lights[0], bufs.lights[1]);
-        const auto req_size = bufs.light_count * sizeof(GPULight) + 4;
-        resize_buffer(bufs.lights[0], req_size, false);
-        staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
-        for(auto i = 0u; i < new_lights.size(); ++i)
-        {
-            auto& l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
-            const auto& t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
-            if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
-            GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
-            staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
-                          sizeof(GPULight));
-        }
-        staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
-        new_lights.clear();
+        ENG_ASSERT(false);
+        // std::swap(bufs.lights[0], bufs.lights[1]);
+        // const auto req_size = bufs.light_count * sizeof(GPULight) + 4;
+        // resize_buffer(bufs.lights[0], req_size, false);
+        // staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
+        // for(auto i = 0u; i < new_lights.size(); ++i)
+        //{
+        //     auto& l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
+        //     const auto& t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
+        //     if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
+        //     GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
+        //     staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
+        //                   sizeof(GPULight));
+        // }
+        // staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
+        // new_lights.clear();
     }
 
     // const auto view = Engine::get().camera->get_view();
@@ -595,120 +598,127 @@ void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* 
 
 void Renderer::build_renderpasses()
 {
-    for(auto rpti = 0u; rpti < (int)RenderPassType::LAST_ENUM; ++rpti)
-    {
-        auto& rp = render_passes.passes[rpti];
-        if(!rp.needs_rebuild()) { continue; }
+	ENG_TODO();
+	return;
+    ENG_ASSERT(false);
 
-        rp.clear();
-        for(const auto& e : rp.entities)
-        {
-            auto& ecsmesh = Engine::get().ecs->get<ecs::Mesh>(e);
-            if(ecsmesh.gpu_resource == ~0u)
-            {
-                ENG_ERROR("Entity {} was not instanced properly. Forgot to call instance_entity()?", *e);
-                continue;
-            }
+    // for(auto rpti = 0u; rpti < (int)RenderPassType::LAST_ENUM; ++rpti)
+    //{
+    //     auto& rp = render_passes.passes[rpti];
+    //     if(!rp.needs_rebuild()) { continue; }
 
-            for(const auto& e : ecsmesh.asset->render_meshes)
-            {
-                const auto& mesh = e.get();
-                const auto& geom = mesh.geometry.get();
-                for(auto i = 0u; i < geom.meshlet_range.size; ++i)
-                {
-                    rp.mesh_instances.push_back(MeshInstance{ mesh.geometry, mesh.material, ecsmesh.gpu_resource,
-                                                              geom.meshlet_range.offset + i });
-                }
-            }
-        }
+    //    rp.clear();
+    //    for(const auto& e : rp.entities)
+    //    {
+    //        auto& ecsmesh = Engine::get().ecs->get<ecs::Mesh>(e);
+    //        if(ecsmesh.gpu_resource == ~0u)
+    //        {
+    //            ENG_ERROR("Entity {} was not instanced properly. Forgot to call instance_entity()?", *e);
+    //            continue;
+    //        }
 
-        std::sort(rp.mesh_instances.begin(), rp.mesh_instances.end(), [](const MeshInstance& a, const MeshInstance& b) {
-            if(a.material < b.material && a.meshlet_index < b.meshlet_index) { return true; }
-            return false;
-        });
+    //        for(const auto& e : ecsmesh.asset->render_meshes)
+    //        {
+    //            const auto& mesh = e.get();
+    //            const auto& geom = mesh.geometry.get();
+    //            for(auto i = 0u; i < geom.meshlet_range.size; ++i)
+    //            {
+    //                rp.mesh_instances.push_back(MeshInstance{ mesh.geometry, mesh.material, ecsmesh.gpu_resource,
+    //                                                          geom.meshlet_range.offset + i });
+    //            }
+    //        }
+    //    }
 
-        std::vector<DrawIndexedIndirectCommand> commands; // command for each geometry
-        commands.reserve(rp.mesh_instances.size());
-        std::vector<GPUInstanceId> instance_indices; // instanceoffset + instance id is the index of the current instance being renderd; accessed from shaders
-        instance_indices.reserve(rp.mesh_instances.size());
-        std::vector<uint32_t> counts; // how many commands can be drawn without changing the pipeline
-        counts.reserve(rp.mesh_instances.size());
-        rp.draw.batches.reserve(rp.mesh_instances.size());
-        for(auto i = 0u; i < rp.mesh_instances.size(); ++i)
-        {
-            // const auto& geom = rp.mesh_instances[i].geometry.get();
-            const auto& material = rp.mesh_instances[i].material.get();
-            const auto& mp = material.mesh_pass->effects[rpti].get();
-            if(i == 0 || rp.draw.batches.back().pipeline != mp.pipeline)
-            {
-                rp.draw.batches.push_back(InstanceBatch{ mp.pipeline, 0, 0 });
-                counts.push_back(0);
-            }
-            if(i == 0 || rp.mesh_instances[i - 1].meshlet_index != rp.mesh_instances[i].meshlet_index)
-            {
-                const auto& mlt = meshlets[rp.mesh_instances[i].meshlet_index];
-                commands.push_back(DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
-                                                               .instanceCount = 0,
-                                                               .firstIndex = mlt.index_offset,
-                                                               .vertexOffset = mlt.vertex_offset,
-                                                               .firstInstance = i });
-            }
-            ++rp.draw.batches.back().instance_count;
-            rp.draw.batches.back().command_count =
-                commands.size() - (rp.draw.batches.size() > 1 ? 0ull : rp.draw.batches[rp.draw.batches.size() - 2].command_count);
-            ++commands.back().instanceCount;
-            counts.back() = rp.draw.batches.back().command_count;
-        }
+    //    std::sort(rp.mesh_instances.begin(), rp.mesh_instances.end(), [](const MeshInstance& a, const MeshInstance& b) {
+    //        if(a.material < b.material && a.meshlet_index < b.meshlet_index) { return true; }
+    //        return false;
+    //    });
 
-        const auto counts_size = counts.size() * sizeof(counts[0]);
-        const auto cmds_start = align_up2(counts_size, 16);
-        const auto cmds_size = commands.size() * sizeof(backend->get_indirect_indexed_command_size());
-        const auto total_size = cmds_start + cmds_size;
+    //    std::vector<DrawIndexedIndirectCommand> commands; // command for each geometry
+    //    commands.reserve(rp.mesh_instances.size());
+    //    std::vector<GPUInstanceId> instance_indices; // instanceoffset + instance id is the index of the current instance being renderd; accessed from shaders
+    //    instance_indices.reserve(rp.mesh_instances.size());
+    //    std::vector<uint32_t> counts; // how many commands can be drawn without changing the pipeline
+    //    counts.reserve(rp.mesh_instances.size());
+    //    rp.draw.batches.reserve(rp.mesh_instances.size());
+    //    for(auto i = 0u; i < rp.mesh_instances.size(); ++i)
+    //    {
+    //        // const auto& geom = rp.mesh_instances[i].geometry.get();
+    //        const auto& material = rp.mesh_instances[i].material.get();
+    //        const auto& mp = material.mesh_pass->effects[rpti].get();
+    //        if(i == 0 || rp.draw.batches.back().pipeline != mp.pipeline)
+    //        {
+    //            rp.draw.batches.push_back(InstanceBatch{ mp.pipeline, 0, 0 });
+    //            counts.push_back(0);
+    //        }
+    //        if(i == 0 || rp.mesh_instances[i - 1].meshlet_index != rp.mesh_instances[i].meshlet_index)
+    //        {
+    //            const auto& mlt = meshlets[rp.mesh_instances[i].meshlet_index];
+    //            commands.push_back(DrawIndexedIndirectCommand{ .indexCount = mlt.index_count,
+    //                                                           .instanceCount = 0,
+    //                                                           .firstIndex = mlt.index_offset,
+    //                                                           .vertexOffset = mlt.vertex_offset,
+    //                                                           .firstInstance = i });
+    //        }
+    //        ++rp.draw.batches.back().instance_count;
+    //        rp.draw.batches.back().command_count =
+    //            commands.size() - (rp.draw.batches.size() > 1 ? 0ull : rp.draw.batches[rp.draw.batches.size() - 2].command_count);
+    //        ++commands.back().instanceCount;
+    //        counts.back() = rp.draw.batches.back().command_count;
+    //    }
 
-        if(!rp.draw.indirect_buf)
-        {
-            rp.draw.indirect_buf = make_buffer(Buffer::init(ENG_FMT("{} indirect buffer", to_string((RenderPassType)rpti)),
-                                                            total_size, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT));
-        }
-        if(!rp.instance_buffer)
-        {
-            rp.instance_buffer =
-                make_buffer(Buffer::init(ENG_FMT("{} instance buffer", to_string((RenderPassType)rpti)),
-                                         instance_indices.size() * sizeof(instance_indices[0]) + 4, BufferUsage::STORAGE_BIT));
-        }
+    //    const auto counts_size = counts.size() * sizeof(counts[0]);
+    //    const auto cmds_start = align_up2(counts_size, 16);
+    //    const auto cmds_size = commands.size() * sizeof(backend->get_indirect_indexed_command_size());
+    //    const auto total_size = cmds_start + cmds_size;
 
-        std::vector<std::byte> command_bytes(cmds_size);
-        for(auto i = 0u; i < commands.size(); ++i)
-        {
-            backend->make_indirect_indexed_command(&command_bytes[i * backend->get_indirect_indexed_command_size()],
-                                                   commands[i].indexCount, commands[i].instanceCount, commands[i].firstIndex,
-                                                   commands[i].vertexOffset, commands[i].firstInstance);
-        }
+    //    if(!rp.draw.indirect_buf)
+    //    {
+    //        rp.draw.indirect_buf = make_buffer(Buffer::init(ENG_FMT("{} indirect buffer", to_string((RenderPassType)rpti)),
+    //                                                        total_size, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT));
+    //    }
+    //    if(!rp.instance_buffer)
+    //    {
+    //        rp.instance_buffer =
+    //            make_buffer(Buffer::init(ENG_FMT("{} instance buffer", to_string((RenderPassType)rpti)),
+    //                                     instance_indices.size() * sizeof(instance_indices[0]) + 4, BufferUsage::STORAGE_BIT));
+    //    }
 
-        resize_buffer(rp.draw.indirect_buf, total_size, false);
-        resize_buffer(rp.instance_buffer, instance_indices.size() * sizeof(instance_indices[0]), false);
-        staging->copy(rp.draw.indirect_buf, counts, 0ull);
-        staging->copy(rp.draw.indirect_buf, command_bytes, cmds_start);
-        staging->copy_value(rp.instance_buffer, (uint32_t)instance_indices.size(), offsetof(GPUInstanceIdsBuffer, count));
-        staging->copy(rp.instance_buffer, instance_indices, offsetof(GPUInstanceIdsBuffer, ids_us));
-        rp.draw.counts_view = BufferView{ rp.draw.indirect_buf, { 0ull, counts_size } };
-        rp.draw.cmds_view = BufferView{ rp.draw.indirect_buf, { cmds_start, cmds_size } };
-        rp.instance_view = BufferView{ rp.instance_buffer, { 0ull, ~0ull } };
-    }
+    //    std::vector<std::byte> command_bytes(cmds_size);
+    //    for(auto i = 0u; i < commands.size(); ++i)
+    //    {
+    //        backend->make_indirect_indexed_command(&command_bytes[i * backend->get_indirect_indexed_command_size()],
+    //                                               commands[i].indexCount, commands[i].instanceCount, commands[i].firstIndex,
+    //                                               commands[i].vertexOffset, commands[i].firstInstance);
+    //    }
+
+    //    resize_buffer(rp.draw.indirect_buf, total_size, false);
+    //    resize_buffer(rp.instance_buffer, instance_indices.size() * sizeof(instance_indices[0]), false);
+    //    staging->copy(rp.draw.indirect_buf, counts, 0ull);
+    //    staging->copy(rp.draw.indirect_buf, command_bytes, cmds_start);
+    //    staging->copy_value(rp.instance_buffer, (uint32_t)instance_indices.size(), offsetof(GPUInstanceIdsBuffer, count));
+    //    staging->copy(rp.instance_buffer, instance_indices, offsetof(GPUInstanceIdsBuffer, ids_us));
+    //    rp.draw.counts_view = BufferView{ rp.draw.indirect_buf, { 0ull, counts_size } };
+    //    rp.draw.cmds_view = BufferView{ rp.draw.indirect_buf, { cmds_start, cmds_size } };
+    //    rp.instance_view = BufferView{ rp.instance_buffer, { 0ull, ~0ull } };
+    //}
 }
 
 void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
-Handle<Buffer> Renderer::make_buffer(Buffer&& buffer, AllocateMemory allocate)
+Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate)
 {
     uint32_t order = 0;
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
     for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
-    ENG_LOG("Creating buffer {} [{:.2f} {}]", buffer.name, size, units[order]);
+    ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
+    backend->set_debug_name(buffer, name);
     auto it = buffers.insert(std::move(buffer));
     if(!it) { return Handle<Buffer>{}; }
+    if(*it == buffer_names.size()) { buffer_names.emplace_back(name.data()); }
+    else { buffer_names[*it] = name.data(); }
     return Handle<Buffer>{ *it };
 }
 
@@ -719,9 +729,10 @@ void Renderer::destroy_buffer(Handle<Buffer>& buffer)
     buffer = {};
 }
 
-Handle<Image> Renderer::make_image(Image&& image, AllocateMemory allocate)
+Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
 {
-    backend->allocate_image(image, allocate);
+    backend->allocate_image(image, allocate, user_data);
+    backend->set_debug_name(image, name);
     auto it = images.insert(std::move(image));
     if(!it) { return Handle<Image>{}; }
     return Handle<Image>{ *it };
@@ -820,8 +831,6 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     std::vector<Meshlet> out_meshlets;
     meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
 
-    Geometry geometry{ .meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)out_meshlets.size() } };
-
     const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
     const auto index_count = out_indices.size();
     const auto vertex_count = get_vertex_count(out_vertices, batch.vertex_layout);
@@ -855,9 +864,11 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
     bufs.vertex_count += vertex_count;
     bufs.index_count += index_count;
-    meshlets.insert(meshlets.end(), out_meshlets.begin(), out_meshlets.end());
 
-    const auto handle = geometries.insert(std::move(geometry));
+    geometries.push_back(Geometry{ .meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)out_meshlets.size() } });
+    Handle<Geometry> handle{ (uint32_t)geometries.size() - 1 };
+
+    meshlets.insert(meshlets.end(), out_meshlets.begin(), out_meshlets.end());
 
     ENG_LOG("Batching geometry: [VXS: {:.2f} KB, IXS: {:.2f} KB]",
             static_cast<float>(out_vertices.size() * sizeof(out_vertices[0])) / 1024.0f,
@@ -952,7 +963,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
         return;
     }
 
-    auto dsth = make_buffer(Buffer::init(handle->name, new_size, handle->usage));
+    auto dsth = make_buffer(buffer_names[*handle], Buffer::init(new_size, handle->usage));
     auto& dst = dsth.get();
     if(copy_data)
     {
@@ -1056,8 +1067,8 @@ void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
     ENG_ASSERT(verts.size() > geometry.size() && verts.size() % 2 == 0);
     if(!vpos_buf)
     {
-        vpos_buf = Engine::get().renderer->make_buffer(Buffer::init("debug verts", verts.size() * sizeof(verts[0]),
-                                                                    BufferUsage::STORAGE_BIT));
+        vpos_buf = Engine::get().renderer->make_buffer("debug verts", Buffer::init(verts.size() * sizeof(verts[0]),
+                                                                                   BufferUsage::STORAGE_BIT));
     }
 
     ENG_ASSERT(false);

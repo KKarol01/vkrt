@@ -1,8 +1,9 @@
 #include <stack>
 #include <ranges>
-#include <fastgltf/core.hpp>
-#include <fastgltf/types.hpp>
-#include <fastgltf/tools.hpp>
+#include <filesystem>
+#include <third_party/fastgltf/include/fastgltf/core.hpp>
+#include <third_party/fastgltf/include/fastgltf/types.hpp>
+#include <third_party/fastgltf/include/fastgltf/tools.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stb/stb_image.h>
@@ -22,137 +23,149 @@
 
 namespace eng
 {
-namespace asset
-{
-namespace import
-{
-
-asset::Model::Node& model_add_node(asset::Model& model, uint32_t* out_idx)
-{
-    if(out_idx) { *out_idx = model.nodes.size(); }
-    return model.nodes.emplace_back();
-}
 
 namespace gltf
 {
 
-asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf::Mesh& fastmesh,
-                               uint32_t primitive_index, asset::Model& model)
+struct Context
 {
-    const auto& fprim = fastmesh.primitives.at(primitive_index);
+    std::vector<uint32_t> images;
+    std::vector<uint32_t> textures;
+    std::vector<Range32u> materials;
+    std::vector<Range32u> geometries;
+    std::vector<Range32u> meshes;
+};
 
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
+Range32u load_geometry(Scene& scene, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Context& ctx)
+{
+    if(ctx.geometries.empty()) { ctx.geometries.insert(ctx.geometries.begin(), gltfasset.meshes.size(), Range32u{}); }
+    if(ctx.geometries[gltfmeshidx].size != 0u) { return ctx.geometries[gltfmeshidx]; }
 
-    static constexpr const char* FAST_COMPS[]{ "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0" };
-    static constexpr gfx::VertexComponent GFX_COMPS[]{ gfx::VertexComponent::POSITION_BIT, gfx::VertexComponent::NORMAL_BIT,
-                                                       gfx::VertexComponent::TANGENT_BIT, gfx::VertexComponent::UV0_BIT };
+    const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
 
-    const auto vertex_layout = [&fprim] {
-        Flags<gfx::VertexComponent> vertex_layout{};
+    Range32u geoms{ (uint32_t)scene.geometries.size(), (uint32_t)gltfmesh.primitives.size() };
+    for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
+    {
+        const fastgltf::Primitive& gltfprim = gltfmesh.primitives[i];
+
+        std::vector<float> vertices;
+        std::vector<uint32_t> indices;
+
+        static constexpr const char* FAST_COMPS[]{ "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0" };
+        static constexpr gfx::VertexComponent GFX_COMPS[]{ gfx::VertexComponent::POSITION_BIT, gfx::VertexComponent::NORMAL_BIT,
+                                                           gfx::VertexComponent::TANGENT_BIT, gfx::VertexComponent::UV0_BIT };
+
+        const auto vertex_layout = [&gltfprim] {
+            Flags<gfx::VertexComponent> vertex_layout{};
+            for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
+            {
+                if(gltfprim.findAttribute(FAST_COMPS[i]) != gltfprim.attributes.end())
+                {
+                    vertex_layout |= GFX_COMPS[i];
+                }
+            }
+            return vertex_layout;
+        }();
+        const auto vertex_size = gfx::get_vertex_layout_size(vertex_layout);
+        const auto get_vertex_component = [&vertices, &vertex_size,
+                                           &vertex_layout](size_t vidx, gfx::VertexComponent comp) -> std::byte* {
+            auto* ptr = (std::byte*)vertices.data();
+            return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
+        };
+
+        const auto fast_iterate = [&gltfasset, &get_vertex_component](int comp, const auto& fastacc, gfx::VertexComponent gfxcomp) {
+            const auto cb = [&get_vertex_component, &gfxcomp]<size_t comps>(const auto& vec, auto idx) {
+                float v[comps]{};
+                for(auto i = 0u; i < comps; ++i)
+                {
+                    v[i] = vec[i];
+                }
+                auto* pdst = get_vertex_component(idx, gfxcomp);
+                memcpy(pdst, v, gfx::get_vertex_component_size(gfxcomp));
+            };
+            const auto cb2 = [&cb](const auto& a, auto b) { cb.template operator()<2>(a, b); };
+            const auto cb3 = [&cb](const auto& a, auto b) { cb.template operator()<3>(a, b); };
+            const auto cb4 = [&cb](const auto& a, auto b) { cb.template operator()<4>(a, b); };
+
+            if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, fastacc, cb3); }
+            else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, fastacc, cb3); }
+            else if(comp == 2) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(gltfasset, fastacc, cb4); }
+            else if(comp == 3) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(gltfasset, fastacc, cb2); }
+        };
+
         for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
         {
-            if(fprim.findAttribute(FAST_COMPS[i]) != fprim.attributes.end()) { vertex_layout |= GFX_COMPS[i]; }
-        }
-        return vertex_layout;
-    }();
-    const auto vertex_size = gfx::get_vertex_layout_size(vertex_layout);
-    const auto get_vertex_component = [&vertices, &vertex_size, &vertex_layout](size_t vidx, gfx::VertexComponent comp) -> std::byte* {
-        auto* ptr = (std::byte*)vertices.data();
-        return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
-    };
-
-    const auto fast_iterate = [&fastasset, &get_vertex_component](int comp, const auto& fastacc, gfx::VertexComponent gfxcomp) {
-        const auto cb = [&get_vertex_component, &gfxcomp]<size_t comps>(const auto& vec, auto idx) {
-            float v[comps]{};
-            for(auto i = 0u; i < comps; ++i)
+            if(!vertex_layout.test(GFX_COMPS[i]))
             {
-                v[i] = vec[i];
+                if(i == 0)
+                {
+                    ENG_ERROR("Mesh does not have positions");
+                    return {};
+                }
+                continue;
             }
-            auto* pdst = get_vertex_component(idx, gfxcomp);
-            memcpy(pdst, v, gfx::get_vertex_component_size(gfxcomp));
-        };
-        const auto cb2 = [&cb](const auto& a, auto b) { cb.template operator()<2>(a, b); };
-        const auto cb3 = [&cb](const auto& a, auto b) { cb.template operator()<3>(a, b); };
-        const auto cb4 = [&cb](const auto& a, auto b) { cb.template operator()<4>(a, b); };
+            auto it = gltfprim.findAttribute(FAST_COMPS[i]);
+            auto& acc = gltfasset.accessors.at(it->accessorIndex);
+            if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
+            fast_iterate(i, acc, GFX_COMPS[i]);
+        }
 
-        if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, fastacc, cb3); }
-        else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(fastasset, fastacc, cb3); }
-        else if(comp == 2) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(fastasset, fastacc, cb4); }
-        else if(comp == 3) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(fastasset, fastacc, cb2); }
-    };
-
-    for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
-    {
-        if(!vertex_layout.test(GFX_COMPS[i]))
+        if(!gltfprim.indicesAccessor)
         {
-            if(i == 0)
+            ENG_WARN("Mesh {} primitive {} does not have mandatory vertex indices. Skipping...", gltfmesh.name.c_str(), i);
+            return {};
+        }
+        else
+        {
+            auto& acc = gltfasset.accessors.at(*gltfprim.indicesAccessor);
+            if(!acc.bufferViewIndex)
             {
-                ENG_ERROR("Mesh does not have positions");
+                ENG_ERROR("No bufferViewIndex...");
                 return {};
             }
-            continue;
+            indices.resize(acc.count);
+            fastgltf::copyFromAccessor<uint32_t>(gltfasset, acc, indices.data());
         }
 
-        auto it = fprim.findAttribute(FAST_COMPS[i]);
-        auto& acc = fastasset.accessors.at(it->accessorIndex);
-        if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
-        fast_iterate(i, acc, GFX_COMPS[i]);
+        scene.geometries.push_back(ecs::Geometry{ .render_geometry = Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{
+                                                      .flags = {},
+                                                      .vertex_layout = vertex_layout,
+                                                      .vertices = vertices,
+                                                      .indices = std::span{ indices },
+                                                  }) });
+        // auto& geom = model.geometries.emplace_back();
+        // geom.render_geometry = render_geometry;
+        // geom.bvh = physics::BVH{ std::as_bytes(std::span{ vertices }), gfx::get_vertex_layout_size(vertex_layout),
+        //                          std::as_bytes(std::span{ indices }), gfx::IndexFormat::U32 };
     }
 
-    if(!fprim.indicesAccessor)
-    {
-        ENG_WARN("Mesh ({}) primitive ({}) does not have mandatory vertex indices. Skipping...", fastmesh.name.c_str(), primitive_index);
-        return nullptr;
-    }
-    else
-    {
-        auto& acc = fastasset.accessors.at(*fprim.indicesAccessor);
-        if(!acc.bufferViewIndex)
-        {
-            ENG_ERROR("No bufferViewIndex...");
-            return nullptr;
-        }
-        indices.resize(acc.count);
-        fastgltf::copyFromAccessor<uint32_t>(fastasset, acc, indices.data());
-    }
-
-    const auto render_geometry = Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{
-        .flags = {},
-        .vertex_layout = vertex_layout,
-        .vertices = vertices,
-        .indices = std::span{ indices },
-    });
-
-    auto& geom = model.geometries.emplace_back();
-    geom.render_geometry = render_geometry;
-    geom.bvh = physics::BVH{ std::as_bytes(std::span{ vertices }), gfx::get_vertex_layout_size(vertex_layout),
-                             std::as_bytes(std::span{ indices }), gfx::IndexFormat::U32 };
-
-    return &geom;
+    ctx.geometries[gltfmeshidx] = geoms;
+    return geoms;
 }
 
-asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat format, size_t image_index, asset::Model& model)
+uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltfimgidx, Context& ctx)
 {
     // todo: check if image format matches with the currently requested.
-    if(model.images.size() <= image_index) { model.images.resize(fastasset.images.size()); }
-    if(model.images.at(image_index).render_image) { return &model.images.at(image_index); }
+    if(ctx.images.empty()) { ctx.images.insert(ctx.images.begin(), gltfasset.images.size(), ~0u); }
+    if(ctx.images[gltfimgidx] != ~0u) { return ctx.images[gltfimgidx]; }
 
-    const auto& fimg = fastasset.images.at(image_index);
+    const fastgltf::Image& gltfimg = gltfasset.images[gltfimgidx];
+
     std::span<const std::byte> data;
-    if(auto* fastbufviewsrc = std::get_if<fastgltf::sources::BufferView>(&fimg.data))
+    if(auto* fastbufviewsrc = std::get_if<fastgltf::sources::BufferView>(&gltfimg.data))
     {
-        auto& fastbufview = fastasset.bufferViews.at(fastbufviewsrc->bufferViewIndex);
-        auto& fastbuf = fastasset.buffers.at(fastbufview.bufferIndex);
+        auto& fastbufview = gltfasset.bufferViews.at(fastbufviewsrc->bufferViewIndex);
+        auto& fastbuf = gltfasset.buffers.at(fastbufview.bufferIndex);
         if(auto* fastarrsrc = std::get_if<fastgltf::sources::Array>(&fastbuf.data))
         {
             data = { fastarrsrc->bytes.data() + fastbufview.byteOffset, fastbufview.byteLength };
         }
     }
+
     if(data.empty())
     {
-        ENG_WARN("Could not load image {}", fimg.name.c_str());
-        return nullptr;
+        ENG_WARN("Could not load image {}", gltfimg.name.c_str());
+        return ~0u;
     }
 
     int x, y, ch;
@@ -160,21 +173,268 @@ asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat form
                                                                             data.size(), &x, &y, &ch, 4));
     if(!imgdata)
     {
-        ENG_ERROR("Stbi failed for image {}: {}", fimg.name.c_str(), stbi_failure_reason());
-        return nullptr;
+        ENG_ERROR("Stbi failed for image {}: {}", gltfimg.name.c_str(), stbi_failure_reason());
+        return ~0u;
     }
 
-    const auto img =
-        Engine::get().renderer->make_image(gfx::Image::init(fimg.name.c_str(), (uint32_t)x, (uint32_t)y, 0, format,
-                                                            gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                            0, 1, gfx::ImageLayout::READ_ONLY));
-    ENG_TODO("TODO: Process mips");
-    gfx::get_renderer().staging->copy(img, imgdata, 0, 0, true, gfx::DiscardContents::YES);
+    const auto img = Engine::get().renderer->make_image(gltfimg.name.c_str(),
+                                                        gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
+                                                                         gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                             gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                         0, 1, gfx::ImageLayout::READ_ONLY));
+    if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
+    else
+    {
+        gfx::get_renderer().staging->copy(img, imgdata, 0, 0, true, gfx::DiscardContents::YES);
+        ENG_TODO("TODO: Process mips");
+    }
     stbi_image_free(imgdata);
-    model.images.at(image_index).name = fimg.name.c_str();
-    model.images.at(image_index).render_image = img;
-    return &model.images.at(image_index);
+    if(!img) { return ~0u; }
+
+    const uint32_t imgidx = scene.images.size();
+    scene.images.push_back(img);
+    ctx.images[gltfimgidx] = imgidx;
+    return imgidx;
+}
+
+uint32_t load_texture(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltftexidx, Context& ctx)
+{
+    if(ctx.textures.empty()) { ctx.textures.insert(ctx.textures.begin(), gltfasset.textures.size(), ~0u); }
+    if(ctx.textures[gltftexidx] != ~0u) { return ctx.textures[gltftexidx]; }
+    const auto& gltftex = gltfasset.textures[gltftexidx];
+    if(!gltftex.imageIndex)
+    {
+        ENG_ERROR("Texture {} does not have associated image", gltftex.name.c_str());
+        return ~0u;
+    }
+    uint32_t image = load_image(scene, gltfasset, format, *gltftex.imageIndex, ctx);
+    if(image == ~0u) { return ~0u; }
+
+    uint32_t texidx = scene.textures.size();
+    scene.textures.push_back(gfx::ImageView::init(scene.images[image], format));
+    ctx.textures[gltftexidx] = texidx;
+    return texidx;
+}
+
+Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Context& ctx)
+{
+    if(ctx.materials.empty()) { ctx.materials.insert(ctx.materials.begin(), gltfasset.materials.size(), Range32u{}); }
+    if(ctx.materials[gltfmeshidx].size != 0u) { return ctx.materials[gltfmeshidx]; }
+
+    const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
+    Range32u mats{ (uint32_t)scene.materials.size(), (uint32_t)gltfmesh.primitives.size() };
+    for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
+    {
+        const fastgltf::Primitive& gltfprim = gltfmesh.primitives[i];
+        if(!gltfprim.materialIndex)
+        {
+            ENG_ERROR("Primitive {} in mesh {} does not have a material", gltfmesh.name.c_str(), i);
+            scene.materials.emplace_back();
+            continue;
+        }
+
+        const fastgltf::Material& gltfmat = gltfasset.materials[*gltfprim.materialIndex];
+        auto matdesc = gfx::MaterialDescriptor{};
+        uint32_t basecolidx{ ~0u };
+        uint32_t normalidx{ ~0u };
+        uint32_t metalroughidx{ ~0u };
+        if(gltfmat.pbrData.baseColorTexture)
+        {
+            basecolidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,
+                                      gltfmat.pbrData.baseColorTexture->textureIndex, ctx);
+            if(basecolidx != ~0u)
+            {
+                matdesc.base_color_texture = scene.textures[gltfmat.pbrData.baseColorTexture->textureIndex];
+            }
+        }
+        if(gltfmat.normalTexture)
+        {
+            normalidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM, gltfmat.normalTexture->textureIndex, ctx);
+            if(normalidx != ~0u) { matdesc.normal_texture = scene.textures[gltfmat.normalTexture->textureIndex]; }
+        }
+        if(gltfmat.pbrData.metallicRoughnessTexture)
+        {
+            metalroughidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM,
+                                         gltfmat.pbrData.metallicRoughnessTexture->textureIndex, ctx);
+            if(metalroughidx != ~0u)
+            {
+                matdesc.metallic_roughness_texture = scene.textures[gltfmat.pbrData.metallicRoughnessTexture->textureIndex];
+            }
+        }
+
+        scene.materials.push_back(ecs::Material{
+            .name = gltfmat.name.c_str(),
+            .render_material = Engine::get().renderer->make_material(matdesc),
+        });
+    }
+
+    ctx.materials[gltfmeshidx] = mats;
+    return mats;
+}
+
+Range32u load_mesh(Scene& scene, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, SceneNode& node, Context& ctx)
+{
+    if(ctx.meshes.empty()) { ctx.meshes.insert(ctx.meshes.begin(), gltfasset.meshes.size(), Range32u{}); }
+    if(ctx.meshes[gltfmeshidx].size != 0u) { return ctx.meshes[gltfmeshidx]; }
+
+    const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
+
+    std::vector<Handle<gfx::Mesh>> primitives;
+    primitives.reserve(gltfmesh.primitives.size());
+    Range32u geoms = load_geometry(scene, gltfasset, gltfmeshidx, ctx);
+    Range32u mats = load_material(scene, gltfasset, gltfmeshidx, ctx);
+    ENG_ASSERT(geoms == mats);
+    for(auto i = 0u; i < geoms.size; ++i)
+    {
+        primitives.push_back(gfx::get_renderer().make_mesh(gfx::MeshDescriptor{
+            .geometry = scene.geometries[geoms.offset + i].render_geometry, .material = scene.materials[mats.offset + i].render_material }));
+    }
+
+    Range32u meshidxs{ .offset = (uint32_t)scene.meshes.size(), .size = (uint32_t)primitives.size() };
+    node.meshes = meshidxs;
+    for(auto i = 0u; i < geoms.size; ++i)
+    {
+        ecs::Mesh& mesh = scene.meshes.emplace_back();
+        mesh.name = gltfmesh.name.c_str();
+        mesh.render_mesh = primitives[i];
+        mesh.geom_mat = geoms.offset + i;
+    }
+    ctx.meshes[gltfmeshidx] = meshidxs;
+    return meshidxs;
+}
+
+SceneNodeId load_node(Scene& scene, const fastgltf::Asset& gltfasset, uint32_t gltfnodeidx, SceneNodeId parentnodeid, Context& ctx)
+{
+    const auto& gltfnode = gltfasset.nodes[gltfnodeidx];
+    const auto nodeid = scene.make_node(gltfnode.name.c_str());
+    scene.hierarchy.make_child(parentnodeid, nodeid);
+
+    auto& node = scene.get_node(nodeid);
+    node.transform = scene.transforms.size();
+    auto& node_transform = scene.transforms.emplace_back(scene.transforms[scene.get_node(parentnodeid).transform]);
+
+    if(gltfnode.transform.index() == 0)
+    {
+        const auto& gltftrs = std::get<fastgltf::TRS>(gltfnode.transform);
+        ecs::Transform trs{ .position = glm::vec3{ gltftrs.translation.x(), gltftrs.translation.y(), gltftrs.translation.z() },
+                            .rotation = glm::quat{ gltftrs.rotation.w(), gltftrs.rotation.x(), gltftrs.rotation.y(),
+                                                   gltftrs.rotation.z() },
+                            .scale = glm::vec3{ gltftrs.scale.x(), gltftrs.scale.y(), gltftrs.scale.z() } };
+        node_transform = ecs::Transform::init(trs.to_mat4() * node_transform.to_mat4());
+    }
+    else
+    {
+        const auto& trs = std::get<fastgltf::math::fmat4x4>(gltfnode.transform);
+        glm::mat4 glmtrs;
+        memcpy(&glmtrs, &trs, sizeof(trs));
+        node_transform = ecs::Transform::init(glmtrs * node_transform.to_mat4());
+    }
+
+    if(gltfnode.meshIndex)
+    {
+        node.meshes = load_mesh(scene, gltfasset, *gltfnode.meshIndex, node, ctx);
+        if(node.meshes.size == 0u)
+        {
+            ENG_ERROR("Failed to load mesh {} for node {}.", gltfasset.meshes.at(*gltfnode.meshIndex).name.c_str(),
+                      gltfnode.name.c_str());
+        }
+    }
+
+    for(const auto& e : gltfnode.children)
+    {
+        load_node(scene, gltfasset, e, nodeid, ctx);
+    }
+
+    return nodeid;
+}
+
+SceneNodeId load_from_file(Scene& scene, const std::filesystem::path& model_path)
+{
+    auto fastdatabuf = fastgltf::GltfDataBuffer::FromPath(model_path);
+    if(!fastdatabuf) { return SceneNodeId{}; }
+
+    static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
+                                        fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
+    fastgltf::Parser gltfparser;
+    auto gltfassetexp = gltfparser.loadGltfBinary(fastdatabuf.get(), model_path.parent_path(), gltfOptions);
+    if(!gltfassetexp) { return SceneNodeId{}; }
+
+    auto& gltfasset = gltfassetexp.get();
+    if(gltfasset.scenes.empty()) { return SceneNodeId{}; }
+
+    auto& gltfscene = gltfasset.scenes.at(0);
+
+    const auto rootnodeid = scene.make_node(model_path.filename().string());
+    scene.get_node(rootnodeid).transform = scene.transforms.size();
+    scene.transforms.emplace_back();
+
+    Context ctx;
+    for(auto i = 0u; i < gltfscene.nodeIndices.size(); ++i)
+    {
+        load_node(scene, gltfasset, gltfscene.nodeIndices[i], rootnodeid, ctx);
+    }
+
+    return rootnodeid;
+}
+
+} // namespace gltf
+
+void Scene::init() {}
+
+SceneNodeId Scene::load_from_file(const std::filesystem::path& model_path)
+{
+    auto full_path = model_path;
+    if(!full_path.string().starts_with(eng::paths::MODELS_DIR.string()))
+    {
+        full_path = eng::paths::MODELS_DIR / full_path;
+    }
+
+    const auto ext = full_path.extension();
+    if(ext == ".glb") { return gltf::load_from_file(*this, full_path); }
+
+    ENG_ERROR("Extension not supported {}", ext.string());
+    return SceneNodeId{};
+}
+
+SceneNodeId Scene::make_node(const std::string& name)
+{
+    const auto idx = hierarchy.create();
+    if(!idx)
+    {
+        ENG_ERROR("Could not create new scene node");
+        return SceneNodeId{ *idx };
+    }
+    if(nodes.size() == *idx) { nodes.push_back(SceneNode{ .name = name }); }
+    return SceneNodeId{ *idx };
+}
+
+SceneNode& Scene::get_node(SceneNodeId id)
+{
+    if(!hierarchy.has(id))
+    {
+        ENG_ERROR("Invalid node id");
+        return null_node;
+    }
+    return nodes[*id];
+}
+
+} // namespace eng
+
+#if 0
+
+namespace eng
+{
+namespace gltf
+{
+
+asset::Geometry* load_geometry(const fastgltf::Asset& fastasset, const fastgltf::Mesh& fastmesh,
+                               uint32_t primitive_index, asset::Model& model)
+{
+
+}
+
+asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat format, size_t image_index, asset::Model& model)
+{
 }
 
 // static Handle<gfx::Sampler> load_sampler(const fastgltf::Asset& asset, size_t index, eng::LoadedModel& ctx)
@@ -212,133 +472,27 @@ asset::Image* load_image(const fastgltf::Asset& fastasset, gfx::ImageFormat form
 
 asset::Texture* load_texture(const fastgltf::Asset& fastasset, gfx::ImageFormat format, size_t texture_index, asset::Model& model)
 {
-    if(model.textures.size() <= texture_index) { model.textures.resize(fastasset.textures.size()); }
-    if(model.textures.at(texture_index).view) { return &model.textures.at(texture_index); }
-    const auto& ftex = fastasset.textures.at(texture_index);
-    const auto image_index = ftex.imageIndex ? *ftex.imageIndex : ~0ull;
-    if(image_index == ~0ull) { return nullptr; }
-    auto* image = load_image(fastasset, format, image_index, model);
-    if(!image)
-    {
-        ENG_ERROR("Could not load texture ({}) image ({})", ftex.name.c_str(), texture_index);
-        return nullptr;
-    }
-    model.textures.at(texture_index) = Texture{ ftex.name.c_str(), gfx::ImageView::init(image->render_image) };
-    return &model.textures.at(texture_index);
+
 }
 
 asset::Material* load_material(const fastgltf::Asset& fastasset, const fastgltf::Mesh& fastmesh,
                                uint32_t primitive_index, asset::Model& model)
 {
-    const auto& fprim = fastmesh.primitives.at(primitive_index);
-    if(!fprim.materialIndex) { return nullptr; }
-    const auto& fmat = fastasset.materials.at(*fprim.materialIndex);
-    if(model.materials.size() <= *fprim.materialIndex) { model.materials.resize(fastasset.materials.size()); }
-    if(model.materials.at(*fprim.materialIndex).render_material) { return &model.materials.at(*fprim.materialIndex); }
 
-    auto matdesc = gfx::MaterialDescriptor{};
-    if(fmat.pbrData.baseColorTexture)
-    {
-        auto* tex = gltf::load_texture(fastasset, gfx::ImageFormat::R8G8B8A8_SRGB, fmat.pbrData.baseColorTexture->textureIndex, model);
-        if(tex != nullptr) { matdesc.base_color_texture = tex->view; }
-        else { ENG_ERROR("Could not load base color texture for material ({}).", fmat.name.c_str()); }
-    }
-    if(fmat.normalTexture)
-    {
-        auto* tex = gltf::load_texture(fastasset, gfx::ImageFormat::R8G8B8A8_UNORM, fmat.normalTexture->textureIndex, model);
-        if(tex != nullptr) { matdesc.normal_texture = tex->view; }
-        else { ENG_ERROR("Could not load normal texture for material ({}).", fmat.name.c_str()); }
-    }
-    if(fmat.pbrData.metallicRoughnessTexture)
-    {
-        auto* tex = gltf::load_texture(fastasset, gfx::ImageFormat::R8G8B8A8_UNORM,
-                                       fmat.pbrData.metallicRoughnessTexture->textureIndex, model);
-        if(tex != nullptr) { matdesc.metallic_roughness_texture = tex->view; }
-        else { ENG_ERROR("Could not load metallic roughness texture for material ({}).", fmat.name.c_str()); }
-    }
-    const auto mat = Engine::get().renderer->make_material(matdesc);
-    model.materials.at(*fprim.materialIndex).name = fmat.name.c_str();
-    model.materials.at(*fprim.materialIndex).render_material = mat;
-    return &model.materials.at(*fprim.materialIndex);
 }
 
 asset::Mesh* load_mesh(const fastgltf::Asset& fastasset, const fastgltf::Node& fastnode, asset::Model& model)
 {
-    if(!fastnode.meshIndex) { return nullptr; }
-    if(model.meshes.size() <= *fastnode.meshIndex) { model.meshes.resize(fastasset.meshes.size()); }
-    if(model.meshes.at(*fastnode.meshIndex).render_meshes.size() > 0) { return &model.meshes.at(*fastnode.meshIndex); }
 
-    const auto& fm = fastasset.meshes.at(*fastnode.meshIndex);
-    std::vector<Handle<gfx::Mesh>> gfxmeshes;
-    std::vector<uint32_t> geometries;
-    for(auto i = 0u; i < fm.primitives.size(); ++i)
-    {
-        const auto* geom = gltf::load_geometry(fastasset, fm, i, model);
-        const auto* mat = gltf::load_material(fastasset, fm, i, model);
-        if(!geom)
-        {
-            ENG_ERROR("Failed to load geometry for mesh ({}) primitive ({}).", fm.name.c_str(), i);
-            continue;
-        }
-        if(!mat)
-        {
-            ENG_ERROR("Failed to load material for mesh ({}) primitive ({}).", fm.name.c_str(), i);
-            continue;
-        }
-        gfxmeshes.push_back(Engine::get().renderer->make_mesh(gfx::MeshDescriptor{ .geometry = geom->render_geometry,
-                                                                                   .material = mat->render_material }));
-    }
-    auto& mesh = model.meshes.at(*fastnode.meshIndex);
-    mesh.name = fm.name.c_str();
-    mesh.render_meshes = std::move(gfxmeshes);
-    mesh.geometries = { (uint32_t)(model.geometries.size() - fm.primitives.size()), (uint32_t)fm.primitives.size() };
-    return &mesh;
 }
 
 void load_node(const fastgltf::Asset& fastasset, const fastgltf::Node& fastnode, asset::Model& model, asset::Model::Node& node)
 {
-    node.name = fastnode.name.c_str();
 
-    if(fastnode.transform.index() == 0)
-    {
-        const auto& trs = std::get<fastgltf::TRS>(fastnode.transform);
-        node.transform =
-            (glm::translate(glm::mat4{ 1.0f }, glm::vec3{ trs.translation.x(), trs.translation.y(), trs.translation.z() }) *
-             glm::mat4_cast(glm::quat{ trs.rotation.w(), trs.rotation.x(), trs.rotation.y(), trs.rotation.z() }) *
-             glm::scale(glm::mat4{ 1.0f }, glm::vec3{ trs.scale.x(), trs.scale.y(), trs.scale.z() })) *
-            node.transform;
-    }
-    else
-    {
-        const auto& trs = std::get<fastgltf::math::fmat4x4>(fastnode.transform);
-        glm::mat4 glmtrs;
-        memcpy(&glmtrs, &trs, sizeof(trs));
-        node.transform = glmtrs * node.transform;
-    }
-
-    if(fastnode.meshIndex)
-    {
-        auto* mesh = gltf::load_mesh(fastasset, fastnode, model);
-        if(!mesh)
-        {
-            ENG_ERROR("Failed to load mesh ({}) for node ({}).", fastasset.meshes.at(*fastnode.meshIndex).name.c_str(),
-                      fastnode.name.c_str());
-        }
-        else { node.mesh = *fastnode.meshIndex; }
-    }
-
-    node.children.reserve(fastnode.children.size());
-    for(const auto& e : fastnode.children)
-    {
-        node.children.push_back(model.nodes.size());
-        auto& child = model.nodes.emplace_back();
-        child.transform = node.transform;
-        gltf::load_node(fastasset, fastasset.nodes.at(e), model, child);
-    }
 }
 } // namespace gltf
 
-std::expected<asset::Model, std::string> GLTFModelImporter::load_model(const std::filesystem::path& path)
+void GLTFModelImporter::load_model(Scene& scene, const std::filesystem::path& path)
 {
     if(!std::filesystem::exists(path))
     {
@@ -387,8 +541,6 @@ std::expected<asset::Model, std::string> GLTFModelImporter::load_model(const std
     ENG_ASSERT(model.nodes.capacity() == fastasset.nodes.size() + 1);
     return std::move(model);
 }
-} // namespace import
-} // namespace asset
 
 void Scene::init() { asset::import::file_importers[".glb"] = std::make_unique<asset::import::GLTFModelImporter>(); }
 
@@ -643,40 +795,42 @@ void Scene::ui_draw_inspector()
     // ImGui::End();
 }
 
-void Scene::ui_draw_manipulate()
-{
-    if(!ui.scene.sel_entity) { return; }
-
-    auto* ecs = Engine::get().ecs;
-    auto& entity = ui.scene.sel_entity;
-    auto& ctransform = ecs->get<ecs::Transform>(entity);
-    auto& cnode = ecs->get<ecs::Node>(entity);
-    auto& cmesh = ecs->get<ecs::Mesh>(entity);
-
-    auto& io = ImGui::GetIO();
-    auto& style = ImGui::GetStyle();
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, 0u); // don't set no background, make host dock push style with no bg, and somehow it works -
-                                                  // the content window actually does not have the background
-    ImGui::Begin("Manipulate", 0, ImGuiWindowFlags_NoDecoration);
-    ImGui::PopStyleColor(1);
-    ImGuizmo::SetDrawlist();
-
-    const auto view = Engine::get().camera->get_view();
-    auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
-    proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
-    const auto window_width = ImGui::GetWindowWidth();
-    const auto window_height = ImGui::GetWindowHeight();
-    const auto window_pos = ImGui::GetWindowPos();
-    glm::mat4 tr{ 1.0f };
-    ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
-    auto translation = ctransform.global;
-    glm::mat4 delta;
-    if(ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::OPERATION::TRANSLATE, ImGuizmo::MODE::LOCAL,
-                            &ctransform.local[0][0]))
-    {
-        update_transform(entity);
-    }
-
-    ImGui::End();
-}
+//void Scene::ui_draw_manipulate()
+//{
+//    if(!ui.scene.sel_entity) { return; }
+//
+//    auto* ecs = Engine::get().ecs;
+//    auto& entity = ui.scene.sel_entity;
+//    auto& ctransform = ecs->get<ecs::Transform>(entity);
+//    auto& cnode = ecs->get<ecs::Node>(entity);
+//    auto& cmesh = ecs->get<ecs::Mesh>(entity);
+//
+//    auto& io = ImGui::GetIO();
+//    auto& style = ImGui::GetStyle();
+//    ImGui::PushStyleColor(ImGuiCol_WindowBg, 0u); // don't set no background, make host dock push style with no bg, and somehow it works -
+//                                                  // the content window actually does not have the background
+//    ImGui::Begin("Manipulate", 0, ImGuiWindowFlags_NoDecoration);
+//    ImGui::PopStyleColor(1);
+//    ImGuizmo::SetDrawlist();
+//
+//    const auto view = Engine::get().camera->get_view();
+//    auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
+//    proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
+//    const auto window_width = ImGui::GetWindowWidth();
+//    const auto window_height = ImGui::GetWindowHeight();
+//    const auto window_pos = ImGui::GetWindowPos();
+//    glm::mat4 tr{ 1.0f };
+//    ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+//    auto translation = ctransform.global;
+//    glm::mat4 delta;
+//    if(ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::OPERATION::TRANSLATE, ImGuizmo::MODE::LOCAL,
+//                            &ctransform.local[0][0]))
+//    {
+//        update_transform(entity);
+//    }
+//
+//    ImGui::End();
+//}
 } // namespace eng
+
+#endif

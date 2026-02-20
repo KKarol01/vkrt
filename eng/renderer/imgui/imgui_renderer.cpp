@@ -51,8 +51,8 @@ void ImGuiRenderer::init()
         .culling = CullFace::NONE,
     });
 
-    vertex_buffer = r.make_buffer(Buffer::init("imgui vertex buffer", 1024 * 1024, BufferUsage::STORAGE_BIT));
-    index_buffer = r.make_buffer(Buffer::init("imgui index buffer", 1024 * 1024, BufferUsage::INDEX_BIT));
+    vertex_buffer = r.make_buffer("imgui vertex buffer", Buffer::init(1024 * 1024, BufferUsage::STORAGE_BIT));
+    index_buffer = r.make_buffer("imgui index buffer", Buffer::init(1024 * 1024, BufferUsage::INDEX_BIT));
 }
 
 void ImGuiRenderer::update(RenderGraph* graph, RenderGraph::AccessId output)
@@ -209,8 +209,8 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
     Handle<Image> image;
     if(imtex->Status == ImTextureStatus_WantCreate)
     {
-        image = r.make_image(Image::init("imgui image", (uint32_t)imtex->Width, (uint32_t)imtex->Height,
-                                         ImageFormat::R8G8B8A8_UNORM, ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
+        image = r.make_image("imgui image", Image::init((uint32_t)imtex->Width, (uint32_t)imtex->Height, ImageFormat::R8G8B8A8_UNORM,
+                                                        ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
         images.push_back(image);
         imtex->SetTexID((ImTextureID)(*image + 1)); // +1 so GetTexID doesn't complain when it's 0.
     }

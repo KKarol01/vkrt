@@ -154,7 +154,7 @@ void Engine::start()
             const float now = get_time_secs();
             on_update.signal();
             camera->update();
-            scene->update();
+            // scene->update();
             renderer->update();
             ++tick;
             last_frame_time = now;

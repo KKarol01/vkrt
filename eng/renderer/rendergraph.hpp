@@ -135,6 +135,7 @@ class RenderGraph
     {
         AccessId add_resource(const Resource& resource, const std::optional<Clear>& clear = {})
         {
+            ENG_ASSERT(!clear);
             graph->resources.push_back(resource);
             const auto ret = add_access(Access{
                 .resource = Handle<Resource>{ (uint32_t)graph->resources.size() - 1 },
@@ -142,8 +143,6 @@ class RenderGraph
                 .stage = {},
                 .access = {},
             });
-            ENG_ASSERT(!clear);
-            ENG_LOG("Making resource {}", (resource.is_buffer() ? resource.as_buffer()->name : resource.as_image()->name));
             // if(clear) { p->clears.emplace_back(ret, *clear); }
             return ret;
         }
@@ -168,38 +167,38 @@ class RenderGraph
             return &it->second;
         }
 
-        AccessId create_resource(Buffer&& a, bool persistent = false)
+        AccessId create_resource(const std::string& name, Buffer&& a, bool persistent = false)
         {
-            ENG_ASSERT(a.name.size() > 0);
-            Resource::NativeResource native = [this, &a, persistent] -> Resource::NativeResource {
+            ENG_ASSERT(name.size() > 0);
+            Resource::NativeResource native = [this, &a, &name, persistent] -> Resource::NativeResource {
                 if(persistent)
                 {
-                    const auto hash = hash::combine_fnv1a(pass->name, a.name);
+                    const auto hash = hash::combine_fnv1a(pass->name, name);
                     if(auto* p = find_persistent(hash, pass->name)) { return p->native; }
-                    auto native_handle = Engine::get().renderer->make_buffer(std::move(a));
+                    auto native_handle = Engine::get().renderer->make_buffer(name, std::move(a));
                     auto persistent_it =
                         graph->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = pass->name, .native = native_handle });
                     return persistent_it.first->second.native;
                 }
-                return Engine::get().renderer->make_buffer(std::move(a), AllocateMemory::NO);
+                return Engine::get().renderer->make_buffer(name, std::move(a), AllocateMemory::ALIASED);
             }();
             return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
 
-        AccessId create_resource(Image&& a, bool persistent = false, const std::optional<Clear>& clear = {})
+        AccessId create_resource(const std::string& name, Image&& a, bool persistent = false, const std::optional<Clear>& clear = {})
         {
-            ENG_ASSERT(a.name.size() > 0);
-            Resource::NativeResource native = [this, &a, persistent] -> Resource::NativeResource {
+            ENG_ASSERT(name.size() > 0);
+            Resource::NativeResource native = [this, &a, &name, persistent] -> Resource::NativeResource {
                 if(persistent)
                 {
-                    const auto hash = hash::combine_fnv1a(pass->name, a.name);
+                    const auto hash = hash::combine_fnv1a(pass->name, name);
                     if(auto* p = find_persistent(hash, pass->name)) { return p->native; }
-                    auto native_handle = Engine::get().renderer->make_image(std::move(a));
+                    auto native_handle = Engine::get().renderer->make_image(name, std::move(a));
                     auto persistent_it =
                         graph->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = pass->name, .native = native_handle });
                     return persistent_it.first->second.native;
                 }
-                return Engine::get().renderer->make_image(std::move(a), AllocateMemory::NO);
+                return Engine::get().renderer->make_image(name, std::move(a), AllocateMemory::ALIASED);
             }();
             return add_resource(Resource{ .native = native, .is_persistent = persistent });
         }
@@ -214,9 +213,8 @@ class RenderGraph
             return ret;
         }
 
-        AccessId sample_texture(AccessId acc, std::optional<ImageFormat> format = {},
-                                   std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                   Range32u layers = { 0u, ~0u })
+        AccessId sample_texture(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -243,7 +241,7 @@ class RenderGraph
         }
 
         AccessId read_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                            Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -254,7 +252,7 @@ class RenderGraph
         }
 
         AccessId write_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                             Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -264,9 +262,8 @@ class RenderGraph
             return access_resource(acc, layout, stage, access, format, type, mips, layers);
         }
 
-        AccessId read_write_image(AccessId acc, std::optional<ImageFormat> format = {},
-                                     std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
-                                     Range32u layers = { 0u, ~0u })
+        AccessId read_write_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                  Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
                                : pass->is_compute() ? PipelineStage::COMPUTE_BIT
@@ -300,8 +297,8 @@ class RenderGraph
         }
 
         AccessId access_resource(AccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                                    std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                    Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                                 std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                 Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
         {
             return add_access(Access{
                 .resource = graph->get_acc(acc).resource,
@@ -315,7 +312,7 @@ class RenderGraph
         }
 
         AccessId access_resource(AccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                                    Range64u range = { 0ull, ~0ull })
+                                 Range64u range = { 0ull, ~0ull })
         {
             return add_access(Access{
                 .resource = graph->get_acc(acc).resource,
@@ -774,13 +771,11 @@ class RenderGraph
         if(res.is_buffer())
         {
             auto h = res.as_buffer();
-            ENG_LOG("Destroying resource {}", h->name);
             r.destroy_buffer(h);
         }
         else
         {
             auto h = res.as_image();
-            ENG_LOG("Destroying resource {}", h->name);
             r.destroy_image(h);
         }
     }

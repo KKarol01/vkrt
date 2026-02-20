@@ -30,8 +30,8 @@ namespace ecs
     Ecs is a system that generates handles (64 bit for now, but could be compressed)
     and allows users to attach structures to them which can be queried later.
     Each handle has 32bit versioning number which is used to prevent stale handles
-    when it's been recycled when doing create->erase->create. During erase version is
-    bumped by 1.
+    when it's been recycled when doing create->erase->create, and a slot which is a 
+    stable index that may be reused. During erase version is bumped by 1.
 
     EntityId::get_slot() returns stable index that may be used to index arrays with
     data associated with the entity.

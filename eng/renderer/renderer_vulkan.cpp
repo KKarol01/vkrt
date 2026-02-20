@@ -29,6 +29,7 @@
 #include <eng/common/paths.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/camera.hpp>
+#include <eng/renderer/set_debug_name.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 // static float halton(int i, int b)
@@ -326,13 +327,12 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
         .usage = VMA_MEMORY_USAGE_AUTO,
     };
 
-    if(allocate == AllocateMemory::NO) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
+    if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
     else { VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vma_alloc, &vmaai)); }
 
-    if(md->buffer) { set_debug_name(md->buffer, a.name); }
-    else
+    if(!md->buffer)
     {
-        ENG_WARN("Could not create buffer {}", a.name);
+        ENG_WARN("Could not create buffer");
         return;
     }
     if(cpu_map) { a.memory = vmaai.pMappedData; }
@@ -364,7 +364,7 @@ void BufferMetadataVk::destroy(Buffer& a)
     a.md.ptr = nullptr;
 }
 
-void ImageMetadataVk::init(Image& a, VkImage img, AllocateMemory allocate)
+void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* user_data)
 {
     if(a.md.as_vk())
     {
@@ -385,12 +385,17 @@ void ImageMetadataVk::init(Image& a, VkImage img, AllocateMemory allocate)
     VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
     VkImageCreateInfo info;
     init(a, info);
-    if(img) { md->image = img; }
-    else if(allocate == AllocateMemory::NO) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
-    else { VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr)); }
-
-    if(md->image) { set_debug_name(md->image, a.name); }
-    else { ENG_ERROR("Could not create image {}", a.name); }
+    if(allocate == AllocateMemory::EXTERNAL)
+    {
+        ENG_ASSERT(user_data);
+        md->image = static_cast<VkImage>(user_data);
+    }
+    else if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
+    else if(allocate == AllocateMemory::YES)
+    {
+        VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr));
+    }
+    if(!md->image) { ENG_ERROR("Could not create image"); }
 }
 
 void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
@@ -453,8 +458,8 @@ void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
 
     auto* md = new ImageViewMetadataVk{};
     VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
-    if(!md->view) { ENG_ERROR("Could not create image view for image {}", img.name); }
-    else { set_debug_name(md->view, img.name); }
+    if(!md->view) { ENG_ERROR("Could not create image view for image {}", *view.image); }
+    else { set_debug_name(md->view, ENG_FMT("image_{}_view", *view.image)); }
     *out_allocation = md;
 }
 
@@ -535,16 +540,12 @@ void SwapchainMetadataVk::init(Swapchain& a)
     VK_CHECK(vkCreateSwapchainKHR(backend.dev, &sinfo, nullptr, &md->swapchain));
     VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &Renderer::frame_delay, vkimgs.data()));
 
+    auto& r = get_renderer();
     for(uint32_t i = 0; i < vkimgs.size(); ++i)
     {
-        Image img{};
-        img.name = ENG_FMT("swapchain_image_{}", i);
-        img.format = image_format;
-        img.width = sinfo.imageExtent.width;
-        img.height = sinfo.imageExtent.height;
-        img.usage = image_usage_flags;
-        ImageMetadataVk::init(img, vkimgs.at(i));
-        a.images[i] = Handle<Image>{ *Engine::get().renderer->images.insert(std::move(img)) };
+        a.images[i] = r.make_image(ENG_FMT("swapchain_image_{}", i),
+                                   Image::init(sinfo.imageExtent.width, sinfo.imageExtent.height, image_format, image_usage_flags),
+                                   AllocateMemory::EXTERNAL, (void*)vkimgs[i]);
         a.views[i] = ImageView::init(a.images[i]);
     }
 }
@@ -559,7 +560,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     for(auto i = 0u; i < a.images.size(); ++i)
     {
         ImageMetadataVk::destroy(a.images.at(i).get(), false);
-        Engine::get().renderer->images.erase(SlotIndex::init(*a.images.at(i)));
+        Engine::get().renderer->images.erase(SlotIndex<uint32_t>{ *a.images.at(i) });
     }
     delete &md;
     a = Swapchain{};
@@ -1338,9 +1339,9 @@ void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
 
 void RendererBackendVk::destroy_buffer(Buffer& buffer) { BufferMetadataVk::destroy(buffer); }
 
-void RendererBackendVk::allocate_image(Image& image, AllocateMemory allocate)
+void RendererBackendVk::allocate_image(Image& image, AllocateMemory allocate, void* user_data)
 {
-    ImageMetadataVk::init(image, {}, allocate);
+    ImageMetadataVk::init(image, allocate, user_data);
 }
 
 void RendererBackendVk::destroy_image(Image& image) { ImageMetadataVk::destroy(image); }
@@ -1626,6 +1627,16 @@ void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, siz
     VK_CHECK(vmaBindImageMemory2(vma, alloc, offset, resource.md.as_vk()->image, nullptr));
     resource.md.as_vk()->is_aliased = true;
     resource.md.as_vk()->vmaa = alloc;
+}
+
+void RendererBackendVk::set_debug_name(Buffer& resource, std::string_view name) const
+{
+    eng::gfx::set_debug_name(resource.md.as_vk()->buffer, name);
+}
+
+void RendererBackendVk::set_debug_name(Image& resource, std::string_view name) const
+{
+    eng::gfx::set_debug_name(resource.md.as_vk()->image, name);
 }
 
 // todo: swapchain impl should not be here

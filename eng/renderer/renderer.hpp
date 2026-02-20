@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 #include <span>
 #include <compare>
 #include <memory>
@@ -279,12 +280,11 @@ struct GeometryDescriptor
 
 struct Buffer
 {
-    static Buffer init(const std::string& name, size_t capacity, Flags<BufferUsage> usage)
+    static Buffer init(size_t capacity, Flags<BufferUsage> usage)
     {
-        return Buffer{ .name = name, .usage = usage, .capacity = capacity, .size = 0ull, .memory = {} };
+        return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {} };
     }
 
-    std::string name;
     Flags<BufferUsage> usage{};
     size_t capacity{};
     size_t size{};
@@ -298,16 +298,15 @@ struct Buffer
 
 struct Image
 {
-    static Image init(const std::string& name, uint32_t width, uint32_t height, ImageFormat format,
-                      Flags<ImageUsage> usage, ImageLayout layout = ImageLayout::UNDEFINED)
+    static Image init(uint32_t width, uint32_t height, ImageFormat format, Flags<ImageUsage> usage,
+                      ImageLayout layout = ImageLayout::UNDEFINED)
     {
-        return init(name, width, height, 1, format, usage, (uint32_t)(std::log2f((float)std::min(width, height)) + 1), 1, layout);
+        return init(width, height, 1, format, usage, (uint32_t)(std::log2f((float)std::min(width, height)) + 1), 1, layout);
     }
-    static Image init(const std::string& name, uint32_t width, uint32_t height, uint32_t depth, ImageFormat format,
-                      Flags<ImageUsage> usage, uint32_t mips = 1, uint32_t layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
+    static Image init(uint32_t width, uint32_t height, uint32_t depth, ImageFormat format, Flags<ImageUsage> usage,
+                      uint32_t mips = 1, uint32_t layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
     {
         return Image{
-            .name = name,
             .type = depth > 1    ? ImageType::TYPE_3D
                     : height > 1 ? ImageType::TYPE_2D
                                  : ImageType::TYPE_1D,
@@ -322,7 +321,6 @@ struct Image
         };
     }
 
-    std::string name;
     ImageType type{ ImageType::TYPE_2D };
     ImageFormat format{};
     uint32_t width{};
@@ -506,7 +504,7 @@ class IRendererBackend
 
     virtual void allocate_buffer(Buffer& buffer, AllocateMemory alloc = AllocateMemory::YES) = 0;
     virtual void destroy_buffer(Buffer& buffer) = 0;
-    virtual void allocate_image(Image& image, AllocateMemory alloc = AllocateMemory::YES) = 0;
+    virtual void allocate_image(Image& image, AllocateMemory alloc = AllocateMemory::YES, void* user_data = nullptr) = 0;
     virtual void destroy_image(Image& b) = 0;
     virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
     virtual void allocate_sampler(Sampler& sampler) = 0;
@@ -536,6 +534,9 @@ class IRendererBackend
     virtual void* allocate_aliasable_memory(const RendererMemoryRequirements& reqs) = 0;
     virtual void bind_aliasable_memory(Buffer& resource, void* memory, size_t offset) = 0;
     virtual void bind_aliasable_memory(Image& resource, void* memory, size_t offset) = 0;
+
+    virtual void set_debug_name(Buffer& resource, std::string_view name) const = 0;
+    virtual void set_debug_name(Image& resource, std::string_view name) const = 0;
 
     RendererBackendCaps caps{};
 };
@@ -761,9 +762,10 @@ class Renderer
     void build_renderpasses();
     void render_debug(const DebugGeometry& geom);
 
-    Handle<Buffer> make_buffer(Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
+    Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
     void destroy_buffer(Handle<Buffer>& handle);
-    Handle<Image> make_image(Image&& image, AllocateMemory allocate = AllocateMemory::YES);
+    Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
+                             void* user_data = nullptr);
     void destroy_image(Handle<Image>& image);
     Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const std::filesystem::path& path);
@@ -812,6 +814,9 @@ class Renderer
 
     Slotmap<Buffer, 1024> buffers;
     Slotmap<Image, 1024> images;
+    std::vector<std::string> buffer_names;
+    // std::vector<std::string> image_names;
+
     HandleFlatSet<Sampler> samplers;
     HandleFlatSet<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
@@ -822,7 +827,7 @@ class Renderer
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
 
-    Slotmap<Geometry, 1024> geometries;
+    std::vector<Geometry> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
     // HandleFlatSet<Texture> textures;
@@ -851,9 +856,9 @@ inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
 } // namespace gfx
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(SlotIndex::init(*handle)); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(SlotIndex::init(*handle)); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries.at(SlotIndex::init(*handle)); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(SlotIndex<uint32_t>{*handle}); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(SlotIndex<uint32_t>{*handle}); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes.at(*handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });

@@ -13,13 +13,12 @@ template <class... Ts> struct Visitor : Ts...
 template <typename Storage = size_t> struct Range_T
 {
     auto operator<=>(const Range_T&) const = default;
-    Storage offset{};
+    Storage offset{ ~0u };
     Storage size{};
 };
 
 using Range32u = Range_T<uint32_t>;
 using Range64u = Range_T<uint64_t>;
-using Range = Range64u;
 using Range3D32i = Range_T<glm::i32vec3>;
 using Range3D32u = Range_T<glm::u32vec3>;
 using Range3D64i = Range_T<glm::i64vec3>;

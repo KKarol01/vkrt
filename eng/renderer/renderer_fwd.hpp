@@ -323,7 +323,8 @@ enum class SamplerMipmapMode
 
 enum class AllocateMemory : uint8_t
 {
-    NO,
+    ALIASED,  // Gpu memory allocator will not create unique memory for this resource.
+    EXTERNAL, // Memory is managed by someone else (swapchain images).
     YES,
 };
 
@@ -387,17 +388,7 @@ class RenderGraph;
 struct IDescriptorSetAllocator;
 class ICommandPool;
 class ICommandBuffer;
-} // namespace gfx
-} // namespace eng
 
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, uint64_t);
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Image, uint64_t);
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Geometry, uint64_t);
-
-namespace eng
-{
-namespace gfx
-{
 namespace pass
 {
 class IPass;

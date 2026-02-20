@@ -62,8 +62,8 @@ class SSTriangle : public IPass
             [this](RenderGraph::PassBuilder& pb) {
                 auto* w = Engine::get().window;
                 SSTrianglePass data;
-                data.color = pb.create_resource(Image::init("sstriangle output", w->width, w->height, 1,
-                                                            ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT));
+                data.color = pb.create_resource("sstriangle output", Image::init(w->width, w->height, 1, ImageFormat::R8G8B8A8_SRGB,
+                                                                                 ImageUsage::COLOR_ATTACHMENT_BIT));
                 data.color = pb.access_color(data.color);
                 get_renderer().imgui_input = *data.color;
                 return data;

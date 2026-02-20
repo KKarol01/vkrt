@@ -1,27 +1,15 @@
 #pragma once
-#include <glm/glm.hpp>
+#include <string>
+#include <glm/common.hpp>
+#include <glm/glm/gtc/matrix_transform.hpp>
+#include <glm/glm/gtc/quaternion.hpp>
+#include <glm/glm/gtx/matrix_decompose.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/logger.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 #include <assets/shaders/bindless_structures.glsli>
-
-namespace eng
-{
-namespace gfx
-{
-struct Mesh;
-struct Geometry;
-struct Material;
-} // namespace gfx
-
-namespace asset
-{
-struct Model;
-struct Mesh;
-} // namespace asset
-
-} // namespace eng
 
 namespace eng
 {
@@ -29,30 +17,37 @@ namespace ecs
 {
 struct Transform
 {
-    static Transform from(const glm::vec3& pos)
+    static Transform init(const glm::mat4& mat)
     {
         Transform t;
-        t.local = glm::identity<glm::mat4>();
-        t.global = glm::translate(pos);
+        glm::vec3 skew;
+        glm::vec4 perspective;
+        if(!glm::decompose(mat, t.scale, t.rotation, t.position, skew, perspective)) { return {}; }
         return t;
     }
-
-    glm::vec3 pos() const { return glm::vec3{ global[3] }; }
-
-    glm::mat4 local{ 1.0f };
-    glm::mat4 global{ 1.0f };
+    glm::mat4 to_mat4() const { return glm::translate(glm::scale(glm::mat4_cast(rotation), scale), position); }
+    glm::vec3 position{};
+    glm::quat rotation{ glm::quat_identity<float, glm::packed_highp>() };
+    glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
 };
 
-struct Node
+struct Material
 {
     std::string name;
-    const asset::Model* model{};
+    Handle<gfx::Material> render_material;
+};
+
+struct Geometry
+{
+    Handle<gfx::Geometry> render_geometry;
 };
 
 struct Mesh
 {
-    const asset::Mesh* asset{};   // asset
-    uint32_t gpu_resource{ ~0u }; // per-instance
+    std::string name;
+    Handle<gfx::Mesh> render_mesh;
+    uint32_t geom_mat{};          // index scene's geometry or materials vectors with this
+    uint32_t gpu_resource{ ~0u }; // renderer sets this when it processes the mesh
 };
 
 struct alignas(16) Light

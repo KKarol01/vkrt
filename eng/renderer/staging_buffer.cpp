@@ -20,9 +20,9 @@ void StagingBuffer::init(SubmitQueue* queue)
     ENG_ASSERT(queue != nullptr);
 
     const auto alloc_size = align_up2(CAPACITY, ALIGNMENT);
-    buffer = Buffer::init("staging buffer", alloc_size,
-                          BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS);
+    buffer = Buffer::init(alloc_size, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS);
     r.backend->allocate_buffer(buffer);
+    r.backend->set_debug_name(buffer, "staging buffer");
     ENG_ASSERT(buffer.memory);
 
     this->queue = queue;

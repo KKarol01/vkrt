@@ -142,7 +142,7 @@ struct BufferMetadataVk
 
 struct ImageMetadataVk
 {
-    static void init(Image& a, VkImage img = {}, AllocateMemory allocate = AllocateMemory::YES);
+    static void init(Image& a, AllocateMemory allocate = AllocateMemory::YES, void* user_data = nullptr);
     static void init(Image& a, VkImageCreateInfo& info);
     static void destroy(Image& a, bool deallocate = true);
     VkImage image{};
@@ -199,7 +199,7 @@ class RendererBackendVk : public IRendererBackend
 
     void allocate_buffer(Buffer& buffer, AllocateMemory allocate = AllocateMemory::YES) override;
     void destroy_buffer(Buffer& buffer) override;
-    void allocate_image(Image& image, AllocateMemory allocate = AllocateMemory::YES) override;
+    void allocate_image(Image& image, AllocateMemory allocate = AllocateMemory::YES, void* user_data = nullptr) override;
     void destroy_image(Image& image) override;
     void allocate_view(const ImageView& view, void** out_allocation) override;
     void allocate_sampler(Sampler& sampler) override;
@@ -225,6 +225,9 @@ class RendererBackendVk : public IRendererBackend
     void* allocate_aliasable_memory(const RendererMemoryRequirements& reqs) override;
     void bind_aliasable_memory(Buffer& resource, void* memory, size_t offset) override;
     void bind_aliasable_memory(Image& resource, void* memory, size_t offset) override;
+
+    void set_debug_name(Buffer& resource, std::string_view name) const override;
+    void set_debug_name(Image& resource, std::string_view name) const override;
 
     VkInstance instance;
     VkDevice dev;
