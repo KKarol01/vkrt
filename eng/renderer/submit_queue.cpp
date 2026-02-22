@@ -185,11 +185,7 @@ void CommandBufferVk::set_scissors(const VkRect2D* scissors, uint32_t count)
     vkCmdSetScissorWithCount(cmd, count, scissors);
 }
 
-void CommandBufferVk::begin_rendering(const VkRenderingInfo& info)
-{
-    before_draw_dispatch(); // todo: not sure if this should be the only place for non compute/rt dispatches
-    vkCmdBeginRendering(cmd, &info);
-}
+void CommandBufferVk::begin_rendering(const VkRenderingInfo& info) { vkCmdBeginRendering(cmd, &info); }
 
 void CommandBufferVk::end_rendering() { vkCmdEndRendering(cmd); }
 

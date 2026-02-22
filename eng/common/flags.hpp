@@ -52,6 +52,8 @@ template <typename T> struct Flags
     constexpr explicit operator U() const noexcept { return flags; }
 
     constexpr bool empty() const { return flags == U{}; }
+    constexpr bool any() const { return flags != U{}; }
+    constexpr bool all() const { return flags == ~U{}; }
     constexpr void set(Flags<T> f) noexcept { *this |= f; }
     constexpr bool test(Flags<T> f) const noexcept { return (flags & f.flags) == f.flags; }
     constexpr bool test_clear(Flags<T> f)

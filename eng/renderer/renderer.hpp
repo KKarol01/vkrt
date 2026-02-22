@@ -37,6 +37,10 @@ struct DescriptorResource
     {
         return DescriptorResource{ .type = DescriptorType::SAMPLED_IMAGE, .image_view = view, .binding = binding, .index = index };
     }
+    static DescriptorResource as_storage(uint32_t binding, Handle<Buffer> buffer, uint32_t index = 0)
+    {
+        return as_storage(binding, BufferView::init(buffer), index);
+    }
     static DescriptorResource as_storage(uint32_t binding, const BufferView& view, uint32_t index = 0)
     {
         return DescriptorResource{ .type = DescriptorType::STORAGE_BUFFER, .buffer_view = view, .binding = binding, .index = index };
@@ -639,7 +643,7 @@ class Renderer
     {
         Handle<Pipeline> pipeline;
         uint32_t instance_count;
-		uint32_t first_command;
+        uint32_t first_command;
         uint32_t command_count;
     };
 
@@ -672,14 +676,14 @@ class Renderer
     {
         void clear()
         {
-            //entities.clear();
+            // entities.clear();
             mesh_instances.clear();
             draw.batches.clear();
         }
         IndirectBatch draw;
         Handle<Buffer> instance_buffer;
         BufferView instance_view;
-        //std::vector<ecs::EntityId> entities;
+        // std::vector<ecs::EntityId> entities;
         std::vector<MeshInstance> mesh_instances;
     };
 
@@ -740,8 +744,8 @@ class Renderer
         VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
         size_t vertex_count{};
         size_t index_count{};
-        size_t transform_count{};
-        size_t light_count{};
+        // size_t transform_count{};
+        // size_t light_count{};
     };
 
     void init(IRendererBackend* backend);

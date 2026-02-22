@@ -452,37 +452,41 @@ void Renderer::update()
     }
     if(new_transforms.size())
     {
-        ENG_ASSERT(false);
-        // std::swap(bufs.transforms[0], bufs.transforms[1]);
-        // const auto req_size = bufs.transform_count * sizeof(glm::mat4);
-        // resize_buffer(bufs.transforms[0], req_size, false);
-        // staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
-        // for(auto i = 0u; i < new_transforms.size(); ++i)
-        //{
-        //     const auto& trs = Engine::get().ecs->get<ecs::Transform>(new_transforms[i]);
-        //     const auto& msh = Engine::get().ecs->get<ecs::Mesh>(new_transforms[i]);
-        //     staging->copy(bufs.transforms[0], &trs.global, msh.gpu_resource * sizeof(trs.global), sizeof(trs.global));
-        // }
-        // new_transforms.clear();
+        std::swap(bufs.transforms[0], bufs.transforms[1]);
+        const auto req_size = gpu_resource_allocator.size() * sizeof(glm::mat4);
+        resize_buffer(bufs.transforms[0], req_size, false);
+        staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
+        for(auto i = 0u; i < new_transforms.size(); ++i)
+        {
+            const auto entity = new_transforms[i];
+            const auto [transform, mesh] = Engine::get().ecs->get<ecs::Transform, ecs::Mesh>(entity);
+            const auto trsmat4x4 = transform.to_mat4();
+            for(auto meshh : mesh.render_meshes)
+            {
+                ENG_ASSERT(meshh);
+                staging->copy(bufs.transforms[0], &trsmat4x4[0][0], meshh->gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
+            }
+        }
+        new_transforms.clear();
     }
     if(new_lights.size())
     {
-        ENG_ASSERT(false);
-        // std::swap(bufs.lights[0], bufs.lights[1]);
-        // const auto req_size = bufs.light_count * sizeof(GPULight) + 4;
-        // resize_buffer(bufs.lights[0], req_size, false);
-        // staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
-        // for(auto i = 0u; i < new_lights.size(); ++i)
+        // ENG_ASSERT(false);
+        //  std::swap(bufs.lights[0], bufs.lights[1]);
+        //  const auto req_size = bufs.light_count * sizeof(GPULight) + 4;
+        //  resize_buffer(bufs.lights[0], req_size, false);
+        //  staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
+        //  for(auto i = 0u; i < new_lights.size(); ++i)
         //{
-        //     auto& l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
-        //     const auto& t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
-        //     if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
-        //     GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
-        //     staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
-        //                   sizeof(GPULight));
-        // }
-        // staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
-        // new_lights.clear();
+        //      auto& l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
+        //      const auto& t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
+        //      if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
+        //      GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
+        //      staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
+        //                    sizeof(GPULight));
+        //  }
+        //  staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
+        //  new_lights.clear();
     }
 
     // const auto view = Engine::get().camera->get_view();
@@ -641,6 +645,8 @@ void Renderer::build_renderpasses()
         const auto rpidx = (int)passtype;
         RenderPass& rp = render_passes[rpidx];
 
+        if(rp.mesh_instances.size() == 0) { return; }
+
         Handle<Pipeline> prev_pipeline;
         uint32_t prev_meshlet = ~0u;
 
@@ -677,8 +683,8 @@ void Renderer::build_renderpasses()
             insts.push_back(GPUInstanceId{
                 .cmdi = (uint32_t)cmds.size(),
                 .resi = (uint32_t)insts.size(),
-                .mati = *inst.material,
                 .insti = inst.instance_index,
+                .mati = *inst.material,
             });
             ++rp.draw.batches.back().instance_count;
             ++cmds.back().instanceCount;
@@ -717,11 +723,12 @@ void Renderer::build_renderpasses()
 
         {
             const auto insts_size = insts.size() * sizeof(insts[0]);
+            const auto total_size = insts_size + 4;
             if(!rp.instance_buffer)
             {
-                rp.instance_buffer = make_buffer("instance buffer", Buffer::init(insts_size, BufferUsage::STORAGE_BIT));
+                rp.instance_buffer = make_buffer("instance buffer", Buffer::init(total_size, BufferUsage::STORAGE_BIT));
             }
-            else if(rp.instance_buffer->capacity < insts_size) { resize_buffer(rp.instance_buffer, insts_size, false); }
+            else if(rp.instance_buffer->capacity < total_size) { resize_buffer(rp.instance_buffer, total_size, false); }
 
             staging->copy_value(rp.instance_buffer, 4u, 0ull, false);
             staging->copy(rp.instance_buffer, insts, 4ull, false);
@@ -730,7 +737,7 @@ void Renderer::build_renderpasses()
         }
     };
 
-    for(auto i = 0u; (uint32_t)RenderPassType::LAST_ENUM; ++i)
+    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
         RenderPassType rpt{ i };
         clear_pass(rpt);
@@ -753,8 +760,8 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     backend->set_debug_name(buffer, name);
     auto it = buffers.insert(std::move(buffer));
     if(!it) { return Handle<Buffer>{}; }
-    if(*it == buffer_names.size()) { buffer_names.emplace_back(name.data()); }
-    else { buffer_names[*it] = name.data(); }
+    if(it.get_index() == buffer_names.size()) { buffer_names.emplace_back(name.data()); }
+    else { buffer_names[it.get_index()] = name.data(); }
     return Handle<Buffer>{ *it };
 }
 
@@ -860,7 +867,8 @@ Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
     ENG_ASSERT((batch.vertex_layout & ~(VertexComponent::POSITION_BIT | VertexComponent::NORMAL_BIT |
-                                        VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT)) == 0);
+                                        VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT))
+                   .empty());
 
     std::vector<float> out_vertices;
     std::vector<uint16_t> out_indices;
@@ -873,13 +881,13 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
     const auto attr_size = vertex_size - pos_size;
 
-    std::byte* psrcvx = (std::byte*)out_vertices.data();
+    std::byte* vert_bytes = (std::byte*)out_vertices.data();
     std::vector<std::byte> positions(vertex_count * pos_size);
     std::vector<std::byte> attributes(vertex_count * attr_size);
     for(auto i = 0ull; i < vertex_count; ++i)
     {
-        memcpy(&positions[i * pos_size], &psrcvx[i * vertex_size], pos_size);
-        memcpy(&attributes[i * attr_size], &psrcvx[i * vertex_size + pos_size], attr_size);
+        memcpy(&positions[i * pos_size], &vert_bytes[i * vertex_size], pos_size);
+        memcpy(&attributes[i * attr_size], &vert_bytes[i * vertex_size + pos_size], attr_size);
     }
     std::vector<glm::vec4> bounding_spheres(out_meshlets.size());
     for(auto i = 0u; i < out_meshlets.size(); ++i)
@@ -955,8 +963,7 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     }
 
     out_indices.resize(mlt_ids.size());
-    std::transform(mlt_ids.begin(), mlt_ids.end(), out_indices.begin(),
-                   [](auto idx) { return static_cast<uint16_t>(idx); });
+    std::transform(mlt_ids.begin(), mlt_ids.end(), out_indices.begin(), [](auto idx) { return (uint16_t)idx; });
     out_meshlets.resize(mltcnt);
     for(auto i = 0u; i < mltcnt; ++i)
     {

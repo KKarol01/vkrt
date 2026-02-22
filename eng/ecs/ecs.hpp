@@ -299,6 +299,16 @@ class Registry
         on_entity_sig_change(eid, old_sig, md.sig);
     }
 
+    // Return the count of registered entities.
+    SlotId::storage_type size() const { return hierarchy.size(); }
+
+    // Return the count of registered components.
+    template <typename Component> SlotId::storage_type size() const
+    {
+        if(auto* pool = get_pool<Component>()) { return pool->size(); }
+        return {};
+    }
+
     // Tries to remove all present components from the entity.
     template <typename... Components> void erase_components(EntityId eid)
     {
@@ -443,6 +453,13 @@ class Registry
     {
         const auto id = ComponentTraits::get_id<Component>();
         if(!pools[id]) { pools[id] = std::make_unique<ComponentPool<Component>>(); }
+        return *static_cast<ComponentPool<Component>*>(&*pools[id]);
+    }
+
+    template <typename Component> ComponentPool<Component>* try_get_pool() const
+    {
+        const auto id = ComponentTraits::get_id<Component>();
+        if(!pools[id]) { return nullptr; }
         return *static_cast<ComponentPool<Component>*>(&*pools[id]);
     }
 

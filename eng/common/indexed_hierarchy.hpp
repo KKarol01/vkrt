@@ -30,6 +30,8 @@ class IndexedHierarchy
   public:
     bool has(NodeId id) const { return id && slots.has(*id); }
 
+    uint32_t size() const { return slots.size(); }
+
     NodeId create()
     {
         if(slots.size() == ~NodeId::storage_type{}) { return NodeId{}; }
@@ -125,6 +127,7 @@ class IndexedHierarchy
             if(!has(id)) { return; }
             callback(id);
             const auto first_child = get_first_child(id);
+            if(!first_child) { return; }
             auto child = first_child;
             do
             {

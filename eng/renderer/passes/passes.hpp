@@ -27,9 +27,13 @@ class IPass
 
 class SSTriangle : public IPass
 {
+  public:
     struct SSTrianglePass
     {
         RenderGraph::AccessId color;
+        RenderGraph::AccessId indirect_buffer;
+        RenderGraph::AccessId instance_buffer;
+        RenderGraph::AccessId constants_buffer;
     };
     struct SSCopyToSwapPass
     {
@@ -41,15 +45,14 @@ class SSTriangle : public IPass
         RenderGraph::AccessId swap;
     };
 
-  public:
     ~SSTriangle() override = default;
 
     void init() override
     {
         auto& r = get_renderer();
         pipeline = r.make_pipeline(PipelineCreateInfo{ .shaders = {
-                                                           r.make_shader("triangle/triangle.vert.glsl"),
-                                                           r.make_shader("triangle/triangle.frag.glsl"),
+                                                           r.make_shader("default_unlit/unlit.vert.glsl"),
+                                                           r.make_shader("default_unlit/unlit.frag.glsl"),
                                                        },
                                                        .attachments = { .count = 1, .color_formats = {ImageFormat::R8G8B8A8_SRGB} }, 
                                                       });
@@ -65,6 +68,16 @@ class SSTriangle : public IPass
                 data.color = pb.create_resource("sstriangle output", Image::init(w->width, w->height, 1, ImageFormat::R8G8B8A8_SRGB,
                                                                                  ImageUsage::COLOR_ATTACHMENT_BIT));
                 data.color = pb.access_color(data.color);
+
+                RenderPassType rpt{ RenderPassType::FORWARD };
+                const auto& rp = get_renderer().render_passes[(int)rpt];
+
+                data.indirect_buffer = pb.import_resource(rp.draw.indirect_buf);
+                data.instance_buffer = pb.import_resource(rp.instance_buffer);
+
+                data.constants_buffer =
+                    pb.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
+
                 get_renderer().imgui_input = *data.color;
                 return data;
             },
@@ -87,11 +100,35 @@ class SSTriangle : public IPass
                 });
                 VkViewport viewport{ 0.0, 0.0, w->width, w->height, 1.0, 0.0 };
                 VkRect2D scissor{ {}, { (uint32_t)w->width, (uint32_t)w->height } };
-                cmd->bind_pipeline(pipeline.get());
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
-                cmd->draw(3, 1, 0, 0);
+
+                RenderPassType rpt{ RenderPassType::FORWARD };
+                const auto& rp = get_renderer().render_passes[(int)rpt];
+                const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
+
+                auto* c = Engine::get().camera;
+                GPUEngConstantsBuffer constants{
+                    .proj_view = c->get_projection() * c->get_view(),
+                };
+                get_renderer().staging->copy(get_renderer().rgraph->get_buf(data.constants_buffer), &constants, 0ull,
+                                             sizeof(constants), false);
+                cmd->wait_sync(get_renderer().staging->flush(nullptr)); // wait for constants buffer upload
+
+                rp.draw.draw([&](const Renderer::IndirectDrawParams& params) {
+                    cmd->bind_pipeline(pipeline.get());
+
+                    DescriptorResource shaderresources[]{ DescriptorResource::as_storage(0, graph.get_buf(data.constants_buffer)),
+                                                          DescriptorResource::as_storage(1, get_renderer().bufs.positions) };
+                    cmd->bind_set(0, shaderresources);
+                    cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
+                    cmd->draw_indexed_indirect_count(params.batch->indirect_buf.get(),
+                                                     params.batch->cmds_view.range.offset + params.draw->first_command * cmdsize,
+                                                     params.batch->indirect_buf.get(),
+                                                     params.draw->first_command * sizeof(uint32_t), params.max_draw_count, cmdsize);
+                });
+
                 cmd->end_rendering();
             });
 

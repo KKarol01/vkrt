@@ -4,9 +4,9 @@
 
 layout(location = 0) in VsOut {
     vec3 position;
-    vec3 normal;
-    vec2 uv;
-    flat uint32_t iidx;
+    // vec3 normal;
+    // vec2 uv;
+    // flat uint32_t iidx;
 } fsin;
 
 layout(location = 0) out vec4 OUT_COLOR;
@@ -26,6 +26,10 @@ const vec3 colors[10] = vec3[](
 
 void main() 
 {
+
+	OUT_COLOR = vec4(1.0);
+
+#if 0
  	uvec2 ss = uvec2(1280, 768);
 	uint ts = 16;
 	uvec2 tc = uvec2(ss + uvec2(ts - 1)) / uvec2(ts);
@@ -84,4 +88,6 @@ void main()
         OUT_COLOR.a = 1.0;
     }
     // OUT_COLOR = vec4(mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), lgc / 4.0), 1.0);
+
+	#endif
 }
