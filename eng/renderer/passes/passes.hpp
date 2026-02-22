@@ -115,13 +115,13 @@ class SSTriangle : public IPass
                 get_renderer().staging->copy(get_renderer().rgraph->get_buf(data.constants_buffer), &constants, 0ull,
                                              sizeof(constants), false);
                 cmd->wait_sync(get_renderer().staging->flush(nullptr)); // wait for constants buffer upload
-
+                cmd->bind_pipeline(pipeline.get());
+                DescriptorResource shaderresources[]{ DescriptorResource::as_storage(0, graph.get_buf(data.constants_buffer)),
+                                                      DescriptorResource::as_storage(1, get_renderer().bufs.positions) };
+                cmd->bind_set(0, shaderresources);
+                ((CommandBufferVk*)cmd)->descriptor_allocator->flush((CommandBufferVk*)cmd);
                 rp.draw.draw([&](const Renderer::IndirectDrawParams& params) {
                     cmd->bind_pipeline(pipeline.get());
-
-                    DescriptorResource shaderresources[]{ DescriptorResource::as_storage(0, graph.get_buf(data.constants_buffer)),
-                                                          DescriptorResource::as_storage(1, get_renderer().bufs.positions) };
-                    cmd->bind_set(0, shaderresources);
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
                     cmd->draw_indexed_indirect_count(params.batch->indirect_buf.get(),
                                                      params.batch->cmds_view.range.offset + params.draw->first_command * cmdsize,

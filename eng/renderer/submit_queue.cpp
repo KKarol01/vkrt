@@ -145,7 +145,7 @@ void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
     const auto& md = *pipeline.md.vk;
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
-    rebind_desc_sets = true;
+    //rebind_desc_sets = true;
 }
 
 void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
@@ -166,7 +166,7 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
 void CommandBufferVk::bind_set(uint32_t slot, std::span<DescriptorResource> resources)
 {
     ENG_ASSERT(current_pipeline && current_pipeline->info.layout);
-    rebind_desc_sets = true;
+    //rebind_desc_sets = true;
     descriptor_allocator->bind_set(slot, resources, current_pipeline->info.layout.get());
 }
 

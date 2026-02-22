@@ -228,24 +228,25 @@ void Renderer::init_pipelines()
     //     .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
     //     .layout = common_playout,
     // });
-    // default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
-    //     .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
-    //     .layout = common_playout,
-    //     .attachments = { .count = 1,
-    //                      .color_formats = { ImageFormat::R8G8B8A8_SRGB },
-    //                      .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-    //                                                                        .src_color_factor = BlendFactor::SRC_ALPHA,
-    //                                                                        .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-    //                                                                        .color_op = BlendOp::ADD,
-    //                                                                        .src_alpha_factor = BlendFactor::ONE,
-    //                                                                        .dst_alpha_factor = BlendFactor::ZERO,
-    //                                                                        .alpha_op = BlendOp::ADD } },
-    //                      .depth_format = ImageFormat::D32_SFLOAT },
-    //     .depth_test = true,
-    //     .depth_write = false,
-    //     .depth_compare = DepthCompare::GEQUAL,
-    //     .culling = CullFace::BACK,
-    // });
+
+    default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
+        .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
+        .layout = PipelineLayout::common_layout,
+        .attachments = { .count = 1,
+                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                         .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                           .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                           .color_op = BlendOp::ADD,
+                                                                           .src_alpha_factor = BlendFactor::ONE,
+                                                                           .dst_alpha_factor = BlendFactor::ZERO,
+                                                                           .alpha_op = BlendOp::ADD } },
+                         .depth_format = ImageFormat::D32_SFLOAT },
+        .depth_test = false,
+        .depth_write = false,
+        .depth_compare = DepthCompare::NEVER,
+        .culling = CullFace::BACK,
+    });
 
     default_meshpass =
         make_mesh_pass(MeshPass::init("default_unlit").set(RenderPassType::FORWARD, make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline })));
@@ -838,12 +839,12 @@ Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
+    if(!p.info.layout) { p.info.layout = PipelineLayout::common_layout; }
     if(backend->caps.supports_bindless)
     {
         // with bindless, all pipeline layout should be the same
-        ENG_ASSERT(!info.layout)
+        ENG_ASSERT(p.info.layout == PipelineLayout::common_layout);
     }
-    if(!p.info.layout) { p.info.layout = PipelineLayout::common_layout; }
     const auto found_handle = pipelines.find(p);
     if(!found_handle) { backend->make_pipeline(p); }
     auto it = pipelines.insert(std::move(p));
