@@ -21,35 +21,35 @@ using namespace eng;
 namespace app
 {
 
-void Renderer::init() {}
-
-void Renderer::update()
-{
-    // for(auto e : Engine::get().scene->scene)
-    //{
-    //      Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
-    //          if(Engine::get().ecs->has<ecs::Mesh>(e))
-    //          {
-    //              Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
-    //          };
-    //      });
-    // }
-
-    // Engine::get().renderer->rgraph->add_pass(
-    //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::DEFAULT_UNLIT - 1 },
-    //     [](gfx::RenderGraph::PassResourceBuilder& b) {
-    //         b.access(Engine::get().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
-    //                  gfx::RenderGraph::AccessType::RW, gfx::PipelineStage::COMPUTE_BIT, gfx::PipelineAccess::SHADER_RW);
-    //     },
-    //     [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) {
-
-    //    });
-}
+// void Renderer::init() {}
+//
+// void Renderer::update()
+//{
+//     // for(auto e : Engine::get().scene->scene)
+//     //{
+//     //      Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
+//     //          if(Engine::get().ecs->has<ecs::Mesh>(e))
+//     //          {
+//     //              Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
+//     //          };
+//     //      });
+//     // }
+//
+//     // Engine::get().renderer->rgraph->add_pass(
+//     //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::DEFAULT_UNLIT - 1 },
+//     //     [](gfx::RenderGraph::PassResourceBuilder& b) {
+//     //         b.access(Engine::get().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
+//     //                  gfx::RenderGraph::AccessType::RW, gfx::PipelineStage::COMPUTE_BIT, gfx::PipelineAccess::SHADER_RW);
+//     //     },
+//     //     [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) {
+//
+//     //    });
+// }
 
 void App::start()
 {
     Engine::get().on_init += [this] { on_init(); };
-    Engine::get().on_update += [this] { on_update(); };
+    //Engine::get().on_update += [this] { on_update(); };
 }
 
 void App::on_init()
@@ -98,8 +98,8 @@ void App::on_init()
     // ecs->update<ecs::Mesh>(e2);
     // ecs->update<ecs::Transform>(e1);
 
-    renderer.init();
-    // const auto* e = Engine::get().scene->load_from_file("cyberpunk.glb");
+    SceneNodeId cyberpunk = Engine::get().scene->load_from_file("cyberpunk.glb");
+	Engine::get().scene->instance_model(cyberpunk);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
@@ -151,6 +151,6 @@ void App::on_init()
     // Engine::get().scene->instance_model(e);
 }
 
-void App::on_update() { renderer.update(); }
+//void App::on_update() { renderer.update(); }
 
 } // namespace app

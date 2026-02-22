@@ -88,6 +88,7 @@ template <typename UserType, size_t PAGE_SIZE, typename IndexType = uint32_t> cl
 
     void for_each(const auto& callback)
     {
+		static_assert(false);
         // for(auto i=0ull;)
     }
 

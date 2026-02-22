@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <eng/common/types.hpp>
 #include <eng/common/spatial.hpp>
+#include <eng/common/hash.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
@@ -20,7 +21,7 @@ namespace eng
 struct SceneNode
 {
     std::string name;
-    Range32u meshes{};
+    Range32u meshes{}; // indexes geoms/mats/meshes alltogether
     uint32_t transform{ ~0u };
 };
 
@@ -50,7 +51,7 @@ class Scene
     std::vector<Handle<gfx::Image>> images;
     std::vector<gfx::ImageView> textures;
     std::vector<ecs::Material> materials;
-    std::vector<ecs::Mesh> meshes;
+    std::vector<Handle<gfx::Mesh>> meshes;
 
     std::vector<SceneNode> nodes;
     inline static SceneNode null_node{};
@@ -58,3 +59,5 @@ class Scene
 };
 
 } // namespace eng
+
+ENG_DEFINE_STD_HASH(eng::SceneNodeId, eng::hash::combine_fnv1a(*t));

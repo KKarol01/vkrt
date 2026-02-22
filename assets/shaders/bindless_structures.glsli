@@ -1,12 +1,12 @@
 #ifndef BINDLESS_STRUCTURES_INC_GLSL
 #define BINDLESS_STRUCTURES_INC_GLSL
 
-#define BINDLESS_STORAGE_BUFFER_BINDING 0
-#define BINDLESS_STORAGE_IMAGE_BINDING 1
+#define ENG_BINDLESS_STORAGE_BUFFER_BINDING 0
+#define ENG_BINDLESS_STORAGE_IMAGE_BINDING 1
 // #define BINDLESS_COMBINED_IMAGE_BINDING 2
-#define BINDLESS_SAMPLED_IMAGE_BINDING 3
-#define BINDLESS_SAMPLER_BINDING 4
-#define BINDLESS_ACCELERATION_STRUCT_BINDING 5
+#define ENG_BINDLESS_SAMPLED_IMAGE_BINDING 3
+#define ENG_BINDLESS_SAMPLER_BINDING 4
+#define ENG_BINDLESS_ACCELERATION_STRUCT_BINDING 5
 #define ENG_TYPE_INT int32_t
 #define ENG_TYPE_UINT uint32_t
 #define ENG_TYPE_UINT8 uint8_t
@@ -43,7 +43,7 @@
 #define ENG_TYPE_UNSIZED(type, name) type name##_us[]
 
 #define ENG_DECLARE_STORAGE_BUFFER(type)                                                                               \
-    layout(set = 0, binding = BINDLESS_STORAGE_BUFFER_BINDING, scalar) buffer SB_##type
+    layout(set = 0, binding = ENG_BINDLESS_STORAGE_BUFFER_BINDING, scalar) buffer SB_##type
 #define ENG_DECLARE_BINDLESS(type) gsb_##type[]
 
 // for picking index right from the push constants
@@ -77,7 +77,7 @@
 #define ENG_DECLARE_BINDLESS(type)
 #endif
 
-struct DrawIndexedIndirectCommand
+struct IndexedIndirectDrawCommand
 {
     ENG_TYPE_UINT indexCount;
     ENG_TYPE_UINT instanceCount;
@@ -86,7 +86,7 @@ struct DrawIndexedIndirectCommand
     ENG_TYPE_UINT firstInstance;
 };
 ENG_DECLARE_STORAGE_BUFFER(GPUDrawIndexedIndirectCommandsBuffer) {
-    ENG_TYPE_UNSIZED(DrawIndexedIndirectCommand, commands);
+    ENG_TYPE_UNSIZED(IndexedIndirectDrawCommand, commands);
 } ENG_DECLARE_BINDLESS(GPUDrawIndexedIndirectCommandsBuffer);
 ENG_DECLARE_STORAGE_BUFFER(GPUIndirectCountsBuffer) {
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, counts);
@@ -224,18 +224,18 @@ ENG_DECLARE_STORAGE_BUFFER(GPUFWDPLightGridsBuffer) {
 
 #ifndef __cplusplus
 
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r16ui) restrict uniform uimage2D gsi_2dr16ui[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r16f) restrict uniform image2D gsi_2dr16f[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2D gsi_2dr32ui[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2DArray gsi_2dr32uiv[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2D gsi_2drgba8[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba32f) restrict uniform image2D gsi_2drgba32f[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba16f) restrict uniform image2D gsi_2drgba16f[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, r32f) restrict uniform image2D gsi_2dr32f[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rg32f) restrict uniform image2D gsi_2drg32f[];
-layout(set = 0, binding = BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2DArray gsi_2drgba8v[];
-layout(set = 0, binding = BINDLESS_SAMPLED_IMAGE_BINDING) uniform texture2D gt_2d[];
-layout(set = 0, binding = BINDLESS_SAMPLER_BINDING) uniform sampler g_samplers[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, r16ui) restrict uniform uimage2D gsi_2dr16ui[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, r16f) restrict uniform image2D gsi_2dr16f[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2D gsi_2dr32ui[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, r32ui) restrict uniform uimage2DArray gsi_2dr32uiv[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2D gsi_2drgba8[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, rgba32f) restrict uniform image2D gsi_2drgba32f[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, rgba16f) restrict uniform image2D gsi_2drgba16f[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, r32f) restrict uniform image2D gsi_2dr32f[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, rg32f) restrict uniform image2D gsi_2drg32f[];
+layout(set = 0, binding = ENG_BINDLESS_STORAGE_IMAGE_BINDING, rgba8) restrict uniform image2DArray gsi_2drgba8v[];
+layout(set = 0, binding = ENG_BINDLESS_SAMPLED_IMAGE_BINDING) uniform texture2D gt_2d[];
+layout(set = 0, binding = ENG_BINDLESS_SAMPLER_BINDING) uniform sampler g_samplers[];
 
 #endif
 

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <vector>
 #include <variant>
+#include <type_traits>
 #include <eng/common/logger.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/slotallocator.hpp>
@@ -118,6 +119,23 @@ class IndexedHierarchy
     // Siblings are circular. false If child has no parent
     NodeId get_next_sibling(NodeId id) const { return get(id).next_sibling; }
 
+    template <std::invocable<NodeId> Callback> void traverse_hierarchy(NodeId id, const Callback& callback) const
+    {
+        const auto recursive = [this, &callback](NodeId id, const auto& self) -> void {
+            if(!has(id)) { return; }
+            callback(id);
+            const auto first_child = get_first_child(id);
+            auto child = first_child;
+            do
+            {
+                self(child, self);
+                child = get_next_sibling(child);
+            }
+            while(child != first_child);
+        };
+        recursive(id, recursive);
+    }
+
   private:
     Node& get(NodeId id)
     {
@@ -131,8 +149,7 @@ class IndexedHierarchy
 
     const Node& get(NodeId id) const { return const_cast<IndexedHierarchy*>(this)->get(id); }
 
-    inline static Node null_object =
-        Node{ .parent = NodeId{}, .first_child = NodeId{}, .prev_sibling = NodeId{}, .next_sibling = NodeId{} };
+    inline static Node null_object = Node{ NodeId{}, NodeId{}, NodeId{}, NodeId{} };
     SlotAllocator slots;
     std::vector<Node> nodes;
 };

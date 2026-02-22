@@ -4,7 +4,7 @@ project(eng)
 find_package(Vulkan REQUIRED)
 
 add_subdirectory(third_party/glm SYSTEM)
-target_compile_definitions(glm INTERFACE
+target_compile_definitions(glm PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE
     GLM_FORCE_RADIANS
     GLM_FORCE_AVX2
@@ -130,7 +130,14 @@ add_executable(eng
     "eng/physics/bvh.cpp"
  "eng/ui/ui.cpp")
 
-target_include_directories(eng PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/fastgltf/include ${CMAKE_SOURCE_DIR}/third_party/fmt/include)
+target_include_directories(eng 
+	PRIVATE 
+	${CMAKE_SOURCE_DIR} 
+	${CMAKE_SOURCE_DIR}/third_party 
+	${Vulkan_INCLUDE_DIRS} 
+	${CMAKE_SOURCE_DIR}/third_party/fastgltf/include 
+	${CMAKE_SOURCE_DIR}/third_party/fmt/include
+)
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
 target_compile_options(eng PRIVATE

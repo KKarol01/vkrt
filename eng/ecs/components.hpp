@@ -45,9 +45,7 @@ struct Geometry
 struct Mesh
 {
     std::string name;
-    Handle<gfx::Mesh> render_mesh;
-    uint32_t geom_mat{};          // index scene's geometry or materials vectors with this
-    uint32_t gpu_resource{ ~0u }; // renderer sets this when it processes the mesh
+    std::vector<Handle<gfx::Mesh>> render_meshes;
 };
 
 struct alignas(16) Light

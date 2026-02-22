@@ -226,9 +226,9 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     write.descriptorCount = 1;
     write.descriptorType = to_vk(type);
     write.dstArrayElement = slot;
-    write.dstBinding = type == DescriptorType::STORAGE_BUFFER  ? BINDLESS_STORAGE_BUFFER_BINDING
-                       : type == DescriptorType::STORAGE_IMAGE ? BINDLESS_STORAGE_IMAGE_BINDING
-                       : type == DescriptorType::SAMPLED_IMAGE ? BINDLESS_SAMPLED_IMAGE_BINDING
+    write.dstBinding = type == DescriptorType::STORAGE_BUFFER  ? ENG_BINDLESS_STORAGE_BUFFER_BINDING
+                       : type == DescriptorType::STORAGE_IMAGE ? ENG_BINDLESS_STORAGE_IMAGE_BINDING
+                       : type == DescriptorType::SAMPLED_IMAGE ? ENG_BINDLESS_SAMPLED_IMAGE_BINDING
                                                                : ~0u;
     assert(write.dstBinding != ~0u);
 

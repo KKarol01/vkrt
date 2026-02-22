@@ -30,7 +30,7 @@ namespace ecs
     Ecs is a system that generates handles (64 bit for now, but could be compressed)
     and allows users to attach structures to them which can be queried later.
     Each handle has 32bit versioning number which is used to prevent stale handles
-    when it's been recycled when doing create->erase->create, and a slot which is a 
+    when it's been recycled when doing create->erase->create, and a slot which is a
     stable index that may be reused. During erase version is bumped by 1.
 
     EntityId::get_slot() returns stable index that may be used to index arrays with
@@ -97,7 +97,7 @@ using SlotId = IndexedHierarchy::NodeId; // indexed to linear arrays of entities
 struct EntityId : public TypedId<EntityId, uint64_t>
 {
     explicit EntityId(storage_type handle) : TypedId(handle) {}
-    explicit EntityId() : EntityId(SlotId{}, ~0u) {}
+    explicit EntityId() : TypedId() {}
     EntityId(SlotId slot, uint32_t version) : TypedId(((uint64_t)version << 32) | (uint64_t)*slot) {}
     auto operator<=>(const EntityId&) const = default;
     SlotId get_slot() const { return SlotId{ (uint32_t)handle }; }
@@ -112,13 +112,18 @@ using ViewEntityRemovedFunc = void(EntityId eid);
 
 struct ComponentTraits
 {
-    // Gets stable unique 0-based index for component
-    template <typename Component> static ComponentId get_id()
+    template <typename Component> static ComponentId get_id_()
     {
+        static_assert(!std::is_reference_v<Component> && !std::is_pointer_v<Component>);
+        static_assert(!std::is_const_v<Component> && !std::is_volatile_v<Component>);
+        static_assert(std::is_object_v<Component>);
         static auto id = counter.fetch_add(1);
         ENG_ASSERT(id < MAX_COMPONENTS);
         return id;
     }
+
+    // Gets stable unique 0-based index for component
+    template <typename Component> static ComponentId get_id() { return get_id_<std::remove_cvref_t<Component>>(); }
     // Returns bit mask of given components
     template <typename... Components> static Signature get_signature()
     {
@@ -284,8 +289,8 @@ class Registry
             return;
         }
 
-        const auto emplace_component = [this, eid]<typename T>(auto&& comp) {
-            auto& pool = get_pool<T>();
+        const auto emplace_component = [this, eid]<typename T>(T&& comp) {
+            auto& pool = get_pool<std::decay_t<T>>();
             pool.emplace(eid.get_slot(), std::forward<decltype(comp)>(comp));
         };
         const auto old_sig = md.sig;
@@ -301,7 +306,9 @@ class Registry
     }
 
     // Invokes a callback for every entity that has the specified components.
-    template <typename... Components> void iterate_over_components(const auto& callback)
+    template <typename... Components>
+    void iterate_over_components(const auto& callback)
+        requires(std::is_invocable_v<decltype(callback), EntityId, Components...>)
     {
         const IComponentPool* const pool = try_find_smallest_pool<Components...>();
         const Signature sig = get_signature<Components...>();
@@ -397,7 +404,7 @@ class Registry
                             std::optional<Callback<ViewEntityUpdatedFunc>> on_update_callback = {},
                             std::optional<Callback<ViewEntityRemovedFunc>> on_remove_callback = {})
     {
-        auto& view = get_view(get_signature<Components...>());
+        auto& view = get_view(get_signature<Components...>(), on_insert_callback);
         if(on_insert_callback) { view.on_insert_callbacks += *on_insert_callback; }
         if(on_update_callback) { view.on_update_callbacks += *on_update_callback; }
         if(on_remove_callback) { view.on_remove_callbacks += *on_remove_callback; }
@@ -439,7 +446,7 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*pools[id]);
     }
 
-    View& get_view(Signature sig)
+    View& get_view(Signature sig, std::optional<Callback<ViewEntityInsertedFunc>> on_insert = {})
     {
         auto it = views.emplace(sig, View{});
         if(!it.second) { return it.first->second; }
@@ -449,7 +456,11 @@ class Registry
         {
             for(auto e : pool->entities)
             {
-                if(metadatas[e].has_components(sig)) { view.entities.push_back(entities[e]); }
+                if(metadatas[e].has_components(sig))
+                {
+                    view.entities.push_back(entities[e]);
+                    if(on_insert) { (*on_insert)(entities[e]); }
+                }
             }
         }
         return view;

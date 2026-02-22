@@ -251,9 +251,10 @@ struct Material
 
 struct Mesh
 {
-    auto operator<=>(const Mesh& t) const = default;
+    bool operator==(const Mesh& a) const { return geometry == a.geometry && material == a.material; }
     Handle<Geometry> geometry;
     Handle<Material> material;
+    uint32_t gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
 };
 
 struct Meshlet
@@ -638,6 +639,7 @@ class Renderer
     {
         Handle<Pipeline> pipeline;
         uint32_t instance_count;
+		uint32_t first_command;
         uint32_t command_count;
     };
 
@@ -666,25 +668,19 @@ class Renderer
         uint32_t meshlet_index;
     };
 
-    struct RenderPasses
+    struct RenderPass
     {
-        struct Pass
+        void clear()
         {
-            bool needs_rebuild() const { return entities.size() != mesh_instances.size(); }
-            void clear()
-            {
-                entities.clear();
-                mesh_instances.clear();
-                draw.batches.clear();
-            }
-            IndirectBatch draw;
-            Handle<Buffer> instance_buffer;
-            BufferView instance_view;
-            std::vector<ecs::EntityId> entities;
-            std::vector<MeshInstance> mesh_instances;
-        };
-        Pass& get(RenderPassType type) { return passes[(int)type]; }
-        std::array<Pass, (int)RenderPassType::LAST_ENUM> passes;
+            //entities.clear();
+            mesh_instances.clear();
+            draw.batches.clear();
+        }
+        IndirectBatch draw;
+        Handle<Buffer> instance_buffer;
+        BufferView instance_view;
+        //std::vector<ecs::EntityId> entities;
+        std::vector<MeshInstance> mesh_instances;
     };
 
     struct GBuffer
@@ -755,10 +751,7 @@ class Renderer
     void init_bufs();
     void init_rgraph_passes();
 
-    void instance_entity(ecs::EntityId e);
-
     void update();
-    void render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd);
     void build_renderpasses();
     void render_debug(const DebugGeometry& geom);
 
@@ -834,7 +827,7 @@ class Renderer
     HandleFlatSet<Material> materials;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::EntityId> new_transforms;
-    RenderPasses render_passes;
+    std::array<RenderPass, (int)RenderPassType::LAST_ENUM> render_passes;
     std::vector<ecs::EntityId> new_lights;
 
     GeometryBuffers bufs;
@@ -859,7 +852,7 @@ inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(SlotIndex<uint32_t>{*handle}); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(SlotIndex<uint32_t>{*handle}); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes.at(*handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
