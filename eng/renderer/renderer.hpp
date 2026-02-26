@@ -836,8 +836,8 @@ class Renderer
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
-    SlotAllocator gpu_resource_allocator;
-    SlotAllocator gpu_light_allocator;
+    SlotAllocator<uint32_t, 32> gpu_resource_allocator;
+    SlotAllocator<uint32_t, 32> gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
     Handle<Pipeline> default_unlit_pipeline;

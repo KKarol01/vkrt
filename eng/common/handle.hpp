@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cassert>
 #include <type_traits>
+#include <eng/common/types.hpp>
 
 namespace eng
 {
@@ -37,18 +38,6 @@ template <typename T> struct HandleGenerator
 
 template <typename T> struct HandleDispatcher
 {
-};
-
-template <typename T, std::integral StorageType> struct TypedId
-{
-    using storage_type = StorageType;
-    constexpr TypedId() = default;
-    constexpr explicit TypedId(storage_type handle) : handle{ handle } {}
-    constexpr storage_type operator*() const { return handle; }
-    constexpr bool operator==(const TypedId& a) const { return (bool)*this && a && handle == a.handle; }
-    constexpr auto operator<=>(const TypedId& a) const { return handle <=> a.handle; }
-    constexpr explicit operator bool() const { return handle != ~storage_type{}; }
-    storage_type handle{ ~storage_type{} };
 };
 
 template <typename T, std::integral StorageType = typename HandleStorage<T>::storage_type>

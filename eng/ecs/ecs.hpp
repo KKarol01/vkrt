@@ -96,7 +96,7 @@ using SlotId = IndexedHierarchy::NodeId; // indexed to linear arrays of entities
 // typed uint64_t for storing stable index to associated data and a version
 struct EntityId : public TypedId<EntityId, uint64_t>
 {
-    explicit EntityId(storage_type handle) : TypedId(handle) {}
+    explicit EntityId(StorageType handle) : TypedId(handle) {}
     explicit EntityId() : TypedId() {}
     EntityId(SlotId slot, uint32_t version) : TypedId(((uint64_t)version << 32) | (uint64_t)*slot) {}
     auto operator<=>(const EntityId&) const = default;
@@ -144,7 +144,7 @@ struct IComponentPool
     bool has(SlotId e) const { return entities.has(*e); }
     size_t size() const { return entities.size(); }
     virtual void erase(SlotId e) = 0;
-    SparseSet<SlotId::storage_type, 1024> entities; // for packing components
+    SparseSet<SlotId::StorageType, 1024> entities; // for packing components
 };
 
 template <typename Component> struct ComponentPool : public IComponentPool
@@ -300,10 +300,10 @@ class Registry
     }
 
     // Return the count of registered entities.
-    SlotId::storage_type size() const { return hierarchy.size(); }
+    SlotId::StorageType size() const { return hierarchy.size(); }
 
     // Return the count of registered components.
-    template <typename Component> SlotId::storage_type size() const
+    template <typename Component> SlotId::StorageType size() const
     {
         if(auto* pool = get_pool<Component>()) { return pool->size(); }
         return {};

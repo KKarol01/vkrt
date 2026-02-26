@@ -10,12 +10,15 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/slotallocator.hpp>
 
+namespace eng
+{
+
 class IndexedHierarchy
 {
     struct Node;
 
   public:
-    using NodeId = eng::TypedId<Node, uint32_t>;
+    using NodeId = SlotAllocator<uint32_t>::Slot;
 
   private:
     struct Node
@@ -28,15 +31,15 @@ class IndexedHierarchy
     };
 
   public:
-    bool has(NodeId id) const { return id && slots.has(*id); }
+    bool has(NodeId id) const { return slots.has(id); }
 
     uint32_t size() const { return slots.size(); }
 
     NodeId create()
     {
-        if(slots.size() == ~NodeId::storage_type{}) { return NodeId{}; }
+        if(slots.size() == ~NodeId::StorageType{}) { return NodeId{}; }
         const auto slot = slots.allocate();
-        if(nodes.size() == slot) { nodes.emplace_back(); }
+        if(nodes.size() == slot.get_index()) { nodes.emplace_back(); }
         return NodeId{ slot };
     }
 
@@ -109,7 +112,7 @@ class IndexedHierarchy
             while(child != fc);
         }
         nodes[*id] = {};
-        slots.erase(*id);
+        slots.erase(id);
     }
 
     // Return false if no parent
@@ -153,6 +156,8 @@ class IndexedHierarchy
     const Node& get(NodeId id) const { return const_cast<IndexedHierarchy*>(this)->get(id); }
 
     inline static Node null_object = Node{ NodeId{}, NodeId{}, NodeId{}, NodeId{} };
-    SlotAllocator slots;
+    SlotAllocator<uint32_t> slots;
     std::vector<Node> nodes;
 };
+
+} // namespace eng
