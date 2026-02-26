@@ -615,7 +615,7 @@ void Renderer::build_renderpasses()
                 }
                 if(meshh->gpu_resource == ~0u)
                 {
-                    meshh->gpu_resource = gpu_resource_allocator.allocate();
+                    meshh->gpu_resource = *gpu_resource_allocator.allocate();
                     new_transforms.push_back(eid);
                 }
 

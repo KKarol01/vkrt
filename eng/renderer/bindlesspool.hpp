@@ -63,6 +63,8 @@ class IDescriptorSetAllocator
 
 class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 {
+    using SlotAllocatorType = SlotAllocator<uint32_t, slots_not_versioned_tag>;
+
     struct Views
     {
         struct Slot
@@ -113,9 +115,9 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     std::deque<VkDescriptorBufferInfo> buf_writes;
     std::deque<VkDescriptorImageInfo> img_writes;
 
-    SlotAllocator<uint32_t, 32> storage_buffer_slots;
-    SlotAllocator<uint32_t, 32> storage_image_slots;
-    SlotAllocator<uint32_t, 32> sampled_image_slots;
+    SlotAllocatorType storage_buffer_slots;
+    SlotAllocatorType storage_image_slots;
+    SlotAllocatorType sampled_image_slots;
     std::unordered_map<Handle<Buffer>, Views> buffer_views;
     std::unordered_map<Handle<Image>, Views> image_views;
     // std::vector<FreedResource> pending_frees;

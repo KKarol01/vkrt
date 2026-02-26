@@ -14,7 +14,7 @@ inline std::filesystem::path MODELS_DIR;
 
 inline void init(const char* base_path)
 {
-    BASE_PATH = std::filesystem::current_path(); // this should point to where the assets/ folder is
+    BASE_PATH = std::filesystem::current_path().parent_path(); // this should point to where the assets/ folder is
     SHADERS_DIR = BASE_PATH / "assets" / "shaders";
     MODELS_DIR = BASE_PATH / "assets" / "models";
 }

@@ -18,7 +18,7 @@ class IndexedHierarchy
     struct Node;
 
   public:
-    using NodeId = SlotAllocator<uint32_t>::Slot;
+    using NodeId = SlotAllocator<>::Slot;
 
   private:
     struct Node

@@ -23,16 +23,17 @@ template <typename T, std::integral Storage> struct TypedId
     StorageType handle{ ~StorageType{} };
 };
 
-template <typename Storage, Storage INDEX_BITS> struct VersionedIndex;
+template <typename T, typename Storage> struct VersionedIndex;
 
 // todo: maybe add configurable num of bits for index
-template <uint32_t INDEX_BITS>
-struct VersionedIndex<uint32_t, INDEX_BITS> : public TypedId<VersionedIndex<uint32_t, INDEX_BITS>, uint32_t>
+template <typename T> struct VersionedIndex<T, uint32_t> : public TypedId<T, uint32_t>
 {
-    static_assert(INDEX_BITS <= 32);
+    using Base = TypedId<T, uint32_t>;
+    using typename Base::StorageType;
+    inline static constexpr StorageType INDEX_BITS = 21;
     inline static constexpr StorageType INDEX_MASK = (StorageType{ 1u } << INDEX_BITS) - 1;
-    using TypedId::TypedId;
-    VersionedIndex(StorageType index, StorageType version) : TypedId((version << INDEX_BITS) | (index & INDEX_MASK)) {}
+    using Base::Base;
+    VersionedIndex(StorageType index, StorageType version) : Base((version << INDEX_BITS) | (index & INDEX_MASK)) {}
     StorageType get_index() const { return handle & INDEX_MASK; }
     StorageType get_version() const { return handle >> INDEX_BITS; }
 };
