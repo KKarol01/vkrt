@@ -145,7 +145,7 @@ void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
     const auto& md = *pipeline.md.vk;
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
-    //rebind_desc_sets = true;
+    rebind_desc_sets = true;
 }
 
 void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
@@ -166,7 +166,7 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
 void CommandBufferVk::bind_set(uint32_t slot, std::span<DescriptorResource> resources)
 {
     ENG_ASSERT(current_pipeline && current_pipeline->info.layout);
-    //rebind_desc_sets = true;
+    rebind_desc_sets = true;
     descriptor_allocator->bind_set(slot, resources, current_pipeline->info.layout.get());
 }
 
@@ -225,10 +225,10 @@ void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
     vkCmdDispatch(cmd, x, y, z);
 }
 
-void CommandBufferVk::begin_label(const std::string& label)
+void CommandBufferVk::begin_label(const char* label)
 {
 #ifndef NDEBUG
-    const auto vkl = Vks(VkDebugUtilsLabelEXT{ .pLabelName = label.c_str(), .color = { 0.0f, 0.0f, 1.0f, 1.0f } });
+    const auto vkl = Vks(VkDebugUtilsLabelEXT{ .pLabelName = label, .color = { 0.0f, 0.0f, 1.0f, 1.0f } });
     vkCmdBeginDebugUtilsLabelEXT(cmd, &vkl);
 #endif
 }

@@ -22,7 +22,7 @@ class IPass
   public:
     virtual ~IPass() = default;
     virtual void init() = 0;
-    virtual void on_render_graph(RenderGraph& graph) = 0;
+    virtual void on_render_graph(RGRenderGraph& graph) = 0;
 };
 
 class SSTriangle : public IPass
@@ -30,19 +30,19 @@ class SSTriangle : public IPass
   public:
     struct SSTrianglePass
     {
-        RenderGraph::AccessId color;
-        RenderGraph::AccessId indirect_buffer;
-        RenderGraph::AccessId instance_buffer;
-        RenderGraph::AccessId constants_buffer;
+        RGAccessId output;
+        RGAccessId indirect_buffer;
+        RGAccessId instance_buffer;
+        RGAccessId constants_buffer;
     };
     struct SSCopyToSwapPass
     {
-        RenderGraph::AccessId color;
-        RenderGraph::AccessId swap;
+        RGAccessId color;
+        RGAccessId swap;
     };
     struct SSSwapPresent
     {
-        RenderGraph::AccessId swap;
+        RGAccessId swap;
     };
 
     ~SSTriangle() override = default;
@@ -58,16 +58,17 @@ class SSTriangle : public IPass
                                                       });
     }
 
-    void on_render_graph(RenderGraph& graph) override
+    void on_render_graph(RGRenderGraph& graph) override
     {
-        auto dt1 = graph.add_graphics_pass<SSTrianglePass>(
-            "Draw triangle1",
-            [this](RenderGraph::PassBuilder& pb) {
-                auto* w = Engine::get().window;
+        auto dt1 = graph.add_graphics_pass(
+            "Draw triangle1", RenderOrder::DEFAULT_UNLIT,
+            [this](RGBuilder& pb) {
+                auto* w = get_engine().window;
                 SSTrianglePass data;
-                data.color = pb.create_resource("sstriangle output", Image::init(w->width, w->height, 1, ImageFormat::R8G8B8A8_SRGB,
-                                                                                 ImageUsage::COLOR_ATTACHMENT_BIT));
-                data.color = pb.access_color(data.color);
+                data.output = pb.create_resource("sstriangle output",
+                                                 Image::init(w->width, w->height, 1, ImageFormat::R8G8B8A8_SRGB,
+                                                             ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT));
+                data.output = pb.access_color(data.output);
 
                 RenderPassType rpt{ RenderPassType::FORWARD };
                 const auto& rp = get_renderer().render_passes[(int)rpt];
@@ -78,22 +79,21 @@ class SSTriangle : public IPass
                 data.constants_buffer =
                     pb.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
 
-                get_renderer().imgui_input = *data.color;
                 return data;
             },
-            [this](RenderGraph& graph, RenderGraph::PassBuilder& pb, const SSTrianglePass& data) {
-                const auto* w = Engine::get().window;
+            [this](RGBuilder& pb, const SSTrianglePass& data) {
+                const auto* w = get_engine().window;
                 auto* cmd = pb.open_cmd_buf();
                 const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
-                    .imageView = graph.get_acc(data.color).image_view.get_md().vk->view,
-                    .imageLayout = to_vk(graph.get_acc(data.color).layout),
+                    .imageView = pb.graph->get_acc(data.output).image_view.get_md().vk->view,
+                    .imageLayout = to_vk(pb.graph->get_acc(data.output).layout),
                     .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                     .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } },
                 }) };
                 const auto vkrinfo = Vks(VkRenderingInfo{
                     .renderArea = { .offset = {},
-                                    .extent = { graph.get_img(data.color)->width, graph.get_img(data.color)->height } },
+                                    .extent = { pb.graph->get_img(data.output)->width, pb.graph->get_img(data.output)->height } },
                     .layerCount = 1,
                     .colorAttachmentCount = 1,
                     .pColorAttachments = vkcols,
@@ -108,7 +108,7 @@ class SSTriangle : public IPass
                 const auto& rp = get_renderer().render_passes[(int)rpt];
                 const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
 
-                auto* c = Engine::get().camera;
+                auto* c = get_engine().camera;
                 GPUEngConstantsBuffer constants{
                     .proj_view = c->get_projection() * c->get_view(),
                 };
@@ -116,7 +116,7 @@ class SSTriangle : public IPass
                                              sizeof(constants), false);
                 cmd->wait_sync(get_renderer().staging->flush(nullptr)); // wait for constants buffer upload
                 cmd->bind_pipeline(pipeline.get());
-                DescriptorResource shaderresources[]{ DescriptorResource::as_storage(0, graph.get_buf(data.constants_buffer)),
+                DescriptorResource shaderresources[]{ DescriptorResource::as_storage(0, pb.graph->get_buf(data.constants_buffer)),
                                                       DescriptorResource::as_storage(1, get_renderer().bufs.positions) };
                 cmd->bind_set(0, shaderresources);
                 ((CommandBufferVk*)cmd)->descriptor_allocator->flush((CommandBufferVk*)cmd);
@@ -131,35 +131,6 @@ class SSTriangle : public IPass
 
                 cmd->end_rendering();
             });
-
-        get_renderer().imgui_renderer->update(&graph, dt1.color);
-        dt1.color = RenderGraph::AccessId{ get_renderer().imgui_input };
-
-        auto cp2s = graph.add_graphics_pass<SSCopyToSwapPass>(
-            "Copy to swapchain",
-            [this, dt1](RenderGraph::PassBuilder& pb) {
-                auto& r = get_renderer();
-                SSCopyToSwapPass data;
-                data.swap = pb.import_resource(r.swapchain->get_image());
-                data.color = pb.access_resource(dt1.color, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
-                                                PipelineAccess::TRANSFER_READ_BIT);
-                data.swap = pb.access_resource(data.swap, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
-                                               PipelineAccess::TRANSFER_WRITE_BIT);
-                return data;
-            },
-            [this](RenderGraph& graph, RenderGraph::PassBuilder& pb, const SSCopyToSwapPass& data) {
-                auto* cmd = pb.open_cmd_buf();
-                cmd->copy(graph.get_img(data.swap).get(), graph.get_img(data.color).get());
-            });
-
-        graph.add_graphics_pass<SSSwapPresent>(
-            "Swapchain to present",
-            [this, cp2s](RenderGraph::PassBuilder& pb) {
-                SSSwapPresent data;
-                data.swap = pb.access_resource(cp2s.swap, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::WRITES);
-                return data;
-            },
-            [](RenderGraph& graph, RenderGraph::PassBuilder& pb, const SSSwapPresent&) {});
     }
 
     Handle<Pipeline> pipeline;
@@ -196,7 +167,7 @@ namespace culling
 //     void setup(RenderGraph* rg)
 //     {
 //         auto& r = get_renderer();
-//         auto* w = Engine::get().window;
+//         auto* w = get_engine().window;
 //         auto& pf = r->get_perframe();
 //
 //         struct ZbufPass
@@ -229,8 +200,8 @@ namespace culling
 //     {
 //         auto& r = get_renderer();
 //         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
-//         VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
-//         VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+//         VkViewport vkview{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
+//         VkRect2D vksciss{ {}, { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
 //         const auto vkdep =
 //             Vks(VkRenderingAttachmentInfo{ .imageView = rg->get_resource(zbufs).image->default_view->md.vk->view,
 //                                            .imageLayout = to_vk(ImageLayout::ATTACHMENT),
@@ -288,7 +259,7 @@ namespace culling
 //     Hiz(RenderGraph* g, const CreateInfo& info) : Pass("culling::Hiz", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         auto& r = get_renderer();
-//         auto* w = Engine::get().window;
+//         auto* w = get_engine().window;
 //         zbuf = info.zbufs;
 //         const auto hizpmips = (uint32_t)(std::log2f(std::max(w->width, w->height)) + 1);
 //         hiz = g->make_resource(ImageDescriptor{ .name = "hizpyramid",
@@ -298,8 +269,8 @@ namespace culling
 //                                                 .format = ImageFormat::R32F,
 //                                                 .usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT },
 //                                r->frame_count);
-//         hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-//             .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = r->bindless_pplayout });
+//         hiz_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+//             .shaders = { get_engine().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = r->bindless_pplayout });
 //     }
 //     void setup() override
 //     {
@@ -366,8 +337,8 @@ namespace culling
 //         fwd_id_bufs = g->import_resource(std::span{ vfwd_batch_ids });
 //         fwd_cmd_bufs = g->import_resource(std::span{ vfwd_batch_cmds });
 //         hiz = info.phiz->hiz;
-//         cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-//             .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
+//         cull_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+//             .shaders = { get_engine().renderer->make_shader("culling/culling.comp.glsl") },
 //             .layout = r->bindless_pplayout,
 //         });
 //     }
@@ -441,8 +412,8 @@ namespace culling
 //             g->make_resource(BufferDescriptor{ "fwdp light list", light_list_size, BufferUsage::STORAGE_BIT }, r->frame_count);
 //         culled_light_grid_bufs =
 //             g->make_resource(BufferDescriptor{ "fwdp light grid", light_grid_size, BufferUsage::STORAGE_BIT }, r->frame_count);
-//         light_culling_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-//             .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
+//         light_culling_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+//             .shaders = { get_engine().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
 //             .layout = r->bindless_pplayout,
 //         });
 //     }
@@ -466,7 +437,7 @@ namespace culling
 //         r->sbuf->copy(rg->get_resource(culled_light_list_bufs).buffer, &zero, 0ull, 4);
 //         q->wait_sync(r->sbuf->flush(), PipelineStage::COMPUTE_BIT);
 //
-//         const auto* w = Engine::get().window;
+//         const auto* w = get_engine().window;
 //         auto dx = (uint32_t)w->width;
 //         auto dy = (uint32_t)w->height;
 //         dx = (dx + tile_pixels - 1) / tile_pixels;

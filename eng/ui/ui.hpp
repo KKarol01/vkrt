@@ -14,7 +14,7 @@ namespace ui
 struct Window;
 class UI;
 
-inline UI& get_ui() { return *Engine::get().ui; }
+inline UI& get_ui() { return *get_engine().ui; }
 
 using WindowId = TypedId<Window, uint32_t>;
 

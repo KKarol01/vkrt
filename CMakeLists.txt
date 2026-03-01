@@ -172,6 +172,7 @@ target_compile_definitions(eng
         VC_EXTRALEAN
         NOMINMAX
         IMGUI_DEFINE_MATH_OPERATORS
+		ImTextureID_Invalid=~0ull
 )
 
 target_precompile_headers(eng

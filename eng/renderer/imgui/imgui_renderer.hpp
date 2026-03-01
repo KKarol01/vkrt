@@ -15,9 +15,14 @@ namespace gfx
 
 class ImGuiRenderer
 {
+    struct ImPassData
+    {
+        RGAccessId output;
+    };
+
   public:
     void init();
-    void update(RenderGraph* graph, RenderGraph::AccessId output);
+    ImPassData update(RGRenderGraph* graph, const Callback<void(RGBuilder&)>& draw_callback);
 
   private:
     void handle_imtexture(ImTextureData* imtex);
@@ -30,7 +35,6 @@ class ImGuiRenderer
     Handle<Buffer> vertex_buffer;
     Handle<Buffer> index_buffer;
     std::vector<Handle<Image>> images;
-    uint32_t output;
 };
 
 } // namespace gfx

@@ -41,9 +41,9 @@
     do                                                                                                                 \
     {                                                                                                                  \
         const std::string format = ENG_FMT("[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                   \
-        /*if(Engine::get().msg_log.size() >= 512) { Engine::get().msg_log.pop_back(); } */                             \
+        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                             \
         ENG_PRTLN("{}", format);                                                                                       \
-        /*Engine::get().msg_log.push_front(format); */                                                                 \
+        /*get_engine().msg_log.push_front(format); */                                                                 \
     }                                                                                                                  \
     while(0)
 

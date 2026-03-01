@@ -99,4 +99,10 @@ class Engine
     std::deque<std::string> msg_log;
 };
 
+inline Engine& get_engine()
+{
+    static Engine engine{};
+    return engine;
+}
+
 } // namespace eng

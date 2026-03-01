@@ -25,20 +25,20 @@ namespace app
 //
 // void Renderer::update()
 //{
-//     // for(auto e : Engine::get().scene->scene)
+//     // for(auto e : get_engine().scene->scene)
 //     //{
-//     //      Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
-//     //          if(Engine::get().ecs->has<ecs::Mesh>(e))
+//     //      get_engine().ecs->traverse_hierarchy(e, [](auto p, auto e) {
+//     //          if(get_engine().ecs->has<ecs::Mesh>(e))
 //     //          {
-//     //              Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
+//     //              get_engine().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
 //     //          };
 //     //      });
 //     // }
 //
-//     // Engine::get().renderer->rgraph->add_pass(
+//     // get_engine().renderer->rgraph->add_pass(
 //     //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::DEFAULT_UNLIT - 1 },
 //     //     [](gfx::RenderGraph::PassResourceBuilder& b) {
-//     //         b.access(Engine::get().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
+//     //         b.access(get_engine().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
 //     //                  gfx::RenderGraph::AccessType::RW, gfx::PipelineStage::COMPUTE_BIT, gfx::PipelineAccess::SHADER_RW);
 //     //     },
 //     //     [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) {
@@ -48,22 +48,22 @@ namespace app
 
 void App::start()
 {
-    Engine::get().on_init += [this] { on_init(); };
-    //Engine::get().on_update += [this] { on_update(); };
+    get_engine().on_init += [this] { on_init(); };
+    // get_engine().on_update += [this] { on_update(); };
 }
 
 void App::on_init()
 {
-    auto* ecs = Engine::get().ecs;
+    auto* ecs = get_engine().ecs;
 
     // auto e1 = ecs->create();
     // ecs->emplace(e1, ecs::Node{}, ecs::Transform{});
     // auto v1 =
-    //     Engine::get().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 1 {}", e); },
+    //     get_engine().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 1 {}", e); },
     //                                                            [](auto e, auto sig) {
     //                                                                ENG_LOG("ENTS UPDATED 1 {} {}", e, sig.to_string());
     //                                                            });
-    // auto v2 = Engine::get().ecs->get_view<ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 2 {}", e); },
+    // auto v2 = get_engine().ecs->get_view<ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 2 {}", e); },
     //                                                       [](auto e, auto sig) {
     //                                                           ENG_LOG("ENTS UPDATED 2 {} {}", e, sig.to_string());
     //                                                       });
@@ -98,8 +98,8 @@ void App::on_init()
     // ecs->update<ecs::Mesh>(e2);
     // ecs->update<ecs::Transform>(e1);
 
-    SceneNodeId cyberpunk = Engine::get().scene->load_from_file("cyberpunk.glb");
-	Engine::get().scene->instance_model(cyberpunk);
+    SceneNodeId cyberpunk = get_engine().scene->load_from_file("cyberpunk.glb");
+    get_engine().scene->instance_model(cyberpunk);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
@@ -142,15 +142,15 @@ void App::on_init()
     //            ecs->make_child(light_aggregate, light); // so they look nice in the scene hierarchy
     //            ecs->add_components(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
     //                                ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
-    //            // Engine::get().renderer->add_light(light);
+    //            // get_engine().renderer->add_light(light);
     //        }
     //    }
     //}
-    // Engine::get().scene->scene.push_back(light_aggregate);
+    // get_engine().scene->scene.push_back(light_aggregate);
 
-    // Engine::get().scene->instance_model(e);
+    // get_engine().scene->instance_model(e);
 }
 
-//void App::on_update() { renderer.update(); }
+// void App::on_update() { renderer.update(); }
 
 } // namespace app

@@ -58,10 +58,18 @@ inline constexpr uint64_t combine_fnv1a(const char* str)
     return hash;
 }
 
+struct PairHash
+{
+    template <typename T1, typename T2> size_t operator()(const std::pair<T1, T2>& p) const
+    {
+        return eng::hash::combine_fnv1a(p.first, p.second);
+    }
+};
+
 } // namespace hash
 } // namespace eng
 
-#define ENG_HASH(cstring) ::eng::hash::combine_fnv1a(cstring)
+#define ENG_HASH_STR(cstring) ::eng::hash::combine_fnv1a(cstring)
 
 #define ENG_DEFINE_STD_HASH(type, code)                                                                                \
     namespace std                                                                                                      \

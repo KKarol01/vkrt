@@ -628,11 +628,18 @@ enum class SubmitFlags : uint32_t
 {
 };
 
-enum class RenderOrder
+// Used for adding passes to the render graph.
+// Essentially divides vector of render passes into segments
+// or partitions, and using the constants from this namespace
+// adds render pass to the end of the corresponding segment.
+// This solves a problem of having to coordinate add everything
+// from one segment BEFORE adding anything ordered after.
+namespace RenderOrder
 {
-    DEFAULT_UNLIT,
-    PRESENT
-};
+inline constexpr uint32_t DEFAULT_UNLIT = 100;
+inline constexpr uint32_t UI = 200;
+inline constexpr uint32_t PRESENT = 300;
+}; // namespace RenderOrder
 
 class Renderer
 {
@@ -748,12 +755,18 @@ class Renderer
         // size_t light_count{};
     };
 
+    struct Settings
+    {
+        Vec2f render_resolution{};
+        Vec2f present_resolution{};
+    };
+
     void init(IRendererBackend* backend);
     void init_helper_geom();
     void init_pipelines();
     void init_perframes();
     void init_bufs();
-    void init_rgraph_passes();
+    // void init_rgraph_passes();
 
     void update();
     void build_renderpasses();
@@ -794,20 +807,19 @@ class Renderer
     Swapchain* swapchain{};
     IRendererBackend* backend{};
     StagingBuffer* staging{};
+    Settings settings;
 
-    RenderGraph* rgraph{};
-    uint32_t imgui_input; // todo: this is very temp
-    std::vector<pass::IPass*> rgraph_passes;
+    RGRenderGraph* rgraph{};
 
-    enum class DebugOutput
-    {
-        COLOR,
-        FWDP_GRID
-    };
-    DebugOutput debug_output{};
-    bool fwdp_enable{ true };
-    bool mlt_occ_cull_enable{ true };
-    bool mlt_frust_cull_enable{ true };
+    // enum class DebugOutput
+    //{
+    //     COLOR,
+    //     FWDP_GRID
+    // };
+    // DebugOutput debug_output{};
+    // bool fwdp_enable{ true };
+    // bool mlt_occ_cull_enable{ true };
+    // bool mlt_frust_cull_enable{ true };
 
     Slotmap<Buffer, 1024> buffers;
     Slotmap<Image, 1024> images;
@@ -827,7 +839,6 @@ class Renderer
     std::vector<Geometry> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
-    // HandleFlatSet<Texture> textures;
     HandleFlatSet<Material> materials;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::EntityId> new_transforms;
@@ -848,7 +859,7 @@ class Renderer
     uint64_t current_frame{}; // monotonically increasing counter
 };
 
-inline Renderer& get_renderer() { return *::eng::Engine::get().renderer; }
+inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
 
 } // namespace gfx
 

@@ -23,7 +23,7 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
 
 Camera::Camera(float fov_radians, float min_dist, float max_dist)
 {
-    GLFWwindow* window = Engine::get().window->window;
+    GLFWwindow* window = get_engine().window->window;
     projection = infinitePerspectiveFovReverseZRH_ZO(fov_radians, 1280.0f, 768.0f, min_dist);
     projection[1][1] *= -1.0f;
 
@@ -32,7 +32,7 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
     lpx = (float)pos[0];
     lpy = (float)pos[1];
 
-    Engine::get().window->add_on_mouse_move([this](float x, float y) {
+    get_engine().window->add_on_mouse_move([this](float x, float y) {
         on_mouse_move(x, y);
         return true;
     });
@@ -40,8 +40,8 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
 
 void Camera::update()
 {
-    GLFWwindow* window = Engine::get().window->window;
-    const float dt = Engine::get().delta_time * 5.0f;
+    GLFWwindow* window = get_engine().window->window;
+    const float dt = get_engine().delta_time * 5.0f;
 
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && glfwGetTime() - last_press_time > 0.3f)
     {

@@ -22,7 +22,7 @@ void ImGuiRenderer::init()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
+    ImGui_ImplGlfw_InitForVulkan(get_engine().window->window, true);
 
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
@@ -55,63 +55,67 @@ void ImGuiRenderer::init()
     index_buffer = r.make_buffer("imgui index buffer", Buffer::init(1024 * 1024, BufferUsage::INDEX_BIT));
 }
 
-void ImGuiRenderer::update(RenderGraph* graph, RenderGraph::AccessId output)
+ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph, const Callback<void(RGBuilder&)>& draw_callback)
 {
-    auto& r = get_renderer();
-
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
 
-    ui_callbacks.signal();
+    const auto impassdata = graph->add_graphics_pass(
+        "imgui", RenderOrder::PRESENT,
+        [this, &draw_callback](RGBuilder& builder) {
+            auto& r = get_renderer();
 
-    ImGui::Render();
+            ImPassData data{};
 
-    ImDrawData* draw_data = ImGui::GetDrawData();
-    if(!draw_data) { return; }
-    int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
-    int fb_height = (int)(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
-    if(fb_width <= 0 || fb_height <= 0) { return; }
-    if(draw_data->Textures != nullptr)
-    {
-        for(ImTextureData* tex : *draw_data->Textures)
-        {
-            handle_imtexture(tex);
-        }
-    }
+            ui_callbacks.signal();
+            draw_callback(builder);
 
-    uint64_t vtx_off = 0;
-    uint64_t idx_off = 0;
-    for(int n = 0; n < draw_data->CmdListsCount; n++)
-    {
-        const ImDrawList* draw_list = draw_data->CmdLists[n];
-        r.staging->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
-        r.staging->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
-        vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
-        idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
-    }
+            ImGui::Render();
 
-    struct ImPassData
-    {
-    };
-    graph->add_graphics_pass<ImPassData>(
-        "imgui",
-        [this, output](RenderGraph::PassBuilder& builder) {
-            get_renderer().imgui_input = *builder.access_color(output);
-            this->output = get_renderer().imgui_input;
-            return ImPassData{};
+            ImDrawData* draw_data = ImGui::GetDrawData();
+            if(!draw_data) { return data; }
+            int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
+            int fb_height = (int)(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
+            if(fb_width <= 0 || fb_height <= 0) { return data; }
+            if(draw_data->Textures != nullptr)
+            {
+                for(ImTextureData* tex : *draw_data->Textures)
+                {
+                    handle_imtexture(tex);
+                }
+            }
+
+            uint64_t vtx_off = 0;
+            uint64_t idx_off = 0;
+            for(int n = 0; n < draw_data->CmdListsCount; n++)
+            {
+                const ImDrawList* draw_list = draw_data->CmdLists[n];
+                r.staging->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
+                r.staging->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
+                vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
+                idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
+            }
+
+            const auto out_res =
+                Vec2f{ get_renderer().settings.present_resolution.x, get_renderer().settings.present_resolution.y };
+            data.output = builder.create_resource("imgui output", Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB,
+                                                                              ImageUsage::COLOR_ATTACHMENT_BIT));
+            data.output = builder.access_color(data.output);
+
+            return data;
         },
-        [this, &r](RenderGraph& graph, RenderGraph::PassBuilder& builder, const ImPassData&) {
+        [this](RGBuilder& builder, const ImPassData& data) {
+            auto& r = get_renderer();
             auto* cmd = builder.open_cmd_buf();
             cmd->wait_sync(r.staging->get_wait_sem());
             ImDrawData* draw_data = ImGui::GetDrawData();
 
-            RenderGraph::AccessId output{ this->output };
-            const auto& img = graph.get_res(output).as_image().get();
+            const auto& img = builder.graph->get_res(data.output).as_image().get();
 
             VkRenderingAttachmentInfo r_col_atts[]{
                 Vks(VkRenderingAttachmentInfo{
-                    .imageView = graph.get_acc(output).image_view.get_md().vk->view,
+                    .imageView = builder.graph->get_acc(data.output).image_view.get_md().vk->view,
                     .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -188,7 +192,7 @@ void ImGuiRenderer::update(RenderGraph* graph, RenderGraph::AccessId output)
                     scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
                     DescriptorResource bindresources[]{
-                        DescriptorResource::as_sampled(5, ImageView::init(Handle<Image>{ (uint32_t)imcmd->GetTexID() - 1 }))
+                        DescriptorResource::as_sampled(5, ImageView::init(Handle<Image>{ (uint32_t)imcmd->GetTexID() }))
                     };
                     cmd->bind_set(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
@@ -199,6 +203,8 @@ void ImGuiRenderer::update(RenderGraph* graph, RenderGraph::AccessId output)
             }
             cmd->end_rendering();
         });
+
+    return impassdata;
 }
 
 void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
@@ -212,7 +218,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         image = r.make_image("imgui image", Image::init((uint32_t)imtex->Width, (uint32_t)imtex->Height, ImageFormat::R8G8B8A8_UNORM,
                                                         ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
         images.push_back(image);
-        imtex->SetTexID((ImTextureID)(*image + 1)); // +1 so GetTexID doesn't complain when it's 0.
+        imtex->SetTexID((ImTextureID)(*image));
     }
 
     if(imtex->Status == ImTextureStatus_WantCreate || imtex->Status == ImTextureStatus_WantUpdates)

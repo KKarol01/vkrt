@@ -19,11 +19,5 @@ inline void init(const char* base_path)
     MODELS_DIR = BASE_PATH / "assets" / "models";
 }
 
-inline std::filesystem::path canonize_path(std::filesystem::path p)
-{
-    p.make_preferred();
-    return p;
-}
-
 } // namespace paths
 } // namespace eng

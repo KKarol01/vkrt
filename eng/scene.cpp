@@ -129,7 +129,7 @@ Range32u load_geometry(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
         }
 
         scene.geometries.push_back(ecs::Geometry{
-            .render_geometry = Engine::get().renderer->make_geometry(gfx::GeometryDescriptor{
+            .render_geometry = get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
                 .flags = {}, .vertex_layout = vertex_layout, .vertices = vertices, .indices = std::span{ indices } }) });
         ++geoms.size;
         // auto& geom = model.geometries.emplace_back();
@@ -176,11 +176,11 @@ uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFo
         return ~0u;
     }
 
-    const auto img = Engine::get().renderer->make_image(gltfimg.name.c_str(),
-                                                        gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
-                                                                         gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                             gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                         0, 1, gfx::ImageLayout::READ_ONLY));
+    const auto img = get_engine().renderer->make_image(gltfimg.name.c_str(),
+                                                       gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
+                                                                        gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                            gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                        0, 1, gfx::ImageLayout::READ_ONLY));
     if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
     else
     {
@@ -262,7 +262,7 @@ Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
 
         scene.materials.push_back(ecs::Material{
             .name = gltfmat.name.c_str(),
-            .render_material = Engine::get().renderer->make_material(matdesc),
+            .render_material = get_engine().renderer->make_material(matdesc),
         });
         ++mats.size;
     }
@@ -390,7 +390,7 @@ ecs::EntityId Scene::instance_model(SceneNodeId nodeid)
         ENG_ERROR("Cannot instatiate node {}", *nodeid);
         return ecs::EntityId{};
     }
-    auto* reg = Engine::get().ecs;
+    auto* reg = get_engine().ecs;
     ecs::EntityId ret;
     std::unordered_map<SceneNodeId, ecs::EntityId> parents;
     hierarchy.traverse_hierarchy(nodeid, [this, reg, &ret, &parents](IndexedHierarchy::NodeId nodeid) {
@@ -447,7 +447,7 @@ ecs::EntityId Scene::instance_model(const asset::Model* model)
 
     static constexpr auto make_hierarchy = [](const auto& self, const asset::Model& model,
                                               const asset::Model::Node& node, ecs::EntityId parent) -> ecs::EntityId {
-        auto* ecsr = Engine::get().ecs;
+        auto* ecsr = get_engine().ecs;
         auto entity = ecsr->create();
         ecsr->add_components(entity, ecs::Node{ node.name, &model }, ecs::Transform{ glm::mat4{ 1.0f }, node.transform });
         if(node.mesh != ~0u) { ecsr->add_components(entity, ecs::Mesh{ &model.meshes.at(node.mesh), ~0u }); }
@@ -466,7 +466,7 @@ ecs::EntityId Scene::instance_model(const asset::Model* model)
 
 void Scene::update_transform(ecs::EntityId entity)
 {
-    auto& ecstrs = Engine::get().ecs->get<ecs::Transform>(entity);
+    auto& ecstrs = get_engine().ecs->get<ecs::Transform>(entity);
     pending_transforms.push_back(entity);
 }
 
@@ -487,7 +487,7 @@ void Scene::update()
             auto passes = true;
             while(p)
             {
-                p = Engine::get().ecs->get_parent(p);
+                p = get_engine().ecs->get_parent(p);
                 if(visited.contains(p))
                 {
                     passes = false;
@@ -500,13 +500,13 @@ void Scene::update()
 
         for(auto e : pending_transforms)
         {
-            const auto p = Engine::get().ecs->get_parent(e);
+            const auto p = get_engine().ecs->get_parent(e);
             std::stack<ecs::EntityId> visit;
             std::stack<glm::mat4> trs;
             visit.push(e);
             if(p)
             {
-                auto& pt = Engine::get().ecs->get<ecs::Transform>(p);
+                auto& pt = get_engine().ecs->get<ecs::Transform>(p);
                 trs.push(pt.global);
             }
             else { trs.push(glm::identity<glm::mat4>()); }
@@ -518,12 +518,12 @@ void Scene::update()
                 auto pt = trs.top();
                 visit.pop();
                 trs.pop();
-                auto& t = Engine::get().ecs->get<ecs::Transform>(e);
+                auto& t = get_engine().ecs->get<ecs::Transform>(e);
                 t.global = t.local * pt;
 
                 ENG_ASSERT(false);
-                // Engine::get().renderer->update_transform(e);
-                Engine::get().ecs->loop_over_children(e, [&t, &trs, &visit](auto e) {
+                // get_engine().renderer->update_transform(e);
+                get_engine().ecs->loop_over_children(e, [&t, &trs, &visit](auto e) {
                     trs.push(t.global);
                     visit.push(e);
                 });
@@ -578,7 +578,7 @@ void Scene::ui_draw_scene()
     };
     for(const auto& e : scene)
     {
-        draw_hierarchy(Engine::get().ecs, e, draw_hierarchy);
+        draw_hierarchy(get_engine().ecs, e, draw_hierarchy);
     }
 }
 
@@ -586,7 +586,7 @@ void Scene::ui_draw_inspector()
 {
     if(!ui.scene.sel_entity) { return; }
 
-    auto* ecs = Engine::get().ecs;
+    auto* ecs = get_engine().ecs;
     auto& entity = ui.scene.sel_entity;
     auto& uie = ui.scene.nodes.at(entity);
     auto& ctransform = ecs->get<ecs::Transform>(entity);
@@ -654,7 +654,7 @@ void Scene::ui_draw_inspector()
     //                        continue;
     //                    }
     //                    const auto& e = stats.nodes[ni];
-    //                    Engine::get().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
+    //                    get_engine().renderer->debug_bufs.add(gfx::DebugGeometry::init_aabb(e.aabb.min, e.aabb.max));
     //                }
     //            }
 
@@ -674,7 +674,7 @@ void Scene::ui_draw_inspector()
 //{
 //    if(!ui.scene.sel_entity) { return; }
 //
-//    auto* ecs = Engine::get().ecs;
+//    auto* ecs = get_engine().ecs;
 //    auto& entity = ui.scene.sel_entity;
 //    auto& ctransform = ecs->get<ecs::Transform>(entity);
 //    auto& cnode = ecs->get<ecs::Node>(entity);
@@ -688,9 +688,9 @@ void Scene::ui_draw_inspector()
 //    ImGui::PopStyleColor(1);
 //    ImGuizmo::SetDrawlist();
 //
-//    const auto view = Engine::get().camera->get_view();
-//    auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
-//    proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
+//    const auto view = get_engine().camera->get_view();
+//    auto proj = get_engine().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
+//    proj = glm::perspectiveFov(glm::radians(75.0f), get_engine().window->width, get_engine().window->height, 0.1f, 30.0f);
 //    const auto window_width = ImGui::GetWindowWidth();
 //    const auto window_height = ImGui::GetWindowHeight();
 //    const auto window_pos = ImGui::GetWindowPos();

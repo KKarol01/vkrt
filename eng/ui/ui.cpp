@@ -17,7 +17,7 @@ void SceneUI::init()
     auto& ui = get_ui();
 
     //const auto shid = ui.make_window("Scene Hierarchy", [](Window& window) {
-    //    auto& scene = *Engine::get().scene;
+    //    auto& scene = *get_engine().scene;
     //    // ImGui::DockBuilderDockWindow(window.title.c_str(), get_ui().right_panel_id);
     //    if(ImGui::Begin(window.title.c_str(), 0, ImGuiWindowFlags_HorizontalScrollbar)) { scene.ui_draw_scene(); }
     //    ImGui::End();
@@ -70,8 +70,6 @@ void UI::draw()
         ImGui::EndMainMenuBar();
     }
 
-    ImGui::Begin("Main panel", 0, ImGuiWindowFlags_NoMove);
-    ImGui::End();
     ImGui::Begin("Right panel", 0);
     ImGui::End();
 

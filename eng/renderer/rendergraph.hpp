@@ -9,560 +9,326 @@
 #include <unordered_map>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
+#include <eng/common/hash.hpp>
 #include <eng/engine.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/math/align.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/string/stack_string.hpp>
 
 namespace eng
 {
 namespace gfx
 {
 
-class RenderGraph
+/*
+ * Buddy-like gpu memory allocator for aliased resources, supporting frames-in-flight.
+ * Allocates pages, and subdivides into pow2-sized buckets.
+ * During free, checks if enough frames were rendered, so buddies can be merged.
+ * Each frame, before first allocation, defrag happens.
+ *
+ * Call init() with a callback to some kind of gpu aliased allocator (for example vma)
+ *
+ * Right now no memory type checking happens and two pages cannot be glued into bigger one.
+ * No memory budget either.
+ */
+class GPUTransientAllocator
+{
+    inline static constexpr size_t MIN_ALLOC = 64 * 1024;
+    inline static constexpr size_t PAGE_SIZE = 128 * 1024 * 1024;
+    inline static constexpr size_t PAGE_ALIGNMENT = 1024 * 1024;
+
+    struct Bucket
+    {
+        bool operator<(const Bucket& b) const
+        {
+            return std::tie(size, page, page_offset) < std::tie(b.size, b.page, b.page_offset);
+        }
+        bool operator==(const Bucket& b) const { return !(*this < b) && !(b < *this); }
+        bool is_free() const;
+        bool can_be_merged_with_buddy(const Bucket& buddy) const;
+        uint32_t page{ ~0u };
+        size_t page_offset{};
+        size_t size{};
+        size_t freed_at{ ~0ull }; // frame index;
+    };
+
+  public:
+    void init(auto&& alias_allocator)
+    {
+        ENG_ASSERT(pages.empty());
+        *this = {};
+        allocator = alias_allocator;
+    }
+    void* allocate(const RendererMemoryRequirements& reqs);
+    void free(void* const alloc);
+    void get_offset_and_base(void* alloc, void*& base, size_t& offset);
+
+  private:
+    bool allocate_new_page(const RendererMemoryRequirements& reqs);
+    void split_bucket(Bucket& bucket, size_t req_size);
+    bool merge_buddies(Bucket& bucket);
+    void defragment();
+
+    static Bucket get_buddy_bucket(const Bucket& bucket)
+    {
+        auto buddy = bucket;
+        buddy.page_offset ^= bucket.size;
+        return buddy;
+    }
+
+    static Bucket get_left_split_bucket(const Bucket& bucket)
+    {
+        auto left = bucket;
+        left.page_offset &= ~bucket.size; // remove offset bit that right split bucket has XORed
+        return left;
+    }
+
+    void* get_bucket_memory(const Bucket& bucket)
+    {
+        return (void*)((uintptr_t)pages[bucket.page] + bucket.page_offset);
+    }
+
+    Callback<void*(const RendererMemoryRequirements&)> allocator;
+    std::vector<void*> pages;
+    std::set<Bucket> buckets;
+    std::unordered_map<void*, Bucket> allocations;
+    size_t last_alloc_frame{ 0 };
+};
+
+class RGRenderGraph;
+struct RGResource;
+struct RGAccess;
+struct RGBuilder;
+
+using RGResourceId = Handle<RGResource>;
+using RGAccessId = Handle<RGAccess>;
+
+struct RGPass
+{
+    struct no_exec_func_tag
+    {
+    };
+    using PassId = TypedId<RGPass, uint64_t>;
+    using PassOrder = uint32_t;
+    enum class Type
+    {
+        NONE,
+        GRAPHICS,
+        COMPUTE,
+    };
+    RGPass() = default;
+    RGPass(const char* name, Type type) : id(ENG_HASH_STR(name)), name(name), type(type) {}
+    virtual ~RGPass() = default;
+    bool is_graphics() const { return type == Type::GRAPHICS; }
+    bool is_compute() const { return type == Type::COMPUTE; }
+    virtual void execute(RGBuilder& pb) = 0;
+    virtual void* get_user_data() const { return nullptr; }
+    PassId id; // hash of name
+    StackString<32> name;
+    Type type{ Type::NONE };
+    std::vector<RGAccessId> accesses;
+    // std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
+    Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
+    ICommandBuffer* cmd{};             // if not null, needs to be executed
+};
+
+template <typename UserType, typename ExecFunc> struct RGUserPass : public RGPass
+{
+    RGUserPass(const char* name, Type type, const ExecFunc& exec_func) : RGPass(name, type), exec_func(exec_func) {}
+    ~RGUserPass() override = default;
+    void execute(RGBuilder& pb) override { exec_func(pb, user_data); };
+    void* get_user_data() const override { return (void*)&user_data; }
+    ExecFunc exec_func{};
+    UserType user_data{};
+};
+
+template <typename ExecFunc> struct RGUserPass<void, ExecFunc> : public RGPass
+{
+    RGUserPass(const char* name, Type type, const ExecFunc& exec_func) : RGPass(name, type), exec_func(exec_func) {}
+    ~RGUserPass() override = default;
+    void execute(RGBuilder& pb) override { exec_func(pb); };
+    ExecFunc exec_func{};
+};
+
+struct RGClear
+{
+    struct DepthStencil
+    {
+        float depth;
+        uint32_t stencil;
+    };
+    struct Color
+    {
+        glm::vec4 color;
+    };
+    static RGClear color(const Color& c) { return RGClear{ c }; }
+    static RGClear depth_stencil(const DepthStencil& c) { return RGClear{ c }; }
+    std::variant<Color, DepthStencil> value;
+};
+
+struct RGResource
+{
+    using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
+    bool is_buffer() const { return native.index() == 0; }
+    Handle<Buffer> as_buffer() const { return std::get<0>(native); }
+    Handle<Image> as_image() const { return std::get<1>(native); }
+    NativeResource native;
+    RGAccessId last_access;
+    uint32_t last_read_group{ ~0u };
+    uint32_t last_write_group{ ~0u };
+    bool is_persistent{};
+    bool is_imported{};
+    void* alloc{}; // from transient allocator if not persistent
+};
+
+struct RGAccess
+{
+    bool is_read() const { return (access & PipelineAccess::READS).any(); }
+    bool is_write() const { return (access & PipelineAccess::WRITES).any(); }
+    // note: this might prove to be problematic if some resources will actually need to use none/none (
+    bool is_import_only() const { return !prev_access; }
+    RGResourceId resource;
+    RGAccessId prev_access;
+    union {
+        BufferView buffer_view; // if resource->is_buffer() == true or layout == undefined
+        ImageView image_view;
+    };
+    ImageLayout layout{ ImageLayout::UNDEFINED };
+    Flags<PipelineStage> stage;
+    Flags<PipelineAccess> access;
+};
+
+struct PersistentStorage
+{
+    RGResource::NativeResource native;
+};
+
+struct RGBuilder
+{
+    RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
+    RGAccessId import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear = {});
+    PersistentStorage* find_persistent(uint64_t namehash);
+    RGAccessId create_resource(const char* name, Buffer&& a, bool persistent = false);
+    RGAccessId create_resource(const char* name, Image&& a, bool persistent = false, const std::optional<RGClear>& clear = {});
+    RGAccessId add_access(const RGAccess& a);
+    RGAccessId access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                               std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u });
+    RGAccessId access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                               Range64u range = { 0ull, ~0ull });
+
+    RGAccessId sample_texture(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                              Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
+        const auto access = PipelineAccess::SHADER_READ_BIT;
+        const auto layout = ImageLayout::READ_ONLY;
+        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+    }
+
+    RGAccessId access_depth(RGAccessId acc, std::optional<ImageFormat> format = {})
+    {
+        const auto stage = PipelineStage::EARLY_Z_BIT | PipelineStage::LATE_Z_BIT;
+        const auto access = PipelineAccess::DS_RW;
+        const auto layout = ImageLayout::ATTACHMENT;
+        return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
+    }
+
+    RGAccessId access_color(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
+    {
+        const auto stage = PipelineStage::COLOR_OUT_BIT;
+        const auto access = PipelineAccess::COLOR_RW_BIT;
+        const auto layout = ImageLayout::ATTACHMENT;
+        return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
+    }
+
+    RGAccessId read_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                          Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
+        const auto access = PipelineAccess::STORAGE_READ_BIT;
+        const auto layout = ImageLayout::GENERAL;
+        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+    }
+
+    RGAccessId write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
+        const auto access = PipelineAccess::STORAGE_WRITE_BIT;
+        const auto layout = ImageLayout::GENERAL;
+        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+    }
+
+    RGAccessId read_write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
+        const auto access = PipelineAccess::STORAGE_RW;
+        const auto layout = ImageLayout::GENERAL;
+        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+    }
+
+    RGAccessId read_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
+    {
+        const auto stage = pass->is_graphics()  ? PipelineStage::VERTEX_BIT | PipelineStage::FRAGMENT
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
+        const auto access = PipelineAccess::STORAGE_READ_BIT;
+        return access_resource(acc, stage, access, range);
+    }
+
+    RGAccessId write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
+    {
+        const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
+        const auto access = PipelineAccess::STORAGE_RW;
+        return access_resource(acc, stage, access, range);
+    }
+
+    RGAccessId read_write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
+    {
+        const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
+        const auto access = PipelineAccess::STORAGE_RW;
+        return access_resource(acc, stage, access, range);
+    }
+
+    ICommandBuffer* open_cmd_buf();
+
+    RGPass* pass{};
+    RGRenderGraph* graph{};
+};
+
+class RGRenderGraph
 {
   public:
-    struct Resource;
-    struct Access;
-    struct PassBuilder;
-
-    using ResourceId = Handle<Resource>;
-    using AccessId = Handle<Access>;
-
-    struct Clear
+    struct OrderedPass
     {
-        struct DepthStencil
-        {
-            float depth;
-            uint32_t stencil;
-        };
-        struct Color
-        {
-            glm::vec4 color;
-        };
-        static Clear color(const Color& c) { return Clear{ c }; }
-        static Clear depth_stencil(const DepthStencil& c) { return Clear{ c }; }
-        std::variant<Color, DepthStencil> value;
-    };
-
-    template <typename UserData> using SetupFunc = Callback<UserData(PassBuilder&)>;
-    template <typename UserData> using ExecFunc = Callback<void(RenderGraph&, PassBuilder&, const UserData&)>;
-    using PassDataDeleter = Callback<void(void*)>;
-
-    struct Pass
-    {
-        enum class Type
-        {
-            NONE,
-            GRAPHICS,
-            COMPUTE,
-        };
-        Pass() = default;
-        Pass(const std::string& name, Type type) : name(name), type(type) {}
-        virtual ~Pass() = default;
-        bool is_graphics() const { return type == Type::GRAPHICS; }
-        bool is_compute() const { return type == Type::COMPUTE; }
-        virtual void execute(RenderGraph& graph) = 0;
-        std::string name; // name. for debugging and gpu labels
-        Type type{ Type::NONE };
-        std::vector<AccessId> accesses;
-        // std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
-        Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
-        ICommandBuffer* cmd{};             // if not null, needs to be executed
-    };
-    template <typename UserData> struct UserPass : public Pass
-    {
-        UserPass(const std::string& name, Type type, const ExecFunc<UserData>& exec_func)
-            : Pass(name, type), exec_func(exec_func)
-        {
-        }
-        ~UserPass() override = default;
-        void execute(RenderGraph& graph) override
-        {
-            PassBuilder pb{ this, &graph };
-            exec_func(graph, pb, user_data);
-        };
-        ExecFunc<UserData> exec_func{};
-        UserData user_data;
-    };
-
-    struct Resource
-    {
-        using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
-        bool is_buffer() const { return native.index() == 0; }
-        Handle<Buffer> as_buffer() const { return std::get<0>(native); }
-        Handle<Image> as_image() const { return std::get<1>(native); }
-        NativeResource native;
-        AccessId last_access;
-        uint32_t last_read_group{ ~0u };
-        uint32_t last_write_group{ ~0u };
-        bool is_persistent{};
-        bool is_imported{};
-        void* alloc{}; // from transient allocator if not persistent
-    };
-
-    struct Access
-    {
-        bool is_read() const { return (access & PipelineAccess::READS) > 0; }
-        bool is_write() const { return (access & PipelineAccess::WRITES) > 0; }
-        // note: this might prove to be problematic if some resources will actually need to use none/none (
-        bool is_import_only() const { return !prev_access; }
-        Handle<Resource> resource;
-        AccessId prev_access;
-        union {
-            BufferView buffer_view; // if resource->is_buffer() == true or layout == undefined
-            ImageView image_view;
-        };
-        ImageLayout layout{ ImageLayout::UNDEFINED };
-        Flags<PipelineStage> stage;
-        Flags<PipelineAccess> access;
+        bool operator<(const OrderedPass& a) const { return order < a.order; }
+        std::unique_ptr<RGPass> pass;
+        RGPass::PassOrder order{};
     };
 
     struct ExecutionGroup
     {
-        // Sync* sync{};
-        std::vector<Pass*> passes;
-    };
-
-    struct PersistentStorage
-    {
-        std::string pass_name;
-        Resource::NativeResource native;
-    };
-
-    struct PassBuilder
-    {
-        AccessId add_resource(const Resource& resource, const std::optional<Clear>& clear = {})
-        {
-            ENG_ASSERT(!clear);
-            graph->resources.push_back(resource);
-            const auto ret = add_access(Access{
-                .resource = Handle<Resource>{ (uint32_t)graph->resources.size() - 1 },
-                .layout = ImageLayout::UNDEFINED,
-                .stage = {},
-                .access = {},
-            });
-            // if(clear) { p->clears.emplace_back(ret, *clear); }
-            return ret;
-        }
-
-        AccessId import_resource(const Resource::NativeResource& resource, const std::optional<Clear>& clear = {})
-        {
-            const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
-                                         [&resource](const auto& e) { return e.native == resource; });
-            if(it != graph->resources.end()) { return it->last_access; }
-            return add_resource(Resource{ .native = resource, .is_persistent = true, .is_imported = true });
-        }
-
-        PersistentStorage* find_persistent(size_t hash, const std::string& pass_name)
-        {
-            auto it = graph->persistent_resources.find(hash);
-            if(it == graph->persistent_resources.end()) { return nullptr; }
-            if(it->second.pass_name != pass_name)
-            {
-                ENG_ERROR("Hash collision");
-                return nullptr;
-            }
-            return &it->second;
-        }
-
-        AccessId create_resource(const std::string& name, Buffer&& a, bool persistent = false)
-        {
-            ENG_ASSERT(name.size() > 0);
-            Resource::NativeResource native = [this, &a, &name, persistent] -> Resource::NativeResource {
-                if(persistent)
-                {
-                    const auto hash = hash::combine_fnv1a(pass->name, name);
-                    if(auto* p = find_persistent(hash, pass->name)) { return p->native; }
-                    auto native_handle = Engine::get().renderer->make_buffer(name, std::move(a));
-                    auto persistent_it =
-                        graph->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = pass->name, .native = native_handle });
-                    return persistent_it.first->second.native;
-                }
-                return Engine::get().renderer->make_buffer(name, std::move(a), AllocateMemory::ALIASED);
-            }();
-            return add_resource(Resource{ .native = native, .is_persistent = persistent });
-        }
-
-        AccessId create_resource(const std::string& name, Image&& a, bool persistent = false, const std::optional<Clear>& clear = {})
-        {
-            ENG_ASSERT(name.size() > 0);
-            Resource::NativeResource native = [this, &a, &name, persistent] -> Resource::NativeResource {
-                if(persistent)
-                {
-                    const auto hash = hash::combine_fnv1a(pass->name, name);
-                    if(auto* p = find_persistent(hash, pass->name)) { return p->native; }
-                    auto native_handle = Engine::get().renderer->make_image(name, std::move(a));
-                    auto persistent_it =
-                        graph->persistent_resources.emplace(hash, PersistentStorage{ .pass_name = pass->name, .native = native_handle });
-                    return persistent_it.first->second.native;
-                }
-                return Engine::get().renderer->make_image(name, std::move(a), AllocateMemory::ALIASED);
-            }();
-            return add_resource(Resource{ .native = native, .is_persistent = persistent });
-        }
-
-        AccessId add_access(const Access& a)
-        {
-            graph->accesses.push_back(a);
-            const auto ret = AccessId{ (uint32_t)graph->accesses.size() - 1 };
-            graph->get_res(ret).last_access = ret;
-            pass->accesses.push_back(ret);
-            pass->stage_mask |= a.stage;
-            return ret;
-        }
-
-        AccessId sample_texture(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-        {
-            const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
-                               : pass->is_compute() ? PipelineStage::COMPUTE_BIT
-                                                    : PipelineStage::NONE;
-            const auto access = PipelineAccess::SHADER_READ_BIT;
-            const auto layout = ImageLayout::READ_ONLY;
-            return access_resource(acc, layout, stage, access, format, type, mips, layers);
-        }
-
-        AccessId access_depth(AccessId acc, std::optional<ImageFormat> format = {})
-        {
-            const auto stage = PipelineStage::EARLY_Z_BIT | PipelineStage::LATE_Z_BIT;
-            const auto access = PipelineAccess::DS_RW;
-            const auto layout = ImageLayout::ATTACHMENT;
-            return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
-        }
-
-        AccessId access_color(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
-        {
-            const auto stage = PipelineStage::COLOR_OUT_BIT;
-            const auto access = PipelineAccess::COLOR_RW_BIT;
-            const auto layout = ImageLayout::ATTACHMENT;
-            return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
-        }
-
-        AccessId read_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                            Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-        {
-            const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
-                               : pass->is_compute() ? PipelineStage::COMPUTE_BIT
-                                                    : PipelineStage::NONE;
-            const auto access = PipelineAccess::STORAGE_READ_BIT;
-            const auto layout = ImageLayout::GENERAL;
-            return access_resource(acc, layout, stage, access, format, type, mips, layers);
-        }
-
-        AccessId write_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                             Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-        {
-            const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
-                               : pass->is_compute() ? PipelineStage::COMPUTE_BIT
-                                                    : PipelineStage::NONE;
-            const auto access = PipelineAccess::STORAGE_WRITE_BIT;
-            const auto layout = ImageLayout::GENERAL;
-            return access_resource(acc, layout, stage, access, format, type, mips, layers);
-        }
-
-        AccessId read_write_image(AccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                  Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-        {
-            const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
-                               : pass->is_compute() ? PipelineStage::COMPUTE_BIT
-                                                    : PipelineStage::NONE;
-            const auto access = PipelineAccess::STORAGE_RW;
-            const auto layout = ImageLayout::GENERAL;
-            return access_resource(acc, layout, stage, access, format, type, mips, layers);
-        }
-
-        AccessId read_buffer(AccessId acc, Range64u range = { 0ull, ~0ull })
-        {
-            const auto stage = pass->is_graphics()  ? PipelineStage::VERTEX_BIT | PipelineStage::FRAGMENT
-                               : pass->is_compute() ? PipelineStage::COMPUTE_BIT
-                                                    : PipelineStage::NONE;
-            const auto access = PipelineAccess::STORAGE_READ_BIT;
-            return access_resource(acc, stage, access, range);
-        }
-
-        AccessId write_buffer(AccessId acc, Range64u range = { 0ull, ~0ull })
-        {
-            const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
-            const auto access = PipelineAccess::STORAGE_RW;
-            return access_resource(acc, stage, access, range);
-        }
-
-        AccessId read_write_buffer(AccessId acc, Range64u range = { 0ull, ~0ull })
-        {
-            const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
-            const auto access = PipelineAccess::STORAGE_RW;
-            return access_resource(acc, stage, access, range);
-        }
-
-        AccessId access_resource(AccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                                 std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                 Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-        {
-            return add_access(Access{
-                .resource = graph->get_acc(acc).resource,
-                .prev_access = acc,
-                .image_view =
-                    ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
-                .layout = layout,
-                .stage = stage,
-                .access = access,
-            });
-        }
-
-        AccessId access_resource(AccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                                 Range64u range = { 0ull, ~0ull })
-        {
-            return add_access(Access{
-                .resource = graph->get_acc(acc).resource,
-                .prev_access = acc,
-                .buffer_view = BufferView{ graph->get_buf(acc), range },
-                .stage = stage,
-                .access = access,
-            });
-        }
-
-        ICommandBuffer* open_cmd_buf()
-        {
-            ENG_ASSERT(pass->cmd == nullptr);
-            pass->cmd = graph->cmd_pools[0]->begin();
-            pass->cmd->begin_label(pass->name);
-            return pass->cmd;
-        }
-
-        Pass* pass{};
-        RenderGraph* graph{};
-    };
-
-    /*
-     * Buddy-like gpu memory allocator for aliased resources, supporting frames-in-flight.
-     * Allocates pages, and subdivides into pow2-sized buckets.
-     * During free, checks if enough frames were rendered, so buddies can be merged.
-     * Each frame, before first allocation, defrag happens.
-     *
-     * Call init() with a callback to some kind of gpu aliased allocator (for example vma)
-     *
-     * Right now no memory type checking happens and two pages cannot be glued into bigger one.
-     * No memory budget either.
-     */
-    class TransientAllocator
-    {
-        inline static constexpr size_t MIN_ALLOC = 64 * 1024;
-        inline static constexpr size_t PAGE_SIZE = 128 * 1024 * 1024;
-        inline static constexpr size_t PAGE_ALIGNMENT = 1024 * 1024;
-
-        struct Bucket
-        {
-            bool operator<(const Bucket& b) const
-            {
-                return std::tie(size, page, page_offset) < std::tie(b.size, b.page, b.page_offset);
-            }
-            bool operator==(const Bucket& b) const { return !(*this < b) && !(b < *this); }
-            bool is_free() const
-            {
-                // buckets are reused across frames. to make sure the previous frame is not using this bucket, when the next frame tries to allocate it,
-                // we check if it either has never been touched, or it was freed in the current frame, or if enough frames have passed since.
-                const auto frame = get_renderer().current_frame;
-                const auto wait = get_renderer().frame_delay;
-                return freed_at == ~0ull || freed_at == frame || (frame - freed_at) >= wait;
-            }
-            bool can_be_merged_with_buddy(const Bucket& buddy) const
-            {
-                ENG_ASSERT(page == buddy.page && size == buddy.size);
-                // can only merge up if enough frames have passed or buckets were freed during the same frame. otherwise it will consolidate back to one page-sized
-                // bucket with is_free() returning false for the next frame, even though the previous frame only used 64kbs.
-                const auto frame = get_renderer().current_frame;
-                const auto wait = get_renderer().frame_delay;
-                return freed_at == buddy.freed_at || (freed_at == ~0ull && (frame - buddy.freed_at) >= wait) ||
-                       (buddy.freed_at == ~0ull && (frame - freed_at) >= wait) ||
-                       (frame - freed_at >= wait && frame - buddy.freed_at >= wait);
-            }
-            uint32_t page{ ~0u };
-            size_t page_offset{};
-            size_t size{};
-            size_t freed_at{ ~0ull }; // frame index;
-        };
-
-      public:
-        void init(auto&& alias_allocator)
-        {
-            ENG_ASSERT(pages.empty());
-            *this = {};
-            allocator = alias_allocator;
-        }
-
-        void* allocate(const RendererMemoryRequirements& reqs)
-        {
-            // todo: this should also somehow check memory types whether the resource will be compatible
-            //       with the memory the allocator is managing.
-            ENG_ASSERT(reqs.size > 0 && reqs.alignment > 0 && is_pow2(reqs.alignment));
-            // 65kbs rounds up to 128kbs :(
-            const auto aligned = next_power_of_2(std::max(align_up2(reqs.size, reqs.alignment), MIN_ALLOC));
-            if(PAGE_SIZE < aligned)
-            {
-                ENG_ASSERT(false, "Allocation too big for page");
-                return nullptr;
-            }
-            const auto frame = get_renderer().current_frame;
-            if(last_alloc_frame != frame)
-            {
-                // first alloc of render frame, try defrag.
-                last_alloc_frame = frame;
-                defragment();
-            }
-            while(true)
-            {
-                // find smallest possible
-                auto it = buckets.lower_bound(Bucket{ .page = 0, .page_offset = 0, .size = aligned });
-                // go up if not enough render frames have passed and the resource may still be in use, unless
-                // it's the same frame, then access is guarded by barriers/semaphores in the rendergraph.
-                for(; it != buckets.end() && !it->is_free(); ++it) {}
-                if(it == buckets.end())
-                {
-                    // no free bucket, allocate new page
-                    if(!allocate_new_page(reqs)) { return nullptr; }
-                    continue;
-                }
-                auto bucket = *it;
-                buckets.erase(it);
-                split_bucket(bucket, aligned); // keep cutting off right halfs until just right
-                auto* const alloc = get_bucket_address(bucket);
-                ENG_ASSERT(!allocations.contains(alloc));
-                allocations[alloc] = bucket;
-                return alloc;
-            }
-        }
-
-        void free(void* const alloc)
-        {
-            if(!alloc)
-            {
-                ENG_ASSERT(false, "Alloc is null");
-                return;
-            }
-
-            auto allocit = allocations.find(alloc);
-            if(allocit == allocations.end())
-            {
-                ENG_ASSERT(false, "Invalid alloc");
-                return;
-            }
-
-            auto bucket = allocit->second;
-            allocations.erase(allocit);
-            bucket.freed_at = get_renderer().current_frame;
-            merge_buddies(bucket); // merge freed this frame for better reuse within one frame
-            buckets.insert(bucket);
-        }
-
-        void get_offset_and_base(void* alloc, void*& base, size_t& offset)
-        {
-            ENG_ASSERT(alloc);
-            const auto& allocation = allocations.at(alloc);
-            base = pages[allocation.page];
-            offset = allocation.page_offset;
-        }
-
-      private:
-        bool allocate_new_page(const RendererMemoryRequirements& reqs)
-        {
-            if(PAGE_SIZE < reqs.size && PAGE_ALIGNMENT < reqs.alignment)
-            {
-                ENG_ERROR("Bad alignment or size");
-                return false;
-            }
-            auto page_reqs = reqs;
-            page_reqs.size = PAGE_SIZE;
-            page_reqs.alignment = PAGE_ALIGNMENT;
-            void* page = allocator(page_reqs);
-            if(!page)
-            {
-                ENG_ERROR("Could not allocate new page");
-                return false;
-            }
-            pages.push_back(page);
-            buckets.insert(Bucket{ .page = (uint32_t)pages.size() - 1, .page_offset = 0, .size = PAGE_SIZE });
-            return true;
-        }
-
-        void split_bucket(Bucket& bucket, size_t req_size)
-        {
-            ENG_ASSERT(!buckets.contains(bucket));
-            auto split_size = bucket.size >> 1;
-            while(req_size <= split_size)
-            {
-                // if the half of the bucket is enough, split and try again with the left half again.
-                bucket.size = split_size;
-                bucket = get_left_split_bucket(bucket);
-                buckets.insert(get_buddy_bucket(bucket));
-                split_size >>= 1;
-            }
-        }
-
-        bool merge_buddies(Bucket& bucket)
-        {
-            bool merged = false;
-            while(true)
-            {
-                auto buddyit = buckets.find(get_buddy_bucket(bucket));
-                if(buddyit == buckets.end() || !buddyit->can_be_merged_with_buddy(bucket)) { return merged; }
-                merged = true;
-                buckets.erase(buddyit);
-                bucket = get_left_split_bucket(bucket);
-                bucket.size <<= 1;
-            }
-        }
-
-        void defragment()
-        {
-            std::vector<Bucket> candidates;
-            candidates.reserve(buckets.size());
-            for(const auto& b : buckets)
-            {
-                if(b.is_free()) { candidates.push_back(b); }
-            }
-            for(auto& b : candidates)
-            {
-                if(!buckets.contains(b)) { continue; }
-                buckets.erase(b);
-                merge_buddies(b);
-                buckets.insert(b);
-            }
-        }
-
-        static Bucket get_buddy_bucket(const Bucket& bucket)
-        {
-            auto buddy = bucket;
-            buddy.page_offset ^= bucket.size;
-            return buddy;
-        }
-
-        static Bucket get_left_split_bucket(const Bucket& bucket)
-        {
-            auto left = bucket;
-            left.page_offset &= ~bucket.size; // remove offset bit that right split bucket has XORed
-            return left;
-        }
-
-        void* get_bucket_address(const Bucket& bucket)
-        {
-            return (void*)((uintptr_t)pages[bucket.page] + bucket.page_offset);
-        }
-
-        Callback<void*(const RendererMemoryRequirements&)> allocator;
-        std::vector<void*> pages;
-        std::set<Bucket> buckets;
-        std::unordered_map<void*, Bucket> allocations;
-        size_t last_alloc_frame{ 0 };
+        std::vector<RGPass*> passes;
     };
 
     // utility funcs for easy access to resources
-    Access& get_acc(AccessId a) { return accesses[*a]; }
-    Resource& get_res(Handle<Resource> a) { return resources[*a]; }
-    Resource& get_res(AccessId a) { return resources[*get_acc(a).resource]; }
-    Handle<Buffer> get_buf(AccessId a) { return get_res(a).as_buffer(); }
-    Handle<Image> get_img(AccessId a) { return get_res(a).as_image(); }
+    RGAccess& get_acc(RGAccessId a) { return accesses[*a]; }
+    RGResource& get_res(RGResourceId a) { return resources[*a]; }
+    RGResource& get_res(RGAccessId a) { return resources[*get_acc(a).resource]; }
+    Handle<Buffer> get_buf(RGAccessId a) { return get_res(a).as_buffer(); }
+    Handle<Image> get_img(RGAccessId a) { return get_res(a).as_image(); }
 
     void init(Renderer* r)
     {
@@ -576,29 +342,45 @@ class RenderGraph
         });
     }
 
-    template <typename UserData>
-    UserData add_graphics_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_func)
+    template <typename SetupFunc, typename ExecFunc, typename UserType = std::invoke_result_t<SetupFunc, RGBuilder&>>
+    UserType add_pass(const char* name, RGPass::PassOrder order, RGPass::Type type, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        auto& pass = static_cast<UserPass<UserData>&>(*passes.emplace_back(std::make_unique<UserPass<UserData>>(UserPass<UserData>{
-            std::string{ name.data(), name.size() }, Pass::Type::GRAPHICS, exec_func })));
-        PassBuilder pb{ &*passes.back(), this };
-        pass.user_data = setup_cb(pb);
-        return pass.user_data;
+        OrderedPass op{};
+        op.pass = std::make_unique<RGUserPass<UserType, ExecFunc>>(name, type, exec_func);
+        op.order = order;
+
+        ENG_ASSERT(!namedpasses.contains(op.pass->id));
+
+        auto it = std::upper_bound(passes.begin(), passes.end(), op);
+        it = passes.insert(it, std::move(op));
+
+        namedpasses[it->pass->id] = &*it->pass;
+
+        RGBuilder pb{ &*it->pass, this };
+        if constexpr(!std::is_same_v<UserType, void>)
+        {
+            auto& user_data = get_user_data<UserType>(name);
+            user_data = setup_func(pb);
+            return user_data;
+        }
+        else { setup_func(pb); }
     }
 
-    template <typename UserData>
-    UserData add_compute_pass(std::string_view name, const SetupFunc<UserData>& setup_cb, const ExecFunc<UserData>& exec_func)
+    template <typename SetupFunc, typename ExecFunc>
+    auto add_graphics_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        auto& pass = static_cast<UserPass<UserData>&>(*passes.emplace_back(std::make_unique<UserPass<UserData>>(UserPass<UserData>{
-            std::string{ name.data(), name.size() }, Pass::Type::COMPUTE, exec_func })));
-        PassBuilder pb{ &*passes.back(), this };
-        pass.user_data = setup_cb(pb);
-        return pass.user_data;
+        return add_pass(name, order, RGPass::Type::GRAPHICS, setup_func, exec_func);
+    }
+
+    template <typename SetupFunc, typename ExecFunc>
+    auto add_compute_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
+    {
+        return add_pass(name, order, RGPass::Type::COMPUTE, setup_func, exec_func);
     }
 
     void compile()
     {
-        const auto calc_earliest_group = [this](const std::vector<AccessId>& accesses) -> uint32_t {
+        const auto calc_earliest_group = [this](const std::vector<RGAccessId>& accesses) -> uint32_t {
             return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& val) {
                 return std::max(max, [this, &val] {
                     const auto& acc = get_acc(val);
@@ -622,7 +404,7 @@ class RenderGraph
                 }());
             });
         };
-        const auto update_access_groups = [this](const std::vector<AccessId>& accesses, uint32_t gid) {
+        const auto update_accesses = [this](const std::vector<RGAccessId>& accesses, uint32_t gid) {
             std::for_each(accesses.begin(), accesses.end(), [this, gid](auto a) {
                 const auto& acc = get_acc(a);
                 auto& res = get_res(a);
@@ -636,17 +418,17 @@ class RenderGraph
         uint32_t last_gid = 0;
         for(auto& p : passes)
         {
-            const auto gid = calc_earliest_group(p->accesses);
+            const auto gid = calc_earliest_group(p.pass->accesses);
             last_gid = std::max(last_gid, gid);
-            groups[gid].passes.push_back(&*p);
-            update_access_groups(p->accesses, gid);
+            groups[gid].passes.push_back(&*p.pass);
+            update_accesses(p.pass->accesses, gid);
         }
         groups.resize(last_gid + 1);
 
-        std::set<Handle<Resource>> alive_res_set;
-        for(auto gi = 0ull; gi < groups.size(); ++gi)
+        // Allocate memory from transient allocator for resources to be used during execution
+        std::set<RGResourceId> alive_res_set;
+        for(auto& g : groups)
         {
-            auto& g = groups[gi];
             for(auto* p : g.passes)
             {
                 for(const auto& ra : p->accesses)
@@ -738,7 +520,8 @@ class RenderGraph
 
             for(auto* p : g.passes)
             {
-                p->execute(*this);
+                RGBuilder pb{ p, this };
+                p->execute(pb);
                 if(!p->cmd) { continue; }
                 p->cmd->end_label();
                 cmd_pools[0]->end(p->cmd);
@@ -749,7 +532,7 @@ class RenderGraph
                     auto& res = get_res(ra);
                     // todo: maybe pool handles here? renderer already does that, soo...
                     // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
-                    if(!res.is_persistent && !res.is_imported && res.last_access == ra) { destroy_resource(res); }
+                    if(!res.is_persistent && res.last_access == ra) { destroy_resource(res); }
                 }
             }
             queue->wait_sync(sems[0], gstages);
@@ -760,11 +543,12 @@ class RenderGraph
         resources.clear();
         accesses.clear();
         passes.clear();
+        namedpasses.clear();
 
         return sems[0];
     }
 
-    void destroy_resource(Resource& res)
+    void destroy_resource(RGResource& res)
     {
         ENG_ASSERT(!res.is_persistent);
         auto& r = get_renderer();
@@ -780,18 +564,301 @@ class RenderGraph
         }
     }
 
+    template <typename UserData> UserData& get_user_data(const char* passname)
+    {
+        const auto id = RGPass::PassId{ ENG_HASH_STR(passname) };
+        const auto it = namedpasses.find(id);
+        ENG_ASSERT(it != namedpasses.end());
+        return *static_cast<UserData*>(it->second->get_user_data());
+    }
+
+    template <typename UserData> const UserData& get_user_data(const char* passname) const
+    {
+        const auto id = RGPass::PassId{ ENG_HASH_STR(passname) };
+        const auto it = namedpasses.find(id);
+        ENG_ASSERT(it != namedpasses.end());
+        return *static_cast<const UserData*>(it->second->get_user_data());
+    }
+
     SubmitQueue* queue{};
     ICommandPool* cmd_pools[2]{};
     Sync* sems[2]{};
-    TransientAllocator allocator;
+    GPUTransientAllocator allocator;
 
-    std::unordered_map<uint64_t, PersistentStorage> persistent_resources;
-    std::vector<Resource> resources;
-    std::vector<Access> accesses;
-    std::vector<std::unique_ptr<Pass>> passes;
-    std::unordered_map<std::string, Handle<Pass>> namedpasses;
+    std::unordered_map<std::pair<RGPass::PassId, uint64_t>, PersistentStorage, hash::PairHash> persistent_resources;
+    std::vector<RGResource> resources;
+    std::vector<RGAccess> accesses;
+    std::vector<OrderedPass> passes;
+    std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
     std::vector<ExecutionGroup> groups;
 };
+
+inline bool GPUTransientAllocator::Bucket::is_free() const
+{
+    // buckets are reused across frames. to make sure the previous frame is not using this bucket, when the next frame tries to allocate it,
+    // we check if it either has never been touched, or it was freed in the current frame, or if enough frames have passed since.
+    const auto frame = get_renderer().current_frame;
+    const auto wait = get_renderer().frame_delay;
+    return freed_at == ~0ull || freed_at == frame || (frame - freed_at) >= wait;
+}
+
+inline bool GPUTransientAllocator::Bucket::can_be_merged_with_buddy(const Bucket& buddy) const
+{
+    ENG_ASSERT(page == buddy.page && size == buddy.size);
+    // can only merge up if enough frames have passed or buckets were freed during the same frame. otherwise it will consolidate back to one page-sized
+    // bucket with is_free() returning false for the next frame, even though the previous frame only used 64kbs.
+    const auto frame = get_renderer().current_frame;
+    const auto wait = get_renderer().frame_delay;
+    return freed_at == buddy.freed_at || (freed_at == ~0ull && (frame - buddy.freed_at) >= wait) ||
+           (buddy.freed_at == ~0ull && (frame - freed_at) >= wait) ||
+           (frame - freed_at >= wait && frame - buddy.freed_at >= wait);
+}
+
+inline void* GPUTransientAllocator::allocate(const RendererMemoryRequirements& reqs)
+{
+    // todo: this should also somehow check memory types whether the resource will be compatible
+    //       with the memory the allocator is managing.
+    ENG_ASSERT(reqs.size > 0 && reqs.alignment > 0 && is_pow2(reqs.alignment));
+    // 65kbs rounds up to 128kbs :(
+    const auto aligned = next_power_of_2(std::max(align_up2(reqs.size, reqs.alignment), MIN_ALLOC));
+    if(PAGE_SIZE < aligned)
+    {
+        ENG_ASSERT(false, "Allocation too big for page");
+        return nullptr;
+    }
+    const auto frame = get_renderer().current_frame;
+    if(last_alloc_frame != frame)
+    {
+        // first alloc of render frame, try defrag.
+        last_alloc_frame = frame;
+        defragment();
+    }
+    while(true)
+    {
+        // find smallest possible
+        auto it = buckets.lower_bound(Bucket{ .page = 0, .page_offset = 0, .size = aligned });
+        // go up if not enough render frames have passed and the resource may still be in use, unless
+        // it's the same frame, then access is guarded by barriers/semaphores in the rendergraph.
+        for(; it != buckets.end() && !it->is_free(); ++it) {}
+        if(it == buckets.end())
+        {
+            // no free bucket, allocate new page
+            if(!allocate_new_page(reqs)) { return nullptr; }
+            continue;
+        }
+        auto bucket = *it;
+        buckets.erase(it);
+        split_bucket(bucket, aligned); // keep cutting off right halfs until just right
+        auto* const alloc = get_bucket_memory(bucket);
+        ENG_ASSERT(!allocations.contains(alloc));
+        allocations[alloc] = bucket;
+        return alloc;
+    }
+}
+
+inline void GPUTransientAllocator::free(void* const alloc)
+{
+    if(!alloc)
+    {
+        ENG_ASSERT(false, "Alloc is null");
+        return;
+    }
+
+    auto allocit = allocations.find(alloc);
+    if(allocit == allocations.end())
+    {
+        ENG_ASSERT(false, "Invalid alloc");
+        return;
+    }
+
+    auto bucket = allocit->second;
+    allocations.erase(allocit);
+    bucket.freed_at = get_renderer().current_frame;
+    merge_buddies(bucket); // merge freed this frame for better reuse within one frame
+    buckets.insert(bucket);
+}
+
+inline void GPUTransientAllocator::get_offset_and_base(void* alloc, void*& base, size_t& offset)
+{
+    ENG_ASSERT(alloc);
+    const auto& allocation = allocations.at(alloc);
+    base = pages[allocation.page];
+    offset = allocation.page_offset;
+}
+
+inline bool gfx::GPUTransientAllocator::allocate_new_page(const RendererMemoryRequirements& reqs)
+{
+    if(PAGE_SIZE < reqs.size && PAGE_ALIGNMENT < reqs.alignment)
+    {
+        ENG_ERROR("Bad alignment or size");
+        return false;
+    }
+    auto page_reqs = reqs;
+    page_reqs.size = PAGE_SIZE;
+    page_reqs.alignment = PAGE_ALIGNMENT;
+    void* page = allocator(page_reqs);
+    if(!page)
+    {
+        ENG_ERROR("Could not allocate new page");
+        return false;
+    }
+    pages.push_back(page);
+    buckets.insert(Bucket{ .page = (uint32_t)pages.size() - 1, .page_offset = 0, .size = PAGE_SIZE });
+    return true;
+}
+
+inline void gfx::GPUTransientAllocator::split_bucket(Bucket& bucket, size_t req_size)
+{
+    ENG_ASSERT(!buckets.contains(bucket));
+    auto split_size = bucket.size >> 1;
+    while(req_size <= split_size)
+    {
+        // if the half of the bucket is enough, split and try again with the left half again.
+        bucket.size = split_size;
+        bucket = get_left_split_bucket(bucket);
+        buckets.insert(get_buddy_bucket(bucket));
+        split_size >>= 1;
+    }
+}
+
+inline bool gfx::GPUTransientAllocator::merge_buddies(Bucket& bucket)
+{
+    bool merged = false;
+    while(true)
+    {
+        auto buddyit = buckets.find(get_buddy_bucket(bucket));
+        if(buddyit == buckets.end() || !buddyit->can_be_merged_with_buddy(bucket)) { return merged; }
+        merged = true;
+        buckets.erase(buddyit);
+        bucket = get_left_split_bucket(bucket);
+        bucket.size <<= 1;
+    }
+}
+
+inline void GPUTransientAllocator::defragment()
+{
+    std::vector<Bucket> candidates;
+    candidates.reserve(buckets.size());
+    for(const auto& b : buckets)
+    {
+        if(b.is_free()) { candidates.push_back(b); }
+    }
+    for(auto& b : candidates)
+    {
+        if(!buckets.contains(b)) { continue; }
+        buckets.erase(b);
+        merge_buddies(b);
+        buckets.insert(b);
+    }
+}
+
+inline RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
+{
+    ENG_ASSERT(!clear);
+    graph->resources.push_back(resource);
+    const auto ret = add_access(RGAccess{
+        .resource = RGResourceId{ (uint32_t)graph->resources.size() - 1 },
+        .layout = ImageLayout::UNDEFINED,
+        .stage = {},
+        .access = {},
+    });
+    // if(clear) { p->clears.emplace_back(ret, *clear); }
+    return ret;
+}
+
+inline RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear)
+{
+    const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
+                                 [&resource](const auto& e) { return e.native == resource; });
+    if(it != graph->resources.end()) { return it->last_access; }
+    return add_resource(RGResource{ .native = resource, .is_persistent = true, .is_imported = true });
+}
+
+inline PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
+{
+    auto it = graph->persistent_resources.find(std::make_pair(pass->id, namehash));
+    if(it == graph->persistent_resources.end()) { return nullptr; }
+    return &it->second;
+}
+
+inline RGAccessId RGBuilder::create_resource(const char* name, Buffer&& a, bool persistent)
+{
+    ENG_ASSERT(name);
+    RGResource::NativeResource native = [this, &a, &name, persistent] -> RGResource::NativeResource {
+        if(persistent)
+        {
+            const auto hash = ENG_HASH_STR(name);
+            if(auto* p = find_persistent(hash)) { return p->native; }
+            auto native_handle = get_engine().renderer->make_buffer(name, std::move(a));
+            auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
+                                                                     PersistentStorage{ .native = native_handle });
+            return persistent_it.first->second.native;
+        }
+        return get_engine().renderer->make_buffer(name, std::move(a), AllocateMemory::ALIASED);
+    }();
+    return add_resource(RGResource{ .native = native, .is_persistent = persistent });
+}
+
+inline RGAccessId RGBuilder::create_resource(const char* name, Image&& a, bool persistent, const std::optional<RGClear>& clear)
+{
+    ENG_ASSERT(name);
+    RGResource::NativeResource native = [this, &a, &name, persistent] -> RGResource::NativeResource {
+        if(persistent)
+        {
+            const auto hash = ENG_HASH_STR(name);
+            if(auto* p = find_persistent(hash)) { return p->native; }
+            auto native_handle = get_engine().renderer->make_image(name, std::move(a));
+            auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
+                                                                     PersistentStorage{ .native = native_handle });
+            return persistent_it.first->second.native;
+        }
+        return get_engine().renderer->make_image(name, std::move(a), AllocateMemory::ALIASED);
+    }();
+    return add_resource(RGResource{ .native = native, .is_persistent = persistent });
+}
+
+inline RGAccessId RGBuilder::add_access(const RGAccess& a)
+{
+    graph->accesses.push_back(a);
+    const auto ret = RGAccessId{ (uint32_t)graph->accesses.size() - 1 };
+    graph->get_res(ret).last_access = ret;
+    pass->accesses.push_back(ret);
+    pass->stage_mask |= a.stage;
+    return ret;
+}
+
+inline RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
+                                                 Flags<PipelineAccess> access, std::optional<ImageFormat> format,
+                                                 std::optional<ImageViewType> type, Range32u mips, Range32u layers)
+{
+    return add_access(RGAccess{
+        .resource = graph->get_acc(acc).resource,
+        .prev_access = acc,
+        .image_view = ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
+        .layout = layout,
+        .stage = stage,
+        .access = access,
+    });
+}
+
+inline RGAccessId RGBuilder::access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
+{
+    return add_access(RGAccess{
+        .resource = graph->get_acc(acc).resource,
+        .prev_access = acc,
+        .buffer_view = BufferView{ graph->get_buf(acc), range },
+        .stage = stage,
+        .access = access,
+    });
+}
+
+inline ICommandBuffer* RGBuilder::open_cmd_buf()
+{
+    ENG_ASSERT(pass->cmd == nullptr);
+    pass->cmd = graph->cmd_pools[0]->begin();
+    pass->cmd->begin_label(pass->name.c_str());
+    return pass->cmd;
+}
 
 } // namespace gfx
 } // namespace eng

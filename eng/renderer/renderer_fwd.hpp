@@ -384,7 +384,7 @@ struct DescriptorSetMetadataVk;
 struct PipelineLayoutMetadataVk;
 struct SamplerMetadataVk;
 struct BufferMetadataVk;
-class RenderGraph;
+class RGRenderGraph;
 struct IDescriptorSetAllocator;
 class ICommandPool;
 class ICommandBuffer;

@@ -47,40 +47,42 @@ void Renderer::init(IRendererBackend* backend)
     swapchain = backend->make_swapchain();
     staging = new StagingBuffer{};
     staging->init(gq);
-    rgraph = new RenderGraph{};
+    rgraph = new RGRenderGraph{};
     rgraph->init(this);
 
     init_bufs();
     init_perframes();
     init_pipelines();
     init_helper_geom();
-    init_rgraph_passes();
 
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    // Engine::get().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::EntityId eid) { instance_entity(eid); },
+    settings.render_resolution = { get_engine().window->width, get_engine().window->height };
+    settings.present_resolution = { get_engine().window->width, get_engine().window->height };
+
+    // get_engine().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::EntityId eid) { instance_entity(eid); },
     //                                                                  [this](ecs::EntityId eid, ecs::Signature comp) {
     //                                                                      new_transforms.push_back(eid);
     //                                                                  },
     //                                                                  [](ecs::EntityId eid) { ENG_ASSERT(false); });
-    // Engine::get().ecs->register_callbacks<ecs::Light>(
+    // get_engine().ecs->register_callbacks<ecs::Light>(
     //     [this](ecs::EntityId eid) {
-    //         auto& ecslight = Engine::get().ecs->get<ecs::Light>(eid);
+    //         auto& ecslight = get_engine().ecs->get<ecs::Light>(eid);
     //         if(ecslight.gpu_index == ~0u) { ++bufs.light_count; }
     //         new_lights.push_back(eid);
     //     },
     //     [this](ecs::EntityId eid, ecs::Signature comp) { new_lights.push_back(eid); },
     //     [](ecs::EntityId eid) { ENG_ASSERT(false); });
 
-    // Engine::get().ui->add_tab(UI::Tab{
+    // get_engine().ui->add_tab(UI::Tab{
     //     "Debug",
     //     UI::Location::RIGHT_PANE,
     //     [this] {
-    //         if(!Engine::get().ui->show_debug_tab) { return; }
+    //         if(!get_engine().ui->show_debug_tab) { return; }
     //         if(ImGui::Begin("Debug"))
     //         {
-    //             auto* camera = Engine::get().camera;
+    //             auto* camera = get_engine().camera;
     //             ImGui::SeparatorText("Camera");
     //             ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
 
@@ -102,7 +104,7 @@ void Renderer::init(IRendererBackend* backend)
     //            rgraph->get_resource(rgraphpasses->cull_zprepass->culled_id_bufs.get(-1)).buffer.get(); uint32_t mlts
     //            = 0; for(auto [e, t, m] : ecs_mesh_view)
     //            {
-    //                const auto& msh = Engine::get().ecs->get<ecs::Mesh>(e);
+    //                const auto& msh = get_engine().ecs->get<ecs::Mesh>(e);
     //                for(auto mmsh : msh->meshes)
     //                {
     //                    mlts += mmsh->geometry->meshlet_range.size;
@@ -163,9 +165,9 @@ void Renderer::init_helper_geom()
     // gen_uv_sphere();
     // ENG_ASSERT(vertices.size() <= ~uint16_t{});
     // helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
-    // helpergeom.ppskybox = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { Engine::get().renderer->make_shader("common/skybox.vert.glsl"),
-    //                  Engine::get().renderer->make_shader("common/skybox.frag.glsl") },
+    // helpergeom.ppskybox = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_engine().renderer->make_shader("common/skybox.vert.glsl"),
+    //                  get_engine().renderer->make_shader("common/skybox.frag.glsl") },
     //     .layout = common_playout,
     //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
     //     .depth_test = true,
@@ -208,15 +210,15 @@ void Renderer::init_pipelines()
         return;
     }
 
-    // hiz_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { Engine::get().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = common_playout });
-    // cull_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { Engine::get().renderer->make_shader("culling/culling.comp.glsl") },
+    // hiz_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_engine().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = common_playout });
+    // cull_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_engine().renderer->make_shader("culling/culling.comp.glsl") },
     //     .layout = common_playout,
     // });
-    // cullzout_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { Engine::get().renderer->make_shader("common/zoutput.vert.glsl"),
-    //                  Engine::get().renderer->make_shader("common/zoutput.frag.glsl") },
+    // cullzout_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_engine().renderer->make_shader("common/zoutput.vert.glsl"),
+    //                  get_engine().renderer->make_shader("common/zoutput.frag.glsl") },
     //     .layout = common_playout,
     //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
     //     .depth_test = true,
@@ -224,8 +226,8 @@ void Renderer::init_pipelines()
     //     .depth_compare = DepthCompare::GREATER,
     //     .culling = CullFace::BACK,
     // });
-    // fwdp_cull_lights_pipeline = Engine::get().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { Engine::get().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
+    // fwdp_cull_lights_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_engine().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
     //     .layout = common_playout,
     // });
 
@@ -255,7 +257,7 @@ void Renderer::init_pipelines()
 
 void Renderer::init_perframes()
 {
-    // auto* ew = Engine::get().window;
+    // auto* ew = get_engine().window;
     perframe.resize(frame_delay);
     for(auto i = 0u; i < frame_delay; ++i)
     {
@@ -298,7 +300,7 @@ void Renderer::init_bufs()
         bufs.lights[i] = make_buffer(ENG_FMT("lights {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
     }
     {
-        const auto* w = Engine::get().window;
+        const auto* w = get_engine().window;
         const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
@@ -306,66 +308,66 @@ void Renderer::init_bufs()
     }
 }
 
-void Renderer::init_rgraph_passes()
-{
-    ENG_ASSERT(rgraph_passes.empty());
-    rgraph_passes.push_back(new pass::SSTriangle{});
+// void Renderer::init_rgraph_passes()
+//{
+// ENG_ASSERT(rgraph_passes.empty());
+// rgraph_passes.push_back(new pass::SSTriangle{});
 
-    for(auto& pass : rgraph_passes)
-    {
-        pass->init();
-    }
+// for(auto& pass : rgraph_passes)
+//{
+//     pass->init();
+// }
 
-    // rgraphpasses = new RenderGraphPasses{};
-    // std::vector<Handle<Image>> zbufs(frame_count);
-    // std::vector<Handle<Image>> cbufs(frame_count);
-    // std::vector<Handle<Image>> swapcbufs(frame_count);
-    // for(auto i = 0u; i < frame_count; ++i)
-    //{
-    //     zbufs[i] = perframe[i].gbuffer.depth;
-    //     cbufs[i] = perframe[i].gbuffer.color;
-    //     swapcbufs[i] = swapchain->images[i];
-    // }
-    // rgraphpasses->zbufsview = rgraph->import_resource(std::span{ zbufs });
-    // rgraphpasses->cbufsview = rgraph->import_resource(std::span{ cbufs });
-    // rgraphpasses->swapcbufsview = rgraph->import_resource(std::span{ swapcbufs });
+// rgraphpasses = new RenderGraphPasses{};
+// std::vector<Handle<Image>> zbufs(frame_count);
+// std::vector<Handle<Image>> cbufs(frame_count);
+// std::vector<Handle<Image>> swapcbufs(frame_count);
+// for(auto i = 0u; i < frame_count; ++i)
+//{
+//     zbufs[i] = perframe[i].gbuffer.depth;
+//     cbufs[i] = perframe[i].gbuffer.color;
+//     swapcbufs[i] = swapchain->images[i];
+// }
+// rgraphpasses->zbufsview = rgraph->import_resource(std::span{ zbufs });
+// rgraphpasses->cbufsview = rgraph->import_resource(std::span{ cbufs });
+// rgraphpasses->swapcbufsview = rgraph->import_resource(std::span{ swapcbufs });
 
-    // rgraphpasses->cull_zprepass =
-    //     std::make_unique<pass::culling::ZPrepass>(rgraph, pass::culling::ZPrepass::CreateInfo{ rgraphpasses->zbufsview });
-    // rgraphpasses->cull_hiz =
-    //     std::make_unique<pass::culling::Hiz>(rgraph, pass::culling::Hiz::CreateInfo{ rgraphpasses->zbufsview });
-    // rgraphpasses->cull_main =
-    //     std::make_unique<pass::culling::MainPass>(rgraph, pass::culling::MainPass::CreateInfo{
-    //                                                           &render_passes.at(RenderPassType::FORWARD),
-    //                                                           &*rgraphpasses->cull_zprepass, &*rgraphpasses->cull_hiz });
+// rgraphpasses->cull_zprepass =
+//     std::make_unique<pass::culling::ZPrepass>(rgraph, pass::culling::ZPrepass::CreateInfo{ rgraphpasses->zbufsview });
+// rgraphpasses->cull_hiz =
+//     std::make_unique<pass::culling::Hiz>(rgraph, pass::culling::Hiz::CreateInfo{ rgraphpasses->zbufsview });
+// rgraphpasses->cull_main =
+//     std::make_unique<pass::culling::MainPass>(rgraph, pass::culling::MainPass::CreateInfo{
+//                                                           &render_passes.at(RenderPassType::FORWARD),
+//                                                           &*rgraphpasses->cull_zprepass, &*rgraphpasses->cull_hiz });
 
-    // rgraphpasses->cull_zprepass->ibatches = &rgraphpasses->cull_main->batches; // todo: don't like this
+// rgraphpasses->cull_zprepass->ibatches = &rgraphpasses->cull_main->batches; // todo: don't like this
 
-    // rgraphpasses->fwdp_lightcull =
-    //     std::make_unique<pass::fwdp::LightCulling>(rgraph, pass::fwdp::LightCulling::CreateInfo{
-    //                                                            rgraphpasses->zbufsview, bufs.fwdp_num_tiles,
-    //                                                            bufs.fwdp_lights_per_tile, bufs.fwdp_tile_pixels });
-    // rgraphpasses->default_unlit =
-    //     std::make_unique<pass::DefaultUnlit>(rgraph, pass::DefaultUnlit::CreateInfo{
-    //                                                      &*rgraphpasses->cull_zprepass, &*rgraphpasses->fwdp_lightcull,
-    //                                                      rgraphpasses->cbufsview, rgraphpasses->zbufsview });
-    // rgraphpasses->debug_geom =
-    //     std::make_unique<pass::DebugGeom>(rgraph, pass::DebugGeom::CreateInfo{ rgraphpasses->cbufsview, rgraphpasses->zbufsview });
-    // rgraphpasses->imgui = std::make_unique<pass::ImGui>(rgraph, pass::ImGui::CreateInfo{ rgraphpasses->cbufsview });
-    // rgraphpasses->present_copy =
-    //     std::make_unique<pass::PresentCopy>(rgraph, pass::PresentCopy::CreateInfo{ rgraphpasses->cbufsview,
-    //                                                                                rgraphpasses->swapcbufsview, swapchain });
-}
+// rgraphpasses->fwdp_lightcull =
+//     std::make_unique<pass::fwdp::LightCulling>(rgraph, pass::fwdp::LightCulling::CreateInfo{
+//                                                            rgraphpasses->zbufsview, bufs.fwdp_num_tiles,
+//                                                            bufs.fwdp_lights_per_tile, bufs.fwdp_tile_pixels });
+// rgraphpasses->default_unlit =
+//     std::make_unique<pass::DefaultUnlit>(rgraph, pass::DefaultUnlit::CreateInfo{
+//                                                      &*rgraphpasses->cull_zprepass, &*rgraphpasses->fwdp_lightcull,
+//                                                      rgraphpasses->cbufsview, rgraphpasses->zbufsview });
+// rgraphpasses->debug_geom =
+//     std::make_unique<pass::DebugGeom>(rgraph, pass::DebugGeom::CreateInfo{ rgraphpasses->cbufsview, rgraphpasses->zbufsview });
+// rgraphpasses->imgui = std::make_unique<pass::ImGui>(rgraph, pass::ImGui::CreateInfo{ rgraphpasses->cbufsview });
+// rgraphpasses->present_copy =
+//     std::make_unique<pass::PresentCopy>(rgraph, pass::PresentCopy::CreateInfo{ rgraphpasses->cbufsview,
+//                                                                                rgraphpasses->swapcbufsview, swapchain });
+//}
 
 // void Renderer::instance_entity(ecs::EntityId e)
 //{
 // ENG_ASSERT(false);
-//  if(!Engine::get().ecs->has<ecs::Transform, ecs::Mesh>(e))
+//  if(!get_engine().ecs->has<ecs::Transform, ecs::Mesh>(e))
 //{
 //      ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", *e);
 //      return;
 //  }
-//  auto& mesh = Engine::get().ecs->get<ecs::Mesh>(e);
+//  auto& mesh = get_engine().ecs->get<ecs::Mesh>(e);
 //  if(mesh.gpu_resource != ~0u)
 //{
 //      ENG_WARN("Entity {} with mesh {} is already instanced {}", *e, mesh.asset->name, mesh.gpu_resource);
@@ -385,7 +387,15 @@ void Renderer::init_rgraph_passes()
 
 void Renderer::update()
 {
-    // auto* ew = Engine::get().window;
+
+    static pass::SSTriangle* sstr{};
+    if(!sstr)
+    {
+        sstr = new pass::SSTriangle{};
+        sstr->init();
+    }
+
+    // auto* ew = get_engine().window;
     // const auto& ppf = perframe.at(current_frame % perframe.size()); // get previous frame res
     auto& pf = get_framedata();
     pf.ren_fen->wait_cpu(~0ull);
@@ -460,7 +470,7 @@ void Renderer::update()
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto entity = new_transforms[i];
-            const auto [transform, mesh] = Engine::get().ecs->get<ecs::Transform, ecs::Mesh>(entity);
+            const auto [transform, mesh] = get_engine().ecs->get<ecs::Transform, ecs::Mesh>(entity);
             const auto trsmat4x4 = transform.to_mat4();
             for(auto meshh : mesh.render_meshes)
             {
@@ -479,8 +489,8 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
         //  for(auto i = 0u; i < new_lights.size(); ++i)
         //{
-        //      auto& l = Engine::get().ecs->get<ecs::Light>(new_lights[i]);
-        //      const auto& t = Engine::get().ecs->get<ecs::Transform>(new_lights[i]);
+        //      auto& l = get_engine().ecs->get<ecs::Light>(new_lights[i]);
+        //      const auto& t = get_engine().ecs->get<ecs::Transform>(new_lights[i]);
         //      if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
         //      GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
         //      staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
@@ -490,13 +500,13 @@ void Renderer::update()
         //  new_lights.clear();
     }
 
-    // const auto view = Engine::get().camera->get_view();
-    // const auto proj = Engine::get().camera->get_projection();
+    // const auto view = get_engine().camera->get_view();
+    // const auto proj = get_engine().camera->get_projection();
     // const auto invview = glm::inverse(view);
     // const auto invproj = glm::inverse(proj);
 
     // static auto prev_view = view;
-    // if(true || glfwGetKey(Engine::get().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
+    // if(true || glfwGetKey(get_engine().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
 
     // ENG_ASSERT(false);
     //  GPUEngConstantsBuffer cb{
@@ -515,7 +525,7 @@ void Renderer::update()
     //      .inv_proj = invproj,
     //      .inv_proj_view = invview * invproj,
     //      //.rand_mat = rand_mat,
-    //      .cam_pos = Engine::get().camera->pos,
+    //      .cam_pos = get_engine().camera->pos,
 
     //    .output_mode = (uint32_t)debug_output,
     //    .fwdp_enable = (uint32_t)fwdp_enable,
@@ -542,11 +552,50 @@ void Renderer::update()
     //              PipelineAccess::NONE, ImageLayout::TRANSFER_DST, ImageLayout::PRESENT);
     // pf.cmdpool->end(cmd);
 
-    for(auto& pass : rgraph_passes)
+    // for(auto& pass : rgraph_passes)
+    //{
+    //     pass->on_render_graph(*rgraph);
+    // }
+
+    sstr->on_render_graph(*rgraph);
+
+    const auto& sstriangledata = rgraph->get_user_data<pass::SSTriangle::SSTrianglePass>("Draw triangle1");
+
+    const auto imdata = imgui_renderer->update(rgraph, [&](RGBuilder& builder) {
+        const auto txt = builder.sample_texture(sstriangledata.output);
+        ImGui::Begin("Main panel", 0, ImGuiWindowFlags_NoMove);
+        ImGui::Image(*builder.graph->get_img(txt), ImVec2{ 500, 500 });
+        ImGui::End();
+    });
+
+    struct CopySwapchainData
     {
-        pass->on_render_graph(*rgraph);
-    }
-    // imgui_renderer->update(rgraph, imgui_input);
+        RGAccessId input;
+        RGAccessId output;
+    };
+    const auto copyswapchaindata = rgraph->add_graphics_pass(
+        "copy to swapchain", RenderOrder::PRESENT,
+        [&](RGBuilder& pb) {
+            CopySwapchainData data;
+            data.input = pb.access_resource(imdata.output, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
+                                            PipelineAccess::TRANSFER_READ_BIT);
+            data.output = pb.import_resource(swapchain->get_image());
+            data.output = pb.access_resource(data.output, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
+                                             PipelineAccess::TRANSFER_WRITE_BIT);
+            return data;
+        },
+        [](RGBuilder& pb, const CopySwapchainData& data) {
+            auto* cmd = pb.open_cmd_buf();
+            cmd->copy(pb.graph->get_img(data.output).get(), pb.graph->get_img(data.input).get());
+        });
+
+    rgraph->add_graphics_pass(
+        "present swapchain", RenderOrder::PRESENT,
+        [&](RGBuilder& pb) {
+            pb.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::TRANSFER_WRITE_BIT);
+        },
+        [](RGBuilder& pb) {});
+
     rgraph->compile();
 
     Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
@@ -564,7 +613,7 @@ void Renderer::update()
 // void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd)
 //{
 //  ENG_ASSERT(false);
-//   auto* ew = Engine::get().window;
+//   auto* ew = get_engine().window;
 //   auto& pf = get_perframe();
 //   auto& rp = render_passes.at(pass);
 
@@ -578,8 +627,8 @@ void Renderer::update()
 //                                                   .imageLayout = to_vk(ImageLayout::ATTACHMENT),
 //                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 //                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
-// VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
-// VkRect2D vksciss{ {}, { (uint32_t)Engine::get().window->width, (uint32_t)Engine::get().window->height } };
+// VkViewport vkview{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
+// VkRect2D vksciss{ {}, { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
 // const auto vkreninfo = Vks(VkRenderingInfo{
 //     .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
 
@@ -605,7 +654,7 @@ void Renderer::build_renderpasses()
 {
     const auto clear_pass = [this](RenderPassType passtype) { render_passes[(int)passtype].clear(); };
     const auto add_meshes_to_passes = [this](RenderPassType passtype) {
-        Engine::get().ecs->iterate_over_components<ecs::Mesh>([this, passtype](ecs::EntityId eid, const ecs::Mesh& mesh) {
+        get_engine().ecs->iterate_over_components<ecs::Mesh>([this, passtype](ecs::EntityId eid, const ecs::Mesh& mesh) {
             for(auto meshh : mesh.render_meshes)
             {
                 if(!meshh)
@@ -810,7 +859,7 @@ Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
         ENG_ERROR("Unrecognized shader extension: {}", ext.string());
         return {};
     }
-    Shader shader{ eng::paths::canonize_path(eng::paths::SHADERS_DIR / path), stage };
+    Shader shader{ eng::paths::SHADERS_DIR / path, stage };
     const auto found_handle = shaders.find(shader);
     if(!found_handle) { backend->make_shader(shader); }
     auto it = shaders.insert(std::move(shader));
@@ -1108,13 +1157,13 @@ void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
     ENG_ASSERT(verts.size() > geometry.size() && verts.size() % 2 == 0);
     if(!vpos_buf)
     {
-        vpos_buf = Engine::get().renderer->make_buffer("debug verts", Buffer::init(verts.size() * sizeof(verts[0]),
-                                                                                   BufferUsage::STORAGE_BIT));
+        vpos_buf = get_engine().renderer->make_buffer("debug verts", Buffer::init(verts.size() * sizeof(verts[0]),
+                                                                                  BufferUsage::STORAGE_BIT));
     }
 
     ENG_ASSERT(false);
-    // Engine::get().renderer->sbuf->copy(vpos_buf, verts, 0);
-    // Engine::get().renderer->sbuf->flush()->wait_cpu(~0ull);
+    // get_engine().renderer->sbuf->copy(vpos_buf, verts, 0);
+    // get_engine().renderer->sbuf->flush()->wait_cpu(~0ull);
 
     ENG_ASSERT(false);
     // cmd->bind_resource(1, vpos_buf);
