@@ -128,7 +128,7 @@ add_executable(eng
     "eng/to_string.cpp" 
 
     "eng/physics/bvh.cpp"
- "eng/ui/ui.cpp")
+ "eng/ui/ui.cpp" "eng/renderer/passes/renderpass.cpp")
 
 target_include_directories(eng 
 	PRIVATE 

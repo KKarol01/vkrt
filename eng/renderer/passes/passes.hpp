@@ -123,10 +123,9 @@ class SSTriangle : public IPass
                 rp.draw.draw([&](const Renderer::IndirectDrawParams& params) {
                     cmd->bind_pipeline(pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(params.batch->indirect_buf.get(),
-                                                     params.batch->cmds_view.range.offset + params.draw->first_command * cmdsize,
-                                                     params.batch->indirect_buf.get(),
-                                                     params.draw->first_command * sizeof(uint32_t), params.max_draw_count, cmdsize);
+                    cmd->draw_indexed_indirect_count(rp.draw.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                     rp.draw.counts_view.buffer.get(), params.count_offset_bytes,
+                                                     params.max_draw_count, params.stride);
                 });
 
                 cmd->end_rendering();

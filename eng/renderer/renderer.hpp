@@ -15,6 +15,7 @@
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
+#include <eng/renderer/passes/renderpass.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/slotmap.hpp>
@@ -258,7 +259,6 @@ struct Mesh
     bool operator==(const Mesh& a) const { return geometry == a.geometry && material == a.material; }
     Handle<Geometry> geometry;
     Handle<Material> material;
-    uint32_t gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
 };
 
 struct Meshlet
@@ -646,54 +646,6 @@ class Renderer
   public:
     static inline uint32_t frame_delay = 2;
 
-    struct InstanceBatch
-    {
-        Handle<Pipeline> pipeline;
-        uint32_t instance_count;
-        uint32_t first_command;
-        uint32_t command_count;
-    };
-
-    struct IndirectBatch;
-    struct IndirectDrawParams
-    {
-        const IndirectBatch* batch{};
-        const InstanceBatch* draw{};
-        uint32_t max_draw_count{};
-    };
-
-    struct IndirectBatch
-    {
-        void draw(const Callback<void(const IndirectDrawParams&)>& draw_callback) const;
-        std::vector<InstanceBatch> batches;
-        Handle<Buffer> indirect_buf; // [counts..., commands...]
-        BufferView counts_view;
-        BufferView cmds_view;
-    };
-
-    struct MeshInstance
-    {
-        Handle<Geometry> geometry;
-        Handle<Material> material;
-        uint32_t instance_index;
-        uint32_t meshlet_index;
-    };
-
-    struct RenderPass
-    {
-        void clear()
-        {
-            // entities.clear();
-            mesh_instances.clear();
-            draw.batches.clear();
-        }
-        IndirectBatch draw;
-        Handle<Buffer> instance_buffer;
-        BufferView instance_view;
-        // std::vector<ecs::EntityId> entities;
-        std::vector<MeshInstance> mesh_instances;
-    };
-
     struct GBuffer
     {
         Handle<Image> color;
@@ -769,7 +721,6 @@ class Renderer
     // void init_rgraph_passes();
 
     void update();
-    void build_renderpasses();
     void render_debug(const DebugGeometry& geom);
 
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
@@ -847,8 +798,8 @@ class Renderer
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
-    SlotAllocator<uint32_t> gpu_resource_allocator;
-    SlotAllocator<uint32_t> gpu_light_allocator;
+    SlotAllocator<uint32_t, eng::slots_not_versioned_tag> gpu_resource_allocator;
+    SlotAllocator<uint32_t, eng::slots_not_versioned_tag> gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
     Handle<Pipeline> default_unlit_pipeline;

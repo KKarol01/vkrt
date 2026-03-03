@@ -370,6 +370,7 @@ struct SyncCreateInfo;
 struct Sync;
 class SubmitQueue;
 
+class RenderPass;
 class ImGuiRenderer;
 class BindlessPool;
 class StagingBuffer;
