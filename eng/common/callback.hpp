@@ -22,7 +22,7 @@ template <typename Func> class Signal
     {
         for(const auto& e : callbacks)
         {
-            e(std::forward<decltype(args)>(args)...);
+            std::invoke(e, std::forward<decltype(args)>(args)...);
         }
     }
     size_t size() const { return callbacks.size(); }

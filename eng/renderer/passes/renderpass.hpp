@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <eng/renderer/renderer_fwd.hpp>
+#include <eng/common/callback.hpp>
 
 namespace eng
 {
@@ -37,25 +38,7 @@ struct IndirectDrawParams
 
 struct IndirectBatch
 {
-    void draw(const auto& draw_callback) const
-    {
-        size_t cmdoffacc = 0;
-        for(auto i = 0u; i < batches.size(); ++i)
-        {
-            const auto& batch = batches[i];
-            const auto cntoff = sizeof(uint32_t) * i;
-            const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
-            const auto cmdoff = cmdsize * cmdoffacc + cmds_view.range.offset;
-            draw_callback(IndirectDrawParams{
-                .draw = &batch,
-                .max_draw_count = batch.command_count,
-                .stride = cmdsize,
-                .command_offset_bytes = cmdoff,
-                .count_offset_bytes = cntoff,
-            });
-            cmdoffacc += batch.command_count;
-        }
-    }
+    void draw(const Callback<void(const IndirectDrawParams&)>& draw_callback) const;
     std::vector<InstanceBatch> batches;
     Handle<Buffer> indirect_buf; // [counts..., commands...]
     BufferView counts_view;

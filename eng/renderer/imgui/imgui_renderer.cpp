@@ -55,29 +55,26 @@ void ImGuiRenderer::init()
     index_buffer = r.make_buffer("imgui index buffer", Buffer::init(1024 * 1024, BufferUsage::INDEX_BIT));
 }
 
-ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph, const Callback<void(RGBuilder&)>& draw_callback)
+ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
 
-    const auto impassdata = graph->add_graphics_pass(
-        "imgui", RenderOrder::PRESENT,
-        [this, &draw_callback](RGBuilder& builder) {
+    const auto& impassdata = graph->add_graphics_pass<ImPassData>(
+        "imgui", RenderOrder::UI,
+        [this](RGBuilder& builder, ImPassData& data) {
             auto& r = get_renderer();
 
-            ImPassData data{};
-
-            ui_callbacks.signal();
-            draw_callback(builder);
+            ui_callbacks.signal(builder);
 
             ImGui::Render();
 
             ImDrawData* draw_data = ImGui::GetDrawData();
-            if(!draw_data) { return data; }
+            if(!draw_data) { return; }
             int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
             int fb_height = (int)(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
-            if(fb_width <= 0 || fb_height <= 0) { return data; }
+            if(fb_width <= 0 || fb_height <= 0) { return; }
             if(draw_data->Textures != nullptr)
             {
                 for(ImTextureData* tex : *draw_data->Textures)
@@ -102,8 +99,6 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph, const Call
             data.output = builder.create_resource("imgui output", Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB,
                                                                               ImageUsage::COLOR_ATTACHMENT_BIT));
             data.output = builder.access_color(data.output);
-
-            return data;
         },
         [this](RGBuilder& builder, const ImPassData& data) {
             auto& r = get_renderer();
@@ -111,7 +106,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph, const Call
             cmd->wait_sync(r.staging->get_wait_sem());
             ImDrawData* draw_data = ImGui::GetDrawData();
 
-            const auto& img = builder.graph->get_res(data.output).as_image().get();
+            const auto& img = builder.graph->get_img(data.output).get();
 
             VkRenderingAttachmentInfo r_col_atts[]{
                 Vks(VkRenderingAttachmentInfo{

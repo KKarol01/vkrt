@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <eng/common/callback.hpp>
 #include <eng/common/indexed_hierarchy.hpp>
+#include <eng/renderer/rendergraph.hpp>
 #include <eng/engine.hpp>
 
 namespace eng
@@ -56,7 +57,7 @@ class UI
 
     void dock_window(WindowId window, uint32_t* dock_id);
 
-    void draw();
+    void draw(gfx::RGBuilder& b);
 
     SceneUI sceneui;
 

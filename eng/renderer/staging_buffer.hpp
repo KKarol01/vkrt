@@ -48,7 +48,7 @@ class StagingBuffer
   public:
     void init(SubmitQueue* queue);
     // Flushes pending transactions and optionally notifies supplied sync.
-    Sync* flush(Sync* signal_sync);
+    Sync* flush(Sync* signal_sync = nullptr);
     // Flushes pending transactions and waits for completions of all submissions.
     void reset();
 

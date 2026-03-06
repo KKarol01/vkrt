@@ -22,13 +22,13 @@ class ImGuiRenderer
 
   public:
     void init();
-    ImPassData update(RGRenderGraph* graph, const Callback<void(RGBuilder&)>& draw_callback);
+    ImPassData update(RGRenderGraph* graph);
 
   private:
     void handle_imtexture(ImTextureData* imtex);
 
   public:
-    Signal<void()> ui_callbacks;
+    Signal<void(RGBuilder&)> ui_callbacks;
 
   private:
     Handle<Pipeline> pipeline;

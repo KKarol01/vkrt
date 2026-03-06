@@ -60,76 +60,7 @@ class SSTriangle : public IPass
 
     void on_render_graph(RGRenderGraph& graph) override
     {
-        auto dt1 = graph.add_graphics_pass(
-            "Draw triangle1", RenderOrder::DEFAULT_UNLIT,
-            [this](RGBuilder& pb) {
-                auto* w = get_engine().window;
-                SSTrianglePass data;
-                data.output = pb.create_resource("sstriangle output",
-                                                 Image::init(w->width, w->height, 1, ImageFormat::R8G8B8A8_SRGB,
-                                                             ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT));
-                data.output = pb.access_color(data.output);
 
-                RenderPassType rpt{ RenderPassType::FORWARD };
-                const auto& rp = get_renderer().render_passes[(int)rpt];
-
-                data.indirect_buffer = pb.import_resource(rp.draw.indirect_buf);
-                data.instance_buffer = pb.import_resource(rp.instance_buffer);
-
-                data.constants_buffer =
-                    pb.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
-
-                return data;
-            },
-            [this](RGBuilder& pb, const SSTrianglePass& data) {
-                const auto* w = get_engine().window;
-                auto* cmd = pb.open_cmd_buf();
-                const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
-                    .imageView = pb.graph->get_acc(data.output).image_view.get_md().vk->view,
-                    .imageLayout = to_vk(pb.graph->get_acc(data.output).layout),
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } },
-                }) };
-                const auto vkrinfo = Vks(VkRenderingInfo{
-                    .renderArea = { .offset = {},
-                                    .extent = { pb.graph->get_img(data.output)->width, pb.graph->get_img(data.output)->height } },
-                    .layerCount = 1,
-                    .colorAttachmentCount = 1,
-                    .pColorAttachments = vkcols,
-                });
-                VkViewport viewport{ 0.0, 0.0, w->width, w->height, 1.0, 0.0 };
-                VkRect2D scissor{ {}, { (uint32_t)w->width, (uint32_t)w->height } };
-                cmd->begin_rendering(vkrinfo);
-                cmd->set_viewports(&viewport, 1);
-                cmd->set_scissors(&scissor, 1);
-
-                RenderPassType rpt{ RenderPassType::FORWARD };
-                const auto& rp = get_renderer().render_passes[(int)rpt];
-                const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
-
-                auto* c = get_engine().camera;
-                GPUEngConstantsBuffer constants{
-                    .proj_view = c->get_projection() * c->get_view(),
-                };
-                get_renderer().staging->copy(get_renderer().rgraph->get_buf(data.constants_buffer), &constants, 0ull,
-                                             sizeof(constants), false);
-                cmd->wait_sync(get_renderer().staging->flush(nullptr)); // wait for constants buffer upload
-                cmd->bind_pipeline(pipeline.get());
-                DescriptorResource shaderresources[]{ DescriptorResource::as_storage(0, pb.graph->get_buf(data.constants_buffer)),
-                                                      DescriptorResource::as_storage(1, get_renderer().bufs.positions) };
-                cmd->bind_set(0, shaderresources);
-                ((CommandBufferVk*)cmd)->descriptor_allocator->flush((CommandBufferVk*)cmd);
-                rp.draw.draw([&](const Renderer::IndirectDrawParams& params) {
-                    cmd->bind_pipeline(pipeline.get());
-                    cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(rp.draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     rp.draw.counts_view.buffer.get(), params.count_offset_bytes,
-                                                     params.max_draw_count, params.stride);
-                });
-
-                cmd->end_rendering();
-            });
     }
 
     Handle<Pipeline> pipeline;

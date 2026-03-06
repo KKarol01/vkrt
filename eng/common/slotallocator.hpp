@@ -12,12 +12,11 @@ namespace eng
 struct slots_versioned_tag;
 struct slots_not_versioned_tag;
 
-/*
- * Uses versioned index that has a version (generation) and a index.
- * When erasing, returned index gets it's version incremented by 1 (with wraparound),
- * and gets added to the free list chain.
- * Any slot is valid if it's index corresponds to the slot's place in the array.
- */
+
+// Uses versioned index that has a version (generation) and a index.
+// When erasing, returned index gets it's version incremented by 1 (with wraparound),
+// and gets added to the free list chain.
+// Any slot is valid if it's index corresponds to the slot's place in the array.
 template <typename Storage = uint32_t, typename Versioning = slots_versioned_tag> struct SlotAllocator
 {
     struct slot_t;

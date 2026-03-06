@@ -64,7 +64,7 @@ void Renderer::init(IRendererBackend* backend)
 
     get_engine().ecs->register_callbacks<ecs::Mesh>([this](ecs::EntityId e) {
         auto& ecs = *get_engine().ecs;
-        auto& mesh = get_engine().ecs->get<ecs::Mesh>(e);
+        auto& mesh = ecs.get<ecs::Mesh>(e);
         if(mesh.gpu_resource == ~0u)
         {
             mesh.gpu_resource = *gpu_resource_allocator.allocate();
@@ -81,6 +81,13 @@ void Renderer::init(IRendererBackend* backend)
             }
         }
     });
+
+    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
+    {
+        RenderPass rp{};
+        rp.type = (RenderPassType)i;
+        render_passes[i] = rp;
+    }
 
     // get_engine().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::EntityId eid) { instance_entity(eid); },
     //                                                                  [this](ecs::EntityId eid, ecs::Signature comp) {
@@ -283,28 +290,11 @@ void Renderer::init_perframes()
     for(auto i = 0u; i < frame_delay; ++i)
     {
         auto& pf = perframe[i];
-        // auto& gb = pf.gbuffer;
-        // gb.color = make_image(ImageDescriptor{
-        //     .name = ENG_FMT("gcolor{}", i),
-        //     .width = (uint32_t)ew->width,
-        //     .height = (uint32_t)ew->height,
-        //     .format = ImageFormat::R8G8B8A8_SRGB,
-        //     .usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT,
-        // });
-        // gb.depth = make_image(ImageDescriptor{
-        //     .name = ENG_FMT("gdepth{}", i),
-        //     .width = (uint32_t)ew->width,
-        //     .height = (uint32_t)ew->height,
-        //     .format = ImageFormat::D32_SFLOAT,
-        //     .usage = ImageUsage::DEPTH_BIT | ImageUsage::TRANSFER_RW | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT,
-        // });
         pf.cmdpool = gq->make_command_pool();
         pf.acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
         pf.ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
         pf.ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
-        pf.constants =
-            make_buffer(ENG_FMT("constants_{}", i), Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
     }
 }
 
@@ -450,11 +440,6 @@ void Renderer::update()
         pf.retired_resources.erase(pf.retired_resources.begin(), remove_until);
     }
 
-    for(auto& rp : render_passes)
-    {
-        rp.build();
-    }
-
     if(new_shaders.size())
     {
         for(auto& e : new_shaders)
@@ -520,54 +505,7 @@ void Renderer::update()
         //  new_lights.clear();
     }
 
-    // const auto view = get_engine().camera->get_view();
-    // const auto proj = get_engine().camera->get_projection();
-    // const auto invview = glm::inverse(view);
-    // const auto invproj = glm::inverse(proj);
-
-    // static auto prev_view = view;
-    // if(true || glfwGetKey(get_engine().window->window, GLFW_KEY_EQUAL) == GLFW_PRESS) { prev_view = view; }
-
-    sstr->on_render_graph(*rgraph);
-
-    const auto& sstriangledata = rgraph->get_user_data<pass::SSTriangle::SSTrianglePass>("Draw triangle1");
-
-    const auto imdata = imgui_renderer->update(rgraph, [&](RGBuilder& builder) {
-        const auto txt = builder.sample_texture(sstriangledata.output);
-        ImGui::Begin("Main panel", 0, ImGuiWindowFlags_NoMove);
-        ImGui::Image(*builder.graph->get_img(txt), ImVec2{ 500, 500 });
-        ImGui::End();
-    });
-
-    struct CopySwapchainData
-    {
-        RGAccessId input;
-        RGAccessId output;
-    };
-    const auto copyswapchaindata = rgraph->add_graphics_pass(
-        "copy to swapchain", RenderOrder::PRESENT,
-        [&](RGBuilder& pb) {
-            CopySwapchainData data;
-            data.input = pb.access_resource(imdata.output, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
-                                            PipelineAccess::TRANSFER_READ_BIT);
-            data.output = pb.import_resource(swapchain->get_image());
-            data.output = pb.access_resource(data.output, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
-                                             PipelineAccess::TRANSFER_WRITE_BIT);
-            return data;
-        },
-        [](RGBuilder& pb, const CopySwapchainData& data) {
-            auto* cmd = pb.open_cmd_buf();
-            cmd->copy(pb.graph->get_img(data.output).get(), pb.graph->get_img(data.input).get());
-        });
-
-    rgraph->add_graphics_pass(
-        "present swapchain", RenderOrder::PRESENT,
-        [&](RGBuilder& pb) {
-            pb.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::TRANSFER_WRITE_BIT);
-        },
-        [](RGBuilder& pb) {});
-
-    rgraph->compile();
+    compile_rendergraph();
 
     Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
@@ -577,8 +515,131 @@ void Renderer::update()
 
     gq->wait_sync(rgsync).with_cmd_buf(cmd).signal_sync(pf.swp_sem).signal_sync(pf.ren_fen).submit();
     gq->wait_sync(pf.swp_sem).present(swapchain);
-    // gq->wait_idle();
     ++current_frame;
+}
+
+void Renderer::compile_rendergraph()
+{
+    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
+    {
+        render_passes[i].build();
+    }
+
+    auto& pf = get_framedata();
+    pf.render_targets = rgraph->add_graphics_pass<RenderTargets>(
+        "Setup render targets", RenderOrder::SETUP_TARGETS,
+        [this](RGBuilder& builder, RenderTargets& rt) {
+            const auto resolution = settings.render_resolution;
+            const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT;
+
+            RGAccessId res;
+            res = builder.create_resource("Color", Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
+                                          false, RGClear::color({ 0.0f, 0.0f, 0.0f, 1.0f }));
+            rt.color[0] = builder.graph->get_res_id(res);
+
+            res = builder.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
+            res = builder.write_buffer(res);
+            rt.constants = builder.graph->get_res_id(res);
+        },
+        [](RGBuilder& b, const RenderTargets& rt) {
+            auto* c = get_engine().camera;
+            GPUEngConstantsBuffer constants_buffer{
+                .proj_view = c->get_projection() * c->get_view(),
+            };
+            auto* cmd = b.open_cmd_buf();
+            get_renderer().staging->copy(get_renderer().rgraph->get_buf(rt.constants), &constants_buffer, 0ull,
+                                         sizeof(constants_buffer), false);
+            cmd->wait_sync(get_renderer().staging->flush());
+        });
+
+    for(auto i = 0u; i < 1; ++i)
+    {
+        RenderPassType type = (RenderPassType)i;
+        const auto name = ENG_FMT("DrawMaterial{}", i);
+        rgraph->add_graphics_pass<RGAccessId>(
+            name.c_str(), RenderOrder::DEFAULT_UNLIT,
+            [this, i](RGBuilder& pb, RGAccessId& output) {
+                auto* w = get_engine().window;
+                const auto& rp = get_renderer().render_passes[i];
+
+                auto res = pb.import_resource(rp.draw.indirect_buf);
+                pb.access_resource(res, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+                res = pb.import_resource(rp.instance_buffer);
+                pb.read_buffer(res);
+
+                output = pb.access_color(pb.graph->get_acc(get_framedata().render_targets.color[0]));
+                pb.read_buffer(pb.graph->get_acc(get_framedata().render_targets.constants));
+            },
+            [this, i](RGBuilder& pb, const RGAccessId& output) {
+                const auto* w = get_engine().window;
+                auto* cmd = pb.open_cmd_buf();
+                const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
+                    .imageView = pb.graph->get_acc(output).image_view.get_md().vk->view,
+                    .imageLayout = to_vk(pb.graph->get_acc(output).layout),
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } },
+                }) };
+                const auto vkrinfo = Vks(VkRenderingInfo{
+                    .renderArea = { .offset = {},
+                                    .extent = { pb.graph->get_img(output)->width, pb.graph->get_img(output)->height } },
+                    .layerCount = 1,
+                    .colorAttachmentCount = 1,
+                    .pColorAttachments = vkcols,
+                });
+                VkViewport viewport{ 0.0, 0.0, w->width, w->height, 1.0, 0.0 };
+                VkRect2D scissor{ {}, { (uint32_t)w->width, (uint32_t)w->height } };
+                cmd->begin_rendering(vkrinfo);
+                cmd->set_viewports(&viewport, 1);
+                cmd->set_scissors(&scissor, 1);
+
+                const auto& rp = get_renderer().render_passes[i];
+                DescriptorResource shaderresources[]{
+                    DescriptorResource::as_storage(0, pb.graph->get_buf(get_framedata().render_targets.constants)),
+                    DescriptorResource::as_storage(1, get_renderer().bufs.positions)
+                };
+                cmd->bind_set(0, shaderresources);
+                rp.draw.draw([&](const IndirectDrawParams& params) {
+                    cmd->bind_pipeline(params.draw->pipeline.get());
+                    cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
+                    cmd->draw_indexed_indirect_count(rp.draw.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                     rp.draw.counts_view.buffer.get(), params.count_offset_bytes,
+                                                     params.max_draw_count, params.stride);
+                });
+
+                cmd->end_rendering();
+            });
+    }
+
+    const auto imdata = imgui_renderer->update(rgraph);
+
+    struct CopySwapchainData
+    {
+        RGAccessId input;
+        RGAccessId output;
+    };
+    const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
+        "copy to swapchain", RenderOrder::PRESENT,
+        [this, imdata](RGBuilder& pb, CopySwapchainData& data) {
+            data.input = pb.access_resource(imdata.output, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
+                                            PipelineAccess::TRANSFER_READ_BIT);
+            data.output = pb.import_resource(swapchain->get_image());
+            data.output = pb.access_resource(data.output, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
+                                             PipelineAccess::TRANSFER_WRITE_BIT);
+        },
+        [](RGBuilder& pb, const CopySwapchainData& data) {
+            auto* cmd = pb.open_cmd_buf();
+            cmd->copy(pb.graph->get_img(data.output).get(), pb.graph->get_img(data.input).get());
+        });
+    rgraph->add_graphics_pass<RGAccessId>(
+        "present swapchain", RenderOrder::PRESENT,
+        [copyswapchaindata](RGBuilder& pb, RGAccessId& output) {
+            output = pb.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL,
+                                        PipelineAccess::TRANSFER_WRITE_BIT);
+        },
+        [](RGBuilder& pb, auto& data) {});
+
+    rgraph->compile();
 }
 
 // void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd)
@@ -813,7 +874,6 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
 
     const auto vx_size = get_vertex_layout_size(batch.vertex_layout);
     const auto vx_count = get_vertex_count(batch.vertices, batch.vertex_layout);
-    const auto pos_size = get_vertex_component_size(VertexComponent::POSITION_BIT);
     const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vxs.data(), mlt_ids.data(), indices.data(), indices.size(),
                                               batch.vertices.data(), vx_count, vx_size, max_verts, max_tris, cone_weight);
     const auto& last_mlt = mlts.at(mltcnt - 1);
@@ -884,7 +944,6 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
     }
 
     auto dsth = make_buffer(buffer_names[*handle], Buffer::init(new_size, handle->usage));
-    auto& dst = dsth.get();
     if(copy_data) { staging->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
     destroy_buffer(handle);
     handle = dsth;

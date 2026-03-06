@@ -39,15 +39,14 @@ void RenderPass::build()
         return std::tie(a.material, a.meshlet_index) < std::tie(b.material, b.meshlet_index);
     });
 
-    Handle<Pipeline> prev_pipeline;
-    uint32_t prev_meshlet = ~0u;
-
     std::vector<GPUInstanceId> insts;
     std::vector<IndexedIndirectDrawCommand> cmds;
     std::vector<uint32_t> counts;
     insts.reserve(mesh_instances.size());
     cmds.reserve(mesh_instances.size());
     counts.reserve(mesh_instances.size());
+    Handle<Pipeline> prev_pipeline;
+    uint32_t prev_meshlet = ~0u;
     for(auto i = 0u; i < mesh_instances.size(); ++i)
     {
         const auto& inst = mesh_instances[i];
@@ -110,6 +109,27 @@ void RenderPass::add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh)
     mi.material = m.material;
     mi.geometry = m.geometry;
     mi.instance_index = instance_index;
+    meshes.push_back(mi);
+}
+
+void IndirectBatch::draw(const Callback<void(const IndirectDrawParams&)>& draw_callback) const
+{
+    size_t cmdoffacc = 0;
+    for(auto i = 0u; i < batches.size(); ++i)
+    {
+        const auto& batch = batches[i];
+        const auto cntoff = sizeof(uint32_t) * i;
+        const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
+        const auto cmdoff = cmdsize * cmdoffacc + cmds_view.range.offset;
+        draw_callback(IndirectDrawParams{
+            .draw = &batch,
+            .max_draw_count = batch.command_count,
+            .stride = cmdsize,
+            .command_offset_bytes = cmdoff,
+            .count_offset_bytes = cntoff,
+        });
+        cmdoffacc += batch.command_count;
+    }
 }
 
 } // namespace gfx

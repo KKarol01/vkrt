@@ -161,7 +161,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
 {
     const auto& buf = view.buffer.get();
     auto [it, success] = buffer_views.emplace(view.buffer, Views{ .vkbuffer = buf.md.as_vk()->buffer });
-    auto& views = buffer_views[view.buffer];
+    auto& views = it->second;
     if(views.vkbuffer != buf.md.as_vk()->buffer)
     {
         views.vkbuffer = buf.md.as_vk()->buffer;

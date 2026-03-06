@@ -145,7 +145,7 @@ void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
     const auto& md = *pipeline.md.vk;
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
-    rebind_desc_sets = true;
+    // rebind_desc_sets = true;
 }
 
 void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
@@ -165,9 +165,8 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
 
 void CommandBufferVk::bind_set(uint32_t slot, std::span<DescriptorResource> resources)
 {
-    ENG_ASSERT(current_pipeline && current_pipeline->info.layout);
     rebind_desc_sets = true;
-    descriptor_allocator->bind_set(slot, resources, current_pipeline->info.layout.get());
+    descs_to_bind[slot] = resources;
 }
 
 void CommandBufferVk::push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range)
@@ -193,6 +192,14 @@ void CommandBufferVk::before_draw_dispatch()
 {
     if(rebind_desc_sets)
     {
+        for(auto i = 0u; i < descs_to_bind.size(); ++i)
+        {
+            if(descs_to_bind[i].size())
+            {
+                descriptor_allocator->bind_set(i, descs_to_bind[i], current_pipeline->info.layout.get());
+            }
+            descs_to_bind[i] = {};
+        }
         descriptor_allocator->flush(this);
         rebind_desc_sets = false;
     }

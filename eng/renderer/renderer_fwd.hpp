@@ -370,7 +370,6 @@ struct SyncCreateInfo;
 struct Sync;
 class SubmitQueue;
 
-class RenderPass;
 class ImGuiRenderer;
 class BindlessPool;
 class StagingBuffer;
@@ -385,10 +384,22 @@ struct DescriptorSetMetadataVk;
 struct PipelineLayoutMetadataVk;
 struct SamplerMetadataVk;
 struct BufferMetadataVk;
-class RGRenderGraph;
 struct IDescriptorSetAllocator;
 class ICommandPool;
 class ICommandBuffer;
+
+class RGRenderGraph;
+struct RGResource;
+struct RGAccess;
+struct RGBuilder;
+using RGResourceId = Handle<RGResource>;
+using RGAccessId = Handle<RGAccess>;
+
+struct MeshInstance;
+struct InstanceBatch;
+struct IndirectDrawParams;
+struct IndirectBatch;
+class RenderPass;
 
 namespace pass
 {

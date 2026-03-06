@@ -107,6 +107,7 @@ struct PushRange
 
 struct PipelineLayout
 {
+    inline static constexpr uint32_t MAX_SETS = 4u;
     inline static Handle<PipelineLayout> common_layout;
     bool operator==(const PipelineLayout& a) const { return layout == a.layout && push_range == a.push_range; }
     bool is_compatible(const PipelineLayout& a) const;
@@ -304,9 +305,10 @@ struct Buffer
 struct Image
 {
     static Image init(uint32_t width, uint32_t height, ImageFormat format, Flags<ImageUsage> usage,
-                      ImageLayout layout = ImageLayout::UNDEFINED)
+                      ImageLayout layout = ImageLayout::UNDEFINED, uint32_t mips = 1)
     {
-        return init(width, height, 1, format, usage, (uint32_t)(std::log2f((float)std::min(width, height)) + 1), 1, layout);
+        mips = mips == ~0u ? (uint32_t)(std::log2f((float)std::min(width, height)) + 1) : mips;
+        return init(width, height, 1, format, usage, mips, 1, layout);
     }
     static Image init(uint32_t width, uint32_t height, uint32_t depth, ImageFormat format, Flags<ImageUsage> usage,
                       uint32_t mips = 1, uint32_t layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
@@ -628,6 +630,13 @@ enum class SubmitFlags : uint32_t
 {
 };
 
+struct RenderTargets
+{
+    RGResourceId constants;
+    RGResourceId color[3];
+    RGResourceId depth;
+};
+
 // Used for adding passes to the render graph.
 // Essentially divides vector of render passes into segments
 // or partitions, and using the constants from this namespace
@@ -636,6 +645,7 @@ enum class SubmitFlags : uint32_t
 // from one segment BEFORE adding anything ordered after.
 namespace RenderOrder
 {
+inline constexpr uint32_t SETUP_TARGETS = 90;
 inline constexpr uint32_t DEFAULT_UNLIT = 100;
 inline constexpr uint32_t UI = 200;
 inline constexpr uint32_t PRESENT = 300;
@@ -646,24 +656,15 @@ class Renderer
   public:
     static inline uint32_t frame_delay = 2;
 
-    struct GBuffer
-    {
-        Handle<Image> color;
-        Handle<Image> depth;
-        // Handle<Image> hiz_pyramid;
-        // Handle<Image> hiz_debug_output;
-    };
-
     struct FrameData
     {
-        GBuffer gbuffer;
-
-        CommandPoolVk* cmdpool{};
+        ICommandPool* cmdpool{};
         Sync* acq_sem{};
         Sync* ren_sem{};
         Sync* swp_sem{};
         Sync* ren_fen{};
-        Handle<Buffer> constants{};
+
+        RenderTargets render_targets;
 
         struct RetiredResource
         {
@@ -709,6 +710,7 @@ class Renderer
 
     struct Settings
     {
+        ImageFormat color_format{ ImageFormat::R8G8B8A8_SRGB };
         Vec2f render_resolution{};
         Vec2f present_resolution{};
     };
@@ -721,6 +723,7 @@ class Renderer
     // void init_rgraph_passes();
 
     void update();
+    void compile_rendergraph();
     void render_debug(const DebugGeometry& geom);
 
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
@@ -735,7 +738,6 @@ class Renderer
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Sync* make_sync(const SyncCreateInfo& info);
     void destroy_sync(Sync* sync);
-    // Handle<Texture> make_texture(const TextureDescriptor& info);
     Handle<Material> make_material(const MaterialDescriptor& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
     static void meshletize_geometry(const GeometryDescriptor& info, std::vector<float>& out_vertices,

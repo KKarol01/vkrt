@@ -14,6 +14,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/math/align.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/renderer/renderer_vulkan.hpp>
 #include <eng/string/stack_string.hpp>
 
@@ -97,19 +98,8 @@ class GPUTransientAllocator
     size_t last_alloc_frame{ 0 };
 };
 
-class RGRenderGraph;
-struct RGResource;
-struct RGAccess;
-struct RGBuilder;
-
-using RGResourceId = Handle<RGResource>;
-using RGAccessId = Handle<RGAccess>;
-
 struct RGPass
 {
-    struct no_exec_func_tag
-    {
-    };
     using PassId = TypedId<RGPass, uint64_t>;
     using PassOrder = uint32_t;
     enum class Type
@@ -129,7 +119,6 @@ struct RGPass
     StackString<32> name;
     Type type{ Type::NONE };
     std::vector<RGAccessId> accesses;
-    // std::vector<std::pair<Handle<ResourceAccess>, Clear>> clears;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
 };
@@ -163,8 +152,14 @@ struct RGClear
     {
         glm::vec4 color;
     };
-    static RGClear color(const Color& c) { return RGClear{ c }; }
+    static RGClear color(std::array<float, 4> color)
+    {
+        return RGClear{ Color{ glm::vec4{ color[0], color[1], color[2], color[3] } } };
+    }
     static RGClear depth_stencil(const DepthStencil& c) { return RGClear{ c }; }
+    bool is_color() const { return value.index() == 0; }
+    Color get_color() const { return std::get<0>(value); }
+    DepthStencil get_ds() const { return std::get<1>(value); }
     std::variant<Color, DepthStencil> value;
 };
 
@@ -181,6 +176,7 @@ struct RGResource
     bool is_persistent{};
     bool is_imported{};
     void* alloc{}; // from transient allocator if not persistent
+    std::optional<RGClear> clear;
 };
 
 struct RGAccess
@@ -188,7 +184,7 @@ struct RGAccess
     bool is_read() const { return (access & PipelineAccess::READS).any(); }
     bool is_write() const { return (access & PipelineAccess::WRITES).any(); }
     // note: this might prove to be problematic if some resources will actually need to use none/none (
-    bool is_import_only() const { return !prev_access; }
+    bool is_first_access() const { return !prev_access; }
     RGResourceId resource;
     RGAccessId prev_access;
     union {
@@ -290,14 +286,18 @@ struct RGBuilder
 
     RGAccessId write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
     {
-        const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
+        const auto stage = pass->is_graphics()  ? PipelineStage::ALL
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
         return access_resource(acc, stage, access, range);
     }
 
     RGAccessId read_write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
     {
-        const auto stage = pass->is_compute() ? PipelineStage::COMPUTE_BIT : PipelineStage::NONE;
+        const auto stage = pass->is_graphics()  ? PipelineStage::ALL
+                           : pass->is_compute() ? PipelineStage::COMPUTE_BIT
+                                                : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
         return access_resource(acc, stage, access, range);
     }
@@ -325,10 +325,14 @@ class RGRenderGraph
 
     // utility funcs for easy access to resources
     RGAccess& get_acc(RGAccessId a) { return accesses[*a]; }
+    RGAccessId get_acc(RGResourceId a) { return get_res(a).last_access; }
     RGResource& get_res(RGResourceId a) { return resources[*a]; }
     RGResource& get_res(RGAccessId a) { return resources[*get_acc(a).resource]; }
+    RGResourceId get_res_id(RGAccessId a) { return get_acc(a).resource; }
     Handle<Buffer> get_buf(RGAccessId a) { return get_res(a).as_buffer(); }
+    Handle<Buffer> get_buf(RGResourceId a) { return get_res(a).as_buffer(); }
     Handle<Image> get_img(RGAccessId a) { return get_res(a).as_image(); }
+    Handle<Image> get_img(RGResourceId a) { return get_res(a).as_image(); }
 
     void init(Renderer* r)
     {
@@ -342,8 +346,9 @@ class RGRenderGraph
         });
     }
 
-    template <typename SetupFunc, typename ExecFunc, typename UserType = std::invoke_result_t<SetupFunc, RGBuilder&>>
-    UserType add_pass(const char* name, RGPass::PassOrder order, RGPass::Type type, const SetupFunc& setup_func, const ExecFunc& exec_func)
+    template <typename UserType, typename SetupFunc, typename ExecFunc>
+    const UserType& add_pass(const char* name, RGPass::PassOrder order, RGPass::Type type, const SetupFunc& setup_func,
+                             const ExecFunc& exec_func)
     {
         OrderedPass op{};
         op.pass = std::make_unique<RGUserPass<UserType, ExecFunc>>(name, type, exec_func);
@@ -359,23 +364,23 @@ class RGRenderGraph
         RGBuilder pb{ &*it->pass, this };
         if constexpr(!std::is_same_v<UserType, void>)
         {
-            auto& user_data = get_user_data<UserType>(name);
-            user_data = setup_func(pb);
-            return user_data;
+            auto* user_data = static_cast<UserType*>(it->pass->get_user_data());
+            setup_func(pb, *user_data);
+            return (const UserType&)*user_data;
         }
         else { setup_func(pb); }
     }
 
-    template <typename SetupFunc, typename ExecFunc>
-    auto add_graphics_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
+    template <typename UserType, typename SetupFunc, typename ExecFunc>
+    const UserType& add_graphics_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        return add_pass(name, order, RGPass::Type::GRAPHICS, setup_func, exec_func);
+        return add_pass<UserType>(name, order, RGPass::Type::GRAPHICS, setup_func, exec_func);
     }
 
-    template <typename SetupFunc, typename ExecFunc>
-    auto add_compute_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
+    template <typename UserType, typename SetupFunc, typename ExecFunc>
+    const UserType& add_compute_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        return add_pass(name, order, RGPass::Type::COMPUTE, setup_func, exec_func);
+        return add_pass<UserType>(name, order, RGPass::Type::COMPUTE, setup_func, exec_func);
     }
 
     void compile()
@@ -385,7 +390,7 @@ class RGRenderGraph
                 return std::max(max, [this, &val] {
                     const auto& acc = get_acc(val);
                     // access just created the resource, we can start right away.
-                    if(acc.is_import_only()) { return 0u; }
+                    if(acc.is_first_access()) { return 0u; }
                     const auto& res = get_res(val);
                     // if current access is a write, we need to wait for previous reads and writes.
                     if(acc.is_write()) { return std::max(res.last_read_group + 1, res.last_write_group + 1); }
@@ -427,8 +432,20 @@ class RGRenderGraph
 
         // Allocate memory from transient allocator for resources to be used during execution
         std::set<RGResourceId> alive_res_set;
+        std::set<RGResourceId> res_to_remove;
+        const auto remove_unused_res = [this, &res_to_remove, &alive_res_set] {
+            for(auto e : res_to_remove)
+            {
+                auto& res = get_res(e);
+                alive_res_set.erase(e);
+                allocator.free(res.alloc);
+                res.alloc = nullptr;
+            }
+            res_to_remove.clear();
+        };
         for(auto& g : groups)
         {
+            remove_unused_res();
             for(auto* p : g.passes)
             {
                 for(const auto& ra : p->accesses)
@@ -439,12 +456,7 @@ class RGRenderGraph
                     auto insertion = alive_res_set.insert(acc.resource);
                     if(!insertion.second)
                     {
-                        if(res.last_access == ra)
-                        {
-                            alive_res_set.erase(acc.resource);
-                            allocator.free(res.alloc);
-                            res.alloc = nullptr;
-                        }
+                        if(res.last_access == ra) { res_to_remove.insert(acc.resource); }
                         continue;
                     }
                     // insertion happened, this resource has never had memory bound to it during this frame
@@ -470,12 +482,7 @@ class RGRenderGraph
                 }
             }
         }
-        for(const auto& rh : alive_res_set)
-        {
-            auto& res = get_res(rh);
-            allocator.free(res.alloc);
-            res.alloc = nullptr;
-        }
+        remove_unused_res();
     }
 
     Sync* execute(Sync** wait_syncs = nullptr, uint32_t wait_count = 0)
@@ -499,10 +506,30 @@ class RGRenderGraph
                 gstages |= p->stage_mask;
                 for(const auto pa : p->accesses)
                 {
-                    const auto& acc = get_acc(pa);
+                    auto& acc = get_acc(pa);
                     const auto& res = get_res(pa);
                     if(res.is_buffer()) { continue; }
-                    if(acc.is_import_only()) { continue; }
+                    if(acc.is_first_access())
+                    {
+                        if(res.clear)
+                        {
+                            if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
+                            if(res.clear->is_color())
+                            {
+                                acc.stage = PipelineStage::TRANSFER_BIT;
+                                acc.access = PipelineAccess::TRANSFER_WRITE_BIT;
+                                acc.layout = ImageLayout::TRANSFER_DST;
+                                const auto clear_color = res.clear->get_color().color;
+                                layout_cmd->barrier(res.as_image().get(), PipelineStage::NONE, PipelineAccess::NONE,
+                                                    PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
+                                                    ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
+                                layout_cmd->clear_color(res.as_image().get(), Color4f{ clear_color.x, clear_color.y,
+                                                                                       clear_color.z, clear_color.w });
+                            }
+                            else { ENG_ERROR(); }
+                        }
+                        continue;
+                    }
                     const auto& pacc = get_acc(acc.prev_access);
                     if(pacc.layout == acc.layout) { continue; }
                     if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
@@ -564,21 +591,7 @@ class RGRenderGraph
         }
     }
 
-    template <typename UserData> UserData& get_user_data(const char* passname)
-    {
-        const auto id = RGPass::PassId{ ENG_HASH_STR(passname) };
-        const auto it = namedpasses.find(id);
-        ENG_ASSERT(it != namedpasses.end());
-        return *static_cast<UserData*>(it->second->get_user_data());
-    }
-
-    template <typename UserData> const UserData& get_user_data(const char* passname) const
-    {
-        const auto id = RGPass::PassId{ ENG_HASH_STR(passname) };
-        const auto it = namedpasses.find(id);
-        ENG_ASSERT(it != namedpasses.end());
-        return *static_cast<const UserData*>(it->second->get_user_data());
-    }
+    // template <typename UserData> UserData* get_user_data() const { return *RGUserDataStoringPass<UserData>::ptr; }
 
     SubmitQueue* queue{};
     ICommandPool* cmd_pools[2]{};
@@ -589,8 +602,8 @@ class RGRenderGraph
     std::vector<RGResource> resources;
     std::vector<RGAccess> accesses;
     std::vector<OrderedPass> passes;
-    std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
     std::vector<ExecutionGroup> groups;
+    std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
 };
 
 inline bool GPUTransientAllocator::Bucket::is_free() const
@@ -755,10 +768,11 @@ inline void GPUTransientAllocator::defragment()
 inline RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
 {
     ENG_ASSERT(!clear);
+    const auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
     graph->resources.push_back(resource);
     const auto ret = add_access(RGAccess{
         .resource = RGResourceId{ (uint32_t)graph->resources.size() - 1 },
-        .layout = ImageLayout::UNDEFINED,
+        .layout = layout,
         .stage = {},
         .access = {},
     });
@@ -814,7 +828,7 @@ inline RGAccessId RGBuilder::create_resource(const char* name, Image&& a, bool p
         }
         return get_engine().renderer->make_image(name, std::move(a), AllocateMemory::ALIASED);
     }();
-    return add_resource(RGResource{ .native = native, .is_persistent = persistent });
+    return add_resource(RGResource{ .native = native, .is_persistent = persistent, .clear = clear });
 }
 
 inline RGAccessId RGBuilder::add_access(const RGAccess& a)
@@ -828,8 +842,8 @@ inline RGAccessId RGBuilder::add_access(const RGAccess& a)
 }
 
 inline RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
-                                                 Flags<PipelineAccess> access, std::optional<ImageFormat> format,
-                                                 std::optional<ImageViewType> type, Range32u mips, Range32u layers)
+                                             Flags<PipelineAccess> access, std::optional<ImageFormat> format,
+                                             std::optional<ImageViewType> type, Range32u mips, Range32u layers)
 {
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,

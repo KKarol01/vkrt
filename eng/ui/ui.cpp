@@ -16,19 +16,19 @@ void SceneUI::init()
 {
     auto& ui = get_ui();
 
-    //const auto shid = ui.make_window("Scene Hierarchy", [](Window& window) {
-    //    auto& scene = *get_engine().scene;
-    //    // ImGui::DockBuilderDockWindow(window.title.c_str(), get_ui().right_panel_id);
-    //    if(ImGui::Begin(window.title.c_str(), 0, ImGuiWindowFlags_HorizontalScrollbar)) { scene.ui_draw_scene(); }
-    //    ImGui::End();
-    //});
-    //ui.dock_window(shid, &ui.right_panel_id);
+    // const auto shid = ui.make_window("Scene Hierarchy", [](Window& window) {
+    //     auto& scene = *get_engine().scene;
+    //     // ImGui::DockBuilderDockWindow(window.title.c_str(), get_ui().right_panel_id);
+    //     if(ImGui::Begin(window.title.c_str(), 0, ImGuiWindowFlags_HorizontalScrollbar)) { scene.ui_draw_scene(); }
+    //     ImGui::End();
+    // });
+    // ui.dock_window(shid, &ui.right_panel_id);
 }
 
 void UI::init()
 {
     sceneui.init();
-    gfx::get_renderer().imgui_renderer->ui_callbacks += [this] { draw(); };
+    gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
 }
 
 void UI::dock_window(WindowId window, uint32_t* dock_id)
@@ -37,7 +37,7 @@ void UI::dock_window(WindowId window, uint32_t* dock_id)
     redo_layout = true;
 }
 
-void UI::draw()
+void UI::draw(gfx::RGBuilder& b)
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     dock_id = ImGui::GetID("ViewportDockspace");
@@ -69,6 +69,14 @@ void UI::draw()
         ImGui::Button("b");
         ImGui::EndMainMenuBar();
     }
+
+    ImGui::Begin("Main panel", 0, ImGuiWindowFlags_NoMove);
+    {
+        auto& rt = gfx::get_renderer().get_framedata().render_targets;
+        auto color = b.access_color(b.graph->get_acc(rt.color[0]));
+        ImGui::Image(*b.graph->get_img(color), ImVec2{ 500, 500 });
+    }
+    ImGui::End();
 
     ImGui::Begin("Right panel", 0);
     ImGui::End();

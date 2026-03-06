@@ -71,6 +71,7 @@ class ICommandBuffer
         bool wait{}; // or signal
     };
     std::vector<SyncDep> sync_deps;
+    std::array<std::span<DescriptorResource>, PipelineLayout::MAX_SETS> descs_to_bind;
 };
 
 class CommandBufferVk : public ICommandBuffer
