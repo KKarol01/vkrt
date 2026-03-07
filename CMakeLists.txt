@@ -116,6 +116,9 @@ add_executable(eng
     "eng/engine.cpp"  
     "eng/camera.cpp"
     "eng/scene.cpp"
+	"eng/ui/ui.cpp" 
+    "eng/to_string.cpp" 
+    "eng/physics/bvh.cpp"
     "eng/renderer/renderer.cpp"
     "eng/renderer/imgui/imgui_renderer.cpp"
     "eng/renderer/to_vk.cpp"
@@ -123,12 +126,9 @@ add_executable(eng
     "eng/renderer/bindlesspool.cpp"
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
-    
-    
-    "eng/to_string.cpp" 
-
-    "eng/physics/bvh.cpp"
- "eng/ui/ui.cpp" "eng/renderer/passes/renderpass.cpp")
+	"eng/renderer/passes/renderpass.cpp"
+	"eng/renderer/rendergraph.cpp"
+)
 
 target_include_directories(eng 
 	PRIVATE 

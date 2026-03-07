@@ -16,6 +16,7 @@
 #include <eng/common/types.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/renderer/passes/renderpass.hpp>
+#include <eng/renderer/rendergraph.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/slotmap.hpp>

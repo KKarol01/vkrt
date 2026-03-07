@@ -328,6 +328,7 @@ enum class AllocateMemory : uint8_t
     YES,
 };
 
+class Renderer;
 struct ImageBlockData;
 struct Shader;
 struct DescriptorSet;
@@ -392,8 +393,6 @@ class RGRenderGraph;
 struct RGResource;
 struct RGAccess;
 struct RGBuilder;
-using RGResourceId = Handle<RGResource>;
-using RGAccessId = Handle<RGAccess>;
 
 struct MeshInstance;
 struct InstanceBatch;
