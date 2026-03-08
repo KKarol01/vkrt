@@ -213,9 +213,9 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is
         std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.image == view; });
 
     if(vit != views.slots.end()) { return vit->slot; }
-    const auto alloc = (uint32_t)*storage_buffer_slots.allocate();
+    const auto alloc = (uint32_t)(is_storage ? *storage_image_slots.allocate() : *sampled_image_slots.allocate());
     views.slots.push_back(Views::Slot{ .slot = alloc, .image = view, .is_storage = is_storage });
-    write_descriptor(is_storage ? DescriptorType::STORAGE_BUFFER : DescriptorType::SAMPLED_IMAGE, &view, alloc);
+    write_descriptor(is_storage ? DescriptorType::STORAGE_IMAGE : DescriptorType::SAMPLED_IMAGE, &view, alloc);
     return alloc;
 }
 

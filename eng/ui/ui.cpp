@@ -12,22 +12,31 @@ namespace eng
 namespace ui
 {
 
-void SceneUI::init()
+class MainPanel
 {
-    auto& ui = get_ui();
+  public:
+    MainPanel(UI& ui)
+    {
+        auto mpwid = ui.make_window("Main Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
+        ui.dock_window(mpwid, &ui.main_panel_id);
+    }
 
-    // const auto shid = ui.make_window("Scene Hierarchy", [](Window& window) {
-    //     auto& scene = *get_engine().scene;
-    //     // ImGui::DockBuilderDockWindow(window.title.c_str(), get_ui().right_panel_id);
-    //     if(ImGui::Begin(window.title.c_str(), 0, ImGuiWindowFlags_HorizontalScrollbar)) { scene.ui_draw_scene(); }
-    //     ImGui::End();
-    // });
-    // ui.dock_window(shid, &ui.right_panel_id);
-}
+    void draw(gfx::RGBuilder& rg)
+    {
+        ImGui::Begin("Main Panel", 0, ImGuiWindowFlags_NoMove);
+        {
+            const auto contsize = ImGui::GetContentRegionAvail();
+            auto& rt = gfx::get_renderer().get_framedata().render_targets;
+            auto color = rg.access_color(rg.graph->get_acc(rt.color[0]));
+            ImGui::Image(*rg.graph->get_img(color), ImVec2{ contsize});
+        }
+        ImGui::End();
+    }
+};
 
 void UI::init()
 {
-    sceneui.init();
+    mainpanel = new MainPanel{ *this };
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
 }
 
@@ -37,25 +46,24 @@ void UI::dock_window(WindowId window, uint32_t* dock_id)
     redo_layout = true;
 }
 
-void UI::draw(gfx::RGBuilder& b)
+void UI::draw(gfx::RGBuilder& rg)
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     dock_id = ImGui::GetID("ViewportDockspace");
 
-    if(!ImGui::DockBuilderGetNode(dock_id))
+    if(always_redo_layout_on_start || !ImGui::DockBuilderGetNode(dock_id))
     {
+        always_redo_layout_on_start = false;
         ImGui::DockBuilderRemoveNode(dock_id);
         ImGui::DockBuilderAddNode(dock_id);
         ImGui::DockBuilderSetNodeSize(dock_id, ImGui::GetMainViewport()->Size);
-
         ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Right, 0.25f, &right_panel_id, &main_panel_id);
 
-        ImGui::DockBuilderDockWindow("Main panel", main_panel_id);
         ImGui::DockBuilderDockWindow("Right panel", right_panel_id);
-        // for(const auto& [window, id] : layout)
-        //{
-        //     ImGui::DockBuilderDockWindow(get_window(window).title.c_str(), *id);
-        // }
+        for(const auto& [window, id] : layout)
+        {
+            ImGui::DockBuilderDockWindow(get_window(window).title.c_str(), *id);
+        }
         ImGui::DockBuilderFinish(dock_id);
     }
 
@@ -70,22 +78,14 @@ void UI::draw(gfx::RGBuilder& b)
         ImGui::EndMainMenuBar();
     }
 
-    ImGui::Begin("Main panel", 0, ImGuiWindowFlags_NoMove);
+    for(const auto& e : root_windows)
     {
-        auto& rt = gfx::get_renderer().get_framedata().render_targets;
-        auto color = b.access_color(b.graph->get_acc(rt.color[0]));
-        ImGui::Image(*b.graph->get_img(color), ImVec2{ 500, 500 });
+        auto& window = get_window(e);
+        window.draw_callback(rg);
     }
-    ImGui::End();
 
     ImGui::Begin("Right panel", 0);
     ImGui::End();
-
-    // for(const auto& e : root_windows)
-    //{
-    //     auto& window = get_window(e);
-    //     window.draw_callback(window);
-    // }
 }
 
 } // namespace ui

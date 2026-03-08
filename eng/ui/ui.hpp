@@ -12,6 +12,8 @@ namespace eng
 namespace ui
 {
 
+class MainPanel;
+
 struct Window;
 class UI;
 
@@ -19,17 +21,12 @@ inline UI& get_ui() { return *get_engine().ui; }
 
 using WindowId = TypedId<Window, uint32_t>;
 
+
 struct Window
 {
-    using draw_callback_type = Callback<void(Window& _this)>;
+    using draw_callback_type = Callback<void(gfx::RGBuilder&)>;
     std::string title;
     draw_callback_type draw_callback;
-};
-
-class SceneUI
-{
-  public:
-    void init();
 };
 
 class UI
@@ -59,17 +56,18 @@ class UI
 
     void draw(gfx::RGBuilder& b);
 
-    SceneUI sceneui;
-
     IndexedHierarchy hierarchy;
     std::vector<WindowId> root_windows;
     std::vector<Window> windows;
     std::vector<std::pair<WindowId, uint32_t*>> layout; // todo: get rid of the pointer...
+    inline static bool always_redo_layout_on_start = true;
     bool redo_layout = true;
 
     uint32_t dock_id{ ~0u };
     uint32_t main_panel_id{ ~0u };
     uint32_t right_panel_id{ ~0u };
+
+    MainPanel* mainpanel;
 };
 
 } // namespace ui
