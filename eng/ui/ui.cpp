@@ -25,10 +25,20 @@ class MainPanel
     {
         ImGui::Begin("Main Panel", 0, ImGuiWindowFlags_NoMove);
         {
-            const auto contsize = ImGui::GetContentRegionAvail();
+            const ImVec2 mpcsize = ImGui::GetContentRegionAvail();
+            const float targetAspect = 16.0f / 9.0f;
+            float width = mpcsize.x;
+            float height = width / targetAspect;
+            if(height > mpcsize.y)
+            {
+                height = mpcsize.y;
+                width = height * targetAspect;
+            }
+            ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
+            ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().get_framedata().render_targets;
             auto color = rg.access_color(rg.graph->get_acc(rt.color[0]));
-            ImGui::Image(*rg.graph->get_img(color), ImVec2{ contsize});
+            ImGui::Image(*rg.graph->get_img(color), ImVec2{ width, height });
         }
         ImGui::End();
     }

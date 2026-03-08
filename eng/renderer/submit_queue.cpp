@@ -145,7 +145,6 @@ void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
     const auto& md = *pipeline.md.vk;
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
-    // rebind_desc_sets = true;
 }
 
 void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
