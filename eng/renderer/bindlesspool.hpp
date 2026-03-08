@@ -7,6 +7,7 @@
 #include <array>
 #include <vector>
 #include <cstdint>
+#include <set>
 #include <eng/common/handle.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/common/slotallocator.hpp>
@@ -54,8 +55,7 @@ class IDescriptorSetAllocator
 
     virtual void bind_set(uint32_t slot, std::span<const DescriptorResource> resources, const PipelineLayout& layout) = 0;
 
-    virtual uint32_t get_bindless(const ImageView& view, bool is_storage) { return ~0u; }
-    virtual uint32_t get_bindless(const BufferView& view) { return ~0u; }
+    virtual uint32_t get_bindless(const DescriptorResourceView& view) { return ~0u; }
 
     virtual void flush(CommandBufferVk* cmd) = 0;
     // virtual void reset() = 0;
@@ -65,29 +65,23 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 {
     using SlotAllocatorType = SlotAllocator<uint32_t, slots_not_versioned_tag>;
 
-    struct Views
+    struct Slot
     {
-        struct Slot
+        bool operator<(const Slot& s) const
         {
-            uint32_t slot{ ~0u };
-            union {
-                BufferView buffer{};
-                ImageView image;
-            };
-            bool is_storage{}; // valid only if it's image. determines whether it is storage or sampled.
-        };
+            const int type = view.is_buffer() ? 0 : 1;
+            const int stype = s.view.is_buffer() ? 0 : 1;
+            const auto handleval = view.is_buffer() ? *view.as_buffer().buffer : *view.as_image().image;
+            const auto shandleval = s.view.is_buffer() ? *s.view.as_buffer().buffer : *s.view.as_image().image;
+            return std::tie(type, handleval) < std::tie(stype, shandleval);
+        }
+        uint32_t slot{ ~0u };
+        DescriptorResourceView view;
         union {
             VkBuffer vkbuffer{};
             VkImage vkimage;
         };
-        std::vector<Slot> slots;
     };
-    // struct FreedResource
-    //{
-    //     SlotAllocator* allocator{};
-    //     uint32_t slot;
-    //     uint64_t frame{}; // frame at which the resource was freed. if delta is bigger than frames in flight, it can be overwritten
-    // };
 
   public:
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
@@ -95,16 +89,21 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 
     void bind_set(uint32_t slot, std::span<const DescriptorResource> resources, const PipelineLayout& layout) override;
 
-    uint32_t get_bindless(const ImageView& view, bool is_storage) override;
-    uint32_t get_bindless(const BufferView& view) override;
+    uint32_t get_bindless(const DescriptorResourceView& view) override;
 
     void flush(CommandBufferVk* cmd) override;
-    // void reset() override;
 
   private:
-    uint32_t bind_resource(BufferView view);
-    uint32_t bind_resource(ImageView view, bool is_storage);
+    uint32_t bind_resource(const DescriptorResourceView& view);
     void write_descriptor(DescriptorType type, const void* view, uint32_t slot);
+    SlotAllocatorType& get_slot_allocator(DescriptorType type)
+    {
+        if(type == DescriptorType::STORAGE_BUFFER) { return storage_buffer_slots; }
+        if(type == DescriptorType::STORAGE_IMAGE) { return storage_image_slots; }
+        if(type == DescriptorType::SAMPLED_IMAGE) { return sampled_image_slots; }
+        ENG_ERROR("Invalid type");
+        return storage_buffer_slots;
+    }
 
     DescriptorPoolVk pool{};
     DescriptorSetVk set{};
@@ -118,9 +117,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     SlotAllocatorType storage_buffer_slots;
     SlotAllocatorType storage_image_slots;
     SlotAllocatorType sampled_image_slots;
-    std::unordered_map<Handle<Buffer>, Views> buffer_views;
-    std::unordered_map<Handle<Image>, Views> image_views;
-    // std::vector<FreedResource> pending_frees;
+    std::multiset<Slot> slots;
 };
 
 } // namespace gfx

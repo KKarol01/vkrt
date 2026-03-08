@@ -140,7 +140,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
             }
 
             {
-                DescriptorResource bindresources[]{ DescriptorResource::as_storage(4, BufferView::init(vertex_buffer)) };
+                DescriptorResource bindresources[]{ DescriptorResource::storage_buffer(4, vertex_buffer) };
                 cmd->bind_set(0, bindresources);
             }
 
@@ -188,7 +188,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                     scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
                     DescriptorResource bindresources[]{
-                        DescriptorResource::as_sampled(5, ImageView::init(Handle<Image>{ (uint32_t)imcmd->GetTexID() }))
+                        DescriptorResource::sampled_image(5, Handle<Image>{ (uint32_t)imcmd->GetTexID() })
                     };
                     cmd->bind_set(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,

@@ -88,37 +88,16 @@ void DescriptorSetAllocatorBindlessVk::bind_set(uint32_t slot, std::span<const D
     {
         const auto& res = resources[i];
         ENG_ASSERT(res.binding != ~0u && res.index != ~0u);
-        uint32_t bindless_index;
-        switch(res.type)
-        {
-        case DescriptorType::STORAGE_BUFFER:
-        {
-            bindless_index = bind_resource(res.buffer_view);
-            break;
-        }
-        case DescriptorType::STORAGE_IMAGE:
-        case DescriptorType::SAMPLED_IMAGE:
-        {
-            bindless_index = bind_resource(res.image_view, res.type == DescriptorType::STORAGE_IMAGE);
-            break;
-        }
-        default:
-        {
-            ENG_ASSERT("Unhandle case");
-            continue;
-        }
-        }
+        uint32_t bindless_index = bind_resource(res.view);
         push_values[res.binding] = bindless_index;
         push_ranges.push_back({ res.binding, 1 });
     }
 }
 
-uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const ImageView& view, bool is_storage)
+uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResourceView& view)
 {
-    return bind_resource(view, is_storage);
+    return bind_resource(view);
 }
-
-uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const BufferView& view) { return bind_resource(view); }
 
 void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
 {
@@ -138,85 +117,29 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
     cmd->bind_sets(&set, 1);
 }
 
-// void DescriptorSetAllocatorBindlessVk::reset()
-//{
-//     const auto& r = get_renderer();
-//     auto delcount = 0u;
-//     for(auto i = 0u; i < pending_frees.size(); ++i)
-//     {
-//         auto& pf = pending_frees[i];
-//         if(r.frame_index - pf.frame < r.frames_in_flight)
-//         {
-//             // break, as next frees were only added later, so cannot be freed too.
-//             break;
-//         }
-//         pf.allocator->free_slot(pf.slot);
-//         ++delcount;
-//     }
-//     pending_frees.erase(pending_frees.begin(), pending_frees.begin() + delcount);
-//     push_ranges.clear();
-// }
-
-uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(BufferView view)
+uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourceView& view)
 {
-    const auto& buf = view.buffer.get();
-    auto [it, success] = buffer_views.emplace(view.buffer, Views{ .vkbuffer = buf.md.as_vk()->buffer });
-    auto& views = it->second;
-    if(views.vkbuffer != buf.md.as_vk()->buffer)
+    Slot slot{};
+    slot.view = view;
+
+    auto eqit = slots.equal_range(slot);
+    bool resource_changed = false;
+    for(const auto& s : std::ranges::subrange(eqit.first, eqit.second))
     {
-        views.vkbuffer = buf.md.as_vk()->buffer;
-        for(const auto& e : views.slots)
+        const auto vkptr = view.is_buffer() ? view.as_buffer().buffer->md.ptr : view.as_image().image->md.ptr;
+        if((s.view.is_buffer() && s.vkbuffer != vkptr) || (!s.view.is_buffer() && s.vkimage != vkptr))
         {
-            storage_buffer_slots.erase(SlotAllocatorType::Slot{ e.slot });
+            resource_changed = true;
+            get_slot_allocator(s.view.type).erase(SlotAllocatorType::Slot{ s.slot });
         }
-        views.slots.clear();
+        if(!resource_changed && s.view == view) { return s.slot; }
     }
-
-    const auto vit =
-        std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.buffer == view; });
-
-    if(vit != views.slots.end()) { return vit->slot; }
-    const auto alloc = (uint32_t)*storage_buffer_slots.allocate();
-    views.slots.push_back(Views::Slot{ .slot = alloc, .buffer = view, .is_storage = true });
-    write_descriptor(DescriptorType::STORAGE_BUFFER, &view, alloc);
-    return alloc;
-}
-
-uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(ImageView view, bool is_storage)
-{
-    const auto& img = view.image.get();
-    auto [it, success] = image_views.emplace(view.image, Views{ .vkimage = img.md.as_vk()->image });
-    auto& views = it->second;
-
-    // Assuming how destroy_resource works in the renderer, The another resource may obtain the same handled only after period of two full frames,
-    // therefore it is safe to free the slots immediately here, instead of putting the slots into pending frees and waiting another two frames.
-    if(views.vkimage != img.md.as_vk()->image)
-    {
-        views.vkimage = img.md.as_vk()->image;
-        for(const auto& e : views.slots)
-        {
-            if(e.is_storage)
-            {
-                storage_image_slots.erase(SlotAllocatorType::Slot{ e.slot });
-                // pending_frees.push_back(FreedResource{ &storage_image_slots, e.slot, get_renderer().frame_index });
-            }
-            else
-            {
-                sampled_image_slots.erase(SlotAllocatorType::Slot{ e.slot });
-                // pending_frees.push_back(FreedResource{ &sampled_image_slots, e.slot, get_renderer().frame_index });
-            }
-        }
-        views.slots.clear();
-    }
-
-    const auto vit =
-        std::find_if(views.slots.begin(), views.slots.end(), [view](const auto& slot) { return slot.image == view; });
-
-    if(vit != views.slots.end()) { return vit->slot; }
-    const auto alloc = (uint32_t)(is_storage ? *storage_image_slots.allocate() : *sampled_image_slots.allocate());
-    views.slots.push_back(Views::Slot{ .slot = alloc, .image = view, .is_storage = is_storage });
-    write_descriptor(is_storage ? DescriptorType::STORAGE_IMAGE : DescriptorType::SAMPLED_IMAGE, &view, alloc);
-    return alloc;
+    if(resource_changed) { slots.erase(eqit.first, eqit.second); }
+    slot.slot = *get_slot_allocator(view.type).allocate();
+    if(view.is_buffer()) { slot.vkbuffer = view.as_buffer().buffer->md.as_vk()->buffer; }
+    else { slot.vkimage = view.as_image().image->md.as_vk()->image; }
+    write_descriptor(view.type, view.is_buffer() ? (void*)&view.as_buffer() : (void*)&view.as_image(), slot.slot);
+    return slots.emplace(slot)->slot;
 }
 
 void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, uint32_t slot)

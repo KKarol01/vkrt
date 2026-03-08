@@ -462,7 +462,8 @@ void Renderer::update()
             // use stable handle index inside the storage to index it in the gpu
             if(backend->caps.supports_bindless)
             {
-                GPUMaterial gpumat{ .base_color_idx = descriptor_allocator->get_bindless(e->base_color_texture, false) };
+                GPUMaterial gpumat{ .base_color_idx = descriptor_allocator->get_bindless(DescriptorResourceView{
+                                        e->base_color_texture, DescriptorType::SAMPLED_IMAGE }) };
                 staging->copy(bufs.materials, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
@@ -594,8 +595,8 @@ void Renderer::compile_rendergraph()
 
                 const auto& rp = get_renderer().render_passes[i];
                 DescriptorResource shaderresources[]{
-                    DescriptorResource::as_storage(0, pb.graph->get_buf(get_framedata().render_targets.constants)),
-                    DescriptorResource::as_storage(1, get_renderer().bufs.positions)
+                    DescriptorResource::storage_buffer(0, pb.graph->get_buf(get_framedata().render_targets.constants)),
+                    DescriptorResource::storage_buffer(1, get_renderer().bufs.positions)
                 };
                 cmd->bind_set(0, shaderresources);
                 rp.draw.draw([&](const IndirectDrawParams& params) {

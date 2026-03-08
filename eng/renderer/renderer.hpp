@@ -33,29 +33,43 @@ namespace eng
 namespace gfx
 {
 
+struct DescriptorResourceView
+{
+    auto operator<=>(const DescriptorResourceView&) const = default;
+    bool is_buffer() const { return resource.index() == 0; }
+    const BufferView& as_buffer() const { return std::get<0>(resource); }
+    const ImageView& as_image() const { return std::get<1>(resource); }
+    std::variant<BufferView, ImageView> resource;
+    DescriptorType type{};
+};
+
 struct DescriptorResource
 {
-    static DescriptorResource as_sampled(uint32_t binding, const ImageView& view, uint32_t index = 0)
+    static DescriptorResource sampled_image(uint32_t binding, const ImageView& view, uint32_t index = 0)
     {
-        return DescriptorResource{ .type = DescriptorType::SAMPLED_IMAGE, .image_view = view, .binding = binding, .index = index };
+        return DescriptorResource{ .view = { view, DescriptorType::SAMPLED_IMAGE }, .binding = binding, .index = index };
     }
-    static DescriptorResource as_storage(uint32_t binding, Handle<Buffer> buffer, uint32_t index = 0)
+    static DescriptorResource sampled_image(uint32_t binding, Handle<Image> image, uint32_t index = 0)
     {
-        return as_storage(binding, BufferView::init(buffer), index);
+        return sampled_image(binding, ImageView::init(image), index);
     }
-    static DescriptorResource as_storage(uint32_t binding, const BufferView& view, uint32_t index = 0)
+    static DescriptorResource storage_image(uint32_t binding, const ImageView& view, uint32_t index = 0)
     {
-        return DescriptorResource{ .type = DescriptorType::STORAGE_BUFFER, .buffer_view = view, .binding = binding, .index = index };
+        return DescriptorResource{ .view = { view, DescriptorType::STORAGE_IMAGE }, .binding = binding, .index = index };
     }
-    static DescriptorResource as_storage(uint32_t binding, const ImageView& view, uint32_t index = 0)
+
+    static DescriptorResource storage_buffer(uint32_t binding, const BufferView& view, uint32_t index = 0)
     {
-        return DescriptorResource{ .type = DescriptorType::STORAGE_IMAGE, .image_view = view, .binding = binding, .index = index };
+        return DescriptorResource{ .view = { view, DescriptorType::STORAGE_BUFFER }, .binding = binding, .index = index };
     }
-    DescriptorType type{};
-    union {
-        BufferView buffer_view;
-        ImageView image_view;
-    };
+    static DescriptorResource storage_buffer(uint32_t binding, Handle<Buffer> buffer, uint32_t index = 0)
+    {
+        return storage_buffer(binding, BufferView::init(buffer), index);
+    }
+
+    DescriptorType get_type() const { return view.type; }
+
+    DescriptorResourceView view;
     uint32_t binding{ ~0u };
     uint32_t index{ ~0u };
 };
