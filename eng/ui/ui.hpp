@@ -13,6 +13,8 @@ namespace ui
 {
 
 class MainPanel;
+class InspectorPanel;
+class LogPanel;
 
 struct Window;
 class UI;
@@ -20,7 +22,6 @@ class UI;
 inline UI& get_ui() { return *get_engine().ui; }
 
 using WindowId = TypedId<Window, uint32_t>;
-
 
 struct Window
 {
@@ -66,8 +67,11 @@ class UI
     uint32_t dock_id{ ~0u };
     uint32_t main_panel_id{ ~0u };
     uint32_t right_panel_id{ ~0u };
+    uint32_t bottom_panel_id{ ~0u };
 
-    MainPanel* mainpanel;
+    MainPanel* mainpanel{};
+    InspectorPanel* inspectorpanel{};
+    LogPanel* logpanel{};
 };
 
 } // namespace ui

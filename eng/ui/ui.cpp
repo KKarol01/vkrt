@@ -44,9 +44,47 @@ class MainPanel
     }
 };
 
+class InspectorPanel
+{
+  public:
+    InspectorPanel(UI& ui)
+    {
+        auto mpwid = ui.make_window("Inspector Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
+        ui.dock_window(mpwid, &ui.right_panel_id);
+    }
+
+    void draw(gfx::RGBuilder& rg)
+    {
+        ImGui::Begin("Inspector Panel", 0);
+        {
+        }
+        ImGui::End();
+    }
+};
+
+class LogPanel
+{
+  public:
+    LogPanel(UI& ui)
+    {
+        auto mpwid = ui.make_window("Log Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
+        ui.dock_window(mpwid, &ui.bottom_panel_id);
+    }
+
+    void draw(gfx::RGBuilder& rg)
+    {
+        ImGui::Begin("Log Panel");
+        {
+        }
+        ImGui::End();
+    }
+};
+
 void UI::init()
 {
     mainpanel = new MainPanel{ *this };
+    inspectorpanel = new InspectorPanel{ *this };
+    logpanel = new LogPanel{ *this };
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
 }
 
@@ -67,9 +105,9 @@ void UI::draw(gfx::RGBuilder& rg)
         ImGui::DockBuilderRemoveNode(dock_id);
         ImGui::DockBuilderAddNode(dock_id);
         ImGui::DockBuilderSetNodeSize(dock_id, ImGui::GetMainViewport()->Size);
-        ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Right, 0.25f, &right_panel_id, &main_panel_id);
+        ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Down, 0.25f, &bottom_panel_id, &main_panel_id);
+        ImGui::DockBuilderSplitNode(main_panel_id, ImGuiDir_Right, 0.25f, &right_panel_id, &main_panel_id);
 
-        ImGui::DockBuilderDockWindow("Right panel", right_panel_id);
         for(const auto& [window, id] : layout)
         {
             ImGui::DockBuilderDockWindow(get_window(window).title.c_str(), *id);
@@ -93,9 +131,6 @@ void UI::draw(gfx::RGBuilder& rg)
         auto& window = get_window(e);
         window.draw_callback(rg);
     }
-
-    ImGui::Begin("Right panel", 0);
-    ImGui::End();
 }
 
 } // namespace ui
