@@ -399,7 +399,7 @@ ecs::EntityId Scene::instance_model(SceneNodeId nodeid)
         ENG_ASSERT(node.transform != ~0u);
         const auto e = reg->create();
         if(!ret) { ret = e; }
-        reg->add_components(e, transforms[node.transform]);
+        reg->add_components(e, ecs::Node{ node.name }, transforms[node.transform]);
         if(node.meshes.size != 0)
         {
             ecs::Mesh ecsmesh{ .render_meshes = { meshes.begin() + node.meshes.offset,
@@ -411,6 +411,7 @@ ecs::EntityId Scene::instance_model(SceneNodeId nodeid)
         if(hierarchy.has(parentid)) { reg->make_child(parents[SceneNodeId{ *parentid }], e); }
         parents[sceneid] = e;
     });
+    scene.push_back(ret);
     ENG_ASSERT(ret);
     return ret;
 }

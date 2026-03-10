@@ -73,8 +73,6 @@ struct FrameTime
 class Engine
 {
   public:
-    static Engine& get();
-
     void init(int argc, char* argv[]);
     void destroy();
     void start();

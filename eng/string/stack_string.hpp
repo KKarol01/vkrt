@@ -20,13 +20,15 @@ template <size_t size> struct StackString
     StackString(StackString&& a) noexcept = default;
     StackString& operator=(StackString&& a) noexcept = default;
 
-    StackString(const char* cstr) { *this = cstr; }
-    StackString& operator=(const char* cstr)
+    StackString(const char* str) { *this = str; }
+    StackString(const std::string& str) { *this = str; }
+    StackString(std::string_view str) { *this = str; }
+    StackString& operator=(const char* str) { return (*this = std::string_view{ str }); }
+    StackString& operator=(const std::string& str) { return (*this = std::string_view{ str.begin(), str.end() }); }
+    StackString& operator=(std::string_view str)
     {
-        if(!cstr) { return *this; }
-        std::string_view view{ cstr };
-        const auto length = std::min(view.length(), size - 1);
-        memcpy(string.data(), cstr, length);
+        const auto length = std::min(str.length(), size - 1);
+        memcpy(string.data(), str.data(), length);
         string[length] = '\0';
         return *this;
     }

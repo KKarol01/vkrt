@@ -317,7 +317,7 @@ class Registry
 
     // Invokes a callback for every entity that has the specified components.
     template <typename... Components>
-    void iterate_over_components(const auto& callback)
+    void iterate_components(const auto& callback)
         requires(std::is_invocable_v<decltype(callback), EntityId, Components...>)
     {
         const IComponentPool* const pool = try_find_smallest_pool<Components...>();
@@ -372,8 +372,17 @@ class Registry
         return (bool)hierarchy.get_first_child(eid.get_slot());
     }
 
+    void iterate_entities(const auto& callback)
+        requires(std::is_invocable_v<decltype(callback), EntityId>)
+    {
+        for(auto e : entities)
+        {
+            std::invoke(callback, e);
+        }
+    }
+
     // Invokes a callback for every child of this entity.
-    void loop_over_children(EntityId eid, const auto& callback)
+    void iterate_children(EntityId eid, const auto& callback)
     {
         if(!has(eid))
         {
@@ -402,7 +411,7 @@ class Registry
         }
         const auto traverse = [&](EntityId id, const auto& self) -> void {
             callback(id);
-            loop_over_children(id, [&](EntityId id) { self(id, self); });
+            iterate_children(id, [&](EntityId id) { self(id, self); });
         };
         traverse(eid, traverse);
     }

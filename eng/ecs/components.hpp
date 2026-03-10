@@ -8,6 +8,7 @@
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/logger.hpp>
+#include <eng/string/stack_string.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
 #include <assets/shaders/bindless_structures.glsli>
 
@@ -15,6 +16,12 @@ namespace eng
 {
 namespace ecs
 {
+
+struct Node
+{
+    StackString<64> name;
+};
+
 struct Transform
 {
     static Transform init(const glm::mat4& mat)
