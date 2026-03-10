@@ -2,6 +2,7 @@
 #include <eng/common/hash.hpp>
 #include <glm/fwd.hpp>
 #include <cstdint>
+#include <concepts>
 
 namespace eng
 {
@@ -43,14 +44,14 @@ template <typename T> struct VersionedIndex<T, uint32_t> : public TypedId<T, uin
     inline static constexpr StorageType INDEX_MASK = (StorageType{ 1u } << INDEX_BITS) - 1;
     using Base::Base;
     VersionedIndex(StorageType index, StorageType version) : Base((version << INDEX_BITS) | (index & INDEX_MASK)) {}
-    StorageType get_index() const { return handle & INDEX_MASK; }
-    StorageType get_version() const { return handle >> INDEX_BITS; }
+    StorageType get_index() const { return Base::handle & INDEX_MASK; }
+    StorageType get_version() const { return Base::handle >> INDEX_BITS; }
 };
 
 template <typename Storage = size_t> struct Range_T
 {
     auto operator<=>(const Range_T&) const = default;
-    Storage offset{ ~0u };
+    Storage offset{ ~Storage{} };
     Storage size{};
 };
 

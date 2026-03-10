@@ -140,13 +140,19 @@ target_include_directories(eng
 )
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
-target_compile_options(eng PRIVATE
-    -Wall -Wextra -Werror -Wpedantic
-    -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=missing-field-initializers
-    -Wno-error=unused-lambda-capture
-    -Wno-error=missing-designated-field-initializers
-    -Wmissing-designated-field-initializers
-)
+if(MSVC)
+    target_compile_options(eng PRIVATE 
+        /W4    
+    )
+else()
+    target_compile_options(eng PRIVATE
+        -Wall -Wextra -Werror -Wpedantic
+        -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=missing-field-initializers
+        -Wno-error=unused-lambda-capture
+        -Wno-error=missing-designated-field-initializers
+        -Wmissing-designated-field-initializers
+    )
+endif()
 set_target_properties(eng PROPERTIES 
     RUNTIME_OUTPUT_NAME_DEBUG "${CMAKE_PROJECT_NAME}Debug"
     RUNTIME_OUTPUT_NAME_RELEASE "${CMAKE_PROJECT_NAME}"

@@ -12,7 +12,7 @@ namespace hash
 
 inline constexpr uint64_t fnv1a_bytes(uint64_t hash, const uint8_t* const bytes, size_t size)
 {
-    static constexpr uint64_t prime = 0x100000001b3ull;
+     constexpr uint64_t prime = 0x100000001b3ull;
     for(auto i = 0ull; i < size; ++i)
     {
         hash = hash ^ bytes[i];
@@ -38,7 +38,7 @@ template <typename T> inline constexpr uint64_t fnv1a_value(uint64_t hash, const
 
 inline constexpr uint64_t combine_fnv1a(const auto&... args)
 {
-    static constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
+     constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
     uint64_t hash = offset_basis;
     ((hash = fnv1a_value(hash, args)), ...);
     return hash;
@@ -46,8 +46,8 @@ inline constexpr uint64_t combine_fnv1a(const auto&... args)
 
 inline constexpr uint64_t combine_fnv1a(const char* str)
 {
-    static constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
-    static constexpr uint64_t prime = 0x100000001b3ull;
+    constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
+    constexpr uint64_t prime = 0x100000001b3ull;
     uint64_t hash = offset_basis;
     while(*str)
     {

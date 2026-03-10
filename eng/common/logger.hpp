@@ -20,12 +20,21 @@
 #define ENG_BREAKPOINT []() { assert(false); }
 #endif
 
+#if defined(__clang__)
 #define ENG_ASSERT(expr, ...)                                                                                          \
     if((bool)(expr) == false)                                                                                          \
     {                                                                                                                  \
         ENG_BREAKPOINT();                                                                                              \
         __VA_OPT__(ENG_LOG(__VA_ARGS__));                                                                              \
     }
+#else
+#define ENG_ASSERT(expr, ...)                                                                                          \
+    if((bool)(expr) == false)                                                                                          \
+    {                                                                                                                  \
+        ENG_BREAKPOINT();                                                                                              \
+        ENG_LOG(__VA_ARGS__);                                                                                          \
+    }
+#endif
 
 #define ENG_ERROR(msg, ...)                                                                                            \
     do                                                                                                                 \
@@ -41,9 +50,9 @@
     do                                                                                                                 \
     {                                                                                                                  \
         const std::string format = ENG_FMT("[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                   \
-        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                             \
+        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                               \
         ENG_PRTLN("{}", format);                                                                                       \
-        /*get_engine().msg_log.push_front(format); */                                                                 \
+        /*get_engine().msg_log.push_front(format); */                                                                  \
     }                                                                                                                  \
     while(0)
 

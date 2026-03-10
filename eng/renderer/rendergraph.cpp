@@ -265,7 +265,7 @@ PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
 RGAccessId RGBuilder::create_resource(const char* name, Buffer&& a, bool persistent)
 {
     ENG_ASSERT(name);
-    RGResource::NativeResource native = [this, &a, &name, persistent] -> RGResource::NativeResource {
+    RGResource::NativeResource native = [this, &a, &name, persistent]() -> RGResource::NativeResource {
         if(persistent)
         {
             const auto hash = ENG_HASH_STR(name);
@@ -283,7 +283,7 @@ RGAccessId RGBuilder::create_resource(const char* name, Buffer&& a, bool persist
 RGAccessId RGBuilder::create_resource(const char* name, Image&& a, bool persistent, const std::optional<RGClear>& clear)
 {
     ENG_ASSERT(name);
-    RGResource::NativeResource native = [this, &a, &name, persistent] -> RGResource::NativeResource {
+    RGResource::NativeResource native = [this, &a, &name, persistent]() -> RGResource::NativeResource {
         if(persistent)
         {
             const auto hash = ENG_HASH_STR(name);

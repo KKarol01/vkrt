@@ -1,5 +1,6 @@
 #include <stack>
 #include <ranges>
+#include <array>
 #include <filesystem>
 #include <unordered_map>
 #include <fastgltf/core.hpp>
@@ -76,13 +77,13 @@ Range32u load_geometry(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
 
         const auto fast_iterate = [&gltfasset, &get_vertex_component](int comp, const auto& gltfacc, gfx::VertexComponent gfxcomp) {
             const auto copy_bytes = [&get_vertex_component, &gfxcomp]<size_t num_floats>(const auto& vec, auto idx) {
-                float v[num_floats]{};
+                std::array<float, num_floats> v{};
                 for(auto i = 0u; i < num_floats; ++i)
                 {
-                    v[i] = vec[i];
+                    v[i] = (float)vec[i];
                 }
                 auto* pdst = get_vertex_component(idx, gfxcomp);
-                memcpy(pdst, v, sizeof(v));
+                memcpy(pdst, v.data(), num_floats * sizeof(v[0]));
             };
             const auto cb2 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<2>(vec, idx); };
             const auto cb3 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<3>(vec, idx); };
