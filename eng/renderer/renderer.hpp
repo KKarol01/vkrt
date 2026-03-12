@@ -539,6 +539,7 @@ class IRendererBackend
     virtual Sync* make_sync(const SyncCreateInfo& info) = 0;
     virtual void destory_sync(Sync*) = 0;
     virtual Swapchain* make_swapchain() = 0;
+	virtual void destroy_swapchain(Swapchain* swapchain) = 0;
     virtual SubmitQueue* get_queue(QueueType type) = 0;
 
     virtual ImageView::Metadata get_md(const ImageView& view) = 0;
@@ -728,6 +729,8 @@ class Renderer
         ImageFormat color_format{ ImageFormat::R8G8B8A8_SRGB };
         Vec2f render_resolution{};
         Vec2f present_resolution{};
+
+		bool regenerate_swapchain{};
     };
 
     void init(IRendererBackend* backend);
@@ -742,10 +745,12 @@ class Renderer
     void render_debug(const DebugGeometry& geom);
 
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
-    void destroy_buffer(Handle<Buffer>& handle);
+    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool.
+    void queue_destroy(Handle<Buffer>& handle);
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
-    void destroy_image(Handle<Image>& image);
+    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool.
+    void queue_destroy(Handle<Image>& image, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const std::filesystem::path& path);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);

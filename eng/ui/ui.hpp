@@ -24,20 +24,29 @@ struct Window
     using draw_callback_type = Callback<void(gfx::RGBuilder&)>;
     std::string title;
     draw_callback_type draw_callback;
+    uint32_t dock_at{};
 };
 
 class UI
 {
+    struct NodeSplits
+    {
+        uint32_t* id{};
+        uint32_t dock_ids[4]{}; // l,r,u,d (same as imguidir)
+        float dock_ratios[4]{}; // must be > 0 to be split
+    };
+
   public:
     void init();
 
-    WindowId make_window(const std::string& title, const Window::draw_callback_type& draw_callback)
+    WindowId make_window(Window&& window)
     {
         const auto hnid = hierarchy.create();
-        if(windows.size() == *hnid) { windows.emplace_back(title, draw_callback); }
-        else { windows[*hnid] = Window{ title, draw_callback }; }
+        if(windows.size() == *hnid) { windows.push_back(std::move(window)); }
+        else { windows[*hnid] = std::move(window); }
         const auto id = WindowId{ *hnid };
         root_windows.push_back(id);
+        windowmap[windows[*hnid].title] = id;
         return id;
     }
 
@@ -49,21 +58,18 @@ class UI
 
     Window& get_window(WindowId id) { return windows[*id]; }
 
-    void dock_window(WindowId window, uint32_t* dock_id);
-
     void draw(gfx::RGBuilder& b);
 
     IndexedHierarchy hierarchy;
     std::vector<WindowId> root_windows;
     std::vector<Window> windows;
-    std::vector<std::pair<WindowId, uint32_t*>> layout; // todo: get rid of the pointer...
+    std::unordered_map<std::string, WindowId> windowmap;
+    std::deque<NodeSplits> splits;
+    std::unordered_map<uint32_t*, NodeSplits*> splitmap;
     inline static bool always_redo_layout_on_start = true;
-    bool redo_layout = true;
 
-    uint32_t dock_id{ ~0u };
-    uint32_t main_panel_id{ ~0u };
-    uint32_t right_panel_id{ ~0u };
-    uint32_t bottom_panel_id{ ~0u };
+    WindowId fullscreen;
+    uint32_t dock_id{};
 };
 
 } // namespace ui

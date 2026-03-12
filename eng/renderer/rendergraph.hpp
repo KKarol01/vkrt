@@ -297,7 +297,7 @@ class RGRenderGraph
 
     Sync* execute(Sync** wait_syncs = nullptr, uint32_t wait_count = 0);
 
-    void destroy_resource(RGResource& res);
+    void free_resource(RGResource& res);
 
     SubmitQueue* queue{};
     ICommandPool* cmd_pools[2]{};

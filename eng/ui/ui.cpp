@@ -12,18 +12,21 @@ namespace eng
 namespace ui
 {
 
-class MainPanel
+class GamePanel
 {
   public:
-    MainPanel(UI& ui)
+    GamePanel(UI& ui, uint32_t dock)
     {
-        auto mpwid = ui.make_window("Main Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
-        ui.dock_window(mpwid, &ui.main_panel_id);
+        Window w{};
+        w.title = "Game Panel";
+        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
+        w.dock_at = dock;
+        ui.make_window(std::move(w));
     }
 
     void draw(gfx::RGBuilder& rg)
     {
-        if(ImGui::Begin("Main Panel", 0, ImGuiWindowFlags_NoMove))
+        if(ImGui::Begin("Game Panel", 0, ImGuiWindowFlags_NoMove))
         {
             const ImVec2 mpcsize = ImGui::GetContentRegionAvail();
             const float targetAspect = 16.0f / 9.0f;
@@ -34,6 +37,7 @@ class MainPanel
                 height = mpcsize.y;
                 width = height * targetAspect;
             }
+            gfx::get_renderer().settings.render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().get_framedata().render_targets;
@@ -44,29 +48,16 @@ class MainPanel
     }
 };
 
-class InspectorPanel
-{
-  public:
-    InspectorPanel(UI& ui)
-    {
-        auto mpwid = ui.make_window("Inspector Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
-        ui.dock_window(mpwid, &ui.right_panel_id);
-    }
-
-    void draw(gfx::RGBuilder& rg)
-    {
-        if(ImGui::Begin("Inspector Panel", 0)) {}
-        ImGui::End();
-    }
-};
-
 class ScenePanel
 {
   public:
-    ScenePanel(UI& ui)
+    ScenePanel(UI& ui, uint32_t dock)
     {
-        auto mpwid = ui.make_window("Scene Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
-        ui.dock_window(mpwid, &ui.right_panel_id);
+        Window w{};
+        w.title = "Scene Panel";
+        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
+        w.dock_at = dock;
+        ui.make_window(std::move(w));
     }
 
     void draw(gfx::RGBuilder& rg)
@@ -85,24 +76,37 @@ class ScenePanel
                     auto& style = ImGui::GetStyle();
                     // height that matches arrow button
                     float row_height = style.FramePadding.y / 2 + ImGui::GetTextLineHeight();
-                    // align x-left, y-middle, otherwise y is bottom and looks bad
-                    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, { 0.0f, 0.5f });
-                    if(ImGui::ArrowButton("##arrow", state.expanded ? ImGuiDir_Down : ImGuiDir_Right))
                     {
-                        state.expanded = !state.expanded;
+                        // align x-left, y-middle, otherwise y is bottom and looks bad
+                        if(ecs->has_children(e))
+                        {
+                            ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, { 0.0f, 0.5f });
+                            if(ImGui::ArrowButton("##arrow", state.expanded ? ImGuiDir_Down : ImGuiDir_Right))
+                            {
+                                state.expanded = !state.expanded;
+                            }
+                            ImGui::SameLine();
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x / 2); // move back item spacing so it neatly touches the arrow
+                            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - style.ItemSpacing.y / 2 + style.FramePadding.y / 2); // move up so it is flush with arrow
+                            ImGui::PopStyleVar(1);
+                        }
+                        else
+                        {
+                            // move right so it's exactly inline vertically with other selects that can be expanded.
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + style.ItemSpacing.x / 2 - style.FramePadding.x / 2);
+                        }
                     }
-                    ImGui::SameLine();
-                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x / 2); // move back item spacing so it neatly touches the arrow
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - style.ItemSpacing.y / 2 + style.FramePadding.y / 2); // move up so it is flush with arrow
 
-                    bool selected{};
-                    bool preclick_value = state.expanded;
-                    if(ImGui::Selectable(node.name.c_str(), &selected, 0, { 0, row_height })) {}
+                    bool selected = selected_node == e;
+                    if(ImGui::Selectable(node.name.c_str(), &selected, 0, { 0, row_height }))
+                    {
+                        if(selected_node == e) { selected_node = ecs::EntityId{}; }
+                        else { selected_node = e; }
+                    }
                     if(ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
                         toggle_expanded_below(e, !state.expanded);
                     }
-                    ImGui::PopStyleVar(1);
                     if(state.expanded)
                     {
                         ImGui::TreePush(&node);
@@ -124,64 +128,87 @@ class ScenePanel
     {
         bool expanded{};
     };
+    ecs::EntityId selected_node;
     std::unordered_map<ecs::EntityId, NodeState> states;
 };
 
-class LogPanel
+class InspectorPanel
 {
   public:
-    LogPanel(UI& ui)
+    InspectorPanel(UI& ui, ScenePanel* scene, uint32_t dock) : scene(scene)
     {
-        auto mpwid = ui.make_window("Log Panel", [this](gfx::RGBuilder& rg) { draw(rg); });
-        ui.dock_window(mpwid, &ui.bottom_panel_id);
+        Window w{};
+        w.title = "Inspector Panel";
+        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
+        w.dock_at = dock;
+        ui.make_window(std::move(w));
     }
 
     void draw(gfx::RGBuilder& rg)
     {
-        if(ImGui::Begin("Log Panel")) {}
+        if(!scene->selected_node) { return; }
+        if(ImGui::Begin("Inspector Panel", 0)) {}
+        ImGui::End();
+    }
+
+    ScenePanel* scene{};
+};
+
+class ConsolePanel
+{
+  public:
+    ConsolePanel(UI& ui, uint32_t dock)
+    {
+        Window w{};
+        w.title = "Console Panel";
+        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
+        w.dock_at = dock;
+        ui.make_window(std::move(w));
+    }
+
+    void draw(gfx::RGBuilder& rg)
+    {
+        if(ImGui::Begin("Console Panel")) {}
         ImGui::End();
     }
 };
 
 void UI::init()
 {
-    auto* mainpanel = new MainPanel{ *this };           // mem leak
-    auto* scenepanel = new ScenePanel{ *this };         // mem leak
-    auto* inspectorpanel = new InspectorPanel{ *this }; // mem leak
-    auto* logpanel = new LogPanel{ *this };             // mem leak
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
-}
-
-void UI::dock_window(WindowId window, uint32_t* dock_id)
-{
-    layout.emplace_back(window, dock_id);
-    redo_layout = true;
 }
 
 void UI::draw(gfx::RGBuilder& rg)
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     dock_id = ImGui::GetID("ViewportDockspace");
-
     if(always_redo_layout_on_start || !ImGui::DockBuilderGetNode(dock_id))
     {
         always_redo_layout_on_start = false;
         ImGui::DockBuilderRemoveNode(dock_id);
         ImGui::DockBuilderAddNode(dock_id);
         ImGui::DockBuilderSetNodeSize(dock_id, ImGui::GetMainViewport()->Size);
-        ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Down, 0.25f, &bottom_panel_id, &main_panel_id);
-        ImGui::DockBuilderSplitNode(main_panel_id, ImGuiDir_Right, 0.25f, &right_panel_id, &main_panel_id);
 
-        for(const auto& [window, id] : layout)
+        uint32_t game;
+        uint32_t scene;
+        uint32_t console;
+        uint32_t inspector;
+        ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Right, 0.25f, &scene, &game);
+        ImGui::DockBuilderSplitNode(game, ImGuiDir_Down, 0.25f, &console, &game);
+        ImGui::DockBuilderSplitNode(scene, ImGuiDir_Down, 0.25f, &inspector, &scene);
+
+        auto* gamepanel = new GamePanel{ *this, game };                            // mem leak
+        auto* scenepanel = new ScenePanel{ *this, scene };                         // mem leak
+        auto* inspectorpanel = new InspectorPanel{ *this, scenepanel, inspector }; // mem leak
+        auto* consolepanel = new ConsolePanel{ *this, console };                   // mem leak
+        for(auto& e : windows)
         {
-            ImGui::DockBuilderDockWindow(get_window(window).title.c_str(), *id);
+            ImGui::DockBuilderDockWindow(e.title.c_str(), e.dock_at);
         }
         ImGui::DockBuilderFinish(dock_id);
     }
 
-    {
-        ImGui::DockSpaceOverViewport(dock_id, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
-    }
+    ImGui::DockSpaceOverViewport(dock_id, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
 
     if(ImGui::BeginMainMenuBar())
     {

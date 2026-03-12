@@ -212,6 +212,7 @@ class RendererBackendVk : public IRendererBackend
     Sync* make_sync(const SyncCreateInfo& info) override;
     void destory_sync(Sync* sync) override;
     Swapchain* make_swapchain() override;
+    void destroy_swapchain(Swapchain* swapchain) override;
     SubmitQueue* get_queue(QueueType type) override;
 
     ImageView::Metadata get_md(const ImageView& view) override;

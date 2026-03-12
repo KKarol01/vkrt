@@ -527,7 +527,8 @@ void SwapchainMetadataVk::init(Swapchain& a)
         .minImageCount = Renderer::frame_delay,
         .imageFormat = to_vk(image_format),
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-        .imageExtent = VkExtent2D{ (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height },
+        .imageExtent = VkExtent2D{ (uint32_t)get_renderer().settings.present_resolution.x,
+                                   (uint32_t)get_renderer().settings.present_resolution.y },
         .imageArrayLayers = 1,
         .imageUsage = to_vk(image_usage_flags),
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -559,8 +560,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     ENG_ASSERT(a.images.size() == a.views.size());
     for(auto i = 0u; i < a.images.size(); ++i)
     {
-        ImageMetadataVk::destroy(a.images.at(i).get(), false);
-        get_engine().renderer->images.erase(SlotIndex<uint32_t>{ *a.images.at(i) });
+        get_renderer().queue_destroy(a.images[i], true);
     }
     delete &md;
     a = Swapchain{};
@@ -1494,6 +1494,13 @@ Swapchain* RendererBackendVk::make_swapchain()
     auto* sw = new Swapchain{};
     SwapchainMetadataVk::init(*sw);
     return sw;
+}
+
+void RendererBackendVk::destroy_swapchain(Swapchain* swapchain)
+{
+    if(!swapchain) { return; }
+    SwapchainMetadataVk::destroy(*swapchain);
+    delete swapchain;
 }
 
 SubmitQueue* RendererBackendVk::get_queue(QueueType type)

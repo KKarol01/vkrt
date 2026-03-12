@@ -545,7 +545,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
                 auto& res = get_res(ra);
                 // todo: maybe pool handles here? renderer already does that, soo...
                 // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
-                if(!res.is_persistent && res.last_access == ra) { destroy_resource(res); }
+                if(!res.is_persistent && res.last_access == ra) { free_resource(res); }
             }
         }
         queue->wait_sync(sems[0], gstages);
@@ -561,19 +561,19 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
     return sems[0];
 }
 
-void RGRenderGraph::destroy_resource(RGResource& res)
+void RGRenderGraph::free_resource(RGResource& res)
 {
     ENG_ASSERT(!res.is_persistent);
     auto& r = get_renderer();
     if(res.is_buffer())
     {
         auto h = res.as_buffer();
-        r.destroy_buffer(h);
+        r.queue_destroy(h);
     }
     else
     {
         auto h = res.as_image();
-        r.destroy_image(h);
+        r.queue_destroy(h);
     }
 }
 

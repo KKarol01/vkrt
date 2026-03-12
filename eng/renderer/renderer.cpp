@@ -44,7 +44,6 @@ void Renderer::init(IRendererBackend* backend)
     backend->init();
 
     gq = backend->get_queue(QueueType::GRAPHICS);
-    swapchain = backend->make_swapchain();
     staging = new StagingBuffer{};
     staging->init(gq);
     rgraph = new RGRenderGraph{};
@@ -60,6 +59,16 @@ void Renderer::init(IRendererBackend* backend)
 
     settings.render_resolution = { get_engine().window->width, get_engine().window->height };
     settings.present_resolution = { get_engine().window->width, get_engine().window->height };
+    settings.regenerate_swapchain = true;
+
+    get_engine().window->add_on_resize([this](float x, float y) {
+        if(settings.present_resolution.x != x || settings.present_resolution.y != y)
+        {
+            settings.present_resolution = { x, y };
+            settings.regenerate_swapchain = true;
+        }
+        return true;
+    });
 
     get_engine().ecs->register_callbacks<ecs::Mesh>([this](ecs::EntityId e) {
         auto& ecs = *get_engine().ecs;
@@ -87,65 +96,6 @@ void Renderer::init(IRendererBackend* backend)
         rp.type = (RenderPassType)i;
         render_passes[i] = rp;
     }
-
-    // get_engine().ecs->register_callbacks<ecs::Transform, ecs::Mesh>([this](ecs::EntityId eid) { instance_entity(eid); },
-    //                                                                  [this](ecs::EntityId eid, ecs::Signature comp) {
-    //                                                                      new_transforms.push_back(eid);
-    //                                                                  },
-    //                                                                  [](ecs::EntityId eid) { ENG_ASSERT(false); });
-    // get_engine().ecs->register_callbacks<ecs::Light>(
-    //     [this](ecs::EntityId eid) {
-    //         auto& ecslight = get_engine().ecs->get<ecs::Light>(eid);
-    //         if(ecslight.gpu_index == ~0u) { ++bufs.light_count; }
-    //         new_lights.push_back(eid);
-    //     },
-    //     [this](ecs::EntityId eid, ecs::Signature comp) { new_lights.push_back(eid); },
-    //     [](ecs::EntityId eid) { ENG_ASSERT(false); });
-
-    // get_engine().ui->add_tab(UI::Tab{
-    //     "Debug",
-    //     UI::Location::RIGHT_PANE,
-    //     [this] {
-    //         if(!get_engine().ui->show_debug_tab) { return; }
-    //         if(ImGui::Begin("Debug"))
-    //         {
-    //             auto* camera = get_engine().camera;
-    //             ImGui::SeparatorText("Camera");
-    //             ImGui::Text("Position: %.2f %.2f %.2f", camera->pos.x, camera->pos.y, camera->pos.z);
-
-    //            ImGui::SeparatorText("Forward+");
-    //            ImGui::Text("Tile size: %u px", bufs.fwdp_tile_pixels);
-    //            ImGui::Text("Num tiles: %u", bufs.fwdp_num_tiles);
-    //            ImGui::Text("Lights per tile: %u", bufs.fwdp_lights_per_tile);
-
-    //            bool fwdp_grid_output = debug_output == DebugOutput::FWDP_GRID;
-    //            bool changed = false;
-    //            changed |= ImGui::Checkbox("FWDP heatmap", &fwdp_grid_output);
-    //            if(fwdp_grid_output) { debug_output = DebugOutput::FWDP_GRID; }
-    //            else { debug_output = DebugOutput::COLOR; }
-    //            ImGui::Checkbox("FWDP enable", &fwdp_enable);
-
-    //            ImGui::SeparatorText("Culling");
-    //            const auto& ppf = get_perframe(-1);
-    //            const auto& cullbuf =
-    //            rgraph->get_resource(rgraphpasses->cull_zprepass->culled_id_bufs.get(-1)).buffer.get(); uint32_t mlts
-    //            = 0; for(auto [e, t, m] : ecs_mesh_view)
-    //            {
-    //                const auto& msh = get_engine().ecs->get<ecs::Mesh>(e);
-    //                for(auto mmsh : msh->meshes)
-    //                {
-    //                    mlts += mmsh->geometry->meshlet_range.size;
-    //                }
-    //            }
-    //            ImGui::Text("Drawn meshlets: %u", *(uint32_t*)cullbuf.memory);
-    //            float culled_percent = (float)(*(uint32_t*)cullbuf.memory) / mlts;
-    //            ImGui::Text("%.2f%% of meshlets culled", 100.0f - culled_percent * 100.0f);
-    //            ImGui::Checkbox("Meshlet frustum culling", &mlt_frust_cull_enable);
-    //            ImGui::Checkbox("Meshlet occlusion culling", &mlt_occ_cull_enable);
-    //        }
-    //        ImGui::End();
-    //    },
-    //});
 }
 
 void Renderer::init_helper_geom()
@@ -397,12 +347,12 @@ void Renderer::init_bufs()
 
 void Renderer::update()
 {
-
-    static pass::SSTriangle* sstr{};
-    if(!sstr)
+    if(settings.regenerate_swapchain)
     {
-        sstr = new pass::SSTriangle{};
-        sstr->init();
+        settings.regenerate_swapchain = false;
+        vkDeviceWaitIdle(((RendererBackendVk*)backend)->dev);
+        backend->destroy_swapchain(swapchain);
+        swapchain = backend->make_swapchain();
     }
 
     // auto* ew = get_engine().window;
@@ -700,7 +650,7 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     return Handle<Buffer>{ *it };
 }
 
-void Renderer::destroy_buffer(Handle<Buffer>& buffer)
+void Renderer::queue_destroy(Handle<Buffer>& buffer)
 {
     ENG_ASSERT(buffer);
     get_framedata().retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
@@ -716,10 +666,15 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
     return Handle<Image>{ *it };
 }
 
-void Renderer::destroy_image(Handle<Image>& image)
+void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
 {
     ENG_ASSERT(image);
-    get_framedata().retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
+    if(destroy_now)
+    {
+        backend->destroy_image(image.get());
+        images.erase(SlotIndex<uint32_t>{ *image });
+    }
+    else { get_framedata().retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
     image = {};
 }
 
@@ -945,7 +900,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
 
     auto dsth = make_buffer(buffer_names[*handle], Buffer::init(new_size, handle->usage));
     if(copy_data) { staging->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
-    destroy_buffer(handle);
+    queue_destroy(handle);
     handle = dsth;
 }
 
