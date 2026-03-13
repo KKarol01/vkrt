@@ -29,12 +29,7 @@ struct Window
 
 class UI
 {
-    struct NodeSplits
-    {
-        uint32_t* id{};
-        uint32_t dock_ids[4]{}; // l,r,u,d (same as imguidir)
-        float dock_ratios[4]{}; // must be > 0 to be split
-    };
+    inline static bool always_redo_layout_on_start = false;
 
   public:
     void init();
@@ -64,9 +59,6 @@ class UI
     std::vector<WindowId> root_windows;
     std::vector<Window> windows;
     std::unordered_map<std::string, WindowId> windowmap;
-    std::deque<NodeSplits> splits;
-    std::unordered_map<uint32_t*, NodeSplits*> splitmap;
-    inline static bool always_redo_layout_on_start = true;
 
     WindowId fullscreen;
     uint32_t dock_id{};

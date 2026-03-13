@@ -182,6 +182,7 @@ void UI::draw(gfx::RGBuilder& rg)
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     dock_id = ImGui::GetID("ViewportDockspace");
+
     if(always_redo_layout_on_start || !ImGui::DockBuilderGetNode(dock_id))
     {
         always_redo_layout_on_start = false;
@@ -206,6 +207,22 @@ void UI::draw(gfx::RGBuilder& rg)
             ImGui::DockBuilderDockWindow(e.title.c_str(), e.dock_at);
         }
         ImGui::DockBuilderFinish(dock_id);
+    }
+    else
+    {
+        static bool once = true;
+        if(once)
+        {
+            once = false;
+            uint32_t game{};
+            uint32_t scene{};
+            uint32_t console{};
+            uint32_t inspector{};
+            auto* gamepanel = new GamePanel{ *this, game };                            // mem leak
+            auto* scenepanel = new ScenePanel{ *this, scene };                         // mem leak
+            auto* inspectorpanel = new InspectorPanel{ *this, scenepanel, inspector }; // mem leak
+            auto* consolepanel = new ConsolePanel{ *this, console };                   // mem leak
+        }
     }
 
     ImGui::DockSpaceOverViewport(dock_id, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
