@@ -231,10 +231,9 @@ enum class RenderPassType : uint32_t
     LAST_ENUM,
 };
 
-enum class PipelineStage : uint32_t
+enum class PipelineStage : uint16_t
 {
     NONE = 0x0,
-    ALL = 0xFFFFFFFF,
     TRANSFER_BIT = 0x1,
     VERTEX_BIT = 0x2,
     FRAGMENT = 0x4,
@@ -243,6 +242,7 @@ enum class PipelineStage : uint32_t
     COLOR_OUT_BIT = 0x20,
     COMPUTE_BIT = 0x40,
     INDIRECT_BIT = 0x80,
+    ALL = 0x100,
 };
 ENG_ENABLE_FLAGS_OPERATORS(PipelineStage);
 
@@ -326,6 +326,14 @@ enum class AllocateMemory : uint8_t
     ALIASED,  // Gpu memory allocator will not create unique memory for this resource.
     EXTERNAL, // Memory is managed by someone else (swapchain images).
     YES,
+};
+
+enum class QueryType : uint8_t
+{
+    NONE,
+    TIMESTAMP,
+    OCCLUSION,
+    PERFORMANCE,
 };
 
 class Renderer;

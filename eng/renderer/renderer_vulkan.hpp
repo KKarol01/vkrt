@@ -174,6 +174,11 @@ struct SwapchainMetadataVk
     VkSwapchainKHR swapchain{};
 };
 
+struct QueryPoolMetadataVk
+{
+    VkQueryPool vkpool{};
+};
+
 class RendererBackendVk : public IRendererBackend
 {
   public:
@@ -196,6 +201,8 @@ class RendererBackendVk : public IRendererBackend
 
     void init() override;
     void initialize_vulkan();
+
+
 
     void allocate_buffer(Buffer& buffer, AllocateMemory allocate = AllocateMemory::YES) override;
     void destroy_buffer(Buffer& buffer) override;
@@ -230,6 +237,11 @@ class RendererBackendVk : public IRendererBackend
     void set_debug_name(Buffer& resource, std::string_view name) const override;
     void set_debug_name(Image& resource, std::string_view name) const override;
 
+    QueryPool* make_query_pool(const QueryPoolCreateInfo& info) override;
+    void destroy_query_pool(QueryPool* pool) override;
+    void get_query_pool_results(QueryPool* pool, uint32_t query, uint32_t count, void* outdata) override;
+    size_t get_query_result_size(QueryType type) override;
+
     VkInstance instance;
     VkDevice dev;
     VkPhysicalDevice pdev;
@@ -241,6 +253,7 @@ class RendererBackendVk : public IRendererBackend
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;
+    VkPhysicalDeviceLimits pdev_limits{};
 };
 } // namespace gfx
 

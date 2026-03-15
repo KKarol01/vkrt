@@ -34,6 +34,7 @@ VkPipelineBindPoint to_vk(const PipelineType& a);
 VkShaderStageFlags to_vk(const Flags<ShaderStage>& a);
 VkDescriptorType to_vk(const DescriptorType& a);
 VkDescriptorPoolCreateFlags to_vk(const Flags<DescriptorPoolFlags>& a);
+VkQueryType to_vk(const QueryType& a);
 
 } // namespace gfx
 } // namespace eng

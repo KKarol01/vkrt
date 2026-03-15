@@ -55,6 +55,8 @@ class UI
 
     void draw(gfx::RGBuilder& b);
 
+	bool reset_layout{};
+
     IndexedHierarchy hierarchy;
     std::vector<WindowId> root_windows;
     std::vector<Window> windows;

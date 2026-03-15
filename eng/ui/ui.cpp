@@ -28,7 +28,12 @@ class GamePanel
     {
         if(ImGui::Begin("Game Panel", 0, ImGuiWindowFlags_NoMove))
         {
-            const ImVec2 mpcsize = ImGui::GetContentRegionAvail();
+            ImVec2 mpcsize = ImGui::GetContentRegionAvail();
+            if(mpcsize.x * mpcsize.y == 0.0f)
+            {
+                mpcsize = ImVec2{ gfx::get_renderer().settings.render_resolution.x,
+                                  gfx::get_renderer().settings.render_resolution.y };
+            }
             const float targetAspect = 16.0f / 9.0f;
             float width = mpcsize.x;
             float height = width / targetAspect;
@@ -175,6 +180,7 @@ class ConsolePanel
 
 void UI::init()
 {
+    reset_layout |= always_redo_layout_on_start;
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
 }
 
@@ -183,9 +189,9 @@ void UI::draw(gfx::RGBuilder& rg)
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     dock_id = ImGui::GetID("ViewportDockspace");
 
-    if(always_redo_layout_on_start || !ImGui::DockBuilderGetNode(dock_id))
+    if(reset_layout || !ImGui::DockBuilderGetNode(dock_id))
     {
-        always_redo_layout_on_start = false;
+        reset_layout = false;
         ImGui::DockBuilderRemoveNode(dock_id);
         ImGui::DockBuilderAddNode(dock_id);
         ImGui::DockBuilderSetNodeSize(dock_id, ImGui::GetMainViewport()->Size);
@@ -231,6 +237,7 @@ void UI::draw(gfx::RGBuilder& rg)
     {
         ImGui::Button("a");
         ImGui::Button("b");
+        if(ImGui::Button("Reset Layout")) { reset_layout = true; }
         ImGui::EndMainMenuBar();
     }
 

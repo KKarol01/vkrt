@@ -234,16 +234,15 @@ void Renderer::init_pipelines()
 
 void Renderer::init_perframes()
 {
-    // auto* ew = get_engine().window;
     frame_datas.resize(frame_delay);
     current_data = &frame_datas[0];
     for(auto i = 0u; i < frame_delay; ++i)
     {
         frame_datas[i].cmdpool = gq->make_command_pool();
         frame_datas[i].acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
-        frame_datas[i].ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
         frame_datas[i].ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         frame_datas[i].swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
+        frame_datas[i].timestamp_pool = backend->make_query_pool({ QueryType::TIMESTAMP, 1024 });
     }
 }
 
@@ -354,16 +353,28 @@ void Renderer::update()
         backend->destroy_swapchain(swapchain);
         swapchain = backend->make_swapchain();
     }
-    // auto* ew = get_engine().window;
-    // const auto& ppf = perframe.at(current_frame % perframe.size()); // get previous frame res
     current_data->ren_fen->wait_cpu(~0ull);
     current_data->ren_fen->reset();
-    // current_data->acq_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
-    // current_data->ren_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
-    // current_data->swp_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
     current_data->cmdpool->reset();
+    // Stupid swapchain -- cannot reset those (binary sems that need to be destroyed to reset)
+    // because waiting on a ren_fen doesn't guarantee that sems are no longer in use, and which
+    // get reset only when waited on in the queue submission, so acq_sem gets waited on (reset)
+    // during (but before) ren_fen signal operation, and swp_sem during present.
+    // current_data->acq_sem->reset();
+    // current_data->swp_sem->reset();
+    {
+        for(const auto& q : current_data->timestamp_queries)
+        {
+            uint64_t ts[2];
+            backend->get_query_pool_results(q.pool, q.index, 2, ts);
+            const auto ms = (ts[1] - ts[0]) * backend->limits.timestampPeriodNs * 1e-6;
+            ENG_LOG("Query {} took {:.3f}ms", q.label.c_str(), ms);
+        }
+        current_data->timestamp_queries.clear();
+    }
 
     swapchain->acquire(~0ull, current_data->acq_sem);
+    ENG_LOG("Swapchain {}", swapchain->current_index);
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -520,7 +531,7 @@ void Renderer::compile_rendergraph()
             },
             [this, i](RGBuilder& pb, const RGAccessId& output) {
                 const auto* w = get_engine().window;
-                auto* cmd = pb.open_cmd_buf();
+                const auto& rp = get_renderer().render_passes[i];
                 const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
                     .imageView = pb.graph->get_acc(output).image_view.get_md().vk->view,
                     .imageLayout = to_vk(pb.graph->get_acc(output).layout),
@@ -537,25 +548,28 @@ void Renderer::compile_rendergraph()
                 });
                 VkViewport viewport{ 0.0, 0.0, w->width, w->height, 1.0, 0.0 };
                 VkRect2D scissor{ {}, { (uint32_t)w->width, (uint32_t)w->height } };
-                cmd->begin_rendering(vkrinfo);
-                cmd->set_viewports(&viewport, 1);
-                cmd->set_scissors(&scissor, 1);
-
-                const auto& rp = get_renderer().render_passes[i];
                 DescriptorResource shaderresources[]{
                     DescriptorResource::storage_buffer(0, pb.graph->get_buf(current_data->render_targets.constants)),
                     DescriptorResource::storage_buffer(1, get_renderer().bufs.positions)
                 };
-                cmd->bind_set(0, shaderresources);
-                rp.draw.draw([&](const IndirectDrawParams& params) {
-                    cmd->bind_pipeline(params.draw->pipeline.get());
-                    cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(rp.draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     rp.draw.counts_view.buffer.get(), params.count_offset_bytes,
-                                                     params.max_draw_count, params.stride);
-                });
-
-                cmd->end_rendering();
+                auto* cmd = pb.open_cmd_buf();
+                {
+                    char label[64]{};
+                    const auto format_res = fmt::format_to(label, "MaterialPassDraw{}", i);
+                    ScopedTimestampQuery query{ std::string_view{ label, format_res.out }, cmd };
+                    cmd->begin_rendering(vkrinfo);
+                    cmd->set_viewports(&viewport, 1);
+                    cmd->set_scissors(&scissor, 1);
+                    cmd->bind_set(0, shaderresources);
+                    rp.draw.draw([&](const IndirectDrawParams& params) {
+                        cmd->bind_pipeline(params.draw->pipeline.get());
+                        cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
+                        cmd->draw_indexed_indirect_count(rp.draw.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                         rp.draw.counts_view.buffer.get(), params.count_offset_bytes,
+                                                         params.max_draw_count, params.stride);
+                    });
+                    cmd->end_rendering();
+                }
             });
     }
 
@@ -957,6 +971,35 @@ bool PipelineLayout::is_compatible(const PipelineLayout& a) const
         if(!s1->is_compatible(s2.get())) { return false; }
     }
     return true;
+}
+
+// todo: swapchain impl should not be here
+uint32_t Swapchain::acquire(uint64_t timeout, Sync* semaphore, Sync* fence)
+{
+    current_index = acquire_impl(this, timeout, semaphore, fence);
+    return current_index;
+}
+
+Handle<Image> Swapchain::get_image() const { return images.at(current_index); }
+
+ImageView Swapchain::get_view() const { return views.at(current_index); }
+
+ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffer* cmd) : cmd(cmd)
+{
+    auto& r = get_renderer();
+    auto& cd = r.current_data;
+    auto& tq = cd->timestamp_queries.emplace_back();
+    query = &tq;
+    query->label = label;
+    query->pool = cd->timestamp_pool;
+    query->index = query->pool->allocate_queries(2);
+    cmd->reset_query_pool(query->pool, query->index, 2);
+    cmd->write_timestamp(query->pool, PipelineStage::ALL, query->index);
+}
+
+ScopedTimestampQuery::~ScopedTimestampQuery()
+{
+    cmd->write_timestamp(query->pool, PipelineStage::ALL, query->index + 1);
 }
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)

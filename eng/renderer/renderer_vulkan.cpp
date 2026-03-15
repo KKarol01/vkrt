@@ -302,7 +302,7 @@ void PipelineMetadataVk::destroy(Pipeline& a)
 
 void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
 {
-    if(a.md.as_vk())
+    if(a.md.vk())
     {
         ENG_ERROR("Trying to init already init buffer");
         return;
@@ -350,13 +350,13 @@ void BufferMetadataVk::init(const Buffer& a, VkBufferCreateInfo& info)
 
 void BufferMetadataVk::destroy(Buffer& a)
 {
-    if(!a.md.as_vk())
+    if(!a.md.vk())
     {
         ENG_ASSERT(a.capacity == 0);
         return;
     }
     auto& backend = RendererBackendVk::get_instance();
-    auto* md = a.md.as_vk();
+    auto* md = a.md.vk();
     if(!md) { return; }
     if(!md->is_aliased) { vmaDestroyBuffer(backend.vma, md->buffer, md->vma_alloc); }
     else { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
@@ -366,7 +366,7 @@ void BufferMetadataVk::destroy(Buffer& a)
 
 void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* user_data)
 {
-    if(a.md.as_vk())
+    if(a.md.vk())
     {
         ENG_ERROR("Trying to init already init image");
         return;
@@ -413,17 +413,17 @@ void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
 
 void ImageMetadataVk::destroy(Image& a, bool deallocate)
 {
-    if(!a.md.as_vk()) { return; }
+    if(!a.md.vk()) { return; }
     auto& backend = RendererBackendVk::get_instance();
-    auto* md = a.md.as_vk();
+    auto* md = a.md.vk();
     if(!md) { return; }
     if(deallocate && !md->is_aliased) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
     else if(deallocate && md->is_aliased) { vkDestroyImage(backend.dev, md->image, nullptr); }
-    for(auto& [view, vkview] : a.md.as_vk()->views)
+    for(auto& [view, vkview] : a.md.vk()->views)
     {
         vkDestroyImageView(backend.dev, vkview.view, nullptr);
     }
-    delete a.md.as_vk();
+    delete a.md.vk();
     a.md.ptr = nullptr;
 }
 
@@ -450,7 +450,7 @@ void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
     const auto dst_layer = view.dst_subresource / img.mips;
     const auto dst_mip = view.dst_subresource % img.mips;
     const auto vkinfo =
-        Vks(VkImageViewCreateInfo{ .image = view.image->md.as_vk()->image,
+        Vks(VkImageViewCreateInfo{ .image = view.image->md.vk()->image,
                                    .viewType = to_vk(view.type),
                                    .format = to_vk(view.format),
                                    .subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip,
@@ -783,6 +783,11 @@ void RendererBackendVk::initialize_vulkan()
 
     caps = RendererBackendCaps{
         .supports_bindless = true, // Should be really checked, but it's safe to assume true
+    };
+
+    pdev_limits = pdev_props.properties.limits;
+    limits = RendererBackendLimits{
+        .timestampPeriodNs = pdev_limits.timestampPeriod,
     };
 }
 
@@ -1513,13 +1518,13 @@ SubmitQueue* RendererBackendVk::get_queue(QueueType type)
 ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
     auto& img = view.image.get();
-    auto it = img.md.as_vk()->views.find(view);
+    auto it = img.md.vk()->views.find(view);
     ImageViewMetadataVk* retmd{};
-    if(it == img.md.as_vk()->views.end())
+    if(it == img.md.vk()->views.end())
     {
         ImageViewMetadataVk* md{};
         get_renderer().backend->allocate_view(view, (void**)&md);
-        retmd = &img.md.as_vk()->views.emplace(view, *md).first->second;
+        retmd = &img.md.vk()->views.emplace(view, *md).first->second;
         delete md; // delete md here, as allocate_view currently allocates dynamic memory and we do a copy to views map
     }
     else { retmd = &it->second; }
@@ -1539,7 +1544,7 @@ void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_
 void RendererBackendVk::get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs)
 {
     VkBufferMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
-                                              .buffer = resource.md.as_vk()->buffer };
+                                              .buffer = resource.md.vk()->buffer };
     VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
     vkGetBufferMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
@@ -1559,7 +1564,7 @@ void RendererBackendVk::get_memory_requirements(const Buffer& resource, Renderer
 void RendererBackendVk::get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs)
 {
     VkImageMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
-                                             .image = resource.md.as_vk()->image };
+                                             .image = resource.md.vk()->image };
     VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
     vkGetImageMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
@@ -1578,7 +1583,7 @@ void RendererBackendVk::get_memory_requirements(const Image& resource, RendererM
 
 void* RendererBackendVk::allocate_aliasable_memory(const RendererMemoryRequirements& reqs)
 {
-    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = reqs.backend_data[0] };
+    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = (uint32_t)reqs.backend_data[0] };
     const VmaAllocationCreateInfo info{ .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
     VmaAllocation alloc;
     VK_CHECK(vmaAllocateMemory(vma, &vkreqs, &info, &alloc, nullptr));
@@ -1590,27 +1595,27 @@ void RendererBackendVk::bind_aliasable_memory(Buffer& resource, void* memory, si
     auto alloc = (VmaAllocation)memory;
     RendererMemoryRequirements reqs{};
     get_memory_requirements(resource, reqs);
-    if(resource.md.as_vk() && resource.md.as_vk()->vma_alloc && !resource.md.as_vk()->is_aliased)
+    if(resource.md.vk() && resource.md.vk()->vma_alloc && !resource.md.vk()->is_aliased)
     {
         ENG_ERROR("Resource already has dedicated memory");
         return;
     }
-    if(!resource.md.as_vk()) { resource.md.ptr = new BufferMetadataVk{}; }
-    ENG_ASSERT(resource.md.as_vk());
-    if(!resource.md.as_vk()->buffer)
+    if(!resource.md.vk()) { resource.md.ptr = new BufferMetadataVk{}; }
+    ENG_ASSERT(resource.md.vk());
+    if(!resource.md.vk()->buffer)
     {
         VkBufferCreateInfo vkinfo;
         BufferMetadataVk::init(resource, vkinfo);
-        VK_CHECK(vkCreateBuffer(dev, &vkinfo, nullptr, &resource.md.as_vk()->buffer));
+        VK_CHECK(vkCreateBuffer(dev, &vkinfo, nullptr, &resource.md.vk()->buffer));
     }
-    if(!resource.md.as_vk()->buffer)
+    if(!resource.md.vk()->buffer)
     {
         ENG_ERROR("Buffer is null");
         return;
     }
-    VK_CHECK(vmaBindBufferMemory2(vma, alloc, offset, resource.md.as_vk()->buffer, nullptr));
-    resource.md.as_vk()->is_aliased = true;
-    resource.md.as_vk()->vma_alloc = alloc;
+    VK_CHECK(vmaBindBufferMemory2(vma, alloc, offset, resource.md.vk()->buffer, nullptr));
+    resource.md.vk()->is_aliased = true;
+    resource.md.vk()->vma_alloc = alloc;
 }
 
 void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, size_t offset)
@@ -1620,42 +1625,90 @@ void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, siz
     get_memory_requirements(resource, reqs);
     if(!resource.md.ptr) { resource.md.ptr = new ImageMetadataVk{}; }
     ENG_ASSERT(resource.md.ptr);
-    if(!resource.md.as_vk()->image)
+    if(!resource.md.vk()->image)
     {
         VkImageCreateInfo vkinfo;
         ImageMetadataVk::init(resource, vkinfo);
-        VK_CHECK(vkCreateImage(dev, &vkinfo, nullptr, &resource.md.as_vk()->image));
+        VK_CHECK(vkCreateImage(dev, &vkinfo, nullptr, &resource.md.vk()->image));
     }
-    if(!resource.md.as_vk()->image)
+    if(!resource.md.vk()->image)
     {
         ENG_ERROR("Image is null");
         return;
     }
-    VK_CHECK(vmaBindImageMemory2(vma, alloc, offset, resource.md.as_vk()->image, nullptr));
-    resource.md.as_vk()->is_aliased = true;
-    resource.md.as_vk()->vmaa = alloc;
+    VK_CHECK(vmaBindImageMemory2(vma, alloc, offset, resource.md.vk()->image, nullptr));
+    resource.md.vk()->is_aliased = true;
+    resource.md.vk()->vmaa = alloc;
 }
 
 void RendererBackendVk::set_debug_name(Buffer& resource, std::string_view name) const
 {
-    eng::gfx::set_debug_name(resource.md.as_vk()->buffer, name);
+    eng::gfx::set_debug_name(resource.md.vk()->buffer, name);
 }
 
 void RendererBackendVk::set_debug_name(Image& resource, std::string_view name) const
 {
-    eng::gfx::set_debug_name(resource.md.as_vk()->image, name);
+    eng::gfx::set_debug_name(resource.md.vk()->image, name);
 }
 
-// todo: swapchain impl should not be here
-uint32_t Swapchain::acquire(uint64_t timeout, Sync* semaphore, Sync* fence)
+QueryPool* RendererBackendVk::make_query_pool(const QueryPoolCreateInfo& info)
 {
-    current_index = acquire_impl(this, timeout, semaphore, fence);
-    return current_index;
+    auto* pool = new QueryPool{};
+    if(!pool) { return pool; }
+    pool->type = info.type;
+    pool->max_queries = info.max_queries;
+    auto* md = new QueryPoolMetadataVk{};
+    pool->md.ptr = md;
+    if(!md)
+    {
+        delete pool;
+        return nullptr;
+    }
+    const auto vkinfo = Vks(VkQueryPoolCreateInfo{
+        .queryType = to_vk(info.type),
+        .queryCount = info.max_queries,
+    });
+    const auto vkres = vkCreateQueryPool(dev, &vkinfo, nullptr, &md->vkpool);
+    VK_CHECK(vkres);
+    if(vkres != VK_SUCCESS)
+    {
+        delete md;
+        delete pool;
+        return nullptr;
+    }
+    return pool;
 }
 
-Handle<Image> Swapchain::get_image() const { return images.at(current_index); }
+void RendererBackendVk::destroy_query_pool(QueryPool* pool)
+{
+    if(!pool || !pool->md.ptr) { return; }
+    delete pool->md.vk();
+    pool->md.ptr = nullptr;
+}
 
-ImageView Swapchain::get_view() const { return views.at(current_index); }
+void RendererBackendVk::get_query_pool_results(QueryPool* pool, uint32_t query, uint32_t count, void* outdata)
+{
+    if(!pool || !pool->md.ptr || !outdata)
+    {
+        ENG_WARN("Invalid params for get query pool results function.");
+        return;
+    }
+    const auto stride = get_query_result_size(pool->type);
+    const auto size = stride * count;
+    VK_CHECK(vkGetQueryPoolResults(dev, pool->md.vk()->vkpool, query, count, size, outdata, stride,
+                                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+}
+
+size_t RendererBackendVk::get_query_result_size(QueryType type)
+{
+    // clang-format off
+    switch(type)
+    {
+    case QueryType::TIMESTAMP: { return sizeof(uint64_t); }
+    default: { ENG_ERROR("Unhandled case."); return 0u; }
+    }
+    // clang-format on
+}
 
 // Handle<Mesh> RendererBackendVulkan::instance_mesh(const InstanceSettings& settings)
 //{

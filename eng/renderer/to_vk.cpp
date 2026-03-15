@@ -353,6 +353,15 @@ VkDescriptorPoolCreateFlags to_vk(const Flags<DescriptorPoolFlags>& a)
     return flags;
 }
 
+VkQueryType to_vk(const QueryType& a)
+{
+	switch(a)
+	{
+		case QueryType::TIMESTAMP: { return VK_QUERY_TYPE_TIMESTAMP; }
+		default: { ENG_ERROR("Unhandled case."); return {}; }
+	}
+}
+
 }
 }
 // clang-format on

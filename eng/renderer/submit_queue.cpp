@@ -45,7 +45,7 @@ void CommandBufferVk::barrier(const Image& image, Flags<PipelineStage> src_stage
                                    .dstAccessMask = to_vk(dst_access),
                                    .oldLayout = to_vk(old_layout),
                                    .newLayout = to_vk(new_layout),
-                                   .image = image.md.as_vk()->image,
+                                   .image = image.md.vk()->image,
                                    .subresourceRange = { to_vk(get_aspect_from_format(image.format)), range.mips.offset,
                                                          range.mips.size, range.layers.offset, range.layers.size } });
     const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
@@ -56,13 +56,13 @@ void CommandBufferVk::copy(const Buffer& dst, const Buffer& src, size_t dst_offs
 {
     ENG_ASSERT(dst_offset + range.size <= dst.capacity && range.offset + range.size <= src.capacity);
     VkBufferCopy region{ range.offset, dst_offset, range.size };
-    vkCmdCopyBuffer(cmd, src.md.as_vk()->buffer, dst.md.as_vk()->buffer, 1, &region);
+    vkCmdCopyBuffer(cmd, src.md.vk()->buffer, dst.md.vk()->buffer, 1, &region);
 }
 
 void CommandBufferVk::copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
 {
-    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = src.md.as_vk()->buffer,
-                                                    .dstImage = dst.md.as_vk()->image,
+    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = src.md.vk()->buffer,
+                                                    .dstImage = dst.md.vk()->image,
                                                     .dstImageLayout = to_vk(ImageLayout::TRANSFER_DST),
                                                     .regionCount = count,
                                                     .pRegions = regions });
@@ -71,8 +71,8 @@ void CommandBufferVk::copy(const Image& dst, const Buffer& src, const VkBufferIm
 
 void CommandBufferVk::copy(const Image& dst, const Image& src, const ImageCopy& copy)
 {
-    auto* dstmd = dst.md.as_vk();
-    const auto* srcmd = dst.md.as_vk();
+    auto* dstmd = dst.md.vk();
+    const auto* srcmd = dst.md.vk();
     VkImageCopy vkcp{ .srcSubresource = { to_vk(get_aspect_from_format(src.format)), copy.srclayers.mip,
                                           copy.srclayers.layers.offset, copy.srclayers.layers.size },
                       .srcOffset = { copy.srcoffset.x, copy.srcoffset.y, copy.srcoffset.z },
@@ -85,8 +85,8 @@ void CommandBufferVk::copy(const Image& dst, const Image& src, const ImageCopy& 
 
 void CommandBufferVk::copy(const Image& dst, const Image& src)
 {
-    auto* dstmd = dst.md.as_vk();
-    const auto* srcmd = src.md.as_vk();
+    auto* dstmd = dst.md.vk();
+    const auto* srcmd = src.md.vk();
     const auto vkr =
         VkImageCopy{ .srcSubresource = { to_vk(get_aspect_from_format(src.format)), 0, 0, std::min(dst.layers, src.layers) },
                      .dstSubresource = { to_vk(get_aspect_from_format(dst.format)), 0, 0, std::min(dst.layers, src.layers) },
@@ -96,8 +96,8 @@ void CommandBufferVk::copy(const Image& dst, const Image& src)
 
 void CommandBufferVk::blit(const Image& dst, const Image& src, const ImageBlit& blit)
 {
-    auto* dstmd = dst.md.as_vk();
-    const auto* srcmd = src.md.as_vk();
+    auto* dstmd = dst.md.vk();
+    const auto* srcmd = src.md.vk();
     auto vkblit = VkImageBlit{};
     vkblit.srcSubresource = { .aspectMask = to_vk(get_aspect_from_format(src.format)),
                               .mipLevel = blit.srclayers.mip,
@@ -124,7 +124,7 @@ void CommandBufferVk::clear_color(const Image& image, const Color4f& color)
     const auto clear = VkClearColorValue{ .float32 = { color.x, color.y, color.z, color.a } };
     const auto range =
         VkImageSubresourceRange{ to_vk(ImageAspect::COLOR), 0u, VK_REMAINING_MIP_LEVELS, 0u, VK_REMAINING_ARRAY_LAYERS };
-    vkCmdClearColorImage(cmd, image.md.as_vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
+    vkCmdClearColorImage(cmd, image.md.vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
 }
 
 void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil)
@@ -132,12 +132,12 @@ void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth,
     const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil ? 0 : *clear_stencil };
     const auto range = VkImageSubresourceRange{ to_vk(clear_stencil ? ImageAspect::DEPTH_STENCIL : ImageAspect::DEPTH),
                                                 0u, VK_REMAINING_MIP_LEVELS, 0u, VK_REMAINING_ARRAY_LAYERS };
-    vkCmdClearDepthStencilImage(cmd, image.md.as_vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
+    vkCmdClearDepthStencilImage(cmd, image.md.vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
 }
 
 void CommandBufferVk::bind_index(const Buffer& index, uint32_t offset, VkIndexType type)
 {
-    vkCmdBindIndexBuffer(cmd, index.md.as_vk()->buffer, offset, type);
+    vkCmdBindIndexBuffer(cmd, index.md.vk()->buffer, offset, type);
 }
 
 void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
@@ -221,8 +221,8 @@ void CommandBufferVk::draw_indexed_indirect_count(const Buffer& indirect, size_t
                                                   size_t count_offset, uint32_t max_draw_count, uint32_t stride)
 {
     before_draw_dispatch();
-    vkCmdDrawIndexedIndirectCount(cmd, indirect.md.as_vk()->buffer, indirect_offset, count.md.as_vk()->buffer,
-                                  count_offset, max_draw_count, stride);
+    vkCmdDrawIndexedIndirectCount(cmd, indirect.md.vk()->buffer, indirect_offset, count.md.vk()->buffer, count_offset,
+                                  max_draw_count, stride);
 }
 
 void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
@@ -244,6 +244,20 @@ void CommandBufferVk::end_label()
 #ifndef NDEBUG
     vkCmdEndDebugUtilsLabelEXT(cmd);
 #endif
+}
+
+void CommandBufferVk::reset_query_pool(QueryPool* pool, uint32_t query_index, uint32_t count)
+{
+    if(!pool || !pool->md.ptr) { return; }
+    if(pool->index == 0) { return; }
+    vkCmdResetQueryPool(cmd, pool->md.vk()->vkpool, query_index, count);
+    pool->index = 0;
+}
+
+void CommandBufferVk::write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, uint32_t index)
+{
+    if(!pool || !pool->md.ptr) { return; }
+    vkCmdWriteTimestamp2(cmd, to_vk(stage), pool->md.vk()->vkpool, index);
 }
 
 CommandPoolVk::CommandPoolVk(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)

@@ -312,7 +312,7 @@ struct Buffer
     void* memory{};
     struct Metadata
     {
-        BufferMetadataVk* as_vk() const { return (BufferMetadataVk*)ptr; }
+        BufferMetadataVk* vk() const { return (BufferMetadataVk*)ptr; }
         void* ptr{};
     } md;
 };
@@ -323,17 +323,17 @@ struct Image
                       ImageLayout layout = ImageLayout::UNDEFINED, uint32_t mips = 1)
     {
         mips = mips == ~0u ? (uint32_t)(std::log2f((float)std::min(width, height)) + 1) : mips;
-        return init(width, height, 1, format, usage, mips, 1, layout);
+        return init(width, height, 0, format, usage, mips, 1, layout);
     }
     static Image init(uint32_t width, uint32_t height, uint32_t depth, ImageFormat format, Flags<ImageUsage> usage,
                       uint32_t mips = 1, uint32_t layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
     {
         return Image{
-            .type = depth > 1    ? ImageType::TYPE_3D
-                    : height > 1 ? ImageType::TYPE_2D
+            .type = depth > 0    ? ImageType::TYPE_3D
+                    : height > 0 ? ImageType::TYPE_2D
                                  : ImageType::TYPE_1D,
             .format = format,
-            .width = width,
+            .width = std::max(width, 1u),
             .height = std::max(height, 1u),
             .depth = std::max(depth, 1u),
             .mips = mips == 0u ? (uint32_t)(std::log2f((float)std::min(width, height)) + 1) : mips,
@@ -354,7 +354,7 @@ struct Image
     ImageLayout layout{ ImageLayout::UNDEFINED };
     struct Metadata
     {
-        ImageMetadataVk* as_vk() const { return (ImageMetadataVk*)ptr; }
+        ImageMetadataVk* vk() const { return (ImageMetadataVk*)ptr; }
         void* ptr{};
     } md;
 };
@@ -509,12 +509,17 @@ struct RendererBackendCaps
     bool supports_bindless{};
 };
 
+struct RendererBackendLimits
+{
+    float timestampPeriodNs{};
+};
+
 struct RendererMemoryRequirements
 {
     auto operator<=>(const RendererMemoryRequirements&) const = default;
     size_t size{};
     size_t alignment{};
-    std::array<uint32_t, 8> backend_data{}; // for storing additional backend-specific data (vulkan uses it to store memory type bits)
+    std::array<uint64_t, 4> backend_data{}; // for storing additional backend-specific data (vulkan uses it to store memory type bits)
 };
 
 class IRendererBackend
@@ -539,7 +544,7 @@ class IRendererBackend
     virtual Sync* make_sync(const SyncCreateInfo& info) = 0;
     virtual void destory_sync(Sync*) = 0;
     virtual Swapchain* make_swapchain() = 0;
-	virtual void destroy_swapchain(Swapchain* swapchain) = 0;
+    virtual void destroy_swapchain(Swapchain* swapchain) = 0;
     virtual SubmitQueue* get_queue(QueueType type) = 0;
 
     virtual ImageView::Metadata get_md(const ImageView& view) = 0;
@@ -561,7 +566,13 @@ class IRendererBackend
     virtual void set_debug_name(Buffer& resource, std::string_view name) const = 0;
     virtual void set_debug_name(Image& resource, std::string_view name) const = 0;
 
+    virtual QueryPool* make_query_pool(const QueryPoolCreateInfo& info) = 0;
+    virtual void destroy_query_pool(QueryPool* pool) = 0;
+    virtual void get_query_pool_results(QueryPool* pool, uint32_t query, uint32_t count, void* outdata) = 0;
+    virtual size_t get_query_result_size(QueryType type) = 0;
+
     RendererBackendCaps caps{};
+    RendererBackendLimits limits{};
 };
 
 } // namespace gfx
@@ -653,6 +664,26 @@ struct RenderTargets
     RGResourceId depth;
 };
 
+struct TimestampQueryResult
+{
+    uint64_t timestamp;
+};
+
+struct TimestampQuery
+{
+    QueryPool* pool{};
+    uint32_t index{}; // index and index+1 for diff
+    StackString<64> label;
+};
+
+struct ScopedTimestampQuery
+{
+    ScopedTimestampQuery(std::string_view label, ICommandBuffer* cmd);
+    ~ScopedTimestampQuery();
+    TimestampQuery* query{};
+    ICommandBuffer* cmd{};
+};
+
 // Used for adding passes to the render graph.
 // Essentially divides vector of render passes into segments
 // or partitions, and using the constants from this namespace
@@ -676,9 +707,11 @@ class Renderer
     {
         ICommandPool* cmdpool{};
         Sync* acq_sem{};
-        Sync* ren_sem{};
         Sync* swp_sem{};
         Sync* ren_fen{};
+
+        QueryPool* timestamp_pool;
+        std::deque<TimestampQuery> timestamp_queries;
 
         RenderTargets render_targets;
 
@@ -730,7 +763,7 @@ class Renderer
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 
-		bool regenerate_swapchain{};
+        bool regenerate_swapchain{};
     };
 
     void init(IRendererBackend* backend);
@@ -738,7 +771,6 @@ class Renderer
     void init_pipelines();
     void init_perframes();
     void init_bufs();
-    // void init_rgraph_passes();
 
     void update();
     void compile_rendergraph();

@@ -136,8 +136,8 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
     }
     if(resource_changed) { slots.erase(eqit.first, eqit.second); }
     slot.slot = *get_slot_allocator(view.type).allocate();
-    if(view.is_buffer()) { slot.vkbuffer = view.as_buffer().buffer->md.as_vk()->buffer; }
-    else { slot.vkimage = view.as_image().image->md.as_vk()->image; }
+    if(view.is_buffer()) { slot.vkbuffer = view.as_buffer().buffer->md.vk()->buffer; }
+    else { slot.vkimage = view.as_image().image->md.vk()->image; }
     write_descriptor(view.type, view.is_buffer() ? (void*)&view.as_buffer() : (void*)&view.as_image(), slot.slot);
     return slots.emplace(slot)->slot;
 }
@@ -159,7 +159,7 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     {
         auto* info = &buf_writes.emplace_back();
         const auto& engview = *(BufferView*)view;
-        info->buffer = engview.buffer->md.as_vk()->buffer;
+        info->buffer = engview.buffer->md.vk()->buffer;
         info->offset = engview.range.offset;
         info->range = engview.range.size;
         write.pBufferInfo = info;

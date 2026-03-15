@@ -198,6 +198,7 @@ target_precompile_headers(eng
         <span>
         <string>
         <thread>
+        <ranges>
         <unordered_map>
         <unordered_set>
         <utility>
