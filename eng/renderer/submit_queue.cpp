@@ -438,11 +438,6 @@ SubmitQueue& SubmitQueue::with_cmd_buf(ICommandBuffer* cmd)
 
 void SubmitQueue::submit()
 {
-    for(auto& [sync, stage] : submission.pushed_syncs)
-    {
-        wait_sync(sync, stage);
-    }
-
     std::vector<VkSemaphoreSubmitInfo> wait_sems(submission.wait_sems.size());
     std::vector<VkSemaphoreSubmitInfo> sig_sems(submission.signal_sems.size());
     std::vector<VkCommandBufferSubmitInfo> cmds(submission.cmds.size());

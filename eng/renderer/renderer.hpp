@@ -774,25 +774,12 @@ class Renderer
 
     SubmitQueue* get_queue(QueueType type);
 
-    FrameData& get_framedata(int32_t offset = 0);
-
     SubmitQueue* gq{};
     Swapchain* swapchain{};
     IRendererBackend* backend{};
     StagingBuffer* staging{};
     Settings settings;
-
     RGRenderGraph* rgraph{};
-
-    // enum class DebugOutput
-    //{
-    //     COLOR,
-    //     FWDP_GRID
-    // };
-    // DebugOutput debug_output{};
-    // bool fwdp_enable{ true };
-    // bool mlt_occ_cull_enable{ true };
-    // bool mlt_frust_cull_enable{ true };
 
     Slotmap<Buffer, 1024> buffers;
     Slotmap<Image, 1024> images;
@@ -828,7 +815,8 @@ class Renderer
     Handle<MeshPass> default_meshpass;
     Handle<Material> default_material;
     ImGuiRenderer* imgui_renderer{};
-    std::vector<FrameData> perframe;
+    std::vector<FrameData> frame_datas;
+    FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
 };
 

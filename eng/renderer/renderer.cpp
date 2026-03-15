@@ -235,15 +235,15 @@ void Renderer::init_pipelines()
 void Renderer::init_perframes()
 {
     // auto* ew = get_engine().window;
-    perframe.resize(frame_delay);
+    frame_datas.resize(frame_delay);
+    current_data = &frame_datas[0];
     for(auto i = 0u; i < frame_delay; ++i)
     {
-        auto& pf = perframe[i];
-        pf.cmdpool = gq->make_command_pool();
-        pf.acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
-        pf.ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
-        pf.ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
-        pf.swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
+        frame_datas[i].cmdpool = gq->make_command_pool();
+        frame_datas[i].acq_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("acquire semaphore {}", i) });
+        frame_datas[i].ren_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 0, ENG_FMT("rendering semaphore {}", i) });
+        frame_datas[i].ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
+        frame_datas[i].swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
     }
 }
 
@@ -354,24 +354,22 @@ void Renderer::update()
         backend->destroy_swapchain(swapchain);
         swapchain = backend->make_swapchain();
     }
-
     // auto* ew = get_engine().window;
     // const auto& ppf = perframe.at(current_frame % perframe.size()); // get previous frame res
-    auto& pf = get_framedata();
-    pf.ren_fen->wait_cpu(~0ull);
-    pf.ren_fen->reset();
-    // pf.acq_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
-    // pf.ren_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
-    // pf.swp_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
-    pf.cmdpool->reset();
+    current_data->ren_fen->wait_cpu(~0ull);
+    current_data->ren_fen->reset();
+    // current_data->acq_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
+    // current_data->ren_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
+    // current_data->swp_sem->reset(); // this is commented out, because recreating these semaphores violates ongoing present operation (vulkan)
+    current_data->cmdpool->reset();
 
-    swapchain->acquire(~0ull, pf.acq_sem);
+    swapchain->acquire(~0ull, current_data->acq_sem);
 
-    if(pf.retired_resources.size() > 0)
+    if(current_data->retired_resources.size() > 0)
     {
-        ENG_LOG("Removing {} retired resources", pf.retired_resources.size());
-        auto remove_until = pf.retired_resources.begin();
-        for(auto& rs : pf.retired_resources)
+        ENG_LOG("Removing {} retired resources", current_data->retired_resources.size());
+        auto remove_until = current_data->retired_resources.begin();
+        for(auto& rs : current_data->retired_resources)
         {
             if(current_frame - rs.deleted_at_frame < frame_delay) { break; }
             ++remove_until;
@@ -386,7 +384,7 @@ void Renderer::update()
                 images.erase(SlotIndex<uint32_t>{ img->handle });
             }
         }
-        pf.retired_resources.erase(pf.retired_resources.begin(), remove_until);
+        current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
     }
 
     if(new_shaders.size())
@@ -457,15 +455,16 @@ void Renderer::update()
 
     compile_rendergraph();
 
-    Sync* rg_wait_syncs[]{ pf.acq_sem, staging->get_wait_sem() };
+    Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->get_wait_sem() };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
 
-    auto* cmd = pf.cmdpool->begin();
-    pf.cmdpool->end(cmd);
+    auto* cmd = current_data->cmdpool->begin();
+    current_data->cmdpool->end(cmd);
 
-    gq->wait_sync(rgsync).with_cmd_buf(cmd).signal_sync(pf.swp_sem).signal_sync(pf.ren_fen).submit();
-    gq->wait_sync(pf.swp_sem).present(swapchain);
+    gq->wait_sync(rgsync).with_cmd_buf(cmd).signal_sync(current_data->swp_sem).signal_sync(current_data->ren_fen).submit();
+    gq->wait_sync(current_data->swp_sem).present(swapchain);
     ++current_frame;
+    current_data = &frame_datas[current_frame % frame_datas.size()];
 }
 
 void Renderer::compile_rendergraph()
@@ -475,8 +474,7 @@ void Renderer::compile_rendergraph()
         render_passes[i].build();
     }
 
-    auto& pf = get_framedata();
-    pf.render_targets = rgraph->add_graphics_pass<RenderTargets>(
+    current_data->render_targets = rgraph->add_graphics_pass<RenderTargets>(
         "Setup render targets", RenderOrder::SETUP_TARGETS,
         [this](RGBuilder& builder, RenderTargets& rt) {
             const auto resolution = settings.render_resolution;
@@ -517,8 +515,8 @@ void Renderer::compile_rendergraph()
                 res = pb.import_resource(rp.instance_buffer);
                 pb.read_buffer(res);
 
-                output = pb.access_color(pb.graph->get_acc(get_framedata().render_targets.color[0]));
-                pb.read_buffer(pb.graph->get_acc(get_framedata().render_targets.constants));
+                output = pb.access_color(pb.graph->get_acc(current_data->render_targets.color[0]));
+                pb.read_buffer(pb.graph->get_acc(current_data->render_targets.constants));
             },
             [this, i](RGBuilder& pb, const RGAccessId& output) {
                 const auto* w = get_engine().window;
@@ -545,7 +543,7 @@ void Renderer::compile_rendergraph()
 
                 const auto& rp = get_renderer().render_passes[i];
                 DescriptorResource shaderresources[]{
-                    DescriptorResource::storage_buffer(0, pb.graph->get_buf(get_framedata().render_targets.constants)),
+                    DescriptorResource::storage_buffer(0, pb.graph->get_buf(current_data->render_targets.constants)),
                     DescriptorResource::storage_buffer(1, get_renderer().bufs.positions)
                 };
                 cmd->bind_set(0, shaderresources);
@@ -600,12 +598,12 @@ void Renderer::compile_rendergraph()
 //   auto& rp = render_passes.at(pass);
 
 // const VkRenderingAttachmentInfo vkcols[] = { Vks(VkRenderingAttachmentInfo{
-//     .imageView = pf.gbuffer.color->default_view->md.vk->view,
+//     .imageView = current_data->gbuffer.color->default_view->md.vk->view,
 //     .imageLayout = to_vk(ImageLayout::ATTACHMENT),
 //     .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 //     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 //     .clearValue = { .color = { .uint32 = {} } } }) };
-// const auto vkdep = Vks(VkRenderingAttachmentInfo{ .imageView = pf.gbuffer.depth->default_view->md.vk->view,
+// const auto vkdep = Vks(VkRenderingAttachmentInfo{ .imageView = current_data->gbuffer.depth->default_view->md.vk->view,
 //                                                   .imageLayout = to_vk(ImageLayout::ATTACHMENT),
 //                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 //                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
@@ -623,7 +621,7 @@ void Renderer::compile_rendergraph()
 // const auto& ib = maincullpass.batches[get_perframe_index()];
 // render_ibatch(cmd, ib, [this, &ib, &pf](CommandBuffer* cmd) {
 //     const auto outputmode = (uint32_t)debug_output;
-//     cmd->bind_resource(0, pf.constants);
+//     cmd->bind_resource(0, current_data->constants);
 //     cmd->bind_resource(1, ib.ids_buf);
 //     const auto& fwd = rgraph->get_pass<pass::fwdp::LightCulling>("fwdp::LightCulling");
 //     cmd->bind_resource(2, rgraph->get_resource(fwd.culled_light_grid_bufs).buffer);
@@ -653,7 +651,7 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
 void Renderer::queue_destroy(Handle<Buffer>& buffer)
 {
     ENG_ASSERT(buffer);
-    get_framedata().retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
+    current_data->retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
     buffer = {};
 }
 
@@ -674,7 +672,7 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
         backend->destroy_image(image.get());
         images.erase(SlotIndex<uint32_t>{ *image });
     }
-    else { get_framedata().retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
+    else { current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
     image = {};
 }
 
@@ -922,11 +920,6 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
 }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
-
-Renderer::FrameData& Renderer::get_framedata(int32_t offset)
-{
-    return perframe[((int32_t)current_frame + offset) % frame_delay];
-}
 
 bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {

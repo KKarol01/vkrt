@@ -200,6 +200,36 @@ struct Sync
     };
 };
 
+enum class QueryType : uint8_t
+{
+    NONE,
+    TIMESTAMP,
+    OCCLUSION,
+    PERFORMANCE,
+};
+
+struct QueryPoolCreateInfo
+{
+    QueryType type{};
+    uint32_t queries{};
+};
+
+struct QueryPoolMetadataVk
+{
+    VkQueryPool vkpool{};
+};
+
+struct QueryPool
+{
+    uint32_t queries{};
+    uint32_t index{};
+    struct Metadata
+    {
+        QueryPoolMetadataVk* vk() const { return (QueryPoolMetadataVk*)ptr; }
+        void* ptr{};
+    } md;
+};
+
 class SubmitQueue
 {
     struct Submission
@@ -211,7 +241,6 @@ class SubmitQueue
         std::vector<uint64_t> signal_values;
         std::vector<Flags<PipelineStage>> signal_stages;
         std::vector<ICommandBuffer*> cmds;
-        std::vector<std::pair<Sync*, Flags<PipelineStage>>> pushed_syncs;
         Sync* fence{};
     };
 

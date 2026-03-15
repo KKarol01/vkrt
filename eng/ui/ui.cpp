@@ -40,7 +40,7 @@ class GamePanel
             gfx::get_renderer().settings.render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
-            auto& rt = gfx::get_renderer().get_framedata().render_targets;
+            auto& rt = gfx::get_renderer().current_data->render_targets;
             auto color = rg.access_color(rg.graph->get_acc(rt.color[0]));
             ImGui::Image(*rg.graph->get_img(color), ImVec2{ width, height });
         }
