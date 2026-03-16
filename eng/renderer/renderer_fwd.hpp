@@ -161,15 +161,15 @@ enum class ImageFormat : uint8_t
 
 enum class ImageAspect : uint8_t
 {
-    NONE,
-    COLOR,
-    DEPTH,
-    STENCIL,
-    DEPTH_STENCIL,
+    NONE = 0x0,
+    COLOR = 0x1,
+    DEPTH = 0x2,
+    STENCIL = 0x4,
+    DEPTH_STENCIL = DEPTH | STENCIL,
 
     /* Remember about get_aspect_from_format when adding new formats. */
-
 };
+ENG_ENABLE_FLAGS_OPERATORS(ImageAspect);
 
 enum class ImageUsage : uint32_t
 {

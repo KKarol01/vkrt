@@ -212,7 +212,7 @@ void Renderer::init_pipelines()
         .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
         .layout = PipelineLayout::common_layout,
         .attachments = { .count = 1,
-                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                         .color_formats = { settings.color_format },
                          .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
                                                                            .src_color_factor = BlendFactor::SRC_ALPHA,
                                                                            .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
@@ -220,10 +220,10 @@ void Renderer::init_pipelines()
                                                                            .src_alpha_factor = BlendFactor::ONE,
                                                                            .dst_alpha_factor = BlendFactor::ZERO,
                                                                            .alpha_op = BlendOp::ADD } },
-                         .depth_format = ImageFormat::D32_SFLOAT },
-        .depth_test = false,
-        .depth_write = false,
-        .depth_compare = DepthCompare::NEVER,
+                         .depth_format = settings.depth_format },
+        .depth_test = true,
+        .depth_write = true,
+        .depth_compare = DepthCompare::LESS,
         .culling = CullFace::BACK,
     });
 
@@ -374,7 +374,6 @@ void Renderer::update()
     }
 
     swapchain->acquire(~0ull, current_data->acq_sem);
-    ENG_LOG("Swapchain {}", swapchain->current_index);
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -496,6 +495,12 @@ void Renderer::compile_rendergraph()
                                           false, RGClear::color({ 0.0f, 0.0f, 0.0f, 1.0f }));
             rt.color[0] = builder.graph->get_res_id(res);
 
+            res = builder.create_resource("Depth",
+                                          Image::init(resolution.x, resolution.y, settings.depth_format,
+                                                      ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
+                                          false, RGClear::depth_stencil(1.0, 0u));
+            rt.depth = builder.graph->get_res_id(res);
+
             res = builder.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
             res = builder.write_buffer(res);
             rt.constants = builder.graph->get_res_id(res);
@@ -515,9 +520,14 @@ void Renderer::compile_rendergraph()
     {
         RenderPassType type = (RenderPassType)i;
         const auto name = ENG_FMT("DrawMaterial{}", i);
-        rgraph->add_graphics_pass<RGAccessId>(
+        struct MaterialDrawData
+        {
+            RGAccessId color;
+            RGAccessId depth;
+        };
+        rgraph->add_graphics_pass<MaterialDrawData>(
             name.c_str(), RenderOrder::DEFAULT_UNLIT,
-            [this, i](RGBuilder& pb, RGAccessId& output) {
+            [this, i](RGBuilder& pb, MaterialDrawData& data) {
                 auto* w = get_engine().window;
                 const auto& rp = get_renderer().render_passes[i];
 
@@ -526,25 +536,34 @@ void Renderer::compile_rendergraph()
                 res = pb.import_resource(rp.instance_buffer);
                 pb.read_buffer(res);
 
-                output = pb.access_color(pb.graph->get_acc(current_data->render_targets.color[0]));
+                data.color = pb.access_color(pb.graph->get_acc(current_data->render_targets.color[0]));
                 pb.read_buffer(pb.graph->get_acc(current_data->render_targets.constants));
+
+                data.depth = res = pb.access_depth(pb.graph->get_acc(current_data->render_targets.depth));
             },
-            [this, i](RGBuilder& pb, const RGAccessId& output) {
+            [this, i](RGBuilder& pb, const MaterialDrawData& data) {
                 const auto* w = get_engine().window;
                 const auto& rp = get_renderer().render_passes[i];
                 const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
-                    .imageView = pb.graph->get_acc(output).image_view.get_md().vk->view,
-                    .imageLayout = to_vk(pb.graph->get_acc(output).layout),
+                    .imageView = pb.graph->get_acc(data.color).image_view.get_md().vk->view,
+                    .imageLayout = to_vk(pb.graph->get_acc(data.color).layout),
                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } },
                 }) };
+                const VkRenderingAttachmentInfo vkdep = Vks(VkRenderingAttachmentInfo{
+                    .imageView = pb.graph->get_acc(data.depth).image_view.get_md().vk->view,
+                    .imageLayout = to_vk(pb.graph->get_acc(data.depth).layout),
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                });
                 const auto vkrinfo = Vks(VkRenderingInfo{
                     .renderArea = { .offset = {},
-                                    .extent = { pb.graph->get_img(output)->width, pb.graph->get_img(output)->height } },
+                                    .extent = { (uint32_t)pb.graph->get_img(data.color)->width,
+                                                (uint32_t)pb.graph->get_img(data.color)->height } },
                     .layerCount = 1,
                     .colorAttachmentCount = 1,
                     .pColorAttachments = vkcols,
+                    .pDepthAttachment = &vkdep,
                 });
                 VkViewport viewport{ 0.0, 0.0, w->width, w->height, 1.0, 0.0 };
                 VkRect2D scissor{ {}, { (uint32_t)w->width, (uint32_t)w->height } };

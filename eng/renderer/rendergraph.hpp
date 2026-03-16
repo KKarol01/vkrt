@@ -59,7 +59,7 @@ struct RGClear
     struct DepthStencil
     {
         float depth;
-        uint32_t stencil;
+        std::optional<uint32_t> stencil;
     };
     struct Color
     {
@@ -69,7 +69,10 @@ struct RGClear
     {
         return RGClear{ Color{ glm::vec4{ color[0], color[1], color[2], color[3] } } };
     }
-    static RGClear depth_stencil(const DepthStencil& c) { return RGClear{ c }; }
+    static RGClear depth_stencil(float depth, std::optional<uint32_t> stencil = {})
+    {
+        return RGClear{ DepthStencil{ depth, stencil } };
+    }
     bool is_color() const { return value.index() == 0; }
     Color get_color() const { return std::get<0>(value); }
     DepthStencil get_ds() const { return std::get<1>(value); }

@@ -500,19 +500,22 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
                     if(res.clear)
                     {
                         if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
+                        acc.stage = PipelineStage::TRANSFER_BIT;
+                        acc.access = PipelineAccess::TRANSFER_WRITE_BIT;
+                        acc.layout = ImageLayout::TRANSFER_DST;
+                        layout_cmd->barrier(res.as_image().get(), PipelineStage::NONE, PipelineAccess::NONE,
+                                            PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
+                                            ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
                         if(res.clear->is_color())
                         {
-                            acc.stage = PipelineStage::TRANSFER_BIT;
-                            acc.access = PipelineAccess::TRANSFER_WRITE_BIT;
-                            acc.layout = ImageLayout::TRANSFER_DST;
-                            const auto clear_color = res.clear->get_color().color;
-                            layout_cmd->barrier(res.as_image().get(), PipelineStage::NONE, PipelineAccess::NONE,
-                                                PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                                ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
-                            layout_cmd->clear_color(res.as_image().get(),
-                                                    Color4f{ clear_color.x, clear_color.y, clear_color.z, clear_color.w });
+                            const auto clear = res.clear->get_color().color;
+                            layout_cmd->clear_color(res.as_image().get(), Color4f{ clear.x, clear.y, clear.z, clear.w });
                         }
-                        else { ENG_ERROR(); }
+                        else
+                        {
+                            const auto clear = res.clear->get_ds();
+                            layout_cmd->clear_depth_stencil(res.as_image().get(), clear.depth, clear.stencil);
+                        }
                     }
                     continue;
                 }
