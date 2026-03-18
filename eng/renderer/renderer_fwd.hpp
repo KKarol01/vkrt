@@ -6,6 +6,11 @@
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
 
+// Windows macro. Expands to '2'. Don't need it, compiles without it. Thanks MS.
+#ifdef OPAQUE
+#undef OPAQUE
+#endif
+
 namespace eng
 {
 namespace gfx
@@ -224,12 +229,27 @@ enum class ImageAddressing : uint8_t
     CLAMP_EDGE
 };
 
-enum class RenderPassType : uint32_t
+enum class RenderPassType : uint8_t
 {
+    Z_PREPASS,
     FORWARD,
     DIRECTIONAL_SHADOW,
     LAST_ENUM,
 };
+
+enum class MaterialType : uint16_t
+{
+    NONE,
+    OPAQUE,
+};
+
+enum class MaterialFlags : uint16_t
+{
+    NONE = 0x0,
+    Z_PREPASS,
+
+};
+ENG_ENABLE_FLAGS_OPERATORS(MaterialFlags);
 
 enum class PipelineStage : uint16_t
 {
@@ -242,7 +262,7 @@ enum class PipelineStage : uint16_t
     COLOR_OUT_BIT = 0x20,
     COMPUTE_BIT = 0x40,
     INDIRECT_BIT = 0x80,
-    ALL = 0x100,
+    ALL = 0x100, // vulkan uses special value; it's not all bits set to 1
 };
 ENG_ENABLE_FLAGS_OPERATORS(PipelineStage);
 
@@ -363,7 +383,6 @@ struct ImageBlit;
 struct ImageCopy;
 struct Sampler;
 struct Texture;
-struct MaterialDescriptor;
 struct MeshDescriptor;
 struct InstanceSettings;
 struct BLASInstanceSettings;

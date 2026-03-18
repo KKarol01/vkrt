@@ -212,7 +212,6 @@ target_precompile_headers(eng
         <glm/gtc/matrix_transform.hpp>
         <glm/gtx/quaternion.hpp>
         <glm/gtx/transform.hpp>
-        <GLFW/glfw3.h>
         <imgui/imgui.h>
         <imgui/backends/imgui_impl_glfw.h>
         <imgui/backends/imgui_impl_vulkan.h>

@@ -67,20 +67,14 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 
     struct Slot
     {
-        bool operator<(const Slot& s) const
+        bool operator==(const Slot& s) const
         {
-            const int type = view.is_buffer() ? 0 : 1;
-            const int stype = s.view.is_buffer() ? 0 : 1;
-            const auto handleval = view.is_buffer() ? *view.as_buffer().buffer : *view.as_image().image;
-            const auto shandleval = s.view.is_buffer() ? *s.view.as_buffer().buffer : *s.view.as_image().image;
-            return std::tie(type, handleval) < std::tie(stype, shandleval);
+            return std::tie(view, vkptr, allocator) == std::tie(s.view, s.vkptr, s.allocator);
         }
-        uint32_t slot{ ~0u };
-        DescriptorResourceView view;
-        union {
-            VkBuffer vkbuffer{};
-            VkImage vkimage;
-        };
+        std::variant<BufferView, ImageView> view;
+        uint32_t value{ ~0u };
+        const void* vkptr{};
+        SlotAllocatorType* allocator{};
     };
 
   public:
@@ -117,7 +111,9 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     SlotAllocatorType storage_buffer_slots;
     SlotAllocatorType storage_image_slots;
     SlotAllocatorType sampled_image_slots;
-    std::multiset<Slot> slots;
+
+    std::unordered_map<uint32_t, std::vector<Slot>> image_views;
+    std::unordered_map<uint32_t, std::vector<Slot>> buffer_views;
 };
 
 } // namespace gfx

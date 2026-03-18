@@ -120,26 +120,50 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
 uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourceView& view)
 {
     Slot slot{};
-    slot.view = view;
+    slot.allocator = &get_slot_allocator(view.type);
 
-    auto eqit = slots.equal_range(slot);
-    bool resource_changed = false;
-    for(const auto& s : std::ranges::subrange(eqit.first, eqit.second))
+    std::vector<Slot>* found_slots{};
+
+    if(view.is_buffer())
     {
-        const auto vkptr = view.is_buffer() ? view.as_buffer().buffer->md.ptr : view.as_image().image->md.ptr;
-        if((s.view.is_buffer() && s.vkbuffer != vkptr) || (!s.view.is_buffer() && s.vkimage != vkptr))
-        {
-            resource_changed = true;
-            get_slot_allocator(s.view.type).erase(SlotAllocatorType::Slot{ s.slot });
-        }
-        if(!resource_changed && s.view == view) { return s.slot; }
+        slot.view = view.as_buffer();
+        slot.vkptr = view.as_buffer().buffer->md.vk()->buffer;
+        auto it = buffer_views.find(get_renderer().get_non_versioned_index(view.as_buffer().buffer));
+        if(it != buffer_views.end()) { found_slots = &it->second; }
     }
-    if(resource_changed) { slots.erase(eqit.first, eqit.second); }
-    slot.slot = *get_slot_allocator(view.type).allocate();
-    if(view.is_buffer()) { slot.vkbuffer = view.as_buffer().buffer->md.vk()->buffer; }
-    else { slot.vkimage = view.as_image().image->md.vk()->image; }
-    write_descriptor(view.type, view.is_buffer() ? (void*)&view.as_buffer() : (void*)&view.as_image(), slot.slot);
-    return slots.emplace(slot)->slot;
+    else
+    {
+        slot.view = view.as_image();
+        slot.vkptr = view.as_image().image->md.vk()->image;
+        auto it = image_views.find(get_renderer().get_non_versioned_index(view.as_image().image));
+        if(it != image_views.end()) { found_slots = &it->second; }
+    }
+
+    if(found_slots && found_slots->size())
+    {
+        if((*found_slots)[0].vkptr != slot.vkptr)
+        {
+            for(auto& s : *found_slots)
+            {
+                s.allocator->erase(SlotAllocatorType::Slot{ s.value });
+            }
+            found_slots->clear();
+        }
+        else
+        {
+            auto it = std::find(found_slots->begin(), found_slots->end(), slot);
+            if(it != found_slots->end()) { return it->value; }
+        }
+    }
+
+    slot.value = *slot.allocator->allocate();
+    write_descriptor(view.type, view.is_buffer() ? (void*)&view.as_buffer() : (void*)&view.as_image(), slot.value);
+    if(view.is_buffer())
+    {
+        buffer_views[get_renderer().get_non_versioned_index(view.as_buffer().buffer)].push_back(slot);
+    }
+    else { image_views[get_renderer().get_non_versioned_index(view.as_image().image)].push_back(slot); }
+    return slot.value;
 }
 
 void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, uint32_t slot)

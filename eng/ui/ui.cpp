@@ -42,11 +42,13 @@ class GamePanel
                 height = mpcsize.y;
                 width = height * targetAspect;
             }
+            width = std::floor(width);
+            height = std::floor(height);
             gfx::get_renderer().settings.render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().current_data->render_targets;
-            auto color = rg.access_color(rg.graph->get_acc(rt.color[0]));
+            auto color = rg.access_color(rg.graph->get_acc(rt.color[(int)gfx::RenderPassType::FORWARD]));
             ImGui::Image(*rg.graph->get_img(color), ImVec2{ width, height });
         }
         ImGui::End();

@@ -33,6 +33,10 @@ namespace eng
 namespace gfx
 {
 
+class Renderer;
+
+inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
+
 struct DescriptorResourceView
 {
     auto operator<=>(const DescriptorResourceView&) const = default;
@@ -123,7 +127,6 @@ struct PushRange
 struct PipelineLayout
 {
     inline static constexpr uint32_t MAX_SETS = 4u;
-    inline static Handle<PipelineLayout> common_layout;
     bool operator==(const PipelineLayout& a) const { return layout == a.layout && push_range == a.push_range; }
     bool is_compatible(const PipelineLayout& a) const;
     std::vector<Handle<DescriptorLayout>> layout{};
@@ -252,22 +255,40 @@ struct ShaderEffect
 
 struct MeshPass
 {
-    static MeshPass init(const std::string& name) { return MeshPass{ .name = name }; }
-    MeshPass& set(RenderPassType type, Handle<ShaderEffect> effect)
+    using Effects = std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM>;
+    static MeshPass init(std::string_view name,
+                         const std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM>& effects = {})
     {
-        effects[(int)type] = effect;
-        return *this;
+        MeshPass pass{};
+        pass.name = name;
+        pass.effects = effects;
+        return pass;
     }
     bool operator==(const MeshPass& o) const { return name == o.name; }
-    std::string name;
-    std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM> effects;
+    StackString<64> name;
+    Effects effects;
 };
 
 struct Material
 {
+    static Material init(std::string_view name, MaterialType type,
+                         Flags<MaterialFlags> flags = MaterialFlags::Z_PREPASS, Handle<MeshPass> mesh_pass = {})
+    {
+        Material mat{};
+        mat.name = name;
+        mat.type = type;
+        mat.flags = flags;
+        mat.mesh_pass = mesh_pass;
+        return mat;
+    }
     auto operator<=>(const Material& t) const = default;
+    StackString<64> name;
+    MaterialType type{};
+    Flags<MaterialFlags> flags;
     Handle<MeshPass> mesh_pass;
-    ImageView base_color_texture;
+    ImageView base_color_texture;         // todo: put those in an array?
+    ImageView normal_texture;             // todo: put those in an array?
+    ImageView metallic_roughness_texture; // todo: put those in an array?
 };
 
 struct Mesh
@@ -439,14 +460,6 @@ struct Sampler
         SamplerMetadataVk* as_vk() const { return (SamplerMetadataVk*)ptr; }
         void* ptr{};
     } md;
-};
-
-struct MaterialDescriptor
-{
-    std::string mesh_pass{ "default_unlit" };
-    ImageView base_color_texture;
-    ImageView normal_texture;
-    ImageView metallic_roughness_texture;
 };
 
 struct MeshDescriptor
@@ -764,6 +777,13 @@ class Renderer
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 
+        DepthCompare depth_compare{ DepthCompare::LESS };
+
+        Handle<PipelineLayout> common_layout;
+        Handle<Pipeline> default_forward_pipeline;
+        Handle<MeshPass> default_meshpass;
+        Handle<Material> default_material;
+
         bool regenerate_swapchain{};
     };
 
@@ -791,13 +811,14 @@ class Renderer
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
     Sync* make_sync(const SyncCreateInfo& info);
     void destroy_sync(Sync* sync);
-    Handle<Material> make_material(const MaterialDescriptor& info);
+    Handle<Material> make_material(const Material& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
     static void meshletize_geometry(const GeometryDescriptor& info, std::vector<float>& out_vertices,
                                     std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
     Handle<MeshPass> make_mesh_pass(const MeshPass& info);
+    Handle<MeshPass> find_mesh_pass(std::string_view name);
 
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
@@ -806,6 +827,16 @@ class Renderer
     // void update_transform(ecs::entity_id entity);
 
     SubmitQueue* get_queue(QueueType type);
+
+    // this is stupid, i might ditch the whole version thingy.
+    // essentially, slotmap returns uint32_t with a few bits dedicated to storing slot version
+    // so that stale handles (with same index, different verion) don't match.
+    // when image or buffer handle gets reused, it has different version, and so completely
+    // different underlying uint32_t value, and descriptor allocator now cannot check if the same handle
+    // represents diferent resource, because the handle has different uint32_t representation
+    // due to incremented version.
+    uint32_t get_non_versioned_index(Handle<Buffer> handle);
+    uint32_t get_non_versioned_index(Handle<Image> handle);
 
     SubmitQueue* gq{};
     Swapchain* swapchain{};
@@ -844,16 +875,11 @@ class Renderer
     SlotAllocator<uint32_t, eng::slots_not_versioned_tag> gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
-    Handle<Pipeline> default_unlit_pipeline;
-    Handle<MeshPass> default_meshpass;
-    Handle<Material> default_material;
     ImGuiRenderer* imgui_renderer{};
     std::vector<FrameData> frame_datas;
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
 };
-
-inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
 
 } // namespace gfx
 

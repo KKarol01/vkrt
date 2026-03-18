@@ -187,9 +187,10 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                     scissor.extent.width = (uint32_t)(clip_max.x - clip_min.x);
                     scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
-                    DescriptorResource bindresources[]{
-                        DescriptorResource::sampled_image(5, Handle<Image>{ (uint32_t)imcmd->GetTexID() })
-                    };
+
+                    auto tid = (uint32_t)imcmd->GetTexID();
+                    ENG_LOG("TID {}", tid);
+                    DescriptorResource bindresources[]{ DescriptorResource::sampled_image(5, Handle<Image>{ tid }) };
                     cmd->bind_set(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
                                       imcmd->VtxOffset + global_vtx_offset, 0);

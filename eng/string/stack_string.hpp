@@ -33,6 +33,10 @@ template <size_t size> struct StackString
         return *this;
     }
 
+    template <size_t other_size> auto operator<=>(const StackString<other_size>& other) const
+    {
+        return as_view() <=> other.as_view();
+    }
     template <size_t other_size> bool operator==(const StackString<other_size>& other) const
     {
         return as_view() == other.as_view();

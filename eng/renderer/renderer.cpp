@@ -175,11 +175,11 @@ void Renderer::init_pipelines()
                 { DescriptorType::SAMPLED_IMAGE, ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL },
                 { DescriptorType::SEPARATE_SAMPLER, ENG_BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, imsamplers },
             } });
-        PipelineLayout::common_layout = make_layout(PipelineLayout{
+        settings.common_layout = make_layout(PipelineLayout{
             .layout = { common_dlayout },
             .push_range = { ShaderStage::ALL, PushRange::MAX_PUSH_BYTES },
         });
-        descriptor_allocator = new DescriptorSetAllocatorBindlessVk{ PipelineLayout::common_layout.get() };
+        descriptor_allocator = new DescriptorSetAllocatorBindlessVk{ settings.common_layout.get() };
     }
     else
     {
@@ -208,28 +208,38 @@ void Renderer::init_pipelines()
     //     .layout = common_playout,
     // });
 
-    default_unlit_pipeline = make_pipeline(PipelineCreateInfo{
-        .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
-        .layout = PipelineLayout::common_layout,
-        .attachments = { .count = 1,
-                         .color_formats = { settings.color_format },
-                         .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-                                                                           .src_color_factor = BlendFactor::SRC_ALPHA,
-                                                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                                                           .color_op = BlendOp::ADD,
-                                                                           .src_alpha_factor = BlendFactor::ONE,
-                                                                           .dst_alpha_factor = BlendFactor::ZERO,
-                                                                           .alpha_op = BlendOp::ADD } },
-                         .depth_format = settings.depth_format },
-        .depth_test = true,
-        .depth_write = true,
-        .depth_compare = DepthCompare::LESS,
-        .culling = CullFace::BACK,
-    });
+    {
+        settings.default_forward_pipeline = make_pipeline(PipelineCreateInfo{
+            .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
+            .layout = settings.common_layout,
+            .attachments = { .count = 1,
+                             .color_formats = { settings.color_format },
+                             .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                               .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                               .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                               .color_op = BlendOp::ADD,
+                                                                               .src_alpha_factor = BlendFactor::ONE,
+                                                                               .dst_alpha_factor = BlendFactor::ZERO,
+                                                                               .alpha_op = BlendOp::ADD } },
+                             .depth_format = settings.depth_format },
+            .depth_test = true,
+            .depth_write = true,
+            .depth_compare = settings.depth_compare,
+            .culling = CullFace::BACK,
+        });
+    }
 
-    default_meshpass =
-        make_mesh_pass(MeshPass::init("default_unlit").set(RenderPassType::FORWARD, make_shader_effect(ShaderEffect{ .pipeline = default_unlit_pipeline })));
-    default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
+    {
+        const auto unlit_effect = make_shader_effect(ShaderEffect{ .pipeline = settings.default_forward_pipeline });
+        MeshPass::Effects effects{};
+        effects[(int)RenderPassType::FORWARD] = unlit_effect;
+
+        settings.default_meshpass = make_mesh_pass(MeshPass::init("mesh_pass_default_unlit", effects));
+        settings.default_material =
+            materials
+                .insert(Material::init("material_default_opaque", MaterialType::OPAQUE, {}, settings.default_meshpass))
+                .handle;
+    }
 }
 
 void Renderer::init_perframes()
@@ -487,13 +497,16 @@ void Renderer::compile_rendergraph()
     current_data->render_targets = rgraph->add_graphics_pass<RenderTargets>(
         "Setup render targets", RenderOrder::SETUP_TARGETS,
         [this](RGBuilder& builder, RenderTargets& rt) {
+            RGAccessId res;
             const auto resolution = settings.render_resolution;
             const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT;
-
-            RGAccessId res;
-            res = builder.create_resource("Color", Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
-                                          false, RGClear::color({ 0.0f, 0.0f, 0.0f, 1.0f }));
-            rt.color[0] = builder.graph->get_res_id(res);
+            for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
+            {
+                auto str = ENG_FMT("Color{}", i);
+                res = builder.create_resource(str.c_str(), Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
+                                              false, RGClear::color({ 0.0f, 0.0f, 0.0f, 1.0f }));
+                rt.color[i] = builder.graph->get_res_id(res);
+            }
 
             res = builder.create_resource("Depth",
                                           Image::init(resolution.x, resolution.y, settings.depth_format,
@@ -516,7 +529,7 @@ void Renderer::compile_rendergraph()
             cmd->wait_sync(get_renderer().staging->flush());
         });
 
-    for(auto i = 0u; i < 1; ++i)
+    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
         RenderPassType type = (RenderPassType)i;
         const auto name = ENG_FMT("DrawMaterial{}", i);
@@ -525,6 +538,9 @@ void Renderer::compile_rendergraph()
             RGAccessId color;
             RGAccessId depth;
         };
+
+        if(render_passes[i].draw.batches.empty()) { continue; }
+
         rgraph->add_graphics_pass<MaterialDrawData>(
             name.c_str(), RenderOrder::DEFAULT_UNLIT,
             [this, i](RGBuilder& pb, MaterialDrawData& data) {
@@ -536,14 +552,18 @@ void Renderer::compile_rendergraph()
                 res = pb.import_resource(rp.instance_buffer);
                 pb.read_buffer(res);
 
-                data.color = pb.access_color(pb.graph->get_acc(current_data->render_targets.color[0]));
+                data.color = pb.access_color(pb.graph->get_acc(current_data->render_targets.color[i]));
                 pb.read_buffer(pb.graph->get_acc(current_data->render_targets.constants));
 
                 data.depth = res = pb.access_depth(pb.graph->get_acc(current_data->render_targets.depth));
+
+                auto positions = pb.import_resource(bufs.positions);
+                pb.read_buffer(positions);
             },
             [this, i](RGBuilder& pb, const MaterialDrawData& data) {
-                const auto* w = get_engine().window;
                 const auto& rp = get_renderer().render_passes[i];
+                auto render_res = settings.render_resolution;
+
                 const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
                     .imageView = pb.graph->get_acc(data.color).image_view.get_md().vk->view,
                     .imageLayout = to_vk(pb.graph->get_acc(data.color).layout),
@@ -557,16 +577,14 @@ void Renderer::compile_rendergraph()
                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                 });
                 const auto vkrinfo = Vks(VkRenderingInfo{
-                    .renderArea = { .offset = {},
-                                    .extent = { (uint32_t)pb.graph->get_img(data.color)->width,
-                                                (uint32_t)pb.graph->get_img(data.color)->height } },
+                    .renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } },
                     .layerCount = 1,
                     .colorAttachmentCount = 1,
                     .pColorAttachments = vkcols,
                     .pDepthAttachment = &vkdep,
                 });
-                VkViewport viewport{ 0.0, 0.0, w->width, w->height, 1.0, 0.0 };
-                VkRect2D scissor{ {}, { (uint32_t)w->width, (uint32_t)w->height } };
+                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 1.0, 0.0 };
+                VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{
                     DescriptorResource::storage_buffer(0, pb.graph->get_buf(current_data->render_targets.constants)),
                     DescriptorResource::storage_buffer(1, get_renderer().bufs.positions)
@@ -759,11 +777,11 @@ Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
     Pipeline p{ .info = info };
-    if(!p.info.layout) { p.info.layout = PipelineLayout::common_layout; }
+    if(!p.info.layout) { p.info.layout = settings.common_layout; }
     if(backend->caps.supports_bindless)
     {
         // with bindless, all pipeline layout should be the same
-        ENG_ASSERT(p.info.layout == PipelineLayout::common_layout);
+        ENG_ASSERT(p.info.layout == settings.common_layout);
     }
     const auto found_handle = pipelines.find(p);
     if(!found_handle) { backend->make_pipeline(p); }
@@ -776,11 +794,12 @@ Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_syn
 
 void Renderer::destroy_sync(Sync* sync) { backend->destory_sync(sync); }
 
-Handle<Material> Renderer::make_material(const MaterialDescriptor& desc)
+Handle<Material> Renderer::make_material(const Material& desc)
 {
-    auto meshpass = mesh_passes.find(MeshPass{ desc.mesh_pass });
-    if(!meshpass) { meshpass = default_meshpass; }
-    auto ret = materials.insert(Material{ .mesh_pass = meshpass, .base_color_texture = desc.base_color_texture });
+    Material mat = desc;
+    if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpass; }
+
+    auto ret = materials.insert(std::move(mat));
     if(ret.success) { new_materials.push_back(ret.handle); }
     return ret.handle;
 }
@@ -915,6 +934,12 @@ Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
 
+Handle<MeshPass> Renderer::find_mesh_pass(std::string_view name)
+{
+    MeshPass mp{ .name = name };
+    return mesh_passes.find(mp);
+}
+
 void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data)
 {
     if(!handle)
@@ -953,6 +978,16 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
 }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
+
+uint32_t Renderer::get_non_versioned_index(Handle<Buffer> handle)
+{
+    return decltype(buffers)::SlotId(*handle).get_index();
+}
+
+uint32_t Renderer::get_non_versioned_index(Handle<Image> handle)
+{
+    return decltype(images)::SlotId(*handle).get_index();
+}
 
 bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {

@@ -234,22 +234,21 @@ Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
         }
 
         const fastgltf::Material& gltfmat = gltfasset.materials[*gltfprim.materialIndex];
-
-        auto matdesc = gfx::MaterialDescriptor{};
+        auto mat = gfx::Material::init(gltfmat.name.c_str(), gfx::MaterialType::OPAQUE);
         if(gltfmat.pbrData.baseColorTexture)
         {
             uint32_t texidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,
                                            gltfmat.pbrData.baseColorTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
-                matdesc.base_color_texture = scene.textures[gltfmat.pbrData.baseColorTexture->textureIndex];
+                mat.base_color_texture = scene.textures[gltfmat.pbrData.baseColorTexture->textureIndex];
             }
         }
         if(gltfmat.normalTexture)
         {
             uint32_t texidx =
                 load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM, gltfmat.normalTexture->textureIndex, ctx);
-            if(texidx != ~0u) { matdesc.normal_texture = scene.textures[gltfmat.normalTexture->textureIndex]; }
+            if(texidx != ~0u) { mat.normal_texture = scene.textures[gltfmat.normalTexture->textureIndex]; }
         }
         if(gltfmat.pbrData.metallicRoughnessTexture)
         {
@@ -257,13 +256,13 @@ Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
                                            gltfmat.pbrData.metallicRoughnessTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
-                matdesc.metallic_roughness_texture = scene.textures[gltfmat.pbrData.metallicRoughnessTexture->textureIndex];
+                mat.metallic_roughness_texture = scene.textures[gltfmat.pbrData.metallicRoughnessTexture->textureIndex];
             }
         }
 
         scene.materials.push_back(ecs::Material{
             .name = gltfmat.name.c_str(),
-            .render_material = get_engine().renderer->make_material(matdesc),
+            .render_material = get_engine().renderer->make_material(mat),
         });
         ++mats.size;
     }

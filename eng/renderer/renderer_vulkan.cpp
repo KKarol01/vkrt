@@ -4,6 +4,22 @@
 #include <fstream>
 #include <utility>
 #include <chrono>
+#include <eng/ecs/ecs.hpp>
+#include <eng/ecs/components.hpp>
+#include <eng/engine.hpp>
+#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/renderer/set_debug_name.hpp>
+#include <eng/renderer/staging_buffer.hpp>
+#include <eng/renderer/bindlesspool.hpp>
+#include <eng/renderer/submit_queue.hpp>
+#include <eng/common/to_vk.hpp>
+#include <eng/common/paths.hpp>
+#include <eng/common/to_string.hpp>
+#include <eng/camera.hpp>
+
+#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+#include <vk-bootstrap/src/VkBootstrap.h>
 #include <stb/stb_include.h>
 #include <volk/volk.h>
 #include <glm/mat3x3.hpp>
@@ -13,23 +29,6 @@
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
-#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
-#include <vk-bootstrap/src/VkBootstrap.h>
-#include <eng/ecs/ecs.hpp>
-#include <eng/ecs/components.hpp>
-#include <eng/engine.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
-#include <eng/renderer/imgui/imgui_renderer.hpp>
-#include <eng/renderer/set_debug_name.hpp>
-#include <assets/shaders/bindless_structures.glsli>
-#include <eng/renderer/staging_buffer.hpp>
-#include <eng/renderer/bindlesspool.hpp>
-#include <eng/renderer/submit_queue.hpp>
-#include <eng/common/to_vk.hpp>
-#include <eng/common/paths.hpp>
-#include <eng/common/to_string.hpp>
-#include <eng/camera.hpp>
-#include <eng/renderer/set_debug_name.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 // static float halton(int i, int b)
