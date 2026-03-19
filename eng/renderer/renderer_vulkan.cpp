@@ -1668,7 +1668,6 @@ QueryPool* RendererBackendVk::make_query_pool(const QueryPoolCreateInfo& info)
         .queryCount = info.max_queries,
     });
     const auto vkres = vkCreateQueryPool(dev, &vkinfo, nullptr, &md->vkpool);
-    VK_CHECK(vkres);
     if(vkres != VK_SUCCESS)
     {
         delete md;
