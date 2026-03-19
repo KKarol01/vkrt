@@ -774,6 +774,7 @@ class Renderer
     {
         ImageFormat color_format{ ImageFormat::R8G8B8A8_SRGB };
         ImageFormat depth_format{ ImageFormat::D24_S8_UNORM };
+        Vec2f new_render_resolution{};
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 

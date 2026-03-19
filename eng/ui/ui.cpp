@@ -12,24 +12,29 @@ namespace eng
 namespace ui
 {
 
-class GamePanel
+class Panel
 {
   public:
-    GamePanel(UI& ui, uint32_t dock)
-    {
-        Window w{};
-        w.title = "Game Panel";
-        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
-        w.dock_at = dock;
-        ui.make_window(std::move(w));
-    }
+    Panel(std::string_view title, uint32_t* dock) : title(title), dock(dock) {}
+    virtual ~Panel() noexcept = default;
+    virtual void draw(gfx::RGBuilder& rg) = 0;
+    std::string title;
+    uint32_t* dock{};
+};
 
-    void draw(gfx::RGBuilder& rg)
+class GamePanel : public Panel
+{
+  public:
+    GamePanel(UI& ui, uint32_t* dock) : Panel("Game Panel", dock) {}
+
+    ~GamePanel() noexcept override = default;
+
+    void draw(gfx::RGBuilder& rg) override
     {
         if(ImGui::Begin("Game Panel", 0, ImGuiWindowFlags_NoMove))
         {
             ImVec2 mpcsize = ImGui::GetContentRegionAvail();
-            if(mpcsize.x * mpcsize.y == 0.0f)
+            if(mpcsize.x <= 0.0f || mpcsize.y <= 0.0f)
             {
                 mpcsize = ImVec2{ gfx::get_renderer().settings.render_resolution.x,
                                   gfx::get_renderer().settings.render_resolution.y };
@@ -44,7 +49,7 @@ class GamePanel
             }
             width = std::floor(width);
             height = std::floor(height);
-            gfx::get_renderer().settings.render_resolution = { width, height };
+            gfx::get_renderer().settings.new_render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().current_data->render_targets;
@@ -55,19 +60,14 @@ class GamePanel
     }
 };
 
-class ScenePanel
+class ScenePanel : public Panel
 {
   public:
-    ScenePanel(UI& ui, uint32_t dock)
-    {
-        Window w{};
-        w.title = "Scene Panel";
-        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
-        w.dock_at = dock;
-        ui.make_window(std::move(w));
-    }
+    ScenePanel(UI& ui, uint32_t* dock) : Panel("Scene Panel", dock) {}
 
-    void draw(gfx::RGBuilder& rg)
+    ~ScenePanel() noexcept override = default;
+
+    void draw(gfx::RGBuilder& rg) override
     {
         if(ImGui::Begin("Scene Panel", 0))
         {
@@ -139,19 +139,14 @@ class ScenePanel
     std::unordered_map<ecs::EntityId, NodeState> states;
 };
 
-class InspectorPanel
+class InspectorPanel : public Panel
 {
   public:
-    InspectorPanel(UI& ui, ScenePanel* scene, uint32_t dock) : scene(scene)
-    {
-        Window w{};
-        w.title = "Inspector Panel";
-        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
-        w.dock_at = dock;
-        ui.make_window(std::move(w));
-    }
+    InspectorPanel(UI& ui, ScenePanel* scene, uint32_t* dock) : Panel("Inspector Panel", dock), scene(scene) {}
 
-    void draw(gfx::RGBuilder& rg)
+    ~InspectorPanel() noexcept override = default;
+
+    void draw(gfx::RGBuilder& rg) override
     {
         if(!scene->selected_node) { return; }
         if(ImGui::Begin("Inspector Panel", 0)) {}
@@ -161,19 +156,14 @@ class InspectorPanel
     ScenePanel* scene{};
 };
 
-class ConsolePanel
+class ConsolePanel : public Panel
 {
   public:
-    ConsolePanel(UI& ui, uint32_t dock)
-    {
-        Window w{};
-        w.title = "Console Panel";
-        w.draw_callback = [this](gfx::RGBuilder& rg) { draw(rg); };
-        w.dock_at = dock;
-        ui.make_window(std::move(w));
-    }
+    ConsolePanel(UI& ui, uint32_t* dock) : Panel("Console Panel", dock) {}
 
-    void draw(gfx::RGBuilder& rg)
+    ~ConsolePanel() noexcept override = default;
+
+    void draw(gfx::RGBuilder& rg) override
     {
         if(ImGui::Begin("Console Panel")) {}
         ImGui::End();
@@ -184,6 +174,11 @@ void UI::init()
 {
     reset_layout |= always_redo_layout_on_start;
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
+
+    auto& gamepanel = panels.emplace_back(new GamePanel{ *this, &game });
+    auto& scenepanel = panels.emplace_back(new ScenePanel{ *this, &scene });
+    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &scene });
+    auto& consolepanel = panels.emplace_back(new ConsolePanel{ *this, &console });
 }
 
 void UI::draw(gfx::RGBuilder& rg)
@@ -198,39 +193,15 @@ void UI::draw(gfx::RGBuilder& rg)
         ImGui::DockBuilderAddNode(dock_id);
         ImGui::DockBuilderSetNodeSize(dock_id, ImGui::GetMainViewport()->Size);
 
-        uint32_t game;
-        uint32_t scene;
-        uint32_t console;
-        uint32_t inspector;
         ImGui::DockBuilderSplitNode(dock_id, ImGuiDir_Right, 0.25f, &scene, &game);
         ImGui::DockBuilderSplitNode(game, ImGuiDir_Down, 0.25f, &console, &game);
         ImGui::DockBuilderSplitNode(scene, ImGuiDir_Down, 0.25f, &inspector, &scene);
 
-        auto* gamepanel = new GamePanel{ *this, game };                            // mem leak
-        auto* scenepanel = new ScenePanel{ *this, scene };                         // mem leak
-        auto* inspectorpanel = new InspectorPanel{ *this, scenepanel, inspector }; // mem leak
-        auto* consolepanel = new ConsolePanel{ *this, console };                   // mem leak
-        for(auto& e : windows)
+        for(auto& e : panels)
         {
-            ImGui::DockBuilderDockWindow(e.title.c_str(), e.dock_at);
+            ImGui::DockBuilderDockWindow(e->title.c_str(), *e->dock);
         }
         ImGui::DockBuilderFinish(dock_id);
-    }
-    else
-    {
-        static bool once = true;
-        if(once)
-        {
-            once = false;
-            uint32_t game{};
-            uint32_t scene{};
-            uint32_t console{};
-            uint32_t inspector{};
-            auto* gamepanel = new GamePanel{ *this, game };                            // mem leak
-            auto* scenepanel = new ScenePanel{ *this, scene };                         // mem leak
-            auto* inspectorpanel = new InspectorPanel{ *this, scenepanel, inspector }; // mem leak
-            auto* consolepanel = new ConsolePanel{ *this, console };                   // mem leak
-        }
     }
 
     ImGui::DockSpaceOverViewport(dock_id, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
@@ -239,14 +210,14 @@ void UI::draw(gfx::RGBuilder& rg)
     {
         ImGui::Button("a");
         ImGui::Button("b");
+        if(ImGui::Button("Savel Layout")) { ImGui::SaveIniSettingsToDisk("imgui.ini"); }
         if(ImGui::Button("Reset Layout")) { reset_layout = true; }
         ImGui::EndMainMenuBar();
     }
 
-    for(const auto& e : root_windows)
+    for(const auto& p : panels)
     {
-        auto& window = get_window(e);
-        window.draw_callback(rg);
+        p->draw(rg);
     }
 }
 

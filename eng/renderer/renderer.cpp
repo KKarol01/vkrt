@@ -57,7 +57,7 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    settings.render_resolution = { get_engine().window->width, get_engine().window->height };
+    settings.new_render_resolution = { get_engine().window->width, get_engine().window->height };
     settings.present_resolution = { get_engine().window->width, get_engine().window->height };
     settings.regenerate_swapchain = true;
 
@@ -356,6 +356,7 @@ void Renderer::init_bufs()
 
 void Renderer::update()
 {
+    settings.render_resolution = settings.new_render_resolution;
     if(settings.regenerate_swapchain)
     {
         settings.regenerate_swapchain = false;
@@ -503,15 +504,15 @@ void Renderer::compile_rendergraph()
             for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
             {
                 auto str = ENG_FMT("Color{}", i);
-                res = builder.create_resource(str.c_str(), Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
-                                              false, RGClear::color({ 0.0f, 0.0f, 0.0f, 1.0f }));
+                res = builder.create_resource(str, Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
+                                              RGClear::color());
                 rt.color[i] = builder.graph->get_res_id(res);
             }
 
             res = builder.create_resource("Depth",
                                           Image::init(resolution.x, resolution.y, settings.depth_format,
                                                       ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                          false, RGClear::depth_stencil(1.0, 0u));
+                                          RGClear::depth_stencil(1.0, 0u));
             rt.depth = builder.graph->get_res_id(res);
 
             res = builder.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));

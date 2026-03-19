@@ -28,8 +28,7 @@ void ImGuiRenderer::init()
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.IniSavingRate = 1.0f;
-
+    io.IniFilename = nullptr;
     ImGui::LoadIniSettingsFromDisk("imgui.ini");
 
     unsigned char* pixels;
@@ -97,8 +96,10 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
             const auto out_res =
                 Vec2f{ get_renderer().settings.present_resolution.x, get_renderer().settings.present_resolution.y };
-            data.output = builder.create_resource("imgui output", Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB,
-                                                                              ImageUsage::COLOR_ATTACHMENT_BIT));
+            data.output = builder.create_resource("imgui output",
+                                                  Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB,
+                                                              ImageUsage::COLOR_ATTACHMENT_BIT),
+                                                  RGClear::color());
             data.output = builder.access_color(data.output);
         },
         [this](RGBuilder& builder, const ImPassData& data) {
@@ -188,8 +189,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                     scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
 
-                    auto tid = (uint32_t)imcmd->GetTexID();
-                    ENG_LOG("TID {}", tid);
+                    const auto tid = (uint32_t)imcmd->GetTexID();
                     DescriptorResource bindresources[]{ DescriptorResource::sampled_image(5, Handle<Image>{ tid }) };
                     cmd->bind_set(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,

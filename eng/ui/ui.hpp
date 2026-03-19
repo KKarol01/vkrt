@@ -11,21 +11,12 @@ namespace eng
 {
 namespace ui
 {
-
-struct Window;
+class Panel;
 class UI;
 
 inline UI& get_ui() { return *get_engine().ui; }
 
-using WindowId = TypedId<Window, uint32_t>;
-
-struct Window
-{
-    using draw_callback_type = Callback<void(gfx::RGBuilder&)>;
-    std::string title;
-    draw_callback_type draw_callback;
-    uint32_t dock_at{};
-};
+using PanelId = TypedId<Panel, uint32_t>;
 
 class UI
 {
@@ -34,36 +25,21 @@ class UI
   public:
     void init();
 
-    WindowId make_window(Window&& window)
-    {
-        const auto hnid = hierarchy.create();
-        if(windows.size() == *hnid) { windows.push_back(std::move(window)); }
-        else { windows[*hnid] = std::move(window); }
-        const auto id = WindowId{ *hnid };
-        root_windows.push_back(id);
-        windowmap[windows[*hnid].title] = id;
-        return id;
-    }
-
-    void make_child(WindowId parent_id, WindowId child_id)
-    {
-        std::erase(root_windows, child_id);
-        hierarchy.make_child(IndexedHierarchy::NodeId{ *parent_id }, IndexedHierarchy::NodeId{ *child_id });
-    }
-
-    Window& get_window(WindowId id) { return windows[*id]; }
+    Panel& get_panel(PanelId id) { return *panels[*id]; }
 
     void draw(gfx::RGBuilder& b);
 
-	bool reset_layout{};
+    bool reset_layout{};
 
-    IndexedHierarchy hierarchy;
-    std::vector<WindowId> root_windows;
-    std::vector<Window> windows;
-    std::unordered_map<std::string, WindowId> windowmap;
+    std::vector<std::shared_ptr<Panel>> panels;
+    std::unordered_map<std::string, PanelId> panelmap;
 
-    WindowId fullscreen;
+    PanelId fullscreen;
     uint32_t dock_id{};
+    uint32_t game{};
+    uint32_t scene{};
+    uint32_t console{};
+    uint32_t inspector{};
 };
 
 } // namespace ui
