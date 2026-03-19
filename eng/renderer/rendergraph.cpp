@@ -10,226 +10,111 @@
 #include <eng/common/handle.hpp>
 #include <eng/engine.hpp>
 
+#include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+
 namespace eng
 {
 namespace gfx
 {
 
-/*
- * Buddy-like gpu memory allocator for aliased resources, supporting frames-in-flight.
- * Allocates pages, and subdivides into pow2-sized buckets.
- * During free, checks if enough frames were rendered, so buddies can be merged.
- * Each frame, before first allocation, defrag happens.
- *
- * Call init() with a callback to some kind of gpu aliased allocator (for example vma)
- *
- * Right now no memory type checking happens and two pages cannot be glued into bigger one.
- * No memory budget either.
+/**
+Paged allocator for aliased allocation and deallocation
+when compiling rendergraph.
  */
 class GPUTransientAllocator
 {
-    inline static constexpr size_t MIN_ALLOC = 64 * 1024;
-    inline static constexpr size_t PAGE_SIZE = 128 * 1024 * 1024;
+    inline static constexpr size_t PAGE_SIZE = 64 * 1024 * 1024;
     inline static constexpr size_t PAGE_ALIGNMENT = 1024 * 1024;
 
-    struct Bucket
+    struct Page
     {
-        bool operator<(const Bucket& b) const
-        {
-            return std::tie(size, page, page_offset) < std::tie(b.size, b.page, b.page_offset);
-        }
-        bool operator==(const Bucket& b) const { return !(*this < b) && !(b < *this); }
-        bool is_free() const
-        {
-            // buckets are reused across frames. to make sure the previous frame is not using this bucket, when the next frame tries to allocate it,
-            // we check if it either has never been touched, or it was freed in the current frame, or if enough frames have passed since.
-            const auto frame = get_renderer().current_frame;
-            const auto wait = get_renderer().frame_delay;
-            return freed_at == ~0ull || freed_at == frame || (frame - freed_at) >= wait;
-        }
-        bool can_be_merged_with_buddy(const Bucket& buddy) const
-        {
-            ENG_ASSERT(page == buddy.page && size == buddy.size);
-            // can only merge up if enough frames have passed or buckets were freed during the same frame. otherwise it will consolidate back to one page-sized
-            // bucket with is_free() returning false for the next frame, even though the previous frame only used 64kbs.
-            const auto frame = get_renderer().current_frame;
-            const auto wait = get_renderer().frame_delay;
-            return freed_at == buddy.freed_at || (freed_at == ~0ull && (frame - buddy.freed_at) >= wait) ||
-                   (buddy.freed_at == ~0ull && (frame - freed_at) >= wait) ||
-                   (frame - freed_at >= wait && frame - buddy.freed_at >= wait);
-        }
-        uint32_t page{ ~0u };
-        size_t page_offset{};
+        void* memory{};
+        VmaVirtualBlock block{};
+    };
+
+    struct Allocation
+    {
+        Page* page{};
+        VmaVirtualAllocation alloc{};
+        size_t offset{};
         size_t size{};
-        size_t freed_at{ ~0ull }; // frame index;
     };
 
   public:
     GPUTransientAllocator(const auto& alias_allocator) { allocator = alias_allocator; }
 
-    void* allocate(const RendererMemoryRequirements& reqs)
+    void* allocate(RendererMemoryRequirements& reqs)
     {
         // todo: this should also somehow check memory types whether the resource will be compatible
         //       with the memory the allocator is managing.
         ENG_ASSERT(reqs.size > 0 && reqs.alignment > 0 && is_pow2(reqs.alignment));
-        // 65kbs rounds up to 128kbs :(
-        const auto aligned = next_power_of_2(std::max(align_up2(reqs.size, reqs.alignment), MIN_ALLOC));
-        if(PAGE_SIZE < aligned)
-        {
-            ENG_ASSERT(false, "Allocation too big for page");
-            return nullptr;
-        }
-        const auto frame = get_renderer().current_frame;
-        if(last_alloc_frame != frame)
-        {
-            // first alloc of render frame, try defrag.
-            last_alloc_frame = frame;
-            defragment();
-        }
         while(true)
         {
-            // find smallest possible
-            auto it = buckets.lower_bound(Bucket{ .page = 0, .page_offset = 0, .size = aligned });
-            // go up if not enough render frames have passed and the resource may still be in use, unless
-            // it's the same frame, then access is guarded by barriers/semaphores in the rendergraph.
-            for(; it != buckets.end() && !it->is_free(); ++it) {}
-            if(it == buckets.end())
+            for(auto& p : pages)
             {
-                // no free bucket, allocate new page
-                if(!allocate_new_page(reqs)) { return nullptr; }
-                continue;
+                VmaVirtualAllocationCreateInfo info{};
+                reqs.size = align_up2(reqs.size, PAGE_ALIGNMENT);
+                info.alignment = PAGE_ALIGNMENT;
+                info.size = reqs.size;
+                VmaVirtualAllocation vmaalloc{};
+                size_t offset{};
+                vmaVirtualAllocate(p.block, &info, &vmaalloc, &offset);
+                if(!vmaalloc) { continue; }
+                Allocation alloc{};
+                alloc.alloc = vmaalloc;
+                alloc.page = &p;
+                alloc.size = reqs.size;
+                alloc.offset = offset;
+                allocations.push_back(alloc);
+                return &allocations.back();
             }
-            auto bucket = *it;
-            buckets.erase(it);
-            split_bucket(bucket, aligned); // keep cutting off right halfs until just right
-            auto* const alloc = get_bucket_memory(bucket);
-            ENG_ASSERT(!allocations.contains(alloc));
-            allocations[alloc] = bucket;
-            return alloc;
+
+            auto preqs = reqs;
+            preqs.size = PAGE_SIZE;
+            preqs.alignment = PAGE_ALIGNMENT;
+            Page p{};
+            p.memory = allocator(preqs);
+            VmaVirtualBlockCreateInfo vmainfo{};
+            vmainfo.size = preqs.size;
+            vmaCreateVirtualBlock(&vmainfo, &p.block);
+            if(!p.block)
+            {
+                ENG_ASSERT(false);
+                return nullptr;
+            }
+            pages.push_front(p);
         }
     }
 
     void free(void* const alloc)
     {
-        if(!alloc)
-        {
-            ENG_ASSERT(false, "Alloc is null");
-            return;
-        }
-
-        auto allocit = allocations.find(alloc);
-        if(allocit == allocations.end())
-        {
-            ENG_ASSERT(false, "Invalid alloc");
-            return;
-        }
-
-        auto bucket = allocit->second;
-        allocations.erase(allocit);
-        bucket.freed_at = get_renderer().current_frame;
-        merge_buddies(bucket); // merge freed this frame for better reuse within one frame
-        buckets.insert(bucket);
+        auto* a = (Allocation*)alloc;
+        if(!a || !a->alloc) { return; }
+        ENG_ASSERT(a->page);
+        vmaVirtualFree(a->page->block, a->alloc);
+        *a = Allocation{};
     }
 
-    void get_offset_and_base(void* alloc, void*& base, size_t& offset)
+    void get_offset_and_base(const void* alloc, void*& base, size_t& offset)
     {
         ENG_ASSERT(alloc);
-        const auto& allocation = allocations.at(alloc);
-        base = pages[allocation.page];
-        offset = allocation.page_offset;
+        auto* a = (Allocation*)alloc;
+        base = a->page->memory;
+        offset = a->offset;
     }
 
-  private:
-    bool allocate_new_page(const RendererMemoryRequirements& reqs)
+    void reset_pages()
     {
-        if(PAGE_SIZE < reqs.size && PAGE_ALIGNMENT < reqs.alignment)
+        for(auto& p : pages)
         {
-            ENG_ERROR("Bad alignment or size");
-            return false;
+            vmaClearVirtualBlock(p.block);
         }
-        auto page_reqs = reqs;
-        page_reqs.size = PAGE_SIZE;
-        page_reqs.alignment = PAGE_ALIGNMENT;
-        void* page = allocator(page_reqs);
-        if(!page)
-        {
-            ENG_ERROR("Could not allocate new page");
-            return false;
-        }
-        pages.push_back(page);
-        buckets.insert(Bucket{ .page = (uint32_t)pages.size() - 1, .page_offset = 0, .size = PAGE_SIZE });
-        return true;
-    }
-
-    void split_bucket(Bucket& bucket, size_t req_size)
-    {
-        ENG_ASSERT(!buckets.contains(bucket));
-        auto split_size = bucket.size >> 1;
-        while(req_size <= split_size)
-        {
-            // if the half of the bucket is enough, split and try again with the left half again.
-            bucket.size = split_size;
-            bucket = get_left_split_bucket(bucket);
-            buckets.insert(get_buddy_bucket(bucket));
-            split_size >>= 1;
-        }
-    }
-
-    bool merge_buddies(Bucket& bucket)
-    {
-        bool merged = false;
-        while(true)
-        {
-            auto buddyit = buckets.find(get_buddy_bucket(bucket));
-            if(buddyit == buckets.end() || !buddyit->can_be_merged_with_buddy(bucket)) { return merged; }
-            merged = true;
-            buckets.erase(buddyit);
-            bucket = get_left_split_bucket(bucket);
-            bucket.size <<= 1;
-        }
-    }
-
-    void defragment()
-    {
-        std::vector<Bucket> candidates;
-        candidates.reserve(buckets.size());
-        for(const auto& b : buckets)
-        {
-            if(b.is_free()) { candidates.push_back(b); }
-        }
-        for(auto& b : candidates)
-        {
-            if(!buckets.contains(b)) { continue; }
-            buckets.erase(b);
-            merge_buddies(b);
-            buckets.insert(b);
-        }
-    }
-
-    static Bucket get_buddy_bucket(const Bucket& bucket)
-    {
-        auto buddy = bucket;
-        buddy.page_offset ^= bucket.size;
-        return buddy;
-    }
-
-    static Bucket get_left_split_bucket(const Bucket& bucket)
-    {
-        auto left = bucket;
-        left.page_offset &= ~bucket.size; // remove offset bit that right split bucket has XORed
-        return left;
-    }
-
-    void* get_bucket_memory(const Bucket& bucket)
-    {
-        return (void*)((uintptr_t)pages[bucket.page] + bucket.page_offset);
+        allocations.clear();
     }
 
     Callback<void*(const RendererMemoryRequirements&)> allocator;
-    std::vector<void*> pages;
-    std::set<Bucket> buckets;
-    std::unordered_map<void*, Bucket> allocations;
-    size_t last_alloc_frame{ 0 };
+    std::deque<Page> pages;
+    std::deque<Allocation> allocations;
 };
 
 RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
@@ -262,9 +147,9 @@ PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
     return &it->second;
 }
 
-RGAccessId RGBuilder::create_resource(const char* name, Buffer&& a, bool persistent)
+RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool persistent)
 {
-    ENG_ASSERT(name);
+    ENG_ASSERT(!name.empty());
     RGResource::NativeResource native = [this, &a, &name, persistent]() -> RGResource::NativeResource {
         if(persistent)
         {
@@ -280,9 +165,9 @@ RGAccessId RGBuilder::create_resource(const char* name, Buffer&& a, bool persist
     return add_resource(RGResource(name, native, persistent, false));
 }
 
-RGAccessId RGBuilder::create_resource(const char* name, Image&& a, bool persistent, const std::optional<RGClear>& clear)
+RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
 {
-    ENG_ASSERT(name);
+    ENG_ASSERT(!name.empty());
     RGResource::NativeResource native = [this, &a, &name, persistent]() -> RGResource::NativeResource {
         if(persistent)
         {
@@ -359,13 +244,21 @@ void RGRenderGraph::init(Renderer* r)
     sems[1] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
     cmd_pools[0] = queue->make_command_pool();
     cmd_pools[1] = queue->make_command_pool();
-    allocator = new GPUTransientAllocator{ [r](const RendererMemoryRequirements& reqs) {
+    allocators[0] = new GPUTransientAllocator{ [r](const RendererMemoryRequirements& reqs) {
         return r->backend->allocate_aliasable_memory(reqs);
     } };
+    allocators[1] = new GPUTransientAllocator{ [r](const RendererMemoryRequirements& reqs) {
+        return r->backend->allocate_aliasable_memory(reqs);
+    } };
+    allocator = allocators[0];
 }
 
 void RGRenderGraph::compile()
 {
+    std::swap(allocators[0], allocators[1]);
+    allocator = allocators[0];
+    allocator->reset_pages();
+
     const auto group_passes = [this] {
         const auto get_earliest_group_for_pass = [this](const std::vector<RGAccessId>& accesses) -> uint32_t {
             return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& val) {
@@ -481,6 +374,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
     {
         queue->wait_sync(wait_syncs[i]);
     }
+
     for(auto i = 0u; i < groups.size(); ++i)
     {
         const auto& g = groups[i];
@@ -531,7 +425,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
         {
             cmd_pools[0]->end(layout_cmd);
             queue->with_cmd_buf(layout_cmd);
-            queue->submit();
+            // queue->submit(); // this need not be submitted individually
         }
 
         for(auto* p : g.passes)

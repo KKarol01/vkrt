@@ -65,7 +65,7 @@ struct RGClear
     {
         glm::vec4 color;
     };
-    static RGClear color(std::array<float, 4> color)
+    static RGClear color(std::array<float, 4> color = { 0.0f, 0.0f, 0.0f, 1.0f })
     {
         return RGClear{ Color{ glm::vec4{ color[0], color[1], color[2], color[3] } } };
     }
@@ -82,7 +82,7 @@ struct RGClear
 struct RGResource
 {
     using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
-    RGResource(const char* name, const NativeResource& native, bool is_persistent, bool is_imported,
+    RGResource(std::string_view name, const NativeResource& native, bool is_persistent, bool is_imported,
                const std::optional<RGClear>& clear = {})
         : name(name), native(native), is_persistent(is_persistent), is_imported(is_imported), clear(clear)
     {
@@ -128,8 +128,8 @@ struct RGBuilder
     RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
     RGAccessId import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear = {});
     PersistentStorage* find_persistent(uint64_t namehash);
-    RGAccessId create_resource(const char* name, Buffer&& a, bool persistent = false);
-    RGAccessId create_resource(const char* name, Image&& a, bool persistent = false, const std::optional<RGClear>& clear = {});
+    RGAccessId create_resource(std::string_view name, Buffer&& a, bool persistent = false);
+    RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool persistent = false);
     RGAccessId add_access(const RGAccess& a);
     RGAccessId access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
                                std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
@@ -305,6 +305,7 @@ class RGRenderGraph
     SubmitQueue* queue{};
     ICommandPool* cmd_pools[2]{};
     Sync* sems[2]{};
+    GPUTransientAllocator* allocators[2]{};
     GPUTransientAllocator* allocator{};
 
     std::unordered_map<std::pair<RGPass::PassId, uint64_t>, PersistentStorage, hash::PairHash> persistent_resources;
