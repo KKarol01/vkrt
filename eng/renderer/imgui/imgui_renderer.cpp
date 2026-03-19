@@ -140,10 +140,8 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                 cmd->push_constants(ShaderStage::ALL, translate, { 8, 8 });
             }
 
-            {
-                DescriptorResource bindresources[]{ DescriptorResource::storage_buffer(4, vertex_buffer) };
-                cmd->bind_set(0, bindresources);
-            }
+            DescriptorResource set0[]{ DescriptorResource::storage_buffer(4, vertex_buffer) };
+            cmd->bind_set(0, set0);
 
             cmd->begin_rendering(rendering_info);
             {
