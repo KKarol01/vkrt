@@ -27,22 +27,22 @@ template <typename T> struct Flags
     constexpr Flags(T t) noexcept : flags(static_cast<U>(t)) {}
     constexpr Flags(U t) noexcept : flags(t) {}
 
-    constexpr auto operator<=>(const Flags<T>& a) const noexcept = default;
-    constexpr Flags<T> operator|(Flags<T> a) const noexcept { return Flags<T>{ flags | a.flags }; }
-    constexpr Flags<T> operator&(Flags<T> a) const noexcept { return Flags<T>{ a.flags & flags }; }
-    constexpr Flags<T> operator^(Flags<T> a) const noexcept { return Flags<T>{ a.flags ^ flags }; }
-    constexpr Flags<T> operator~() const noexcept { return Flags<T>{ ~flags }; }
-    constexpr Flags<T>& operator|=(Flags<T> f) noexcept
+    constexpr auto operator<=>(const Flags<T>& a) const = default;
+    constexpr Flags<T> operator|(Flags<T> a) const { return Flags<T>{ static_cast<U>(flags | a.flags) }; }
+    constexpr Flags<T> operator&(Flags<T> a) const { return Flags<T>{ static_cast<U>(a.flags & flags) }; }
+    constexpr Flags<T> operator^(Flags<T> a) const { return Flags<T>{ static_cast<U>(a.flags ^ flags) }; }
+    constexpr Flags<T> operator~() const { return Flags<T>{ static_cast<U>(~flags) }; }
+    constexpr Flags<T>& operator|=(Flags<T> f)
     {
         flags = flags | f.flags;
         return *this;
     }
-    constexpr Flags<T>& operator&=(Flags<T> f) noexcept
+    constexpr Flags<T>& operator&=(Flags<T> f)
     {
         flags = flags & f.flags;
         return *this;
     }
-    constexpr Flags<T>& operator^=(Flags<T> f) noexcept
+    constexpr Flags<T>& operator^=(Flags<T> f)
     {
         flags = flags ^ f.flags;
         return *this;
