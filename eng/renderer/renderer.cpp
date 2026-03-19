@@ -749,7 +749,7 @@ Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
         ENG_ERROR("Unrecognized shader extension: {}", ext.string());
         return {};
     }
-    Shader shader{ eng::paths::SHADERS_DIR / path, stage };
+    Shader shader{ eng::paths::SHADERS_DIR / path, stage, {} };
     const auto found_handle = shaders.find(shader);
     if(!found_handle) { backend->make_shader(shader); }
     auto it = shaders.insert(std::move(shader));
