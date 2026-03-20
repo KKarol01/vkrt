@@ -240,7 +240,7 @@ void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
 void CommandBufferVk::begin_label(const char* label)
 {
 #ifndef NDEBUG
-    auto vkl = vks::VkDebugUtilsLabelEXT{};
+    auto vkl = vk::VkDebugUtilsLabelEXT{};
     vkl.pLabelName = label;
     vkl.color[0] = 0.0f;
     vkl.color[1] = 0.0f;
