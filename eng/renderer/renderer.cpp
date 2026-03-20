@@ -174,10 +174,11 @@ void Renderer::init_pipelines()
                 { DescriptorType::STORAGE_IMAGE, ENG_BINDLESS_STORAGE_IMAGE_BINDING, 1024, ShaderStage::ALL },
                 { DescriptorType::SAMPLED_IMAGE, ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL },
                 { DescriptorType::SEPARATE_SAMPLER, ENG_BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, imsamplers },
-            } });
+            } ,.md = {},});
         settings.common_layout = make_layout(PipelineLayout{
             .layout = { common_dlayout },
             .push_range = { ShaderStage::ALL, PushRange::MAX_PUSH_BYTES },
+            .md = {},
         });
         descriptor_allocator = new DescriptorSetAllocatorBindlessVk{ settings.common_layout.get() };
     }
@@ -209,24 +210,22 @@ void Renderer::init_pipelines()
     // });
 
     {
-        settings.default_forward_pipeline = make_pipeline(PipelineCreateInfo{
-            .shaders = { make_shader("default_unlit/unlit.vert.glsl"), make_shader("default_unlit/unlit.frag.glsl") },
-            .layout = settings.common_layout,
-            .attachments = { .count = 1,
-                             .color_formats = { settings.color_format },
-                             .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-                                                                               .src_color_factor = BlendFactor::SRC_ALPHA,
-                                                                               .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                                                               .color_op = BlendOp::ADD,
-                                                                               .src_alpha_factor = BlendFactor::ONE,
-                                                                               .dst_alpha_factor = BlendFactor::ZERO,
-                                                                               .alpha_op = BlendOp::ADD } },
-                             .depth_format = settings.depth_format },
-            .depth_test = true,
-            .depth_write = true,
-            .depth_compare = settings.depth_compare,
-            .culling = CullFace::BACK,
-        });
+        settings.default_forward_pipeline =
+            make_pipeline(PipelineCreateInfo::init({ make_shader("default_unlit/unlit.vert.glsl"),
+                                                     make_shader("default_unlit/unlit.frag.glsl") })
+                              .init_image_attachments(PipelineCreateInfo::AttachmentState{
+                                  .count = 1,
+                                  .color_formats = { settings.color_format },
+                                  .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                                    .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                                    .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                                    .color_op = BlendOp::ADD,
+                                                                                    .src_alpha_factor = BlendFactor::ONE,
+                                                                                    .dst_alpha_factor = BlendFactor::ZERO,
+                                                                                    .alpha_op = BlendOp::ADD } },
+                                  .depth_format = settings.depth_format })
+                              .init_depth_test(true, true, settings.depth_compare)
+                              .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
     }
 
     {
@@ -523,9 +522,9 @@ void Renderer::compile_rendergraph()
         },
         [](RGBuilder& b, const RenderTargets& rt) {
             auto* c = get_engine().camera;
-            GPUEngConstantsBuffer constants_buffer{
-                .proj_view = c->get_projection() * c->get_view(),
-            };
+            GPUEngConstantsBuffer constants_buffer{};
+            constants_buffer.proj_view = c->get_projection() * c->get_view();
+
             auto* cmd = b.open_cmd_buf();
             get_renderer().staging->copy(get_renderer().rgraph->get_buf(rt.constants), &constants_buffer, 0ull,
                                          sizeof(constants_buffer), false);
@@ -567,25 +566,24 @@ void Renderer::compile_rendergraph()
                 const auto& rp = get_renderer().render_passes[i];
                 auto render_res = settings.render_resolution;
 
-                const VkRenderingAttachmentInfo vkcols[]{ Vks(VkRenderingAttachmentInfo{
-                    .imageView = pb.graph->get_acc(data.color).image_view.get_md().vk->view,
-                    .imageLayout = to_vk(pb.graph->get_acc(data.color).layout),
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                }) };
-                const VkRenderingAttachmentInfo vkdep = Vks(VkRenderingAttachmentInfo{
-                    .imageView = pb.graph->get_acc(data.depth).image_view.get_md().vk->view,
-                    .imageLayout = to_vk(pb.graph->get_acc(data.depth).layout),
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                });
-                const auto vkrinfo = Vks(VkRenderingInfo{
-                    .renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } },
-                    .layerCount = 1,
-                    .colorAttachmentCount = 1,
-                    .pColorAttachments = vkcols,
-                    .pDepthAttachment = &vkdep,
-                });
+                vks::VkRenderingAttachmentInfo vkcols[1]{};
+                vkcols[0].imageView = pb.graph->get_acc(data.color).image_view.get_md().vk->view;
+                vkcols[0].imageLayout = to_vk(pb.graph->get_acc(data.color).layout);
+                vkcols[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+                auto vkdep = vks::VkRenderingAttachmentInfo{};
+                vkdep.imageView = pb.graph->get_acc(data.depth).image_view.get_md().vk->view;
+                vkdep.imageLayout = to_vk(pb.graph->get_acc(data.depth).layout);
+                vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+                auto vkrinfo = vks::VkRenderingInfo{};
+                vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
+                vkrinfo.layerCount = 1;
+                vkrinfo.colorAttachmentCount = 1;
+                vkrinfo.pColorAttachments = vkcols;
+                vkrinfo.pDepthAttachment = &vkdep;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 1.0, 0.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{
@@ -594,9 +592,7 @@ void Renderer::compile_rendergraph()
                 };
                 auto* cmd = pb.open_cmd_buf();
                 {
-                    char label[64]{};
-                    const auto format_res = fmt::format_to(label, "MaterialPassDraw{}", i);
-                    ScopedTimestampQuery query{ std::string_view{ label, format_res.out }, cmd };
+                    ScopedTimestampQuery query{ ENG_FMT("MaterialPassDraw{}", i), cmd };
                     cmd->begin_rendering(vkrinfo);
                     cmd->set_viewports(&viewport, 1);
                     cmd->set_scissors(&scissor, 1);
@@ -781,7 +777,7 @@ Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
 {
-    Pipeline p{ .info = info };
+    Pipeline p{ .info = info, .type = PipelineType::NONE, .md = {} };
     if(!p.info.layout) { p.info.layout = settings.common_layout; }
     if(backend->caps.supports_bindless)
     {
@@ -941,7 +937,7 @@ Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_pa
 
 Handle<MeshPass> Renderer::find_mesh_pass(std::string_view name)
 {
-    MeshPass mp{ .name = name };
+    MeshPass mp{ .name = name, .effects = {} };
     return mesh_passes.find(mp);
 }
 

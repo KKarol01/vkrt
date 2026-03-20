@@ -41,17 +41,19 @@ void CommandBufferVk::barrier(const Image& image, Flags<PipelineStage> src_stage
                               Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
                               ImageLayout new_layout, const ImageMipLayerRange& range)
 {
-    const auto barr =
-        Vks(VkImageMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
-                                   .srcAccessMask = to_vk(src_access),
-                                   .dstStageMask = to_vk(dst_stage),
-                                   .dstAccessMask = to_vk(dst_access),
-                                   .oldLayout = to_vk(old_layout),
-                                   .newLayout = to_vk(new_layout),
-                                   .image = image.md.vk()->image,
-                                   .subresourceRange = { to_vk(get_aspect_from_format(image.format)), range.mips.offset,
-                                                         range.mips.size, range.layers.offset, range.layers.size } });
-    const auto dep = Vks(VkDependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barr });
+    auto barr = vks::VkImageMemoryBarrier2{};
+    barr.srcStageMask = to_vk(src_stage);
+    barr.srcAccessMask = to_vk(src_access);
+    barr.dstStageMask = to_vk(dst_stage);
+    barr.dstAccessMask = to_vk(dst_access);
+    barr.oldLayout = to_vk(old_layout);
+    barr.newLayout = to_vk(new_layout);
+    barr.image = image.md.vk()->image;
+    barr.subresourceRange = { to_vk(get_aspect_from_format(image.format)), range.mips.offset, range.mips.size,
+                              range.layers.offset, range.layers.size };
+    auto dep = vks::VkDependencyInfo{};
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &barr;
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
@@ -64,12 +66,13 @@ void CommandBufferVk::copy(const Buffer& dst, const Buffer& src, size_t dst_offs
 
 void CommandBufferVk::copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
 {
-    const auto info = Vks(VkCopyBufferToImageInfo2{ .srcBuffer = src.md.vk()->buffer,
-                                                    .dstImage = dst.md.vk()->image,
-                                                    .dstImageLayout = to_vk(ImageLayout::TRANSFER_DST),
-                                                    .regionCount = count,
-                                                    .pRegions = regions });
-    vkCmdCopyBufferToImage2(cmd, &info);
+    auto vkinfo = vks::VkCopyBufferToImageInfo2{};
+    vkinfo.srcBuffer = src.md.vk()->buffer;
+    vkinfo.dstImage = dst.md.vk()->image;
+    vkinfo.dstImageLayout = to_vk(ImageLayout::TRANSFER_DST);
+    vkinfo.regionCount = count;
+    vkinfo.pRegions = regions;
+    vkCmdCopyBufferToImage2(cmd, &vkinfo);
 }
 
 void CommandBufferVk::copy(const Image& dst, const Image& src, const ImageCopy& copy)
@@ -90,11 +93,11 @@ void CommandBufferVk::copy(const Image& dst, const Image& src)
 {
     auto* dstmd = dst.md.vk();
     const auto* srcmd = src.md.vk();
-    const auto vkr =
-        VkImageCopy{ .srcSubresource = { to_vk(get_aspect_from_format(src.format)), 0, 0, std::min(dst.layers, src.layers) },
-                     .dstSubresource = { to_vk(get_aspect_from_format(dst.format)), 0, 0, std::min(dst.layers, src.layers) },
-                     .extent = { dst.width, dst.height, dst.depth } };
-    vkCmdCopyImage(cmd, srcmd->image, to_vk(ImageLayout::TRANSFER_SRC), dstmd->image, to_vk(ImageLayout::TRANSFER_DST), 1, &vkr);
+    auto vkcopy = VkImageCopy{};
+    vkcopy.srcSubresource = { to_vk(get_aspect_from_format(src.format)), 0, 0, std::min(dst.layers, src.layers) };
+    vkcopy.dstSubresource = { to_vk(get_aspect_from_format(dst.format)), 0, 0, std::min(dst.layers, src.layers) };
+    vkcopy.extent = { dst.width, dst.height, dst.depth };
+    vkCmdCopyImage(cmd, srcmd->image, to_vk(ImageLayout::TRANSFER_SRC), dstmd->image, to_vk(ImageLayout::TRANSFER_DST), 1, &vkcopy);
 }
 
 void CommandBufferVk::blit(const Image& dst, const Image& src, const ImageBlit& blit)
@@ -237,7 +240,12 @@ void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
 void CommandBufferVk::begin_label(const char* label)
 {
 #ifndef NDEBUG
-    const auto vkl = Vks(VkDebugUtilsLabelEXT{ .pLabelName = label, .color = { 0.0f, 0.0f, 1.0f, 1.0f } });
+    auto vkl = vks::VkDebugUtilsLabelEXT{};
+    vkl.pLabelName = label;
+    vkl.color[0] = 0.0f;
+    vkl.color[1] = 0.0f;
+    vkl.color[2] = 1.0f;
+    vkl.color[3] = 1.0f;
     vkCmdBeginDebugUtilsLabelEXT(cmd, &vkl);
 #endif
 }
@@ -265,18 +273,22 @@ void CommandBufferVk::write_timestamp(QueryPool* pool, Flags<PipelineStage> stag
 
 CommandPoolVk::CommandPoolVk(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
 {
-    const auto vk_info = Vks(VkCommandPoolCreateInfo{ .flags = flags, .queueFamilyIndex = family_index });
-    VK_CHECK(vkCreateCommandPool(dev, &vk_info, nullptr, &pool));
+    auto vkinfo = vks::VkCommandPoolCreateInfo{};
+    vkinfo.flags = flags;
+    vkinfo.queueFamilyIndex = family_index;
+    VK_CHECK(vkCreateCommandPool(dev, &vkinfo, nullptr, &pool));
 }
 
 ICommandBuffer* CommandPoolVk::allocate()
 {
     if(free.empty())
     {
-        const auto vk_info = Vks(VkCommandBufferAllocateInfo{
-            .commandPool = pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 });
+        auto vkinfo = vks::VkCommandBufferAllocateInfo{};
+        vkinfo.commandPool = pool;
+        vkinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        vkinfo.commandBufferCount = 1;
         VkCommandBuffer vkcmd;
-        VK_CHECK(vkAllocateCommandBuffers(dev, &vk_info, &vkcmd));
+        VK_CHECK(vkAllocateCommandBuffers(dev, &vkinfo, &vkcmd));
         return &used.emplace_back(vkcmd, get_renderer().descriptor_allocator);
     }
     auto* cmd = &used.emplace_back(std::move(free.front()));
@@ -293,8 +305,9 @@ ICommandBuffer* CommandPoolVk::begin()
 
 ICommandBuffer* CommandPoolVk::begin(ICommandBuffer* cmd)
 {
-    const auto vk_info = Vks(VkCommandBufferBeginInfo{ .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT });
-    VK_CHECK(vkBeginCommandBuffer(((CommandBufferVk*)cmd)->cmd, &vk_info));
+    auto vkinfo = vks::VkCommandBufferBeginInfo{};
+    vkinfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(((CommandBufferVk*)cmd)->cmd, &vkinfo));
     return cmd;
 }
 
@@ -324,16 +337,18 @@ void Sync::init(const SyncCreateInfo& info)
     name = info.name;
     if(type == FENCE)
     {
-        const auto vkinfo = Vks(VkFenceCreateInfo{ .flags = value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{} });
+        auto vkinfo = vks::VkFenceCreateInfo{};
+        vkinfo.flags = value > 0 ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{};
         VK_CHECK(vkCreateFence(RendererBackendVk::get_dev(), &vkinfo, nullptr, &fence));
         if(name.size()) { set_debug_name(fence, name); }
     }
     else if(type == BINARY_SEMAPHORE || type == TIMELINE_SEMAPHORE)
     {
-        auto vkinfo = Vks(VkSemaphoreCreateInfo{});
-        const auto timeline_info =
-            Vks(VkSemaphoreTypeCreateInfo{ .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = value });
-        if(type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeline_info; }
+        auto vkinfo = vks::VkSemaphoreCreateInfo{};
+        auto timeinfo = vks::VkSemaphoreTypeCreateInfo{};
+        timeinfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        timeinfo.initialValue = value;
+        if(type == TIMELINE_SEMAPHORE) { vkinfo.pNext = &timeinfo; }
         VK_CHECK(vkCreateSemaphore(RendererBackendVk::get_dev(), &vkinfo, nullptr, &semaphore));
         if(name.size()) { set_debug_name(semaphore, name); }
     }
@@ -354,8 +369,10 @@ void Sync::signal_cpu(uint64_t value)
     if(value == ~0ull) { value = this->value + 1; }
     if(type == TIMELINE_SEMAPHORE)
     {
-        const auto info = Vks(VkSemaphoreSignalInfo{ .semaphore = semaphore, .value = value });
-        vkSignalSemaphore(RendererBackendVk::get_dev(), &info);
+        auto vkinfo = vks::VkSemaphoreSignalInfo{};
+        vkinfo.semaphore = semaphore;
+        vkinfo.value = value;
+        vkSignalSemaphore(RendererBackendVk::get_dev(), &vkinfo);
     }
     else
     {
@@ -376,8 +393,11 @@ bool Sync::wait_cpu(size_t timeout, uint64_t value) const
     if(type == FENCE) { return vkWaitForFences(RendererBackendVk::get_dev(), 1, &fence, true, timeout) == VK_SUCCESS; }
     else if(type == TIMELINE_SEMAPHORE)
     {
-        const auto info = Vks(VkSemaphoreWaitInfo{ .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &value });
-        return vkWaitSemaphores(RendererBackendVk::get_dev(), &info, timeout) == VK_SUCCESS;
+        auto vkinfo = vks::VkSemaphoreWaitInfo{};
+        vkinfo.semaphoreCount = 1;
+        vkinfo.pSemaphores = &semaphore;
+        vkinfo.pValues = &value;
+        return vkWaitSemaphores(RendererBackendVk::get_dev(), &vkinfo, timeout) == VK_SUCCESS;
     }
     ENG_ERROR("Sync object of type {} cannot be waited on.", to_string(type));
     return false;
@@ -455,13 +475,14 @@ SubmitQueue& SubmitQueue::with_cmd_buf(ICommandBuffer* cmd)
 
 void SubmitQueue::submit()
 {
-    std::vector<VkSemaphoreSubmitInfo> wait_sems(submission.wait_sems.size());
-    std::vector<VkSemaphoreSubmitInfo> sig_sems(submission.signal_sems.size());
-    std::vector<VkCommandBufferSubmitInfo> cmds(submission.cmds.size());
+    std::vector<VkSemaphoreSubmitInfo> vkwaitinfos(submission.wait_sems.size());
+    std::vector<VkSemaphoreSubmitInfo> vksiginfos(submission.signal_sems.size());
+    std::vector<VkCommandBufferSubmitInfo> vkcmdinfos(submission.cmds.size());
 
-    for(auto i = 0u; i < cmds.size(); ++i)
+    for(auto i = 0u; i < vkcmdinfos.size(); ++i)
     {
-        cmds[i] = Vks(VkCommandBufferSubmitInfo{ .commandBuffer = ((CommandBufferVk*)submission.cmds[i])->cmd });
+        vkcmdinfos[i] = vks::VkCommandBufferSubmitInfo{};
+        vkcmdinfos[i].commandBuffer = ((CommandBufferVk*)submission.cmds[i])->cmd;
         for(const auto& dep : submission.cmds[i]->sync_deps)
         {
             if(dep.wait) { wait_sync(dep.sync, dep.stage, dep.value); }
@@ -469,27 +490,28 @@ void SubmitQueue::submit()
         }
         submission.cmds[i]->sync_deps.clear();
     }
-    for(auto i = 0u; i < wait_sems.size(); ++i)
+    for(auto i = 0u; i < vkwaitinfos.size(); ++i)
     {
-        wait_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.wait_sems[i]->semaphore,
-                                                  .value = submission.wait_values[i],
-                                                  .stageMask = to_vk(submission.wait_stages[i]) });
+        vkwaitinfos[i] = vks::VkSemaphoreSubmitInfo{};
+        vkwaitinfos[i].semaphore = submission.wait_sems[i]->semaphore;
+        vkwaitinfos[i].value = submission.wait_values[i];
+        vkwaitinfos[i].stageMask = to_vk(submission.wait_stages[i]);
     }
-    for(auto i = 0u; i < sig_sems.size(); ++i)
+    for(auto i = 0u; i < vksiginfos.size(); ++i)
     {
-        sig_sems[i] = Vks(VkSemaphoreSubmitInfo{ .semaphore = submission.signal_sems[i]->semaphore,
-                                                 .value = submission.signal_values[i],
-                                                 .stageMask = to_vk(submission.signal_stages[i]) });
+        vksiginfos[i] = vks::VkSemaphoreSubmitInfo{};
+        vksiginfos[i].semaphore = submission.signal_sems[i]->semaphore;
+        vksiginfos[i].value = submission.signal_values[i];
+        vksiginfos[i].stageMask = to_vk(submission.signal_stages[i]);
     }
-    const auto vk_info = Vks(VkSubmitInfo2{
-        .waitSemaphoreInfoCount = (uint32_t)wait_sems.size(),
-        .pWaitSemaphoreInfos = wait_sems.data(),
-        .commandBufferInfoCount = (uint32_t)cmds.size(),
-        .pCommandBufferInfos = cmds.data(),
-        .signalSemaphoreInfoCount = (uint32_t)sig_sems.size(),
-        .pSignalSemaphoreInfos = sig_sems.data(),
-    });
-    VK_CHECK(vkQueueSubmit2(queue, 1, &vk_info, submission.fence ? submission.fence->fence : nullptr));
+    auto vkinfo = vks::VkSubmitInfo2{};
+    vkinfo.waitSemaphoreInfoCount = (uint32_t)vkwaitinfos.size();
+    vkinfo.pWaitSemaphoreInfos = vkwaitinfos.data();
+    vkinfo.commandBufferInfoCount = (uint32_t)vkcmdinfos.size();
+    vkinfo.pCommandBufferInfos = vkcmdinfos.data();
+    vkinfo.signalSemaphoreInfoCount = (uint32_t)vksiginfos.size();
+    vkinfo.pSignalSemaphoreInfos = vksiginfos.data();
+    VK_CHECK(vkQueueSubmit2(queue, 1, &vkinfo, submission.fence ? submission.fence->fence : nullptr));
     submission = Submission{};
 }
 
@@ -519,12 +541,13 @@ void SubmitQueue::present(Swapchain* swapchain)
         wait_sems[i] = submission.wait_sems[i]->semaphore;
     }
 
-    const auto pinfo = Vks(VkPresentInfoKHR{ .waitSemaphoreCount = (uint32_t)wait_sems.size(),
-                                             .pWaitSemaphores = wait_sems.data(),
-                                             .swapchainCount = 1,
-                                             .pSwapchains = &SwapchainMetadataVk::get(*swapchain).swapchain,
-                                             .pImageIndices = &swapchain->current_index });
-    vkQueuePresentKHR(queue, &pinfo);
+    auto vkinfo = vks::VkPresentInfoKHR{};
+    vkinfo.waitSemaphoreCount = (uint32_t)wait_sems.size();
+    vkinfo.pWaitSemaphores = wait_sems.data();
+    vkinfo.swapchainCount = 1;
+    vkinfo.pSwapchains = &SwapchainMetadataVk::get(*swapchain).swapchain;
+    vkinfo.pImageIndices = &swapchain->current_index;
+    vkQueuePresentKHR(queue, &vkinfo);
     submission = {};
 }
 

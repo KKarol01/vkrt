@@ -124,6 +124,8 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
     graph->resources.push_back(resource);
     const auto ret = add_access(RGAccess{
         .resource = RGResourceId{ (uint32_t)graph->resources.size() - 1 },
+        .prev_access = {},
+        .buffer_view = {},
         .layout = layout,
         .stage = {},
         .access = {},

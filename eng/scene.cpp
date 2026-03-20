@@ -402,8 +402,10 @@ ecs::EntityId Scene::instance_model(SceneNodeId nodeid)
         reg->add_components(e, ecs::Node{ node.name }, transforms[node.transform]);
         if(node.meshes.size != 0)
         {
-            ecs::Mesh ecsmesh{ .render_meshes = { meshes.begin() + node.meshes.offset,
-                                                  meshes.begin() + node.meshes.offset + node.meshes.size } };
+            ecs::Mesh ecsmesh{ .name = {},
+                               .render_meshes = { meshes.begin() + node.meshes.offset,
+                                                  meshes.begin() + node.meshes.offset + node.meshes.size },
+                               .gpu_resource = ~0u };
             reg->add_components(e, ecsmesh);
         }
 

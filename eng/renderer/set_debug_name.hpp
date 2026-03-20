@@ -26,6 +26,7 @@ template <typename VkStruct> inline void set_debug_name(VkStruct object, std::st
 #ifndef NDEBUG
     VkDebugUtilsObjectNameInfoEXT obj_name{
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .pNext = nullptr,
         .objectType = VkObject<VkStruct>::type,
         .objectHandle = reinterpret_cast<uint64_t>(object),
         .pObjectName = name.data(),

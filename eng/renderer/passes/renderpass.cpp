@@ -55,7 +55,8 @@ void RenderPass::build()
         if(prev_pipeline != mp.pipeline)
         {
             prev_pipeline = mp.pipeline;
-            draw.batches.push_back(InstanceBatch{ .pipeline = mp.pipeline, .first_command = (uint32_t)cmds.size() });
+            draw.batches.push_back(InstanceBatch{
+                .pipeline = mp.pipeline, .instance_count = 0, .first_command = (uint32_t)cmds.size(), .command_count = 0 });
             counts.push_back(0);
         }
         if(prev_meshlet != inst.meshlet_index)

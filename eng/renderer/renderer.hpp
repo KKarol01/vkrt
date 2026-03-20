@@ -158,10 +158,10 @@ struct PipelineCreateInfo
     struct StencilState
     {
         auto operator<=>(const StencilState&) const = default;
-        StencilOp fail;
-        StencilOp pass;
-        StencilOp depth_fail;
-        CompareOp compare;
+        StencilOp fail{};
+        StencilOp pass{};
+        StencilOp depth_fail{};
+        CompareOp compare{};
         uint32_t compare_mask{ ~0u };
         uint32_t write_mask{ ~0u };
         uint32_t ref{};
@@ -208,6 +208,49 @@ struct PipelineCreateInfo
     };
 
     bool operator==(const PipelineCreateInfo& a) const = default;
+
+    static PipelineCreateInfo init(const std::vector<Handle<Shader>> shaders, std::optional<Handle<PipelineLayout>> layout = {})
+    {
+        PipelineCreateInfo info{};
+        info.shaders = shaders;
+        info.layout = layout ? *layout : Handle<PipelineLayout>{};
+        return info;
+    }
+    PipelineCreateInfo& init_vertex_layout(const std::vector<VertexBinding> bindings, const std::vector<VertexAttribute> attributes)
+    {
+        this->bindings = { bindings.begin(), bindings.end() };
+        this->attributes = { attributes.begin(), attributes.end() };
+        return *this;
+    }
+    PipelineCreateInfo& init_image_attachments(AttachmentState attachments)
+    {
+        this->attachments = attachments;
+        return *this;
+    }
+    PipelineCreateInfo& init_depth_test(bool depth_test, bool depth_write, DepthCompare depth_compare)
+    {
+        this->depth_test = depth_test;
+        this->depth_write = depth_write;
+        this->depth_compare = depth_compare;
+        return *this;
+    }
+    PipelineCreateInfo& init_stencil_test(bool stencil_test, StencilState front, StencilState back)
+    {
+        this->stencil_test = stencil_test;
+        this->stencil_front = front;
+        this->stencil_back = back;
+        return *this;
+    }
+    PipelineCreateInfo& init_topology(Topology topology, PolygonMode polygon_mode, CullFace culling,
+                                      bool front_is_ccw = true, float line_width = 1.0f)
+    {
+        this->topology = topology;
+        this->polygon_mode = polygon_mode;
+        this->culling = culling;
+        this->front_is_ccw = front_is_ccw;
+        this->line_width = line_width;
+        return *this;
+    }
 
     std::vector<Handle<Shader>> shaders;
     std::vector<VertexBinding> bindings;
@@ -324,7 +367,7 @@ struct Buffer
 {
     static Buffer init(size_t capacity, Flags<BufferUsage> usage)
     {
-        return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {} };
+        return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = {} };
     }
 
     Flags<BufferUsage> usage{};
@@ -361,6 +404,7 @@ struct Image
             .layers = layers,
             .usage = usage,
             .layout = layout,
+            .md = {},
         };
     }
 
@@ -426,6 +470,7 @@ struct Sampler
             .mip_blending = mip_blending,
             .reduction_mode = reduction,
             .lod = { lod_min, lod_max, lod_base },
+            .md = {},
         };
     }
     bool operator==(const Sampler& a) const
@@ -532,7 +577,7 @@ struct RendererMemoryRequirements
     auto operator<=>(const RendererMemoryRequirements&) const = default;
     size_t size{};
     size_t alignment{};
-    std::array<uint64_t, 4> backend_data{}; // for storing additional backend-specific data (vulkan uses it to store memory type bits)
+    uintptr_t backend_data{}; // for storing additional backend-specific data (vulkan uses it to store memory type bits)
 };
 
 class IRendererBackend
@@ -641,12 +686,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.filtering.min,
                                                                 t.addressing.v, t.addressing.w, t.mip_blending,
                                                                 t.reduction_mode, t.lod.min, t.lod.max, t.lod.bias));
 //  ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
-ENG_DEFINE_STD_HASH(eng::gfx::RendererMemoryRequirements,
-                    eng::hash::combine_fnv1a(t.size, t.alignment,
-                                             std::accumulate(t.backend_data.begin(), t.backend_data.end(), 0ull,
-                                                             [](auto acc, const auto& e) {
-                                                                 return eng::hash::combine_fnv1a(acc, e);
-                                                             })));
+ENG_DEFINE_STD_HASH(eng::gfx::RendererMemoryRequirements, eng::hash::combine_fnv1a(t.size, t.alignment, t.backend_data));
 
 namespace eng
 {

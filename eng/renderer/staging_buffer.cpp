@@ -175,14 +175,14 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
         const auto copy_extent =
             glm::u32vec3{ extent.x, rows_allocated, 1 } *
             glm::u32vec3{ block_data.texel_extent.x, block_data.texel_extent.y, block_data.texel_extent.z };
-        const auto copy = Vks(VkBufferImageCopy2{
-            .bufferOffset = alloc.offset,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource = { to_vk(get_aspect_from_format(img.format)), mip, layer, 1 },
-            .imageOffset = { copy_offset.x, copy_offset.y, copy_offset.z },
-            .imageExtent = { copy_extent.x, copy_extent.y, copy_extent.z },
-        });
+        auto copy = vks::VkBufferImageCopy2{};
+        copy.bufferOffset = alloc.offset;
+        copy.bufferRowLength = 0;
+        copy.bufferImageHeight = 0;
+        copy.imageSubresource = { to_vk(get_aspect_from_format(img.format)), mip, layer, 1 };
+        copy.imageOffset = { copy_offset.x, copy_offset.y, copy_offset.z };
+        copy.imageExtent = { copy_extent.x, copy_extent.y, copy_extent.z };
+
         get_cmd()->copy(img, buffer, &copy, 1);
 
         bytes_uploaded += usable_bytes;

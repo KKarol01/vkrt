@@ -20,7 +20,7 @@
 ////         r.make_image_view(r.vsm.dir_light_page_table,
 ////                           Vks(VkImageViewCreateInfo{
 ////                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
+////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vkinfo.format }));
 ////     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
 ////     uint32_t bindless_indices[]{
 ////         r.get_bindless_index(r.index_buffer),
@@ -46,7 +46,7 @@
 ////         r.make_image_view(r.vsm.dir_light_page_table,
 ////                           Vks(VkImageViewCreateInfo{
 ////                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
+////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vkinfo.format }));
 ////     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
 ////     uint32_t bindless_indices[]{
 ////         r.get_bindless_index(r.index_buffer),
@@ -69,12 +69,12 @@
 ////         r.make_image_view(r.vsm.dir_light_page_table,
 ////                           Vks(VkImageViewCreateInfo{
 ////                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
+////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vkinfo.format }));
 ////     auto page_view_rgb8 = r.make_image_view(
 ////         r.vsm.dir_light_page_table_rgb8,
 ////         Vks(VkImageViewCreateInfo{
 ////             .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-////             .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table_rgb8).vk_info.format }));
+////             .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table_rgb8).vkinfo.format }));
 ////     uint32_t bindless_indices[]{
 ////         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
 ////         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table_rgb8, page_view_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
@@ -93,7 +93,7 @@
 ////         r.make_image_view(r.vsm.dir_light_page_table,
 ////                           Vks(VkImageViewCreateInfo{
 ////                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vk_info.format }));
+////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vkinfo.format }));
 ////     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
 ////     struct PushConstants
 ////     {
@@ -257,7 +257,7 @@
 ////
 ////     static_assert(sizeof(r->fftocean.pc) <= 128);
 ////     r->bindless_pool->bind(cmd, pipeline->bind_point);
-////     uint32_t dispatch_size = r->get_image(r->fftocean.h0_spectrum).vk_info.extent.width / 8u;
+////     uint32_t dispatch_size = r->get_image(r->fftocean.h0_spectrum).vkinfo.extent.width / 8u;
 ////     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
 ////                        &r->fftocean.pc);
 ////     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
@@ -619,8 +619,8 @@
 ////{
 ////     // auto& r = *RendererVulkan::get_instance();
 ////     // const auto rendering_info = Vks(VkRenderingInfo{
-////     //     .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).vk_info.extent.width,
-////     //                                 .height = r.get_image(r.vsm.shadow_map_0).vk_info.extent.height } },
+////     //     .renderArea = { .extent = { .width = r.get_image(r.vsm.shadow_map_0).vkinfo.extent.width,
+////     //                                 .height = r.get_image(r.vsm.shadow_map_0).vkinfo.extent.height } },
 ////     //     .layerCount = 1,
 ////     //     .colorAttachmentCount = 0,
 ////     //     .pColorAttachments = nullptr,

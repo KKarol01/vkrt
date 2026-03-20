@@ -19,9 +19,12 @@ DescriptorSetVk DescriptorPoolVk::allocate(const DescriptorLayout& layout, uint3
         if(free.empty()) { add_page(); }
         pool = free.back();
 
-        const auto vk_alloc_info = Vks(VkDescriptorSetAllocateInfo{
-            .descriptorPool = pool, .descriptorSetCount = 1, .pSetLayouts = &layout.md.vk->layout });
-        VkDescriptorSet vkset;
+        auto vk_alloc_info = vks::VkDescriptorSetAllocateInfo{};
+        vk_alloc_info.descriptorPool = pool;
+        vk_alloc_info.descriptorSetCount = 1;
+        vk_alloc_info.pSetLayouts = &layout.md.vk->layout;
+
+        VkDescriptorSet vkset{};
         const auto res = vkAllocateDescriptorSets(RendererBackendVk::get_dev(), &vk_alloc_info, &vkset);
         if(res != VK_SUCCESS)
         {
@@ -49,10 +52,11 @@ void DescriptorPoolVk::add_page()
         }
         return vec;
     }();
-    const auto vk_pool_info = Vks(VkDescriptorPoolCreateInfo{ .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
-                                                              .maxSets = max_allocs,
-                                                              .poolSizeCount = (uint32_t)sizes.size(),
-                                                              .pPoolSizes = vksizes.data() });
+    auto vk_pool_info = vks::VkDescriptorPoolCreateInfo{};
+    vk_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    vk_pool_info.maxSets = max_allocs;
+    vk_pool_info.poolSizeCount = (uint32_t)sizes.size();
+    vk_pool_info.pPoolSizes = vksizes.data();
     VK_CHECK(vkCreateDescriptorPool(RendererBackendVk::get_dev(), &vk_pool_info, nullptr, &free.emplace_back()));
     max_allocs = std::min(4096.0, std::ceil(max_allocs * 1.5));
 }
@@ -165,7 +169,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
 
 void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, uint32_t slot)
 {
-    auto& write = writes.emplace_back(Vks(VkWriteDescriptorSet{}));
+    auto& write = writes.emplace_back(vks::VkWriteDescriptorSet{});
     write.dstSet = set.set;
     write.descriptorCount = 1;
     write.descriptorType = to_vk(type);

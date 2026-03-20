@@ -25,50 +25,6 @@ class IPass
     virtual void on_render_graph(RGRenderGraph& graph) = 0;
 };
 
-class SSTriangle : public IPass
-{
-  public:
-    struct SSTrianglePass
-    {
-        RGAccessId output;
-        RGAccessId indirect_buffer;
-        RGAccessId instance_buffer;
-        RGAccessId constants_buffer;
-    };
-    struct SSCopyToSwapPass
-    {
-        RGAccessId color;
-        RGAccessId swap;
-    };
-    struct SSSwapPresent
-    {
-        RGAccessId swap;
-    };
-
-    ~SSTriangle() override = default;
-
-    void init() override
-    {
-        auto& r = get_renderer();
-        pipeline = r.make_pipeline(PipelineCreateInfo{ .shaders = {
-                                                           r.make_shader("default_unlit/unlit.vert.glsl"),
-                                                           r.make_shader("default_unlit/unlit.frag.glsl"),
-                                                       },
-                                                       .attachments = { .count = 1, .color_formats = {ImageFormat::R8G8B8A8_SRGB} }, 
-                                                      });
-    }
-
-    void on_render_graph(RGRenderGraph& graph) override
-    {
-
-    }
-
-    Handle<Pipeline> pipeline;
-    // SSTrianglePass pass_out_color;
-    // SSCopyToSwapPass pass_copy_to_swap;
-    // SSSwapPresent pass_present_swap;
-};
-
 namespace culling
 {
 

@@ -89,17 +89,15 @@ void DescriptorLayoutMetadataVk::init(DescriptorLayout& a)
         return bindings;
     }();
 
-    const auto vkbindingflagsinfo = Vks(VkDescriptorSetLayoutBindingFlagsCreateInfo{
-        .bindingCount = (uint32_t)vkbindingflags.size(),
-        .pBindingFlags = vkbindingflags.data(),
-    });
+    auto vkbindingflagsinfo = vks::VkDescriptorSetLayoutBindingFlagsCreateInfo{};
+    vkbindingflagsinfo.bindingCount = (uint32_t)vkbindingflags.size();
+    vkbindingflagsinfo.pBindingFlags = vkbindingflags.data();
 
-    const auto vklayoutinfo = Vks(VkDescriptorSetLayoutCreateInfo{
-        .pNext = &vkbindingflagsinfo,
-        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-        .bindingCount = (uint32_t)vkbindings.size(),
-        .pBindings = vkbindings.data(),
-    });
+    auto vklayoutinfo = vks::VkDescriptorSetLayoutCreateInfo{};
+    vklayoutinfo.pNext = &vkbindingflagsinfo;
+    vklayoutinfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    vklayoutinfo.bindingCount = (uint32_t)vkbindings.size();
+    vklayoutinfo.pBindings = vkbindings.data();
     VK_CHECK(vkCreateDescriptorSetLayout(RendererBackendVk::get_dev(), &vklayoutinfo, nullptr, &md->layout));
 }
 
@@ -124,11 +122,11 @@ void PipelineLayoutMetadataVk::init(PipelineLayout& a)
     }
     VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.push_range.stages), .offset = 0ull, .size = a.push_range.size };
 
-
-    const auto pli = Vks(VkPipelineLayoutCreateInfo{ .setLayoutCount = (uint32_t)vksls.size(),
-                                                     .pSetLayouts = vksls.data(),
-                                                     .pushConstantRangeCount = range.size > 0 ? 1u : 0u,
-                                                     .pPushConstantRanges = &range });
+    auto pli = vks::VkPipelineLayoutCreateInfo{};
+    pli.setLayoutCount = (uint32_t)vksls.size();
+    pli.pSetLayouts = vksls.data();
+    pli.pushConstantRangeCount = range.size > 0 ? 1u : 0u;
+    pli.pPushConstantRanges = &range;
     VK_CHECK(vkCreatePipelineLayout(RendererBackendVk::get_dev(), &pli, nullptr, &md->layout));
 }
 
@@ -162,12 +160,18 @@ void PipelineMetadataVk::init(const Pipeline& a)
     stages.reserve(a.info.shaders.size());
     for(const auto& e : a.info.shaders)
     {
-        stages.push_back(Vks(VkPipelineShaderStageCreateInfo{ .stage = gfx::to_vk(e->stage), .module = e->md.vk->shader, .pName = "main" }));
+        vks::VkPipelineShaderStageCreateInfo shader{};
+        shader.stage = gfx::to_vk(e->stage);
+        shader.module = e->md.vk->shader;
+        shader.pName = "main";
+        stages.push_back(shader);
     }
 
     if(a.type == PipelineType::COMPUTE)
     {
-        const auto vkinfo = Vks(VkComputePipelineCreateInfo{ .stage = stages.at(0), .layout = a.info.layout->md.vk->layout });
+        auto vkinfo = vks::VkComputePipelineCreateInfo{};
+        vkinfo.stage = stages.at(0);
+        vkinfo.layout = a.info.layout->md.vk->layout;
         VK_CHECK(vkCreateComputePipelines(vkdev, {}, 1, &vkinfo, {}, &md->pipeline));
         return;
     }
@@ -184,55 +188,53 @@ void PipelineMetadataVk::init(const Pipeline& a)
         vkattributes.at(i) = { a.info.attributes.at(i).location, a.info.attributes.at(i).binding,
                                gfx::to_vk(a.info.attributes.at(i).format), a.info.attributes.at(i).offset };
     }
-    auto pVertexInputState =
-        Vks(VkPipelineVertexInputStateCreateInfo{ .vertexBindingDescriptionCount = (uint32_t)a.info.bindings.size(),
-                                                  .pVertexBindingDescriptions = vkbindings.data(),
-                                                  .vertexAttributeDescriptionCount = (uint32_t)a.info.attributes.size(),
-                                                  .pVertexAttributeDescriptions = vkattributes.data() });
+    auto pVertexInputState = vks::VkPipelineVertexInputStateCreateInfo{};
+    pVertexInputState.vertexBindingDescriptionCount = (uint32_t)a.info.bindings.size();
+    pVertexInputState.pVertexBindingDescriptions = vkbindings.data();
+    pVertexInputState.vertexAttributeDescriptionCount = (uint32_t)a.info.attributes.size();
+    pVertexInputState.pVertexAttributeDescriptions = vkattributes.data();
 
-    auto pInputAssemblyState = Vks(VkPipelineInputAssemblyStateCreateInfo{ .topology = gfx::to_vk(a.info.topology) });
+    auto pInputAssemblyState = vks::VkPipelineInputAssemblyStateCreateInfo{};
+    pInputAssemblyState.topology = gfx::to_vk(a.info.topology);
 
-    auto pTessellationState = Vks(VkPipelineTessellationStateCreateInfo{});
+    auto pTessellationState = vks::VkPipelineTessellationStateCreateInfo{};
 
-    auto pViewportState = Vks(VkPipelineViewportStateCreateInfo{});
+    auto pViewportState = vks::VkPipelineViewportStateCreateInfo{};
 
-    auto pRasterizationState = Vks(VkPipelineRasterizationStateCreateInfo{
-        .polygonMode = gfx::to_vk(a.info.polygon_mode),
-        .cullMode = gfx::to_vk(a.info.culling),
-        .frontFace = a.info.front_is_ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE,
-        .lineWidth = a.info.line_width,
-    });
+    auto pRasterizationState = vks::VkPipelineRasterizationStateCreateInfo{};
+    pRasterizationState.polygonMode = gfx::to_vk(a.info.polygon_mode);
+    pRasterizationState.cullMode = gfx::to_vk(a.info.culling);
+    pRasterizationState.frontFace = a.info.front_is_ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
+    pRasterizationState.lineWidth = a.info.line_width;
 
-    auto pMultisampleState = Vks(VkPipelineMultisampleStateCreateInfo{
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-    });
+    auto pMultisampleState = vks::VkPipelineMultisampleStateCreateInfo{};
+    pMultisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     // vkstencil
-    auto pDepthStencilState = Vks(VkPipelineDepthStencilStateCreateInfo{
-            .depthTestEnable = a.info.depth_test,
-            .depthWriteEnable = a.info.depth_write,
-            .depthCompareOp = gfx::to_vk(a.info.depth_compare),
-            .depthBoundsTestEnable = false,
-            .stencilTestEnable = a.info.stencil_test,
-            .front = {
-                gfx::to_vk(a.info.stencil_front.fail),
-                gfx::to_vk(a.info.stencil_front.pass),
-                gfx::to_vk(a.info.stencil_front.depth_fail),
-                gfx::to_vk(a.info.stencil_front.compare),
-                a.info.stencil_front.compare_mask,
-                a.info.stencil_front.write_mask,
-                a.info.stencil_front.ref,
-            },
-            .back = {
-                gfx::to_vk(a.info.stencil_back.fail),
-                gfx::to_vk(a.info.stencil_back.pass),
-                gfx::to_vk(a.info.stencil_back.depth_fail),
-                gfx::to_vk(a.info.stencil_back.compare),
-                a.info.stencil_back.compare_mask,
-                a.info.stencil_back.write_mask,
-                a.info.stencil_back.ref,
-            },
-        });
+    auto pDepthStencilState = vks::VkPipelineDepthStencilStateCreateInfo{};
+    pDepthStencilState.depthTestEnable = a.info.depth_test;
+    pDepthStencilState.depthWriteEnable = a.info.depth_write;
+    pDepthStencilState.depthCompareOp = gfx::to_vk(a.info.depth_compare);
+    pDepthStencilState.depthBoundsTestEnable = false;
+    pDepthStencilState.stencilTestEnable = a.info.stencil_test;
+    pDepthStencilState.front = {
+        gfx::to_vk(a.info.stencil_front.fail),
+        gfx::to_vk(a.info.stencil_front.pass),
+        gfx::to_vk(a.info.stencil_front.depth_fail),
+        gfx::to_vk(a.info.stencil_front.compare),
+        a.info.stencil_front.compare_mask,
+        a.info.stencil_front.write_mask,
+        a.info.stencil_front.ref,
+    };
+    pDepthStencilState.back = {
+        gfx::to_vk(a.info.stencil_back.fail),
+        gfx::to_vk(a.info.stencil_back.pass),
+        gfx::to_vk(a.info.stencil_back.depth_fail),
+        gfx::to_vk(a.info.stencil_back.compare),
+        a.info.stencil_back.compare_mask,
+        a.info.stencil_back.write_mask,
+        a.info.stencil_back.ref,
+    };
 
     std::array<VkPipelineColorBlendAttachmentState, 8> vkblends;
     std::array<VkFormat, 8> vkcol_formats;
@@ -251,43 +253,39 @@ void PipelineMetadataVk::init(const Pipeline& a)
                                                   ((uint32_t)a.info.attachments.blend_states.at(i).a) << 3 } };
         vkcol_formats.at(i) = gfx::to_vk(a.info.attachments.color_formats.at(i));
     }
-    auto pColorBlendState = Vks(VkPipelineColorBlendStateCreateInfo{
-        .attachmentCount = a.info.attachments.count,
-        .pAttachments = vkblends.data(),
-    });
+    auto pColorBlendState = vks::VkPipelineColorBlendStateCreateInfo{};
+    pColorBlendState.attachmentCount = a.info.attachments.count;
+    pColorBlendState.pAttachments = vkblends.data();
 
     VkDynamicState dynstates[]{
         VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
         VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
     };
-    auto pDynamicState = Vks(VkPipelineDynamicStateCreateInfo{
-        .dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]),
-        .pDynamicStates = dynstates,
-    });
+    auto pDynamicState = vks::VkPipelineDynamicStateCreateInfo{};
+    pDynamicState.dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]);
+    pDynamicState.pDynamicStates = dynstates;
 
-    auto pDynamicRendering = Vks(VkPipelineRenderingCreateInfo{
-        .colorAttachmentCount = a.info.attachments.count,
-        .pColorAttachmentFormats = vkcol_formats.data(),
-        .depthAttachmentFormat = gfx::to_vk(a.info.attachments.depth_format),
-        .stencilAttachmentFormat = gfx::to_vk(a.info.attachments.stencil_format),
-    });
+    auto pDynamicRendering = vks::VkPipelineRenderingCreateInfo{};
+    pDynamicRendering.colorAttachmentCount = a.info.attachments.count;
+    pDynamicRendering.pColorAttachmentFormats = vkcol_formats.data();
+    pDynamicRendering.depthAttachmentFormat = gfx::to_vk(a.info.attachments.depth_format);
+    pDynamicRendering.stencilAttachmentFormat = gfx::to_vk(a.info.attachments.stencil_format);
 
-    auto vk_info = Vks(VkGraphicsPipelineCreateInfo{
-        .pNext = &pDynamicRendering,
-        .stageCount = (uint32_t)stages.size(),
-        .pStages = stages.data(),
-        .pVertexInputState = &pVertexInputState,
-        .pInputAssemblyState = &pInputAssemblyState,
-        .pTessellationState = &pTessellationState,
-        .pViewportState = &pViewportState,
-        .pRasterizationState = &pRasterizationState,
-        .pMultisampleState = &pMultisampleState,
-        .pDepthStencilState = &pDepthStencilState,
-        .pColorBlendState = &pColorBlendState,
-        .pDynamicState = &pDynamicState,
-        .layout = a.info.layout->md.vk->layout,
-    });
-    VK_CHECK(vkCreateGraphicsPipelines(vkdev, nullptr, 1, &vk_info, nullptr, &md->pipeline));
+    auto vkinfo = vks::VkGraphicsPipelineCreateInfo{};
+    vkinfo.pNext = &pDynamicRendering;
+    vkinfo.stageCount = (uint32_t)stages.size();
+    vkinfo.pStages = stages.data();
+    vkinfo.pVertexInputState = &pVertexInputState;
+    vkinfo.pInputAssemblyState = &pInputAssemblyState;
+    vkinfo.pTessellationState = &pTessellationState;
+    vkinfo.pViewportState = &pViewportState;
+    vkinfo.pRasterizationState = &pRasterizationState;
+    vkinfo.pMultisampleState = &pMultisampleState;
+    vkinfo.pDepthStencilState = &pDepthStencilState;
+    vkinfo.pColorBlendState = &pColorBlendState;
+    vkinfo.pDynamicState = &pDynamicState;
+    vkinfo.layout = a.info.layout->md.vk->layout;
+    VK_CHECK(vkCreateGraphicsPipelines(vkdev, nullptr, 1, &vkinfo, nullptr, &md->pipeline));
 }
 
 void PipelineMetadataVk::destroy(Pipeline& a)
@@ -322,10 +320,9 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
     VkBufferCreateInfo vkinfo;
     VmaAllocationInfo vmaai{};
     init(a, vkinfo);
-    const auto vmainfo = VmaAllocationCreateInfo{
-        .flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u,
-        .usage = VMA_MEMORY_USAGE_AUTO,
-    };
+    auto vmainfo = VmaAllocationCreateInfo{};
+    vmainfo.flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u;
+    vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
 
     if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
     else { VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vma_alloc, &vmaai)); }
@@ -338,14 +335,17 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
     if(cpu_map) { a.memory = vmaai.pMappedData; }
     if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
     {
-        const auto vkbdai = Vks(VkBufferDeviceAddressInfo{ .buffer = md->buffer });
-        md->device_address = vkGetBufferDeviceAddress(backend.dev, &vkbdai);
+        auto vkbdainfo = vks::VkBufferDeviceAddressInfo{};
+        vkbdainfo.buffer = md->buffer;
+        md->device_address = vkGetBufferDeviceAddress(backend.dev, &vkbdainfo);
     }
 }
 
 void BufferMetadataVk::init(const Buffer& a, VkBufferCreateInfo& info)
 {
-    info = Vks(VkBufferCreateInfo{ .size = a.capacity, .usage = to_vk(a.usage) });
+    info = vks::VkBufferCreateInfo{};
+    info.size = a.capacity;
+    info.usage = to_vk(a.usage);
 }
 
 void BufferMetadataVk::destroy(Buffer& a)
@@ -382,7 +382,9 @@ void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* user_data)
         return;
     }
 
-    VmaAllocationCreateInfo vma_info{ .usage = VMA_MEMORY_USAGE_AUTO };
+    VmaAllocationCreateInfo vma_info{};
+    vma_info.usage = VMA_MEMORY_USAGE_AUTO;
+
     VkImageCreateInfo info;
     init(a, info);
     if(allocate == AllocateMemory::EXTERNAL)
@@ -400,15 +402,16 @@ void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* user_data)
 
 void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
 {
-    info = Vks(VkImageCreateInfo{ .imageType = to_vk(a.type),
-                                  .format = to_vk(a.format),
-                                  .extent = { a.width, a.height, a.depth },
-                                  .mipLevels = a.mips,
-                                  .arrayLayers = a.layers,
-                                  .samples = VK_SAMPLE_COUNT_1_BIT,
-                                  .tiling = VK_IMAGE_TILING_OPTIMAL,
-                                  .usage = to_vk(a.usage) | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                  .initialLayout = to_vk(ImageLayout::UNDEFINED) });
+    info = vks::VkImageCreateInfo{};
+    info.imageType = to_vk(a.type);
+    info.format = to_vk(a.format);
+    info.extent = { a.width, a.height, a.depth };
+    info.mipLevels = a.mips;
+    info.arrayLayers = a.layers;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = to_vk(a.usage) | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info.initialLayout = to_vk(ImageLayout::UNDEFINED);
 }
 
 void ImageMetadataVk::destroy(Image& a, bool deallocate)
@@ -449,12 +452,12 @@ void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
     const auto src_mip = view.src_subresource % img.mips;
     const auto dst_layer = view.dst_subresource / img.mips;
     const auto dst_mip = view.dst_subresource % img.mips;
-    const auto vkinfo =
-        Vks(VkImageViewCreateInfo{ .image = view.image->md.vk()->image,
-                                   .viewType = to_vk(view.type),
-                                   .format = to_vk(view.format),
-                                   .subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip,
-                                                         dst_mip - src_mip + 1, src_layer, dst_layer - src_layer + 1 } });
+    auto vkinfo = vks::VkImageViewCreateInfo{};
+    vkinfo.image = view.image->md.vk()->image;
+    vkinfo.viewType = to_vk(view.type);
+    vkinfo.format = to_vk(view.format);
+    vkinfo.subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip, dst_mip - src_mip + 1, src_layer,
+                                dst_layer - src_layer + 1 };
 
     auto* md = new ImageViewMetadataVk{};
     VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
@@ -478,20 +481,21 @@ void ImageViewMetadataVk::destroy(ImageView& a)
 void SamplerMetadataVk::init(Sampler& a)
 {
     if(a.md.as_vk() != nullptr) { return; }
-    auto vkinfo = Vks(VkSamplerCreateInfo{ .magFilter = gfx::to_vk(a.filtering.mag),
-                                           .minFilter = gfx::to_vk(a.filtering.min),
-                                           .mipmapMode = gfx::to_vk(a.mip_blending),
-                                           .addressModeU = gfx::to_vk(a.addressing.u),
-                                           .addressModeV = gfx::to_vk(a.addressing.v),
-                                           .addressModeW = gfx::to_vk(a.addressing.w),
-                                           .mipLodBias = a.lod.bias,
-                                           .minLod = a.lod.min,
-                                           .maxLod = a.lod.max });
-    auto vkreduction = Vks(VkSamplerReductionModeCreateInfo{});
+    auto vkinfo = vks::VkSamplerCreateInfo{};
+    vkinfo.magFilter = gfx::to_vk(a.filtering.mag);
+    vkinfo.minFilter = gfx::to_vk(a.filtering.min);
+    vkinfo.mipmapMode = gfx::to_vk(a.mip_blending);
+    vkinfo.addressModeU = gfx::to_vk(a.addressing.u);
+    vkinfo.addressModeV = gfx::to_vk(a.addressing.v);
+    vkinfo.addressModeW = gfx::to_vk(a.addressing.w);
+    vkinfo.mipLodBias = a.lod.bias;
+    vkinfo.minLod = a.lod.min;
+    vkinfo.maxLod = a.lod.max;
+    auto vksampredinfo = vks::VkSamplerReductionModeCreateInfo{};
     if(a.reduction_mode != SamplerReductionMode::NONE)
     {
-        vkreduction.reductionMode = gfx::to_vk(a.reduction_mode);
-        vkinfo.pNext = &vkreduction;
+        vksampredinfo.reductionMode = gfx::to_vk(a.reduction_mode);
+        vkinfo.pNext = &vksampredinfo;
     }
     auto* md = new SamplerMetadataVk{};
     a.md.ptr = md;
@@ -522,30 +526,29 @@ void SwapchainMetadataVk::init(Swapchain& a)
     const auto image_usage_flags = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT;
     const auto image_format = ImageFormat::R8G8B8A8_SRGB;
     auto& backend = RendererBackendVk::get_instance();
-    const auto sinfo = Vks(VkSwapchainCreateInfoKHR{
-        .surface = backend.window_surface,
-        .minImageCount = Renderer::frame_delay,
-        .imageFormat = to_vk(image_format),
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-        .imageExtent = VkExtent2D{ (uint32_t)get_renderer().settings.present_resolution.x,
-                                   (uint32_t)get_renderer().settings.present_resolution.y },
-        .imageArrayLayers = 1,
-        .imageUsage = to_vk(image_usage_flags),
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
-        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .clipped = true,
-    });
+    auto vkswpinfo = vks::VkSwapchainCreateInfoKHR{};
+    vkswpinfo.surface = backend.window_surface;
+    vkswpinfo.minImageCount = Renderer::frame_delay;
+    vkswpinfo.imageFormat = to_vk(image_format);
+    vkswpinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    vkswpinfo.imageExtent = VkExtent2D{ (uint32_t)get_renderer().settings.present_resolution.x,
+                                        (uint32_t)get_renderer().settings.present_resolution.y };
+    vkswpinfo.imageArrayLayers = 1;
+    vkswpinfo.imageUsage = to_vk(image_usage_flags);
+    vkswpinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    vkswpinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    vkswpinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    vkswpinfo.clipped = true;
 
     std::vector<VkImage> vkimgs(a.images.size());
-    VK_CHECK(vkCreateSwapchainKHR(backend.dev, &sinfo, nullptr, &md->swapchain));
+    VK_CHECK(vkCreateSwapchainKHR(backend.dev, &vkswpinfo, nullptr, &md->swapchain));
     VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &Renderer::frame_delay, vkimgs.data()));
 
     auto& r = get_renderer();
     for(uint32_t i = 0; i < vkimgs.size(); ++i)
     {
         a.images[i] = r.make_image(ENG_FMT("swapchain_image_{}", i),
-                                   Image::init(sinfo.imageExtent.width, sinfo.imageExtent.height, image_format, image_usage_flags),
+                                   Image::init(vkswpinfo.imageExtent.width, vkswpinfo.imageExtent.height, image_format, image_usage_flags),
                                    AllocateMemory::EXTERNAL, (void*)vkimgs[i]);
         a.views[i] = ImageView::init(a.images[i]);
     }
@@ -621,11 +624,10 @@ void RendererBackendVk::initialize_vulkan()
 
     const auto* window = get_engine().window;
 
-    auto surface_info = Vks(VkWin32SurfaceCreateInfoKHR{
-        .hinstance = GetModuleHandle(nullptr),
-        .hwnd = glfwGetWin32Window(window->window),
-    });
-    vkCreateWin32SurfaceKHR(vkb_inst.instance, &surface_info, nullptr, &window_surface);
+    auto vkwin32surfinfo = vks::VkWin32SurfaceCreateInfoKHR{};
+    vkwin32surfinfo.hinstance = GetModuleHandle(nullptr);
+    vkwin32surfinfo.hwnd = glfwGetWin32Window(window->window);
+    vkCreateWin32SurfaceKHR(vkb_inst.instance, &vkwin32surfinfo, nullptr, &window_surface);
 
     vkb::PhysicalDeviceSelector selector{ vkb_inst };
     auto phys_rets = selector.require_present()
@@ -660,59 +662,54 @@ void RendererBackendVk::initialize_vulkan()
     supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
                           phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
 
-    auto synch2_features = Vks(VkPhysicalDeviceSynchronization2Features{ .synchronization2 = true });
+    auto synch2_features = vks::VkPhysicalDeviceSynchronization2Features{};
+    synch2_features.synchronization2 = true;
 
-    auto dyn_features = Vks(VkPhysicalDeviceDynamicRenderingFeatures{ .dynamicRendering = true });
+    auto dyn_features = vks::VkPhysicalDeviceDynamicRenderingFeatures{};
+    dyn_features.dynamicRendering = true;
 
-    auto dev_2_features = Vks(VkPhysicalDeviceFeatures2{ .features = {
-                                                             .geometryShader = true,
-                                                             .multiDrawIndirect = true,
-                                                             .fillModeNonSolid = true,
-                                                             .vertexPipelineStoresAndAtomics = true,
-                                                             .fragmentStoresAndAtomics = true,
-                                                         } });
+    auto dev_2_features = vks::VkPhysicalDeviceFeatures2{};
+    dev_2_features.features.geometryShader = true;
+    dev_2_features.features.multiDrawIndirect = true;
+    dev_2_features.features.fillModeNonSolid = true;
+    dev_2_features.features.vertexPipelineStoresAndAtomics = true;
+    dev_2_features.features.fragmentStoresAndAtomics = true;
 
-    auto dev_vk12_features = Vks(VkPhysicalDeviceVulkan12Features{
-        .drawIndirectCount = true,
-        .shaderSampledImageArrayNonUniformIndexing = true,
-        .shaderStorageBufferArrayNonUniformIndexing = true,
-        .shaderStorageImageArrayNonUniformIndexing = true,
-        .descriptorBindingUniformBufferUpdateAfterBind = true,
-        .descriptorBindingSampledImageUpdateAfterBind = true,
-        .descriptorBindingStorageImageUpdateAfterBind = true,
-        .descriptorBindingStorageBufferUpdateAfterBind = true,
-        .descriptorBindingUpdateUnusedWhilePending = true,
-        .descriptorBindingPartiallyBound = true,
-        .descriptorBindingVariableDescriptorCount = true,
-        .runtimeDescriptorArray = true,
-        .samplerFilterMinmax = true,
-        .scalarBlockLayout = true,
-        .hostQueryReset = true,
-        .timelineSemaphore = true,
-        .bufferDeviceAddress = true,
-    });
+    auto dev_vk12_features = vks::VkPhysicalDeviceVulkan12Features{};
+    dev_vk12_features.drawIndirectCount = true;
+    dev_vk12_features.shaderSampledImageArrayNonUniformIndexing = true;
+    dev_vk12_features.shaderStorageBufferArrayNonUniformIndexing = true;
+    dev_vk12_features.shaderStorageImageArrayNonUniformIndexing = true;
+    dev_vk12_features.descriptorBindingUniformBufferUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingSampledImageUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingStorageImageUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingStorageBufferUpdateAfterBind = true;
+    dev_vk12_features.descriptorBindingUpdateUnusedWhilePending = true;
+    dev_vk12_features.descriptorBindingPartiallyBound = true;
+    dev_vk12_features.descriptorBindingVariableDescriptorCount = true;
+    dev_vk12_features.runtimeDescriptorArray = true;
+    dev_vk12_features.samplerFilterMinmax = true;
+    dev_vk12_features.scalarBlockLayout = true;
+    dev_vk12_features.hostQueryReset = true;
+    dev_vk12_features.timelineSemaphore = true;
+    dev_vk12_features.bufferDeviceAddress = true;
 
-    auto acc_features = Vks(VkPhysicalDeviceAccelerationStructureFeaturesKHR{
-        .accelerationStructure = true,
-        .descriptorBindingAccelerationStructureUpdateAfterBind = true,
-    });
+    auto acc_features = vks::VkPhysicalDeviceAccelerationStructureFeaturesKHR{};
+    acc_features.accelerationStructure = true;
+    acc_features.descriptorBindingAccelerationStructureUpdateAfterBind = true;
 
-    auto rtpp_features = Vks(VkPhysicalDeviceRayTracingPipelineFeaturesKHR{
-        .rayTracingPipeline = true,
-        .rayTraversalPrimitiveCulling = true,
-    });
+    auto rtpp_features = vks::VkPhysicalDeviceRayTracingPipelineFeaturesKHR{};
+    rtpp_features.rayTracingPipeline = true;
+    rtpp_features.rayTraversalPrimitiveCulling = true;
 
-    auto maint5_features = Vks(VkPhysicalDeviceMaintenance5FeaturesKHR{
-        .maintenance5 = true,
-    });
+    auto maint5_features = vks::VkPhysicalDeviceMaintenance5FeaturesKHR{};
+    maint5_features.maintenance5 = true;
 
-    auto rayq_features = Vks(VkPhysicalDeviceRayQueryFeaturesKHR{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
-        .rayQuery = true,
-    });
+    auto rayq_features = vks::VkPhysicalDeviceRayQueryFeaturesKHR{};
+    rayq_features.rayQuery = true;
 
-    rt_props = Vks(VkPhysicalDeviceRayTracingPipelinePropertiesKHR{});
-    rt_acc_props = Vks(VkPhysicalDeviceAccelerationStructurePropertiesKHR{});
+    rt_props = vks::VkPhysicalDeviceRayTracingPipelinePropertiesKHR{};
+    rt_acc_props = vks::VkPhysicalDeviceAccelerationStructurePropertiesKHR{};
     vkb::DeviceBuilder device_builder{ phys_ret };
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
     if(supports_raytracing)
@@ -730,9 +727,9 @@ void RendererBackendVk::initialize_vulkan()
 
     VkDevice device = vkb_device.device;
 
-    auto pdev_props = Vks(VkPhysicalDeviceProperties2{
-        .pNext = &rt_props,
-    });
+    auto pdev_props = vks::VkPhysicalDeviceProperties2{};
+    pdev_props.pNext = &rt_props;
+
     rt_props.pNext = &rt_acc_props;
     vkGetPhysicalDeviceProperties2(phys_ret.physical_device, &pdev_props);
 
@@ -771,14 +768,13 @@ void RendererBackendVk::initialize_vulkan()
         .vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements,
     };
 
-    VmaAllocatorCreateInfo allocatorCreateInfo = {
-        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
-        .physicalDevice = pdev,
-        .device = dev,
-        .pVulkanFunctions = &vulkanFunctions,
-        .instance = instance,
-        .vulkanApiVersion = VK_API_VERSION_1_3,
-    };
+    VmaAllocatorCreateInfo allocatorCreateInfo{};
+    allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT;
+    allocatorCreateInfo.physicalDevice = pdev;
+    allocatorCreateInfo.device = dev;
+    allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+    allocatorCreateInfo.instance = instance;
+    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
 
     caps = RendererBackendCaps{
@@ -1438,13 +1434,12 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
 
     pc_spv_file.close();
 
-    const auto module_info = Vks(VkShaderModuleCreateInfo{
-        .codeSize = out_spv.size() * sizeof(uint32_t),
-        .pCode = out_spv.data(),
-    });
+    auto vkshaderinfo = vks::VkShaderModuleCreateInfo{};
+    vkshaderinfo.codeSize = out_spv.size() * sizeof(uint32_t);
+    vkshaderinfo.pCode = out_spv.data();
 
     if(shmd->shader) { vkDestroyShaderModule(dev, shmd->shader, nullptr); }
-    VK_CHECK(vkCreateShaderModule(dev, &module_info, nullptr, &shmd->shader));
+    VK_CHECK(vkCreateShaderModule(dev, &vkshaderinfo, nullptr, &shmd->shader));
 
     return true;
 }
@@ -1543,49 +1538,50 @@ void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_
 
 void RendererBackendVk::get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs)
 {
-    VkBufferMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2,
-                                              .buffer = resource.md.vk()->buffer };
-    VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
+    auto res_reqs = vks::VkBufferMemoryRequirementsInfo2{};
+    res_reqs.buffer = resource.md.vk()->buffer;
+    auto mem_reqs = vks::VkMemoryRequirements2{};
     vkGetBufferMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
     {
         reqs.size = mem_reqs.memoryRequirements.size;
         reqs.alignment = mem_reqs.memoryRequirements.alignment;
-        reqs.backend_data[0] = mem_reqs.memoryRequirements.memoryTypeBits;
+        reqs.backend_data = mem_reqs.memoryRequirements.memoryTypeBits;
     }
     else
     {
         reqs.size = std::max(reqs.size, mem_reqs.memoryRequirements.size);
         reqs.alignment = std::max(reqs.alignment, mem_reqs.memoryRequirements.alignment);
-        reqs.backend_data[0] &= mem_reqs.memoryRequirements.memoryTypeBits;
+        reqs.backend_data &= mem_reqs.memoryRequirements.memoryTypeBits;
     }
 }
 
 void RendererBackendVk::get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs)
 {
-    VkImageMemoryRequirementsInfo2 res_reqs{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
-                                             .image = resource.md.vk()->image };
-    VkMemoryRequirements2 mem_reqs{ .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
+    auto res_reqs = vks::VkImageMemoryRequirementsInfo2{};
+    res_reqs.image = resource.md.vk()->image;
+    auto mem_reqs = vks::VkMemoryRequirements2{};
     vkGetImageMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
     {
         reqs.size = mem_reqs.memoryRequirements.size;
         reqs.alignment = mem_reqs.memoryRequirements.alignment;
-        reqs.backend_data[0] = mem_reqs.memoryRequirements.memoryTypeBits;
+        reqs.backend_data = mem_reqs.memoryRequirements.memoryTypeBits;
     }
     else
     {
         reqs.size = std::max(reqs.size, mem_reqs.memoryRequirements.size);
         reqs.alignment = std::max(reqs.alignment, mem_reqs.memoryRequirements.alignment);
-        reqs.backend_data[0] &= mem_reqs.memoryRequirements.memoryTypeBits;
+        reqs.backend_data &= mem_reqs.memoryRequirements.memoryTypeBits;
     }
 }
 
 void* RendererBackendVk::allocate_aliasable_memory(const RendererMemoryRequirements& reqs)
 {
-    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = (uint32_t)reqs.backend_data[0] };
-    const VmaAllocationCreateInfo info{ .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
-    VmaAllocation alloc;
+    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = (uint32_t)reqs.backend_data };
+    VmaAllocationCreateInfo info{};
+    info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VmaAllocation alloc{};
     VK_CHECK(vmaAllocateMemory(vma, &vkreqs, &info, &alloc, nullptr));
     return alloc;
 }
@@ -1664,10 +1660,9 @@ QueryPool* RendererBackendVk::make_query_pool(const QueryPoolCreateInfo& info)
         delete pool;
         return nullptr;
     }
-    const auto vkinfo = Vks(VkQueryPoolCreateInfo{
-        .queryType = to_vk(info.type),
-        .queryCount = info.max_queries,
-    });
+    auto vkinfo = vks::VkQueryPoolCreateInfo{};
+    vkinfo.queryType = to_vk(info.type);
+    vkinfo.queryCount = info.max_queries;
     const auto vkres = vkCreateQueryPool(dev, &vkinfo, nullptr, &md->vkpool);
     if(vkres != VK_SUCCESS)
     {

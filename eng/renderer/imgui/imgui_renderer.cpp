@@ -35,21 +35,20 @@ void ImGuiRenderer::init()
     int width, height;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
-    pipeline = r.make_pipeline(PipelineCreateInfo{
-        .shaders = { r.make_shader("imgui/imgui.vert.glsl"), r.make_shader("imgui/imgui.frag.glsl") },
-        .attachments = { .count = 1,
-                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
-                         .blend_states = { PipelineCreateInfo::BlendState{
-                             .enable = true,
-                             .src_color_factor = BlendFactor::SRC_ALPHA,
-                             .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                             .color_op = BlendOp::ADD,
-                             .src_alpha_factor = BlendFactor::ONE,
-                             .dst_alpha_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                             .alpha_op = BlendOp::ADD,
-                         } } },
-        .culling = CullFace::NONE,
-    });
+    pipeline = r.make_pipeline(
+        PipelineCreateInfo::init({ r.make_shader("imgui/imgui.vert.glsl"), r.make_shader("imgui/imgui.frag.glsl") })
+            .init_image_attachments(PipelineCreateInfo::AttachmentState{ .count = 1,
+                                                                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                                                                         .blend_states = { PipelineCreateInfo::BlendState{
+                                                                             .enable = true,
+                                                                             .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                             .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                             .color_op = BlendOp::ADD,
+                                                                             .src_alpha_factor = BlendFactor::ONE,
+                                                                             .dst_alpha_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                             .alpha_op = BlendOp::ADD,
+                                                                         } } })
+            .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::NONE));
 
     vertex_buffer = r.make_buffer("imgui vertex buffer", Buffer::init(1024 * 1024, BufferUsage::STORAGE_BIT));
     index_buffer = r.make_buffer("imgui index buffer", Buffer::init(1024 * 1024, BufferUsage::INDEX_BIT));
@@ -110,22 +109,18 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
             const auto& img = builder.graph->get_img(data.output).get();
 
-            VkRenderingAttachmentInfo r_col_atts[]{
-                Vks(VkRenderingAttachmentInfo{
-                    .imageView = builder.graph->get_acc(data.output).image_view.get_md().vk->view,
-                    .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                    .clearValue = { .color = { .uint32 = { 0, 0, 0, 0 } } },
-                }),
-            };
+            vks::VkRenderingAttachmentInfo r_col_atts[1]{};
+            r_col_atts[0].imageView = builder.graph->get_acc(data.output).image_view.get_md().vk->view;
+            r_col_atts[0].imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+            r_col_atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            r_col_atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            r_col_atts[0].clearValue = { .color = { .uint32 = { 0, 0, 0, 0 } } };
 
-            auto rendering_info = Vks(VkRenderingInfo{
-                .renderArea = { .extent = { .width = img.width, .height = img.height } },
-                .layerCount = 1,
-                .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
-                .pColorAttachments = r_col_atts,
-            });
+            auto rendering_info = vks::VkRenderingInfo{};
+            rendering_info.renderArea = { .offset = {}, .extent = { .width = img.width, .height = img.height } };
+            rendering_info.layerCount = 1;
+            rendering_info.colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]);
+            rendering_info.pColorAttachments = r_col_atts;
 
             cmd->bind_index(index_buffer.get(), 0, VK_INDEX_TYPE_UINT16);
             cmd->bind_pipeline(pipeline.get());
