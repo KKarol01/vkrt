@@ -49,7 +49,7 @@ template <typename UserType, size_t PAGE_SIZE, typename Storage = uint32_t> clas
         auto& slot = get_slot(index);
         ENG_ASSERT(slot.has_next());
         next = slot.get_next();
-        slot.next_or_data.emplace<UserType>(std::forward<Args>(args)...);
+        slot.next_or_data.template emplace<UserType>(std::forward<Args>(args)...);
         return index;
     }
 

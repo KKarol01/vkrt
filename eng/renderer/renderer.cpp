@@ -398,13 +398,13 @@ void Renderer::update()
             {
                 ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
                 backend->destroy_buffer(buf->get());
-                buffers.erase(SlotIndex<uint32_t>{ buf->handle });
+                buffers.erase(Slotmap<Buffer, 1024>::SlotId{ buf->handle });
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
                 backend->destroy_image(img->get());
-                images.erase(SlotIndex<uint32_t>{ img->handle });
+                images.erase(Slotmap<Image, 1024>::SlotId{ img->handle });
             }
         }
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
@@ -726,7 +726,7 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
     if(destroy_now)
     {
         backend->destroy_image(image.get());
-        images.erase(*image);
+        images.erase(Slotmap<Image, 1024>::SlotId{ *image });
     }
     else { current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
     image = {};

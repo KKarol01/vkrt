@@ -387,7 +387,7 @@ ecs::EntityId Scene::instance_model(SceneNodeId nodeid)
 {
     if(!hierarchy.has(nodeid))
     {
-        ENG_ERROR("Cannot instatiate node {}", *nodeid);
+        ENG_WARN("Cannot instatiate node {}", *nodeid);
         return ecs::EntityId{};
     }
     auto* reg = get_engine().ecs;

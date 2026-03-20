@@ -875,8 +875,8 @@ class Renderer
 } // namespace gfx
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(SlotIndex<uint32_t>{*handle}); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(SlotIndex<uint32_t>{*handle}); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(Slotmap<eng::gfx::Buffer, 1024>::SlotId{*handle}); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(Slotmap<eng::gfx::Image, 1024>::SlotId{*handle}); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
