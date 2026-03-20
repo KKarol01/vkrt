@@ -18,7 +18,7 @@ class IndexedHierarchy
     struct Node;
 
   public:
-    using NodeId = SlotAllocator<>::Slot;
+    using NodeId = SlotAllocator<uint32_t>::Slot;
 
   private:
     struct Node
@@ -39,8 +39,8 @@ class IndexedHierarchy
     {
         if(slots.size() == ~NodeId::StorageType{}) { return NodeId{}; }
         const auto slot = slots.allocate();
-        if(nodes.size() == slot.get_index()) { nodes.emplace_back(); }
-        return NodeId{ slot };
+        if(nodes.size() == *slot) { nodes.emplace_back(); }
+        return slot;
     }
 
     void make_child(NodeId parentid, NodeId childid)

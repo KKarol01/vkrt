@@ -63,7 +63,7 @@ class IDescriptorSetAllocator
 
 class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 {
-    using SlotAllocatorType = SlotAllocator<uint32_t, slots_not_versioned_tag>;
+    using SlotAllocatorType = SlotAllocator<uint32_t>;
 
     struct Slot
     {

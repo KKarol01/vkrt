@@ -9,74 +9,36 @@
 namespace eng
 {
 
-struct slots_versioned_tag;
-struct slots_not_versioned_tag;
-
-
-// Uses versioned index that has a version (generation) and a index.
-// When erasing, returned index gets it's version incremented by 1 (with wraparound),
-// and gets added to the free list chain.
-// Any slot is valid if it's index corresponds to the slot's place in the array.
-template <typename Storage = uint32_t, typename Versioning = slots_versioned_tag> struct SlotAllocator
+template <typename Storage = uint32_t> struct SlotAllocator
 {
     struct slot_t;
-    using VersionedSlotType = VersionedIndex<slot_t, Storage>;
-    using NonVersionedSlotType = TypedId<slot_t, Storage>;
-    using Slot = std::conditional_t<std::is_same_v<Versioning, slots_versioned_tag>, VersionedSlotType, NonVersionedSlotType>;
+    using Slot = TypedId<slot_t, Storage>;
 
-    bool has(Slot s) const { return s && get_index(s) < slots.size() && s == slots[get_index(s)]; }
+    bool has(Slot s) const { return *s < slots.size() && s == slots[*s]; }
 
     Slot::StorageType size() const { return num_slots; }
 
     Slot allocate()
     {
-        if(!next_free) { return slots.emplace_back(make_slot((uint32_t)slots.size(), 0u)); }
-        const auto ret = next_free;
-        std::swap(next_free, slots[get_index(next_free)]);
+        if(!next_free) { return slots.emplace_back(num_slots++); }
+        Slot s = next_free;
+        next_free = slots[*s]; // get next free
+        slots[*s] = s;         // make slot valid
         ++num_slots;
-        return ret;
+        return s;
     }
 
     void erase(Slot s)
     {
         if(!has(s)) { return; }
-        const auto si = get_index(s);
-        const auto nv = get_version(s) + 1;
-        slots[si] = make_slot(si, nv);
-
-        Slot* cf = &next_free;
-        Slot* pf{};
-        while(*cf && get_version(*cf) < nv)
-        {
-            cf = &slots[get_index(*cf)];
-            pf = cf;
-        }
-        if(!pf) { pf = cf; }
-        std::swap(slots[si], *pf);
+        slots[*s] = next_free;
+        next_free = s;
         --num_slots;
-    }
-
-    static Slot::StorageType get_index(Slot s)
-    {
-        if constexpr(std::is_same_v<Versioning, slots_versioned_tag>) { return s.get_index(); }
-        else { return *s; }
-    }
-
-    static Slot::StorageType get_version(Slot s)
-    {
-        if constexpr(std::is_same_v<Versioning, slots_versioned_tag>) { return s.get_version(); }
-        else { return {}; }
-    }
-
-    static Slot make_slot(Slot::StorageType index, Slot::StorageType version)
-    {
-        if constexpr(std::is_same_v<Versioning, slots_versioned_tag>) { return Slot{ index, version }; }
-        else { return Slot{ index }; }
     }
 
     std::vector<Slot> slots;
     Slot next_free{};
-    Slot::StorageType num_slots{};
+    Storage num_slots{};
 };
 
 } // namespace eng

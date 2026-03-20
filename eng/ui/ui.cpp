@@ -177,7 +177,7 @@ void UI::init()
 
     auto& gamepanel = panels.emplace_back(new GamePanel{ *this, &game });
     auto& scenepanel = panels.emplace_back(new ScenePanel{ *this, &scene });
-    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &scene });
+    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &inspector });
     auto& consolepanel = panels.emplace_back(new ConsolePanel{ *this, &console });
 }
 
@@ -210,7 +210,7 @@ void UI::draw(gfx::RGBuilder& rg)
     {
         ImGui::Button("a");
         ImGui::Button("b");
-        if(ImGui::Button("Savel Layout")) { ImGui::SaveIniSettingsToDisk("imgui.ini"); }
+        if(ImGui::Button("Save Layout")) { ImGui::SaveIniSettingsToDisk("imgui.ini"); }
         if(ImGui::Button("Reset Layout")) { reset_layout = true; }
         ImGui::EndMainMenuBar();
     }

@@ -872,8 +872,8 @@ class Renderer
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
-    SlotAllocator<uint32_t, eng::slots_not_versioned_tag> gpu_resource_allocator;
-    SlotAllocator<uint32_t, eng::slots_not_versioned_tag> gpu_light_allocator;
+    SlotAllocator<uint32_t> gpu_resource_allocator;
+    SlotAllocator<uint32_t> gpu_light_allocator;
     std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
     ImGuiRenderer* imgui_renderer{};
