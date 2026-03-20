@@ -128,14 +128,14 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
     {
         slot.view = view.as_buffer();
         slot.vkptr = view.as_buffer().buffer->md.vk()->buffer;
-        auto it = buffer_views.find(get_renderer().get_non_versioned_index(view.as_buffer().buffer));
+        auto it = buffer_views.find(*view.as_buffer().buffer);
         if(it != buffer_views.end()) { found_slots = &it->second; }
     }
     else
     {
         slot.view = view.as_image();
         slot.vkptr = view.as_image().image->md.vk()->image;
-        auto it = image_views.find(get_renderer().get_non_versioned_index(view.as_image().image));
+        auto it = image_views.find(*view.as_image().image);
         if(it != image_views.end()) { found_slots = &it->second; }
     }
 
@@ -158,11 +158,8 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
 
     slot.value = *slot.allocator->allocate();
     write_descriptor(view.type, view.is_buffer() ? (void*)&view.as_buffer() : (void*)&view.as_image(), slot.value);
-    if(view.is_buffer())
-    {
-        buffer_views[get_renderer().get_non_versioned_index(view.as_buffer().buffer)].push_back(slot);
-    }
-    else { image_views[get_renderer().get_non_versioned_index(view.as_image().image)].push_back(slot); }
+    if(view.is_buffer()) { buffer_views[*view.as_buffer().buffer].push_back(slot); }
+    else { image_views[*view.as_image().image].push_back(slot); }
     return slot.value;
 }
 

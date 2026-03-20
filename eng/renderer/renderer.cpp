@@ -396,15 +396,13 @@ void Renderer::update()
             ++remove_until;
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
-                ENG_LOG("Removing retired buffer {} ({})", buffer_names[get_non_versioned_index(*buf)],
-                        get_non_versioned_index(*buf));
+                ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
                 backend->destroy_buffer(buf->get());
                 buffers.erase(SlotIndex<uint32_t>{ buf->handle });
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
-                ENG_LOG("Removing retired image {} ({})", image_names[get_non_versioned_index(*img)],
-                        get_non_versioned_index(*img));
+                ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
                 backend->destroy_image(img->get());
                 images.erase(SlotIndex<uint32_t>{ img->handle });
             }
@@ -699,8 +697,8 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     backend->set_debug_name(buffer, name);
     auto it = buffers.insert(std::move(buffer));
     if(!it) { return Handle<Buffer>{}; }
-    if(it.get_index() == buffer_names.size()) { buffer_names.emplace_back(name); }
-    else { buffer_names[it.get_index()] = name; }
+    if(*it == buffer_names.size()) { buffer_names.emplace_back(name); }
+    else { buffer_names[*it] = name; }
     return Handle<Buffer>{ *it };
 }
 
@@ -717,8 +715,8 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
     backend->set_debug_name(image, name);
     auto it = images.insert(std::move(image));
     if(!it) { return Handle<Image>{}; }
-    if(it.get_index() == image_names.size()) { image_names.emplace_back(name); }
-    else { image_names[it.get_index()] = name; }
+    if(*it == image_names.size()) { image_names.emplace_back(name); }
+    else { image_names[*it] = name; }
     return Handle<Image>{ *it };
 }
 
@@ -728,7 +726,7 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
     if(destroy_now)
     {
         backend->destroy_image(image.get());
-        images.erase(SlotIndex<uint32_t>{ *image });
+        images.erase(*image);
     }
     else { current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
     image = {};
@@ -985,16 +983,6 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
 }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
-
-uint32_t Renderer::get_non_versioned_index(Handle<Buffer> handle)
-{
-    return decltype(buffers)::SlotId(*handle).get_index();
-}
-
-uint32_t Renderer::get_non_versioned_index(Handle<Image> handle)
-{
-    return decltype(images)::SlotId(*handle).get_index();
-}
 
 bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {

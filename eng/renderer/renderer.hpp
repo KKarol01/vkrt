@@ -829,16 +829,6 @@ class Renderer
 
     SubmitQueue* get_queue(QueueType type);
 
-    // this is stupid, i might ditch the whole version thingy.
-    // essentially, slotmap returns uint32_t with a few bits dedicated to storing slot version
-    // so that stale handles (with same index, different verion) don't match.
-    // when image or buffer handle gets reused, it has different version, and so completely
-    // different underlying uint32_t value, and descriptor allocator now cannot check if the same handle
-    // represents diferent resource, because the handle has different uint32_t representation
-    // due to incremented version.
-    uint32_t get_non_versioned_index(Handle<Buffer> handle);
-    uint32_t get_non_versioned_index(Handle<Image> handle);
-
     SubmitQueue* gq{};
     Swapchain* swapchain{};
     IRendererBackend* backend{};
