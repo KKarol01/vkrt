@@ -147,9 +147,7 @@ if(MSVC)
 else()
     target_compile_options(eng PRIVATE
         -Wall -Wextra -Werror -Wpedantic
-        -Wno-error=unused-parameter -Wno-error=unused-variable
-        -Wno-error=unused-lambda-capture
-        #-Wno-error=missing-designated-field-initializers
+        -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=unused-lambda-capture
     )
 endif()
 set_target_properties(eng PROPERTIES 
