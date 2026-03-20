@@ -26,11 +26,14 @@ void ICommandBuffer::signal_sync(Sync* sync, Flags<PipelineStage> stage)
 void CommandBufferVk::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
                               Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access)
 {
-    const auto barrier = Vks(VkMemoryBarrier2{ .srcStageMask = to_vk(src_stage),
-                                               .srcAccessMask = to_vk(src_access),
-                                               .dstStageMask = to_vk(dst_stage),
-                                               .dstAccessMask = to_vk(dst_access) });
-    const auto dep = Vks(VkDependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &barrier });
+    auto barrier = vks::VkMemoryBarrier2{};
+    barrier.srcStageMask = to_vk(src_stage);
+    barrier.srcAccessMask = to_vk(src_access);
+    barrier.dstStageMask = to_vk(dst_stage);
+    barrier.dstAccessMask = to_vk(dst_access);
+    auto dep = vks::VkDependencyInfo{};
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 

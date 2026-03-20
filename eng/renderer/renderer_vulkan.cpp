@@ -124,6 +124,7 @@ void PipelineLayoutMetadataVk::init(PipelineLayout& a)
     }
     VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.push_range.stages), .offset = 0ull, .size = a.push_range.size };
 
+
     const auto pli = Vks(VkPipelineLayoutCreateInfo{ .setLayoutCount = (uint32_t)vksls.size(),
                                                      .pSetLayouts = vksls.data(),
                                                      .pushConstantRangeCount = range.size > 0 ? 1u : 0u,
