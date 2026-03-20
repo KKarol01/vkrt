@@ -566,19 +566,19 @@ void Renderer::compile_rendergraph()
                 const auto& rp = get_renderer().render_passes[i];
                 auto render_res = settings.render_resolution;
 
-                vks::VkRenderingAttachmentInfo vkcols[1]{};
+                vk::VkRenderingAttachmentInfo vkcols[1]{};
                 vkcols[0].imageView = pb.graph->get_acc(data.color).image_view.get_md().vk->view;
                 vkcols[0].imageLayout = to_vk(pb.graph->get_acc(data.color).layout);
                 vkcols[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                 vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-                auto vkdep = vks::VkRenderingAttachmentInfo{};
+                auto vkdep = vk::VkRenderingAttachmentInfo{};
                 vkdep.imageView = pb.graph->get_acc(data.depth).image_view.get_md().vk->view;
                 vkdep.imageLayout = to_vk(pb.graph->get_acc(data.depth).layout);
                 vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                 vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-                auto vkrinfo = vks::VkRenderingInfo{};
+                auto vkrinfo = vk::VkRenderingInfo{};
                 vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 vkrinfo.layerCount = 1;
                 vkrinfo.colorAttachmentCount = 1;

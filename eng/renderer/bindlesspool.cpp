@@ -19,7 +19,7 @@ DescriptorSetVk DescriptorPoolVk::allocate(const DescriptorLayout& layout, uint3
         if(free.empty()) { add_page(); }
         pool = free.back();
 
-        auto vk_alloc_info = vks::VkDescriptorSetAllocateInfo{};
+        auto vk_alloc_info = vk::VkDescriptorSetAllocateInfo{};
         vk_alloc_info.descriptorPool = pool;
         vk_alloc_info.descriptorSetCount = 1;
         vk_alloc_info.pSetLayouts = &layout.md.vk->layout;
@@ -52,7 +52,7 @@ void DescriptorPoolVk::add_page()
         }
         return vec;
     }();
-    auto vk_pool_info = vks::VkDescriptorPoolCreateInfo{};
+    auto vk_pool_info = vk::VkDescriptorPoolCreateInfo{};
     vk_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
     vk_pool_info.maxSets = max_allocs;
     vk_pool_info.poolSizeCount = (uint32_t)sizes.size();
@@ -169,7 +169,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
 
 void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, uint32_t slot)
 {
-    auto& write = writes.emplace_back(vks::VkWriteDescriptorSet{});
+    auto& write = writes.emplace_back(vk::VkWriteDescriptorSet{});
     write.dstSet = set.set;
     write.descriptorCount = 1;
     write.descriptorType = to_vk(type);

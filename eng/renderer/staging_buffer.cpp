@@ -175,7 +175,7 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
         const auto copy_extent =
             glm::u32vec3{ extent.x, rows_allocated, 1 } *
             glm::u32vec3{ block_data.texel_extent.x, block_data.texel_extent.y, block_data.texel_extent.z };
-        auto copy = vks::VkBufferImageCopy2{};
+        auto copy = vk::VkBufferImageCopy2{};
         copy.bufferOffset = alloc.offset;
         copy.bufferRowLength = 0;
         copy.bufferImageHeight = 0;

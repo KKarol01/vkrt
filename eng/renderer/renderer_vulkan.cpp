@@ -89,11 +89,11 @@ void DescriptorLayoutMetadataVk::init(DescriptorLayout& a)
         return bindings;
     }();
 
-    auto vkbindingflagsinfo = vks::VkDescriptorSetLayoutBindingFlagsCreateInfo{};
+    auto vkbindingflagsinfo = vk::VkDescriptorSetLayoutBindingFlagsCreateInfo{};
     vkbindingflagsinfo.bindingCount = (uint32_t)vkbindingflags.size();
     vkbindingflagsinfo.pBindingFlags = vkbindingflags.data();
 
-    auto vklayoutinfo = vks::VkDescriptorSetLayoutCreateInfo{};
+    auto vklayoutinfo = vk::VkDescriptorSetLayoutCreateInfo{};
     vklayoutinfo.pNext = &vkbindingflagsinfo;
     vklayoutinfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
     vklayoutinfo.bindingCount = (uint32_t)vkbindings.size();
@@ -122,7 +122,7 @@ void PipelineLayoutMetadataVk::init(PipelineLayout& a)
     }
     VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.push_range.stages), .offset = 0ull, .size = a.push_range.size };
 
-    auto pli = vks::VkPipelineLayoutCreateInfo{};
+    auto pli = vk::VkPipelineLayoutCreateInfo{};
     pli.setLayoutCount = (uint32_t)vksls.size();
     pli.pSetLayouts = vksls.data();
     pli.pushConstantRangeCount = range.size > 0 ? 1u : 0u;
@@ -160,7 +160,7 @@ void PipelineMetadataVk::init(const Pipeline& a)
     stages.reserve(a.info.shaders.size());
     for(const auto& e : a.info.shaders)
     {
-        vks::VkPipelineShaderStageCreateInfo shader{};
+        vk::VkPipelineShaderStageCreateInfo shader{};
         shader.stage = gfx::to_vk(e->stage);
         shader.module = e->md.vk->shader;
         shader.pName = "main";
@@ -169,7 +169,7 @@ void PipelineMetadataVk::init(const Pipeline& a)
 
     if(a.type == PipelineType::COMPUTE)
     {
-        auto vkinfo = vks::VkComputePipelineCreateInfo{};
+        auto vkinfo = vk::VkComputePipelineCreateInfo{};
         vkinfo.stage = stages.at(0);
         vkinfo.layout = a.info.layout->md.vk->layout;
         VK_CHECK(vkCreateComputePipelines(vkdev, {}, 1, &vkinfo, {}, &md->pipeline));
@@ -188,30 +188,30 @@ void PipelineMetadataVk::init(const Pipeline& a)
         vkattributes.at(i) = { a.info.attributes.at(i).location, a.info.attributes.at(i).binding,
                                gfx::to_vk(a.info.attributes.at(i).format), a.info.attributes.at(i).offset };
     }
-    auto pVertexInputState = vks::VkPipelineVertexInputStateCreateInfo{};
+    auto pVertexInputState = vk::VkPipelineVertexInputStateCreateInfo{};
     pVertexInputState.vertexBindingDescriptionCount = (uint32_t)a.info.bindings.size();
     pVertexInputState.pVertexBindingDescriptions = vkbindings.data();
     pVertexInputState.vertexAttributeDescriptionCount = (uint32_t)a.info.attributes.size();
     pVertexInputState.pVertexAttributeDescriptions = vkattributes.data();
 
-    auto pInputAssemblyState = vks::VkPipelineInputAssemblyStateCreateInfo{};
+    auto pInputAssemblyState = vk::VkPipelineInputAssemblyStateCreateInfo{};
     pInputAssemblyState.topology = gfx::to_vk(a.info.topology);
 
-    auto pTessellationState = vks::VkPipelineTessellationStateCreateInfo{};
+    auto pTessellationState = vk::VkPipelineTessellationStateCreateInfo{};
 
-    auto pViewportState = vks::VkPipelineViewportStateCreateInfo{};
+    auto pViewportState = vk::VkPipelineViewportStateCreateInfo{};
 
-    auto pRasterizationState = vks::VkPipelineRasterizationStateCreateInfo{};
+    auto pRasterizationState = vk::VkPipelineRasterizationStateCreateInfo{};
     pRasterizationState.polygonMode = gfx::to_vk(a.info.polygon_mode);
     pRasterizationState.cullMode = gfx::to_vk(a.info.culling);
     pRasterizationState.frontFace = a.info.front_is_ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
     pRasterizationState.lineWidth = a.info.line_width;
 
-    auto pMultisampleState = vks::VkPipelineMultisampleStateCreateInfo{};
+    auto pMultisampleState = vk::VkPipelineMultisampleStateCreateInfo{};
     pMultisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     // vkstencil
-    auto pDepthStencilState = vks::VkPipelineDepthStencilStateCreateInfo{};
+    auto pDepthStencilState = vk::VkPipelineDepthStencilStateCreateInfo{};
     pDepthStencilState.depthTestEnable = a.info.depth_test;
     pDepthStencilState.depthWriteEnable = a.info.depth_write;
     pDepthStencilState.depthCompareOp = gfx::to_vk(a.info.depth_compare);
@@ -253,7 +253,7 @@ void PipelineMetadataVk::init(const Pipeline& a)
                                                   ((uint32_t)a.info.attachments.blend_states.at(i).a) << 3 } };
         vkcol_formats.at(i) = gfx::to_vk(a.info.attachments.color_formats.at(i));
     }
-    auto pColorBlendState = vks::VkPipelineColorBlendStateCreateInfo{};
+    auto pColorBlendState = vk::VkPipelineColorBlendStateCreateInfo{};
     pColorBlendState.attachmentCount = a.info.attachments.count;
     pColorBlendState.pAttachments = vkblends.data();
 
@@ -261,17 +261,17 @@ void PipelineMetadataVk::init(const Pipeline& a)
         VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
         VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
     };
-    auto pDynamicState = vks::VkPipelineDynamicStateCreateInfo{};
+    auto pDynamicState = vk::VkPipelineDynamicStateCreateInfo{};
     pDynamicState.dynamicStateCount = sizeof(dynstates) / sizeof(dynstates[0]);
     pDynamicState.pDynamicStates = dynstates;
 
-    auto pDynamicRendering = vks::VkPipelineRenderingCreateInfo{};
+    auto pDynamicRendering = vk::VkPipelineRenderingCreateInfo{};
     pDynamicRendering.colorAttachmentCount = a.info.attachments.count;
     pDynamicRendering.pColorAttachmentFormats = vkcol_formats.data();
     pDynamicRendering.depthAttachmentFormat = gfx::to_vk(a.info.attachments.depth_format);
     pDynamicRendering.stencilAttachmentFormat = gfx::to_vk(a.info.attachments.stencil_format);
 
-    auto vkinfo = vks::VkGraphicsPipelineCreateInfo{};
+    auto vkinfo = vk::VkGraphicsPipelineCreateInfo{};
     vkinfo.pNext = &pDynamicRendering;
     vkinfo.stageCount = (uint32_t)stages.size();
     vkinfo.pStages = stages.data();
@@ -335,7 +335,7 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
     if(cpu_map) { a.memory = vmaai.pMappedData; }
     if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
     {
-        auto vkbdainfo = vks::VkBufferDeviceAddressInfo{};
+        auto vkbdainfo = vk::VkBufferDeviceAddressInfo{};
         vkbdainfo.buffer = md->buffer;
         md->device_address = vkGetBufferDeviceAddress(backend.dev, &vkbdainfo);
     }
@@ -343,7 +343,7 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
 
 void BufferMetadataVk::init(const Buffer& a, VkBufferCreateInfo& info)
 {
-    info = vks::VkBufferCreateInfo{};
+    info = vk::VkBufferCreateInfo{};
     info.size = a.capacity;
     info.usage = to_vk(a.usage);
 }
@@ -402,7 +402,7 @@ void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* user_data)
 
 void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
 {
-    info = vks::VkImageCreateInfo{};
+    info = vk::VkImageCreateInfo{};
     info.imageType = to_vk(a.type);
     info.format = to_vk(a.format);
     info.extent = { a.width, a.height, a.depth };
@@ -452,7 +452,7 @@ void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
     const auto src_mip = view.src_subresource % img.mips;
     const auto dst_layer = view.dst_subresource / img.mips;
     const auto dst_mip = view.dst_subresource % img.mips;
-    auto vkinfo = vks::VkImageViewCreateInfo{};
+    auto vkinfo = vk::VkImageViewCreateInfo{};
     vkinfo.image = view.image->md.vk()->image;
     vkinfo.viewType = to_vk(view.type);
     vkinfo.format = to_vk(view.format);
@@ -481,7 +481,7 @@ void ImageViewMetadataVk::destroy(ImageView& a)
 void SamplerMetadataVk::init(Sampler& a)
 {
     if(a.md.as_vk() != nullptr) { return; }
-    auto vkinfo = vks::VkSamplerCreateInfo{};
+    auto vkinfo = vk::VkSamplerCreateInfo{};
     vkinfo.magFilter = gfx::to_vk(a.filtering.mag);
     vkinfo.minFilter = gfx::to_vk(a.filtering.min);
     vkinfo.mipmapMode = gfx::to_vk(a.mip_blending);
@@ -491,7 +491,7 @@ void SamplerMetadataVk::init(Sampler& a)
     vkinfo.mipLodBias = a.lod.bias;
     vkinfo.minLod = a.lod.min;
     vkinfo.maxLod = a.lod.max;
-    auto vksampredinfo = vks::VkSamplerReductionModeCreateInfo{};
+    auto vksampredinfo = vk::VkSamplerReductionModeCreateInfo{};
     if(a.reduction_mode != SamplerReductionMode::NONE)
     {
         vksampredinfo.reductionMode = gfx::to_vk(a.reduction_mode);
@@ -526,7 +526,7 @@ void SwapchainMetadataVk::init(Swapchain& a)
     const auto image_usage_flags = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT;
     const auto image_format = ImageFormat::R8G8B8A8_SRGB;
     auto& backend = RendererBackendVk::get_instance();
-    auto vkswpinfo = vks::VkSwapchainCreateInfoKHR{};
+    auto vkswpinfo = vk::VkSwapchainCreateInfoKHR{};
     vkswpinfo.surface = backend.window_surface;
     vkswpinfo.minImageCount = Renderer::frame_delay;
     vkswpinfo.imageFormat = to_vk(image_format);
@@ -624,7 +624,7 @@ void RendererBackendVk::initialize_vulkan()
 
     const auto* window = get_engine().window;
 
-    auto vkwin32surfinfo = vks::VkWin32SurfaceCreateInfoKHR{};
+    auto vkwin32surfinfo = vk::VkWin32SurfaceCreateInfoKHR{};
     vkwin32surfinfo.hinstance = GetModuleHandle(nullptr);
     vkwin32surfinfo.hwnd = glfwGetWin32Window(window->window);
     vkCreateWin32SurfaceKHR(vkb_inst.instance, &vkwin32surfinfo, nullptr, &window_surface);
@@ -662,20 +662,20 @@ void RendererBackendVk::initialize_vulkan()
     supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
                           phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
 
-    auto synch2_features = vks::VkPhysicalDeviceSynchronization2Features{};
+    auto synch2_features = vk::VkPhysicalDeviceSynchronization2Features{};
     synch2_features.synchronization2 = true;
 
-    auto dyn_features = vks::VkPhysicalDeviceDynamicRenderingFeatures{};
+    auto dyn_features = vk::VkPhysicalDeviceDynamicRenderingFeatures{};
     dyn_features.dynamicRendering = true;
 
-    auto dev_2_features = vks::VkPhysicalDeviceFeatures2{};
+    auto dev_2_features = vk::VkPhysicalDeviceFeatures2{};
     dev_2_features.features.geometryShader = true;
     dev_2_features.features.multiDrawIndirect = true;
     dev_2_features.features.fillModeNonSolid = true;
     dev_2_features.features.vertexPipelineStoresAndAtomics = true;
     dev_2_features.features.fragmentStoresAndAtomics = true;
 
-    auto dev_vk12_features = vks::VkPhysicalDeviceVulkan12Features{};
+    auto dev_vk12_features = vk::VkPhysicalDeviceVulkan12Features{};
     dev_vk12_features.drawIndirectCount = true;
     dev_vk12_features.shaderSampledImageArrayNonUniformIndexing = true;
     dev_vk12_features.shaderStorageBufferArrayNonUniformIndexing = true;
@@ -694,22 +694,22 @@ void RendererBackendVk::initialize_vulkan()
     dev_vk12_features.timelineSemaphore = true;
     dev_vk12_features.bufferDeviceAddress = true;
 
-    auto acc_features = vks::VkPhysicalDeviceAccelerationStructureFeaturesKHR{};
+    auto acc_features = vk::VkPhysicalDeviceAccelerationStructureFeaturesKHR{};
     acc_features.accelerationStructure = true;
     acc_features.descriptorBindingAccelerationStructureUpdateAfterBind = true;
 
-    auto rtpp_features = vks::VkPhysicalDeviceRayTracingPipelineFeaturesKHR{};
+    auto rtpp_features = vk::VkPhysicalDeviceRayTracingPipelineFeaturesKHR{};
     rtpp_features.rayTracingPipeline = true;
     rtpp_features.rayTraversalPrimitiveCulling = true;
 
-    auto maint5_features = vks::VkPhysicalDeviceMaintenance5FeaturesKHR{};
+    auto maint5_features = vk::VkPhysicalDeviceMaintenance5FeaturesKHR{};
     maint5_features.maintenance5 = true;
 
-    auto rayq_features = vks::VkPhysicalDeviceRayQueryFeaturesKHR{};
+    auto rayq_features = vk::VkPhysicalDeviceRayQueryFeaturesKHR{};
     rayq_features.rayQuery = true;
 
-    rt_props = vks::VkPhysicalDeviceRayTracingPipelinePropertiesKHR{};
-    rt_acc_props = vks::VkPhysicalDeviceAccelerationStructurePropertiesKHR{};
+    rt_props = vk::VkPhysicalDeviceRayTracingPipelinePropertiesKHR{};
+    rt_acc_props = vk::VkPhysicalDeviceAccelerationStructurePropertiesKHR{};
     vkb::DeviceBuilder device_builder{ phys_ret };
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
     if(supports_raytracing)
@@ -727,7 +727,7 @@ void RendererBackendVk::initialize_vulkan()
 
     VkDevice device = vkb_device.device;
 
-    auto pdev_props = vks::VkPhysicalDeviceProperties2{};
+    auto pdev_props = vk::VkPhysicalDeviceProperties2{};
     pdev_props.pNext = &rt_props;
 
     rt_props.pNext = &rt_acc_props;
@@ -1434,7 +1434,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
 
     pc_spv_file.close();
 
-    auto vkshaderinfo = vks::VkShaderModuleCreateInfo{};
+    auto vkshaderinfo = vk::VkShaderModuleCreateInfo{};
     vkshaderinfo.codeSize = out_spv.size() * sizeof(uint32_t);
     vkshaderinfo.pCode = out_spv.data();
 
@@ -1538,9 +1538,9 @@ void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_
 
 void RendererBackendVk::get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs)
 {
-    auto res_reqs = vks::VkBufferMemoryRequirementsInfo2{};
+    auto res_reqs = vk::VkBufferMemoryRequirementsInfo2{};
     res_reqs.buffer = resource.md.vk()->buffer;
-    auto mem_reqs = vks::VkMemoryRequirements2{};
+    auto mem_reqs = vk::VkMemoryRequirements2{};
     vkGetBufferMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
     {
@@ -1558,9 +1558,9 @@ void RendererBackendVk::get_memory_requirements(const Buffer& resource, Renderer
 
 void RendererBackendVk::get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs)
 {
-    auto res_reqs = vks::VkImageMemoryRequirementsInfo2{};
+    auto res_reqs = vk::VkImageMemoryRequirementsInfo2{};
     res_reqs.image = resource.md.vk()->image;
-    auto mem_reqs = vks::VkMemoryRequirements2{};
+    auto mem_reqs = vk::VkMemoryRequirements2{};
     vkGetImageMemoryRequirements2(dev, &res_reqs, &mem_reqs);
     if(reqs.size == 0)
     {
@@ -1660,7 +1660,7 @@ QueryPool* RendererBackendVk::make_query_pool(const QueryPoolCreateInfo& info)
         delete pool;
         return nullptr;
     }
-    auto vkinfo = vks::VkQueryPoolCreateInfo{};
+    auto vkinfo = vk::VkQueryPoolCreateInfo{};
     vkinfo.queryType = to_vk(info.type);
     vkinfo.queryCount = info.max_queries;
     const auto vkres = vkCreateQueryPool(dev, &vkinfo, nullptr, &md->vkpool);

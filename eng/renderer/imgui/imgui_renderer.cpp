@@ -109,14 +109,14 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
             const auto& img = builder.graph->get_img(data.output).get();
 
-            vks::VkRenderingAttachmentInfo r_col_atts[1]{};
+            vk::VkRenderingAttachmentInfo r_col_atts[1]{};
             r_col_atts[0].imageView = builder.graph->get_acc(data.output).image_view.get_md().vk->view;
             r_col_atts[0].imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
             r_col_atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             r_col_atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             r_col_atts[0].clearValue = { .color = { .uint32 = { 0, 0, 0, 0 } } };
 
-            auto rendering_info = vks::VkRenderingInfo{};
+            auto rendering_info = vk::VkRenderingInfo{};
             rendering_info.renderArea = { .offset = {}, .extent = { .width = img.width, .height = img.height } };
             rendering_info.layerCount = 1;
             rendering_info.colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]);

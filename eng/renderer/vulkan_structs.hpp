@@ -21,7 +21,7 @@ namespace eng
 {
 namespace gfx
 {
-namespace vks
+namespace vk
 {
 template<typename T> requires(std::is_standard_layout_v<T>()) T init() { return T{}; }
 template<typename T, VkStructureType sType> T init() requires(std::is_standard_layout_v<T>()) { T t{}; t.sType = sType; return t; }
