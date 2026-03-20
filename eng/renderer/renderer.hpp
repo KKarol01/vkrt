@@ -849,7 +849,7 @@ class Renderer
     Slotmap<Buffer, 1024> buffers;
     Slotmap<Image, 1024> images;
     std::vector<std::string> buffer_names;
-    // std::vector<std::string> image_names;
+    std::vector<std::string> image_names;
 
     HandleFlatSet<Sampler> samplers;
     HandleFlatSet<Shader> shaders;
