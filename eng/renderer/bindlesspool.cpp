@@ -3,7 +3,7 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/renderer/vulkan/vulkan_structs.hpp>
-#include <assets/shaders/common.glsli>
+#include <assets/shaders/common.hlsli>
 #include <eng/renderer/vulkan/to_vk.hpp>
 
 namespace eng

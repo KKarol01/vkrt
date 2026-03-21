@@ -12,6 +12,8 @@
 #define ENG_SAMPLER_NEAREST 1
 #define ENG_SAMPLER_HIZ 2
 
+#define GPU_LIGHT_TYPE_POINT 0
+
 #ifndef __cplusplus
 #define ENG_TYPE_INT int
 #define ENG_TYPE_INT2 int2
@@ -35,14 +37,17 @@
 #define ENG_DECLARE_STORAGE_BUFFER(type) struct type
 
 #elif __cplusplus
+#define ENG_TYPE_INT int32_t
 #define ENG_TYPE_INT2 glm::ivec2
 #define ENG_TYPE_INT3 glm::ivec3
 #define ENG_TYPE_INT4 glm::ivec4
 
+#define ENG_TYPE_UINT uint32_t
 #define ENG_TYPE_UINT2 glm::uvec2
 #define ENG_TYPE_UINT3 glm::uvec3
 #define ENG_TYPE_UINT4 glm::uvec4
 
+#define ENG_TYPE_FLOAT float
 #define ENG_TYPE_FLOAT2 glm::vec2
 #define ENG_TYPE_FLOAT3 glm::vec3
 #define ENG_TYPE_FLOAT4 glm::vec4
@@ -91,6 +96,35 @@ struct GPUEngConstants
 struct GPUVertexPosition
 {
     ENG_TYPE_FLOAT3 pos;
+};
+
+struct IndexedIndirectDrawCommand
+{
+    ENG_TYPE_UINT indexCount;
+    ENG_TYPE_UINT instanceCount;
+    ENG_TYPE_UINT firstIndex;
+    ENG_TYPE_INT vertexOffset;
+    ENG_TYPE_UINT firstInstance;
+};
+
+struct GPUVertexAttribute
+{
+    ENG_TYPE_FLOAT3 normal;
+    ENG_TYPE_FLOAT4 tangent;
+    ENG_TYPE_FLOAT2 uv;
+};
+
+struct GPUInstanceId
+{
+    ENG_TYPE_UINT cmdi; // index of indirect draw command
+    ENG_TYPE_UINT resi; // index of resource shared by instances 
+    ENG_TYPE_UINT insti; // index of resource owned by instance
+    ENG_TYPE_UINT mati; // index of material
+};
+
+struct GPUMaterial
+{
+    ENG_TYPE_UINT base_color_idx;
 };
 
 #endif

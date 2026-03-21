@@ -10,7 +10,7 @@
 #include <eng/common/logger.hpp>
 #include <eng/string/stack_string.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
-#include <assets/shaders/common.glsli>
+#include <assets/shaders/common.hlsli>
 
 namespace eng
 {

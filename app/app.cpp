@@ -6,7 +6,7 @@
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/rendergraph.hpp>
-#include <assets/shaders/common.glsli>
+#include <assets/shaders/common.hlsli>
 #include <eng/common/handle.hpp>
 #include <eng/renderer/submit_queue.hpp>
 

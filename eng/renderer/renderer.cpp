@@ -12,7 +12,7 @@
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
 #include <eng/renderer/passes/renderpass.hpp>
-#include <assets/shaders/common.glsli>
+#include <assets/shaders/common.hlsli>
 
 namespace eng
 {
@@ -515,13 +515,13 @@ void Renderer::compile_rendergraph()
                                           RGClear::depth_stencil(1.0, 0u));
             rt.depth = builder.graph->get_res_id(res);
 
-            res = builder.create_resource("constants", Buffer::init(sizeof(GPUEngConstantsBuffer), BufferUsage::STORAGE_BIT));
+            res = builder.create_resource("constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
             res = builder.write_buffer(res);
             rt.constants = builder.graph->get_res_id(res);
         },
         [](RGBuilder& b, const RenderTargets& rt) {
             auto* c = get_engine().camera;
-            GPUEngConstantsBuffer constants_buffer{};
+            GPUEngConstants constants_buffer{};
             constants_buffer.proj_view = c->get_projection() * c->get_view();
 
             auto* cmd = b.open_cmd_buf();
