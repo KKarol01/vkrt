@@ -4,16 +4,15 @@
 #include <eng/engine.hpp>
 #include <eng/camera.hpp>
 #include <eng/renderer/bindlesspool.hpp>
-#include <eng/common/to_vk.hpp>
+#include <eng/renderer/vulkan/to_vk.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
-#include <eng/common/paths.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
 #include <eng/renderer/passes/renderpass.hpp>
-#include <assets/shaders/bindless_structures.glsli>
+#include <assets/shaders/common.glsli>
 
 namespace eng
 {
@@ -210,22 +209,22 @@ void Renderer::init_pipelines()
     // });
 
     {
-        settings.default_forward_pipeline =
-            make_pipeline(PipelineCreateInfo::init({ make_shader("default_unlit/unlit.vert.glsl"),
-                                                     make_shader("default_unlit/unlit.frag.glsl") })
-                              .init_image_attachments(PipelineCreateInfo::AttachmentState{
-                                  .count = 1,
-                                  .color_formats = { settings.color_format },
-                                  .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-                                                                                    .src_color_factor = BlendFactor::SRC_ALPHA,
-                                                                                    .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                                                                    .color_op = BlendOp::ADD,
-                                                                                    .src_alpha_factor = BlendFactor::ONE,
-                                                                                    .dst_alpha_factor = BlendFactor::ZERO,
-                                                                                    .alpha_op = BlendOp::ADD } },
-                                  .depth_format = settings.depth_format })
-                              .init_depth_test(true, true, settings.depth_compare)
-                              .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
+        settings.default_forward_pipeline = make_pipeline(
+            PipelineCreateInfo::init({ make_shader("./eng/renderer/shaders/default_unlit/default_unlit.vs.hlsl"),
+                                       make_shader("./eng/renderer/shaders/default_unlit/default_unlit.ps.hlsl") })
+                .init_image_attachments(PipelineCreateInfo::AttachmentState{
+                    .count = 1,
+                    .color_formats = { settings.color_format },
+                    .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                      .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                      .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                      .color_op = BlendOp::ADD,
+                                                                      .src_alpha_factor = BlendFactor::ONE,
+                                                                      .dst_alpha_factor = BlendFactor::ZERO,
+                                                                      .alpha_op = BlendOp::ADD } },
+                    .depth_format = settings.depth_format })
+                .init_depth_test(true, true, settings.depth_compare)
+                .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
     }
 
     {
@@ -739,17 +738,7 @@ Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
 
 Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
 {
-    const auto ext = std::filesystem::path{ path }.replace_extension().extension();
-    ShaderStage stage;
-    if(ext == ".vert") { stage = ShaderStage::VERTEX_BIT; }
-    else if(ext == ".frag") { stage = ShaderStage::PIXEL_BIT; }
-    else if(ext == ".comp") { stage = ShaderStage::COMPUTE_BIT; }
-    else
-    {
-        ENG_ERROR("Unrecognized shader extension: {}", ext.string());
-        return {};
-    }
-    Shader shader{ eng::paths::SHADERS_DIR / path, stage, {} };
+    auto shader = Shader::init(path);
     const auto found_handle = shaders.find(shader);
     if(!found_handle) { backend->make_shader(shader); }
     auto it = shaders.insert(std::move(shader));

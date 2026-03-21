@@ -1,8 +1,8 @@
 #include "submit_queue.hpp"
-#include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/vulkan/vulkan_structs.hpp>
 #include <eng/common/logger.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
-#include <eng/common/to_vk.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
+#include <eng/renderer/vulkan/to_vk.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/renderer/bindlesspool.hpp>
@@ -239,7 +239,7 @@ void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
 
 void CommandBufferVk::begin_label(const char* label)
 {
-#ifndef NDEBUG
+#ifdef ENG_DEBUG_BUILD
     auto vkl = vk::VkDebugUtilsLabelEXT{};
     vkl.pLabelName = label;
     vkl.color[0] = 0.0f;
@@ -252,7 +252,7 @@ void CommandBufferVk::begin_label(const char* label)
 
 void CommandBufferVk::end_label()
 {
-#ifndef NDEBUG
+#ifdef ENG_DEBUG_BUILD
     vkCmdEndDebugUtilsLabelEXT(cmd);
 #endif
 }

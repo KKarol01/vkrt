@@ -1,9 +1,9 @@
 #pragma once
 
-#ifndef NDEBUG
+#ifdef ENG_DEBUG_BUILD
 #include <string_view>
 #include <vulkan/vulkan.h>
-#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
 #endif
 
 namespace eng
@@ -23,7 +23,7 @@ template<> struct VkObject<VkFence> { inline static constexpr VkObjectType type 
 
 template <typename VkStruct> inline void set_debug_name(VkStruct object, std::string_view name)
 {
-#ifndef NDEBUG
+#ifdef ENG_DEBUG_BUILD
     VkDebugUtilsObjectNameInfoEXT obj_name{
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
         .pNext = nullptr,

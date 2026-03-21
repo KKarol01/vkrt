@@ -6,14 +6,14 @@
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/rendergraph.hpp>
-#include <assets/shaders/bindless_structures.glsli>
+#include <assets/shaders/common.glsli>
 #include <eng/common/handle.hpp>
 #include <eng/renderer/submit_queue.hpp>
 
 // todo: :(
-#include <eng/renderer/vulkan_structs.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
-#include <eng/common/to_vk.hpp>
+#include <eng/renderer/vulkan/vulkan_structs.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
+#include <eng/renderer/vulkan/to_vk.hpp>
 #include <vulkan/vulkan.h>
 
 using namespace eng;
@@ -98,7 +98,7 @@ void App::on_init()
     // ecs->update<ecs::Mesh>(e2);
     // ecs->update<ecs::Transform>(e1);
 
-    SceneNodeId cyberpunk = get_engine().scene->load_from_file("cyberpunk.glb");
+    SceneNodeId cyberpunk = get_engine().scene->load_from_file("./assets/models/cyberpunk.glb");
     get_engine().scene->instance_model(cyberpunk);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);

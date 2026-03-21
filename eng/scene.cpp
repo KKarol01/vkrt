@@ -13,10 +13,9 @@
 #include <eng/engine.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/common/logger.hpp>
-#include <eng/common/paths.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
+//#include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/camera.hpp>
 #include <eng/physics/bvh.hpp>
 #include <third_party/imgui/imgui.h>
@@ -371,11 +370,6 @@ void Scene::init() {}
 SceneNodeId Scene::load_from_file(const std::filesystem::path& model_path)
 {
     auto full_path = model_path;
-    if(!full_path.string().starts_with(eng::paths::MODELS_DIR.string()))
-    {
-        full_path = eng::paths::MODELS_DIR / full_path;
-    }
-
     const auto ext = full_path.extension();
     if(ext == ".glb") { return gltf::load_from_file(*this, full_path); }
 

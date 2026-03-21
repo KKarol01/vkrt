@@ -12,7 +12,7 @@ namespace hash
 
 inline constexpr uint64_t fnv1a_bytes(uint64_t hash, const uint8_t* const bytes, size_t size)
 {
-     constexpr uint64_t prime = 0x100000001b3ull;
+    constexpr uint64_t prime = 0x100000001b3ull;
     for(auto i = 0ull; i < size; ++i)
     {
         hash = hash ^ bytes[i];
@@ -25,11 +25,8 @@ template <typename T> inline constexpr uint64_t fnv1a_value(uint64_t hash, const
 {
     if constexpr(std::is_trivially_copyable_v<T>)
     {
-        if(std::is_constant_evaluated())
-        {
-            auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(t);
-            return fnv1a_bytes(hash, bytes.data(), bytes.size());
-        }
+        auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(t);
+        return fnv1a_bytes(hash, bytes.data(), bytes.size());
     }
     auto thash = std::hash<T>{}(t);
     auto bytes = std::bit_cast<std::array<uint8_t, sizeof(thash)>>(thash);
@@ -38,7 +35,7 @@ template <typename T> inline constexpr uint64_t fnv1a_value(uint64_t hash, const
 
 inline constexpr uint64_t combine_fnv1a(const auto&... args)
 {
-     constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
+    constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
     uint64_t hash = offset_basis;
     ((hash = fnv1a_value(hash, args)), ...);
     return hash;

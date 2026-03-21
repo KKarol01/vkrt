@@ -6,7 +6,7 @@
 #define ENG_FMT(str, ...) fmt::format(str, __VA_ARGS__)
 #define ENG_FMT_STR(str, ...) ENG_FMT(fmt::runtime(str), __VA_ARGS__)
 
-#ifndef NDEBUG
+#ifdef ENG_DEBUG_BUILD
 #include <iostream>
 #include <cassert>
 #define ENG_PRT(msg, ...) std::cout << ENG_FMT(msg, __VA_ARGS__)

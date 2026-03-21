@@ -35,6 +35,11 @@ set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_USE_STD_MODULE ON CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fastgltf)
 
+set(REPROC++ ON CACHE BOOL "" FORCE)
+set(REPROC_TEST OFF CACHE BOOL "" FORCE)
+set(REPROC_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/reproc)
+
 add_library(build_header_only STATIC
     "eng/build_header_only.cpp"
  )
@@ -114,6 +119,7 @@ add_executable(eng
     "app/app.cpp"
 
     "eng/engine.cpp"  
+	"eng/fs/fs.cpp"
     "eng/camera.cpp"
     "eng/scene.cpp"
 	"eng/ui/ui.cpp" 
@@ -121,8 +127,8 @@ add_executable(eng
     "eng/physics/bvh.cpp"
     "eng/renderer/renderer.cpp"
     "eng/renderer/imgui/imgui_renderer.cpp"
-    "eng/renderer/to_vk.cpp"
-    "eng/renderer/renderer_vulkan.cpp" 
+    "eng/renderer/vulkan/to_vk.cpp"
+    "eng/renderer/vulkan/vulkan_backend.cpp" 
     "eng/renderer/bindlesspool.cpp"
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
@@ -137,6 +143,7 @@ target_include_directories(eng
 	${Vulkan_INCLUDE_DIRS} 
 	${CMAKE_SOURCE_DIR}/third_party/fastgltf/include 
 	${CMAKE_SOURCE_DIR}/third_party/fmt/include
+	${CMAKE_SOURCE_DIR}/third_party/reproc/reproc++/include
 )
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
@@ -168,6 +175,7 @@ target_link_libraries(eng
         $<$<NOT:$<CONFIG:Debug>>:shaderc_combined>
         fastgltf
         meshoptimizer
+		reproc++
 )
 target_compile_definitions(eng
     PUBLIC
@@ -176,6 +184,7 @@ target_compile_definitions(eng
         NOMINMAX
         IMGUI_DEFINE_MATH_OPERATORS
 		ImTextureID_Invalid=~0ull
+		$<$<CONFIG:Debug>:ENG_DEBUG_BUILD>
 )
 
 target_precompile_headers(eng
@@ -201,7 +210,8 @@ target_precompile_headers(eng
         <utility>
         <variant>
         <vector>
-        <volk/volk.h>
+        
+		<volk/volk.h>
         <vulkan/vulkan.h>
         <glm/glm.hpp>
         <glm/mat3x3.hpp>
@@ -216,14 +226,16 @@ target_precompile_headers(eng
         <vk-bootstrap/src/VkBootstrap.h>
         <shaderc/shaderc.hpp>
         <fmt/format.h>
-        <eng/common/flags.hpp>
+        
+		<eng/common/flags.hpp>
         <eng/common/handle.hpp>
         <eng/common/handleflatset.hpp>
         <eng/common/hash.hpp>
         <eng/common/logger.hpp>
         <eng/common/sparseset.hpp>
-        <eng/common/to_vk.hpp>
         <eng/common/to_string.hpp>
         <eng/common/types.hpp>
+
         <eng/renderer/renderer_fwd.hpp>
+        <eng/renderer/vulkan/to_vk.hpp>
 )

@@ -1,10 +1,10 @@
 #include "bindlesspool.hpp"
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/submit_queue.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
-#include <eng/renderer/vulkan_structs.hpp>
-#include <assets/shaders/bindless_structures.glsli>
-#include <eng/common/to_vk.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
+#include <eng/renderer/vulkan/vulkan_structs.hpp>
+#include <assets/shaders/common.glsli>
+#include <eng/renderer/vulkan/to_vk.hpp>
 
 namespace eng
 {

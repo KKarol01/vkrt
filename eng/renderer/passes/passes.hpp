@@ -1,10 +1,10 @@
 #pragma once
 
 #include <eng/renderer/renderer.hpp>
-#include <eng/renderer/renderer_vulkan.hpp> // todo: remove this
+#include <eng/renderer/vulkan/vulkan_backend.hpp> // todo: remove this
 #include <eng/engine.hpp>
 #include <eng/renderer/rendergraph.hpp>
-#include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/vulkan/vulkan_structs.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/common/hash.hpp>
 

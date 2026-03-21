@@ -1,12 +1,12 @@
 #include "staging_buffer.hpp"
 #include <eng/renderer/renderer.hpp>
 #include <eng/math/align.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/renderer/submit_queue.hpp>
-#include <eng/renderer/vulkan_structs.hpp>
+#include <eng/renderer/vulkan/vulkan_structs.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/logger.hpp>
-#include <eng/common/to_vk.hpp>
+#include <eng/renderer/vulkan/to_vk.hpp>
 #include <vulkan/vulkan_core.h>
 
 namespace eng

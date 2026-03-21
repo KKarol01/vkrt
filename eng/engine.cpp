@@ -4,13 +4,13 @@
 #include <eng/ui/ui.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <eng/renderer/renderer.hpp>
-#include <eng/renderer/renderer_vulkan.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/engine.hpp>
-#include <eng/common/paths.hpp>
 #include <eng/camera.hpp>
 #include <eng/scene.hpp>
 #include <eng/ecs/ecs.hpp>
+#include <eng/fs/fs.hpp>
 
 static void on_mouse_move(GLFWwindow* window, double px, double py)
 {
@@ -112,11 +112,10 @@ void Window::add_on_mouse_move(const on_mouse_move_cb_t& a) { on_mouse_move_call
 
 void Engine::init(int argc, char* argv[])
 {
-    eng::paths::init(argv[0]);
-
     if(!glfwInit()) { ENG_WARN("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
+    fs = new fs::FileSystem{};
     window = new Window{ 1280.0f, 768.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};

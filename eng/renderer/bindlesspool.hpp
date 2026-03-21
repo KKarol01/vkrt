@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <unordered_map>
 #include <span>
 #include <deque>
@@ -12,6 +11,9 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/common/slotallocator.hpp>
 #include <eng/common/hash.hpp>
+
+// todo: remove this
+#include <vulkan/vulkan.h>
 
 namespace eng
 {

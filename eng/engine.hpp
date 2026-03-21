@@ -30,6 +30,11 @@ namespace gfx
 class Renderer;
 } // namespace gfx
 
+namespace fs
+{
+class FileSystem;
+}
+
 struct Window
 {
     using on_focus_cb_t = std::function<bool(bool)>;
@@ -76,6 +81,8 @@ class Engine
     void init(int argc, char* argv[]);
     void destroy();
     void start();
+
+    fs::FileSystem* fs{};
 
     Window* window{};
     Camera* camera{};

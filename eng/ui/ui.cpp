@@ -91,7 +91,9 @@ class ScenePanel : public Panel
                             if(ImGui::ArrowButton("##arrow", state.expanded ? ImGuiDir_Down : ImGuiDir_Right))
                             {
                                 state.expanded = !state.expanded;
+                                if(ImGui::GetIO().KeyShift) { toggle_expanded_below(e, state.expanded); }
                             }
+
                             ImGui::SameLine();
                             ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x / 2); // move back item spacing so it neatly touches the arrow
                             ImGui::SetCursorPosY(ImGui::GetCursorPosY() - style.ItemSpacing.y / 2 + style.FramePadding.y / 2); // move up so it is flush with arrow
@@ -109,10 +111,6 @@ class ScenePanel : public Panel
                     {
                         if(selected_node == e) { selected_node = ecs::EntityId{}; }
                         else { selected_node = e; }
-                    }
-                    if(ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
-                    {
-                        toggle_expanded_below(e, !state.expanded);
                     }
                     if(state.expanded)
                     {

@@ -1,0 +1,31 @@
+#version 460
+
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_buffer_reference : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
+
+layout(scalar, push_constant) uniform PushConstants {
+    uint32_t src_image_index;
+    uint32_t dst_image_index;
+    uint32_t vsm_buffer_index;
+    uint32_t constants_index;  // unused
+    uint32_t page_table_index; // unused
+    uint32_t vsm_physical_depth_image_index; // unused
+};
+#define NO_PUSH_CONSTANTS
+#include "./vsm/common.glsli"
+
+#define src_image gsi_2dr32uiv[src_image_index]
+#define dst_image gsi_2drgba8v[dst_image_index]
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+void main() {
+    const ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(gid, ivec2(VSM_VIRTUAL_PAGE_RESOLUTION)))) { return; }
+    for(int i = 0; i < VSM_NUM_CLIPMAPS; ++i) {
+        imageStore(dst_image, ivec3(gid, i), vec4(imageLoad(src_image, ivec3(gid, i)).r, 0.0, 0.0, 1.0));
+    }
+}
