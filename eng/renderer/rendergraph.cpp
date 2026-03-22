@@ -139,7 +139,7 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
     const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
                                  [&resource](const auto& e) { return e.native == resource; });
     if(it != graph->resources.end()) { return it->last_access; }
-    return add_resource(RGResource("", resource, true, true, clear));
+    return add_resource(RGResource("", resource, true, false, clear));
 }
 
 PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
@@ -152,37 +152,49 @@ PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
 RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool persistent)
 {
     ENG_ASSERT(!name.empty());
-    RGResource::NativeResource native = [this, &a, &name, persistent]() -> RGResource::NativeResource {
-        if(persistent)
+    const bool is_aliased = !persistent && !graph->disable_memory_aliasing;
+    RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
+        if(!is_aliased)
         {
-            const auto hash = ENG_HASH_STR(name);
+            const auto hash = eng::hash::combine_fnv1a(name);
             if(auto* p = find_persistent(hash)) { return p->native; }
             auto native_handle = get_engine().renderer->make_buffer(name, std::move(a));
-            auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
-                                                                     PersistentStorage{ .native = native_handle });
-            return persistent_it.first->second.native;
+            if(persistent)
+            {
+                auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
+                                                                         PersistentStorage{ .native = native_handle });
+                return persistent_it.first->second.native;
+            }
+            return native_handle;
         }
-        return get_engine().renderer->make_buffer(name, std::move(a), AllocateMemory::ALIASED);
+        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::YES : AllocateMemory::ALIASED;
+        return get_engine().renderer->make_buffer(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource(name, native, persistent, false));
+    return add_resource(RGResource(name, native, persistent, is_aliased));
 }
 
 RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
 {
     ENG_ASSERT(!name.empty());
-    RGResource::NativeResource native = [this, &a, &name, persistent]() -> RGResource::NativeResource {
-        if(persistent)
+    const bool is_aliased = !persistent && !graph->disable_memory_aliasing;
+    RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
+        if(!is_aliased)
         {
-            const auto hash = ENG_HASH_STR(name);
+            const auto hash = eng::hash::combine_fnv1a(name);
             if(auto* p = find_persistent(hash)) { return p->native; }
             auto native_handle = get_engine().renderer->make_image(name, std::move(a));
-            auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
-                                                                     PersistentStorage{ .native = native_handle });
-            return persistent_it.first->second.native;
+            if(persistent)
+            {
+                auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
+                                                                         PersistentStorage{ .native = native_handle });
+                return persistent_it.first->second.native;
+            }
+            return native_handle;
         }
-        return get_engine().renderer->make_image(name, std::move(a), AllocateMemory::ALIASED);
+        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::YES : AllocateMemory::ALIASED;
+        return get_engine().renderer->make_image(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource(name, native, persistent, false, clear));
+    return add_resource(RGResource(name, native, persistent, is_aliased, clear));
 }
 
 RGAccessId RGBuilder::add_access(const RGAccess& a)
@@ -270,7 +282,10 @@ void RGRenderGraph::compile()
                     if(acc.is_first_access()) { return 0u; }
                     const auto& res = get_res(val);
                     // if current access is a write, we need to wait for previous reads and writes.
-                    if(acc.is_write()) { return std::max(res.last_read_group + 1, res.last_write_group + 1); }
+                    if(acc.is_write() || serialize_passes)
+                    {
+                        return std::max(res.last_read_group + 1, res.last_write_group + 1);
+                    }
                     if(acc.is_read())
                     {
                         const auto& pacc = get_acc(acc.prev_access);
@@ -329,7 +344,7 @@ void RGRenderGraph::compile()
                 {
                     auto& acc = get_acc(ra);
                     auto& res = get_res(ra);
-                    if(res.is_persistent) { continue; }
+                    if(!res.is_aliased) { continue; }
                     auto insertion = alive_res_set.insert(acc.resource);
                     if(!insertion.second)
                     {
@@ -447,8 +462,8 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
                 if(!res.is_persistent && res.last_access == ra) { free_resource(res); }
             }
         }
-        queue->wait_sync(sems[0], gstages);
-        queue->signal_sync(sems[0], gstages);
+        queue->wait_sync(sems[0], gstages   | PipelineStage::ALL);
+        queue->signal_sync(sems[0], gstages | PipelineStage::ALL);
         queue->submit();
     }
 

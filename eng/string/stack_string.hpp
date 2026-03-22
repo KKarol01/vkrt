@@ -49,7 +49,7 @@ template <size_t size> struct StackString
     std::string to_string() const { return std::string{ string.data() }; }
     const char* c_str() const { return string.data(); }
 
-    uint64_t hash() const { return ENG_HASH_STR(string.data()); }
+    uint64_t hash() const { return eng::hash::combine_fnv1a(string.data()); }
 
     std::array<char, size> string{};
 };

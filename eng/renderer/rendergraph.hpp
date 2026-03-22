@@ -30,7 +30,7 @@ struct RGPass
         COMPUTE,
     };
     RGPass() = default;
-    RGPass(const char* name, Type type) : id(ENG_HASH_STR(name)), name(name), type(type) {}
+    RGPass(const char* name, Type type) : id(eng::hash::combine_fnv1a(name)), name(name), type(type) {}
     virtual ~RGPass() = default;
     bool is_graphics() const { return type == Type::GRAPHICS; }
     bool is_compute() const { return type == Type::COMPUTE; }
@@ -82,9 +82,9 @@ struct RGClear
 struct RGResource
 {
     using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
-    RGResource(std::string_view name, const NativeResource& native, bool is_persistent, bool is_imported,
+    RGResource(std::string_view name, const NativeResource& native, bool is_persistent, bool is_aliased,
                const std::optional<RGClear>& clear = {})
-        : name(name), native(native), is_persistent(is_persistent), is_imported(is_imported), clear(clear)
+        : name(name), native(native), is_persistent(is_persistent), is_aliased(is_aliased), clear(clear)
     {
     }
     bool is_buffer() const { return native.index() == 0; }
@@ -96,7 +96,7 @@ struct RGResource
     uint32_t last_read_group{ ~0u };
     uint32_t last_write_group{ ~0u };
     bool is_persistent{};
-    bool is_imported{};
+    bool is_aliased{};
     void* alloc{}; // from transient allocator if not persistent
     std::optional<RGClear> clear;
 };
@@ -314,6 +314,9 @@ class RGRenderGraph
     std::vector<OrderedPass> passes;
     std::vector<ExecutionGroup> groups;
     std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
+
+    bool serialize_passes{};
+    bool disable_memory_aliasing{};
 };
 
 } // namespace gfx

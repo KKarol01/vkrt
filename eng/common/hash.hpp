@@ -66,8 +66,6 @@ struct PairHash
 } // namespace hash
 } // namespace eng
 
-#define ENG_HASH_STR(cstring) ::eng::hash::combine_fnv1a(cstring)
-
 #define ENG_DEFINE_STD_HASH(type, code)                                                                                \
     namespace std                                                                                                      \
     {                                                                                                                  \
