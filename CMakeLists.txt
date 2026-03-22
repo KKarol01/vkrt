@@ -171,8 +171,6 @@ target_link_libraries(eng
         build_header_only
         vk-bootstrap
         glfw
-        $<$<CONFIG:Debug>:shaderc_combinedd>
-        $<$<NOT:$<CONFIG:Debug>>:shaderc_combined>
         fastgltf
         meshoptimizer
 		reproc++
@@ -224,7 +222,6 @@ target_precompile_headers(eng
         <imgui/backends/imgui_impl_vulkan.h>
         <VulkanMemoryAllocator/include/vk_mem_alloc.h>
         <vk-bootstrap/src/VkBootstrap.h>
-        <shaderc/shaderc.hpp>
         <fmt/format.h>
         
 		<eng/common/flags.hpp>
