@@ -167,7 +167,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
             }
             return native_handle;
         }
-        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::YES : AllocateMemory::ALIASED;
+        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_engine().renderer->make_buffer(name, std::move(a), allocation_mode);
     }();
     return add_resource(RGResource(name, native, persistent, is_aliased));
@@ -191,7 +191,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const st
             }
             return native_handle;
         }
-        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::YES : AllocateMemory::ALIASED;
+        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_engine().renderer->make_image(name, std::move(a), allocation_mode);
     }();
     return add_resource(RGResource(name, native, persistent, is_aliased, clear));
@@ -462,8 +462,8 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
                 if(!res.is_persistent && res.last_access == ra) { free_resource(res); }
             }
         }
-        queue->wait_sync(sems[0], gstages   | PipelineStage::ALL);
-        queue->signal_sync(sems[0], gstages | PipelineStage::ALL);
+        queue->wait_sync(sems[0], gstages);
+        queue->signal_sync(sems[0], gstages);
         queue->submit();
     }
 
