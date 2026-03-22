@@ -15,7 +15,8 @@
 #include <eng/common/logger.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
-//#include <eng/renderer/vulkan/vulkan_backend.hpp>
+#include <eng/assets/asset_manager.hpp>
+// #include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/camera.hpp>
 #include <eng/physics/bvh.hpp>
 #include <third_party/imgui/imgui.h>
@@ -371,7 +372,7 @@ SceneNodeId Scene::load_from_file(const std::filesystem::path& model_path)
 {
     auto full_path = model_path;
     const auto ext = full_path.extension();
-    if(ext == ".glb") { return gltf::load_from_file(*this, full_path); }
+    if(ext == ".glb") { return gltf::load_from_file(*this, get_engine().assets->make_path(full_path)); }
 
     ENG_ERROR("Extension not supported {}", ext.string());
     return SceneNodeId{};

@@ -277,7 +277,7 @@ class Registry
     {
         if(!has(eid))
         {
-            ENG_ERROR("Invalid entity {}", *eid);
+            ENG_WARN("Invalid entity {}", *eid);
             return;
         }
 
@@ -285,7 +285,7 @@ class Registry
         auto& md = get_md(eid);
         if((sig & md.sig).any())
         {
-            ENG_ERROR("Entity {} already has some of these components {}", *eid, (sig & md.sig).to_string());
+            ENG_WARN("Entity {} already has some of these components {}", *eid, (sig & md.sig).to_string());
             return;
         }
 

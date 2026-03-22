@@ -210,8 +210,8 @@ void Renderer::init_pipelines()
 
     {
         settings.default_forward_pipeline = make_pipeline(
-            PipelineCreateInfo::init({ make_shader("./eng/renderer/shaders/default_unlit/default_unlit.vs.hlsl"),
-                                       make_shader("./eng/renderer/shaders/default_unlit/default_unlit.ps.hlsl") })
+            PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/default_unlit/default_unlit.vs.hlsl"),
+                                       make_shader("/eng/renderer/shaders/default_unlit/default_unlit.ps.hlsl") })
                 .init_image_attachments(PipelineCreateInfo::AttachmentState{
                     .count = 1,
                     .color_formats = { settings.color_format },

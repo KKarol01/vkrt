@@ -11,6 +11,7 @@
 #include <eng/scene.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/fs/fs.hpp>
+#include <eng/assets/asset_manager.hpp>
 
 static void on_mouse_move(GLFWwindow* window, double px, double py)
 {
@@ -116,11 +117,20 @@ void Engine::init(int argc, char* argv[])
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     fs = new fs::FileSystem{};
+    assets = new AssetManager{};
     window = new Window{ 1280.0f, 768.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};
     ui = new ui::UI{};
     scene = new eng::Scene{};
+
+    assets->init();
+    if(!assets->was_properly_init())
+    {
+        destroy();
+        ENG_ERROR("Engine assets manager initialization failed.");
+        return;
+    }
 
     window->init();
     glfwSetCursorPosCallback(window->window, on_mouse_move);

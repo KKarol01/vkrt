@@ -98,7 +98,7 @@ void App::on_init()
     // ecs->update<ecs::Mesh>(e2);
     // ecs->update<ecs::Transform>(e1);
 
-    SceneNodeId cyberpunk = get_engine().scene->load_from_file("./assets/models/cyberpunk.glb");
+    SceneNodeId cyberpunk = get_engine().scene->load_from_file("/assets/models/cyberpunk.glb");
     get_engine().scene->instance_model(cyberpunk);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);

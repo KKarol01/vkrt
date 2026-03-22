@@ -35,8 +35,8 @@ void ImGuiRenderer::init()
     int width, height;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
-    pipeline = r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("./eng/renderer/shaders/imgui/imgui.vs.hlsl"),
-                                                          r.make_shader("./eng/renderer/shaders/imgui/imgui.ps.hlsl") })
+    pipeline = r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/eng/renderer/shaders/imgui/imgui.vs.hlsl"),
+                                                          r.make_shader("/eng/renderer/shaders/imgui/imgui.ps.hlsl") })
                                    .init_image_attachments(PipelineCreateInfo::AttachmentState{
                                        .count = 1,
                                        .color_formats = { ImageFormat::R8G8B8A8_SRGB },
