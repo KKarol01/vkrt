@@ -21,7 +21,6 @@
 
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
-#include <stb/stb_include.h>
 #include <volk/volk.h>
 #include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
