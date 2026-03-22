@@ -355,13 +355,23 @@ void Renderer::init_bufs()
 void Renderer::update()
 {
     settings.render_resolution = settings.new_render_resolution;
+
     if(settings.regenerate_swapchain)
     {
-        settings.regenerate_swapchain = false;
-        vkDeviceWaitIdle(((RendererBackendVk*)backend)->dev);
-        backend->destroy_swapchain(swapchain);
-        swapchain = backend->make_swapchain();
+        if(swapchain)
+        {
+            vkDeviceWaitIdle(((RendererBackendVk*)backend)->dev);
+            backend->destroy_swapchain(swapchain);
+            swapchain = nullptr;
+        }
+        if(settings.present_resolution.x > 0.0f && settings.present_resolution.y > 0.0f)
+        {
+            settings.regenerate_swapchain = false;
+            swapchain = backend->make_swapchain();
+        }
+        else { return; }
     }
+
     current_data->ren_fen->wait_cpu(~0ull);
     current_data->ren_fen->reset();
     current_data->cmdpool->reset();
@@ -381,8 +391,6 @@ void Renderer::update()
         }
         current_data->timestamp_queries.clear();
     }
-
-    swapchain->acquire(~0ull, current_data->acq_sem);
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -474,16 +482,20 @@ void Renderer::update()
         //  new_lights.clear();
     }
 
+    swapchain->acquire(~0ull, current_data->acq_sem);
+
     compile_rendergraph();
 
     Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->get_wait_sem() };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
-
     auto* cmd = current_data->cmdpool->begin();
     current_data->cmdpool->end(cmd);
-
-    gq->wait_sync(rgsync).with_cmd_buf(cmd).signal_sync(current_data->swp_sem).signal_sync(current_data->ren_fen).submit();
+    cmd->wait_sync(rgsync);
+    cmd->signal_sync(current_data->swp_sem);
+    cmd->signal_sync(current_data->ren_fen);
+    gq->with_cmd_buf(cmd).submit();
     gq->wait_sync(current_data->swp_sem).present(swapchain);
+
     ++current_frame;
     current_data = &frame_datas[current_frame % frame_datas.size()];
 }

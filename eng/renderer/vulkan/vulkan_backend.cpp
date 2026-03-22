@@ -416,14 +416,14 @@ void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
     info.initialLayout = to_vk(ImageLayout::UNDEFINED);
 }
 
-void ImageMetadataVk::destroy(Image& a, bool deallocate)
+void ImageMetadataVk::destroy(Image& a)
 {
     if(!a.md.vk()) { return; }
     auto& backend = RendererBackendVk::get_instance();
     auto* md = a.md.vk();
     if(!md) { return; }
-    if(deallocate && !md->is_aliased) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
-    else if(deallocate && md->is_aliased) { vkDestroyImage(backend.dev, md->image, nullptr); }
+    if(!md->is_aliased && md->vmaa) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
+    else if(md->is_aliased) { vkDestroyImage(backend.dev, md->image, nullptr); }
     for(auto& [view, vkview] : a.md.vk()->views)
     {
         vkDestroyImageView(backend.dev, vkview.view, nullptr);
@@ -1439,10 +1439,8 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
             "-spirv",
             "-fvk-use-scalar-layout",
 #ifdef ENG_DEBUG_BUILD
-            "-O0",
             "-Od",
             "-Zi",
-            "-Qembed_debug",
 #endif
             "-I",
             include_path,

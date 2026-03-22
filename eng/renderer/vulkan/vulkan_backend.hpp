@@ -146,7 +146,7 @@ struct ImageMetadataVk
 {
     static void init(Image& a, AllocateMemory allocate = AllocateMemory::YES, void* vkimage = nullptr);
     static void init(Image& a, VkImageCreateInfo& info);
-    static void destroy(Image& a, bool deallocate = true);
+    static void destroy(Image& a);
     VkImage image{};
     VmaAllocation vmaa{};
     std::unordered_map<ImageView, ImageViewMetadataVk> views;
