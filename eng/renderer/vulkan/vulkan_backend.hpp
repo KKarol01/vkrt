@@ -127,7 +127,6 @@ struct PipelineLayoutMetadataVk
 struct PipelineMetadataVk
 {
     static void init(const Pipeline& a);
-    static void destroy(Pipeline& a);
     VkPipeline pipeline{};
 };
 
@@ -212,9 +211,11 @@ class RendererBackendVk : public IRendererBackend
     void allocate_sampler(Sampler& sampler) override;
     void make_shader(Shader& shader) override;
     bool compile_shader(const Shader& shader) override;
+    void destroy_shader(Shader& shader) override;
     bool compile_layout(DescriptorLayout& layout) override;
     bool compile_layout(PipelineLayout& layout) override;
     void make_pipeline(Pipeline& pipeline) override;
+    void destroy_pipeline(Pipeline& pipeline) override;
     bool compile_pipeline(const Pipeline& pipeline) override;
     Sync* make_sync(const SyncCreateInfo& info) override;
     void destory_sync(Sync* sync) override;

@@ -9,14 +9,18 @@ namespace eng
 
 struct Win32DirChangeHandle
 {
-    Win32DirChangeHandle(const fs::Path& path, Signal<void(const fs::Path&)>* signal) : path(path), signal(signal) {}
+    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, Signal<void(const fs::Path&)>* signal)
+        : virtual_path(virtual_path), physical_path(physical_path), signal(signal)
+    {
+    }
     ~Win32DirChangeHandle() { close(); }
 
     void start()
     {
         stop = false;
 
-        notification = FindFirstChangeNotificationW(path.c_str(), true, FILE_NOTIFY_CHANGE_LAST_WRITE);
+        notification = CreateFileW(physical_path.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
         if(!notification)
         {
             ENG_WARN("[WIN32] Failed to attach on_dir_change notification");
@@ -59,10 +63,11 @@ struct Win32DirChangeHandle
                 for(size_t offset = 0; rec_bytes > 0; offset += info.NextEntryOffset)
                 {
                     memcpy(&info, &buffer[offset], sizeof(info));
-                    std::wstring wstr(info.FileNameLength, L'\0');
+                    std::wstring wstr(info.FileNameLength / sizeof(wchar_t), L'\0');
                     memcpy(wstr.data(), ((char*)&buffer[offset] + offsetof(FILE_NOTIFY_INFORMATION, FileName)),
                            wstr.size() * sizeof(wstr[0]));
-                    std::filesystem::path p{ wstr };
+                    auto win_path = std::filesystem::path{ wstr };
+                    const auto p = (virtual_path / win_path).generic_string();
                     signal->signal(p);
                     if(info.NextEntryOffset == 0) { break; }
                 }
@@ -74,6 +79,7 @@ struct Win32DirChangeHandle
                     if(!queued) { break; }
                 }
             }
+            CancelIoEx(notification, &overlap);
         } };
     }
 
@@ -91,7 +97,8 @@ struct Win32DirChangeHandle
         overlap = {};
     }
 
-    fs::Path path;
+    fs::Path virtual_path;
+    fs::Path physical_path;
     HANDLE notification{};
     HANDLE event{};
     OVERLAPPED overlap{};
@@ -137,17 +144,10 @@ fs::FilePtr AssetManager::get_asset(const fs::Path& path, fs::OpenMode mode)
     return get_engine().fs->open_file(_path, mode);
 }
 
-void AssetManager::install_notify_on_dir_change_callback(const fs::Path& dir)
+void AssetManager::install_notify_on_dir_change_callback(const fs::Path& virtual_path, const fs::Path& physical_path)
 {
-    if(dir.empty()) { return; }
-    if(!dir.string().starts_with('/')) { return; }
-    if(dir.has_extension()) { return; }
-
-    auto path = make_path(dir);
-    if(!path.is_absolute()) { path = std::filesystem::absolute(path); }
-
-    auto& dir_callback = dir_change_cb_map[path];
-    auto ptr = std::make_shared<Win32DirChangeHandle>(path, &dir_callback.on_dir_change);
+    auto& dir_callback = dir_change_cb_map[virtual_path];
+    auto ptr = std::make_shared<Win32DirChangeHandle>(virtual_path, physical_path, &dir_callback.on_dir_change);
     dir_callback.handle = ptr;
     ptr->start();
 }

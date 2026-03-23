@@ -140,7 +140,7 @@ void PipelineLayoutMetadataVk::destroy(PipelineLayout& a)
 
 void PipelineMetadataVk::init(const Pipeline& a)
 {
-    if(!a.md.vk)
+    if(!a.md.ptr)
     {
         ENG_ERROR("Pipeline metadata null.");
         return;
@@ -153,7 +153,7 @@ void PipelineMetadataVk::init(const Pipeline& a)
     }
 
     auto vkdev = RendererBackendVk::get_dev();
-    auto* md = a.md.vk;
+    auto* md = a.md.vk();
 
     if(md->pipeline) { vkDestroyPipeline(vkdev, md->pipeline, nullptr); }
 
@@ -287,16 +287,6 @@ void PipelineMetadataVk::init(const Pipeline& a)
     vkinfo.pDynamicState = &pDynamicState;
     vkinfo.layout = a.info.layout->md.vk->layout;
     VK_CHECK(vkCreateGraphicsPipelines(vkdev, nullptr, 1, &vkinfo, nullptr, &md->pipeline));
-}
-
-void PipelineMetadataVk::destroy(Pipeline& a)
-{
-    if(!a.md.vk) { return; }
-    auto* md = a.md.vk;
-    ENG_ASSERT(md->pipeline);
-    vkDestroyPipeline(RendererBackendVk::get_dev(), md->pipeline, nullptr);
-    delete a.md.vk;
-    a.md.vk = nullptr;
 }
 
 void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
@@ -1390,7 +1380,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
     // check if precompiled
     {
         fs::FilePtr precompfile = get_engine().assets->get_asset(precomppath, fs::OpenMode::RB);
-        if(precompfile)
+        if(precompfile && precompfile->size > 8)
         {
             std::byte readhash8[8];
             precompfile->read(readhash8, 8, 0);
@@ -1486,6 +1476,15 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
     return true;
 }
 
+void RendererBackendVk::destroy_shader(Shader& shader)
+{
+    if(!shader.md.ptr) { return; }
+    if(!shader.md.vk()->shader) { return; }
+    vkDestroyShaderModule(dev, shader.md.vk()->shader, nullptr);
+    delete shader.md.vk();
+    shader.md = {};
+}
+
 bool RendererBackendVk::compile_layout(DescriptorLayout& layout)
 {
     DescriptorLayoutMetadataVk::init(layout);
@@ -1508,7 +1507,16 @@ void RendererBackendVk::make_pipeline(Pipeline& pipeline)
         ENG_ERROR("Unrecognized pipeline type");
         return;
     }
-    pipeline.md.vk = new PipelineMetadataVk{};
+    pipeline.md.ptr = new PipelineMetadataVk{};
+}
+
+void RendererBackendVk::destroy_pipeline(Pipeline& pipeline)
+{
+    if(!pipeline.md.ptr) { return; }
+    if(!pipeline.md.vk()->pipeline) { return; }
+    vkDestroyPipeline(dev, pipeline.md.vk()->pipeline, nullptr);
+    delete pipeline.md.vk();
+    pipeline.md = {};
 }
 
 bool RendererBackendVk::compile_pipeline(const Pipeline& pipeline)

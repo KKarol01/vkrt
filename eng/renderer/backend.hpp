@@ -38,9 +38,11 @@ class IRendererBackend
     virtual void allocate_sampler(Sampler& sampler) = 0;
     virtual void make_shader(Shader& shader) = 0;
     virtual bool compile_shader(const Shader& shader) = 0;
+    virtual void destroy_shader(Shader& shader) = 0;
     virtual bool compile_layout(DescriptorLayout& layout) = 0;
     virtual bool compile_layout(PipelineLayout& layout) = 0;
     virtual void make_pipeline(Pipeline& pipeline) = 0;
+    virtual void destroy_pipeline(Pipeline& pipeline) = 0;
     virtual bool compile_pipeline(const Pipeline& pipeline) = 0;
     virtual Sync* make_sync(const SyncCreateInfo& info) = 0;
     virtual void destory_sync(Sync*) = 0;

@@ -1,4 +1,5 @@
 #include <meshoptimizer/src/meshoptimizer.h>
+#include <ranges>
 #include "renderer.hpp"
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/engine.hpp>
@@ -9,6 +10,7 @@
 #include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
+#include <eng/assets/asset_manager.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
 #include <eng/renderer/passes/renderpass.hpp>
@@ -88,6 +90,15 @@ void Renderer::init(IRendererBackend* backend)
             }
         }
     });
+
+    const auto queue_shader_for_recompilation = [this](const fs::Path& path) {
+        auto it = std::ranges::find_if(shaders, [&path](const auto& e) { return e.path == path; });
+        if(it == shaders.end()) { return; }
+        if(std::ranges::any_of(shaders_to_recompile, [&path](const auto& e) { return e->path == path; })) { return; }
+        shaders_to_recompile.push_back(Handle<Shader>{ (Handle<Shader>::StorageType)std::distance(shaders.begin(), it) });
+    };
+    get_engine().assets->notify_on_dir_change("/assets/shaders", queue_shader_for_recompilation);
+    get_engine().assets->notify_on_dir_change("/eng/renderer/shaders", queue_shader_for_recompilation);
 
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
@@ -360,7 +371,7 @@ void Renderer::update()
     {
         if(swapchain)
         {
-            vkDeviceWaitIdle(((RendererBackendVk*)backend)->dev);
+            vkDeviceWaitIdle(RendererBackendVk::get_dev());
             backend->destroy_swapchain(swapchain);
             swapchain = nullptr;
         }
@@ -416,6 +427,23 @@ void Renderer::update()
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
     }
 
+    if(shaders_to_recompile.size())
+    {
+        vkDeviceWaitIdle(RendererBackendVk::get_dev());
+        for(auto sh : shaders_to_recompile)
+        {
+            this->backend->destroy_shader(sh.get());
+            this->backend->make_shader(sh.get());
+            new_shaders.push_back(sh);
+            for(auto pipelineh : sh->using_pipelines)
+            {
+                this->backend->destroy_pipeline(pipelineh.get());
+                this->backend->make_pipeline(pipelineh.get());
+                new_pipelines.push_back(pipelineh);
+            }
+        }
+        shaders_to_recompile.clear();
+    }
     if(new_shaders.size())
     {
         for(auto& e : new_shaders)
@@ -428,6 +456,10 @@ void Renderer::update()
     {
         for(auto& e : new_pipelines)
         {
+            for(auto shaderh : e->info.shaders)
+            {
+                shaderh->using_pipelines.push_back(e);
+            }
             backend->compile_pipeline(e.get());
         }
         new_pipelines.clear();
@@ -751,11 +783,17 @@ Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
 Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
 {
     auto shader = Shader::init(path);
-    const auto found_handle = shaders.find(shader);
-    if(!found_handle) { backend->make_shader(shader); }
-    auto it = shaders.insert(std::move(shader));
-    if(!found_handle) { new_shaders.push_back(it.handle); }
-    return it.handle;
+    const auto it = std::ranges::find_if(shaders, [&path](const auto& e) { return e.path == path; });
+    const auto found_handle = it != shaders.end();
+    if(!found_handle)
+    {
+        const auto handle = Handle<Shader>{ (Handle<Shader>::StorageType)shaders.size() };
+        backend->make_shader(shader);
+        shaders.push_back(std::move(shader));
+        new_shaders.push_back(handle);
+        return handle;
+    }
+    return Handle<Shader>{ (Handle<Shader>::StorageType)std::distance(shaders.begin(), it) };
 }
 
 Handle<DescriptorLayout> Renderer::make_layout(const DescriptorLayout& info)
@@ -785,11 +823,17 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
         // with bindless, all pipeline layout should be the same
         ENG_ASSERT(p.info.layout == settings.common_layout);
     }
-    const auto found_handle = pipelines.find(p);
-    if(!found_handle) { backend->make_pipeline(p); }
-    auto it = pipelines.insert(std::move(p));
-    if(!found_handle) { new_pipelines.push_back(it.handle); }
-    return it.handle;
+    const auto it = std::ranges::find(pipelines, p);
+    const auto found_handle = it != pipelines.end();
+    if(!found_handle)
+    {
+        const auto handle = Handle<Pipeline>{ (Handle<Pipeline>::StorageType)pipelines.size() };
+        backend->make_pipeline(p);
+        new_pipelines.push_back(handle);
+        pipelines.push_back(std::move(p));
+        return handle;
+    }
+    return Handle<Pipeline>{ (Handle<Pipeline>::StorageType)std::distance(pipelines.begin(), it) };
 }
 
 Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_sync(info); }

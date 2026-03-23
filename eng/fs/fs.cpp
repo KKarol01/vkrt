@@ -90,8 +90,15 @@ FilePtr FileSystem::open_file(const Path& path, OpenMode mode)
         else { filemap.erase(fileit); }
     }
 
+    const auto pathstr = path.string();
     FILE* rawfile{};
-    fopen_s(&rawfile, path.string().c_str(), open_mode_to_posix(mode));
+    const auto EACCESS_ERRNO = 13; // sometimes i get access violation and cannot open the file.
+                                   // i suspect this is because of file listening in asset_manager.
+    auto tries = 0u;
+    while(fopen_s(&rawfile, pathstr.c_str(), open_mode_to_posix(mode)) == EACCESS_ERRNO && tries++ < 10)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
+    }
 
     if(!rawfile) { return {}; }
 

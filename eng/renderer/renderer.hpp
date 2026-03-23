@@ -101,10 +101,11 @@ struct Shader
             else { ENG_WARN("Unrecognized shader extension: {}", ext.string()); }
             return stage;
         }();
-        return Shader{ path, stage, {} };
+        return Shader{ path, stage, {}, {} };
     }
     std::filesystem::path path;
     ShaderStage stage{ ShaderStage::NONE };
+    std::vector<Handle<Pipeline>> using_pipelines;
     struct Metadata
     {
         ShaderMetadataVk* vk() const { return (ShaderMetadataVk*)ptr; }
@@ -293,8 +294,10 @@ struct Pipeline
     bool operator==(const Pipeline& a) const { return info == a.info; }
     PipelineCreateInfo info;
     PipelineType type{};
-    union Metadata {
-        PipelineMetadataVk* vk{};
+    struct Metadata
+    {
+        PipelineMetadataVk* vk() const { return (PipelineMetadataVk*)ptr; }
+        void* ptr{};
     } md;
 };
 
@@ -821,17 +824,18 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer, 1024> buffers;
-    Slotmap<Image, 1024> images;
+    Slotmap<Buffer, 128> buffers;
+    Slotmap<Image, 128> images;
     std::vector<std::string> buffer_names;
     std::vector<std::string> image_names;
 
     HandleFlatSet<Sampler> samplers;
-    HandleFlatSet<Shader> shaders;
+    std::vector<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
+    std::vector<Handle<Shader>> shaders_to_recompile;
     HandleFlatSet<DescriptorLayout, std::hash<DescriptorLayout>, LayoutCompatibilityChecker<DescriptorLayout>> dlayouts;
     HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>, LayoutCompatibilityChecker<PipelineLayout>> pplayouts;
-    HandleFlatSet<Pipeline> pipelines;
+    std::vector<Pipeline> pipelines;
     std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
@@ -864,7 +868,8 @@ ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_render
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(Slotmap<eng::gfx::Image, 1024>::SlotId{*handle}); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders.at(handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders[*handle]; });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
@@ -872,7 +877,6 @@ ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_ren
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts.at(handle); });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(handle); });
 // clang-format on

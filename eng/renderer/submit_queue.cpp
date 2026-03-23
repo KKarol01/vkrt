@@ -148,7 +148,7 @@ void CommandBufferVk::bind_index(const Buffer& index, uint32_t offset, VkIndexTy
 
 void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
 {
-    const auto& md = *pipeline.md.vk;
+    const auto& md = *pipeline.md.vk();
     vkCmdBindPipeline(cmd, to_vk(pipeline.type), md.pipeline);
     current_pipeline = &pipeline;
 }
