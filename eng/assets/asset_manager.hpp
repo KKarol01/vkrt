@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 #include <eng/fs/fs.hpp>
 #include <eng/common/callback.hpp>
@@ -10,8 +11,8 @@ class AssetManager
 {
     struct DirCallback
     {
-        Signal<void(const fs::Path)> on_dir_change;
-        void* handle;
+        Signal<void(const fs::Path&)> on_dir_change;
+        std::shared_ptr<void> handle{};
     };
 
   public:
