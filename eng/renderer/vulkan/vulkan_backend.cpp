@@ -1426,9 +1426,10 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         }();
         if(!shader_target) { return false; }
 
-        constexpr const char* include_path = "./"; // compilation should happen from where the folder assets/ is
-        const auto hlsl_path = shader.path.string();
-        const auto spv_path = shader.path.string() + ".spv";
+        // compilation should happen from where the folder assets/ is
+        const auto include_path = get_engine().assets->get_assets_path().string();
+        const auto hlsl_path = get_engine().assets->make_path(shader.path).string();
+        const auto spv_path = get_engine().assets->make_path(shader.path.string() + ".spv").string();
         const char* args[]{
             "dxc.exe",
             "-T",
@@ -1442,7 +1443,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
             "-Zi",
 #endif
             "-I",
-            include_path,
+            include_path.c_str(),
             "-Fo",
             spv_path.c_str(),
             hlsl_path.c_str(),
