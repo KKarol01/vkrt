@@ -20,7 +20,7 @@ void ICommandBuffer::wait_sync(Sync* sync, Flags<PipelineStage> stage)
 
 void ICommandBuffer::signal_sync(Sync* sync, Flags<PipelineStage> stage)
 {
-    sync_deps.emplace_back(sync, sync->signal_gpu(), stage, false);
+    sync_deps.emplace_back(sync, sync->get_next_signal_value(), stage, false);
 }
 
 void CommandBufferVk::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
@@ -475,10 +475,7 @@ SubmitQueue& SubmitQueue::with_cmd_buf(ICommandBuffer* cmd)
 
 void SubmitQueue::submit()
 {
-    std::vector<VkSemaphoreSubmitInfo> vkwaitinfos(submission.wait_sems.size());
-    std::vector<VkSemaphoreSubmitInfo> vksiginfos(submission.signal_sems.size());
     std::vector<VkCommandBufferSubmitInfo> vkcmdinfos(submission.cmds.size());
-
     for(auto i = 0u; i < vkcmdinfos.size(); ++i)
     {
         vkcmdinfos[i] = vk::VkCommandBufferSubmitInfo{};
@@ -490,6 +487,8 @@ void SubmitQueue::submit()
         }
         submission.cmds[i]->sync_deps.clear();
     }
+
+    std::vector<VkSemaphoreSubmitInfo> vkwaitinfos(submission.wait_sems.size());
     for(auto i = 0u; i < vkwaitinfos.size(); ++i)
     {
         vkwaitinfos[i] = vk::VkSemaphoreSubmitInfo{};
@@ -497,6 +496,8 @@ void SubmitQueue::submit()
         vkwaitinfos[i].value = submission.wait_values[i];
         vkwaitinfos[i].stageMask = to_vk(submission.wait_stages[i]);
     }
+
+    std::vector<VkSemaphoreSubmitInfo> vksiginfos(submission.signal_sems.size());
     for(auto i = 0u; i < vksiginfos.size(); ++i)
     {
         vksiginfos[i] = vk::VkSemaphoreSubmitInfo{};
