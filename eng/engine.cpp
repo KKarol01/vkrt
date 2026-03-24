@@ -117,7 +117,7 @@ void Engine::init(int argc, char* argv[])
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     fs = new fs::FileSystem{};
-    assets = new AssetManager{};
+    assets = new assets::AssetManager{};
     window = new Window{ 1280.0f, 768.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};

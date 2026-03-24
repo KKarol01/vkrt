@@ -91,14 +91,9 @@ void Renderer::init(IRendererBackend* backend)
         }
     });
 
-    const auto queue_shader_for_recompilation = [this](const fs::Path& path) {
-        auto it = std::ranges::find_if(shaders, [&path](const auto& e) { return e.path == path; });
-        if(it == shaders.end()) { return; }
-        if(std::ranges::any_of(shaders_to_recompile, [&path](const auto& e) { return e->path == path; })) { return; }
-        shaders_to_recompile.push_back(Handle<Shader>{ (Handle<Shader>::StorageType)std::distance(shaders.begin(), it) });
-    };
-    get_engine().assets->notify_on_dir_change("/assets/shaders", queue_shader_for_recompilation);
-    get_engine().assets->notify_on_dir_change("/eng/renderer/shaders", queue_shader_for_recompilation);
+    new_shaders_listener = get_engine().assets->make_listener();
+    get_engine().assets->listen_for_path("/assets/shaders", new_shaders_listener);
+    get_engine().assets->listen_for_path("/eng/renderer/shaders", new_shaders_listener);
 
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
@@ -427,11 +422,14 @@ void Renderer::update()
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
     }
 
-    if(shaders_to_recompile.size())
-    {
+    new_shaders_listener->consume_paths([this](std::vector<fs::Path> paths) {
+        return;
         vkDeviceWaitIdle(RendererBackendVk::get_dev());
-        for(auto sh : shaders_to_recompile)
+        for(const auto& path : paths)
         {
+            auto shaderit = std::ranges::find_if(shaders, [&path](const auto& sh) { return sh.path == path; });
+            if(shaderit == shaders.end()) { continue; }
+            auto sh = Handle<Shader>{ (uint32_t)std::distance(shaders.begin(), shaderit) };
             this->backend->destroy_shader(sh.get());
             this->backend->make_shader(sh.get());
             new_shaders.push_back(sh);
@@ -442,8 +440,8 @@ void Renderer::update()
                 new_pipelines.push_back(pipelineh);
             }
         }
-        shaders_to_recompile.clear();
-    }
+    });
+
     if(new_shaders.size())
     {
         for(auto& e : new_shaders)

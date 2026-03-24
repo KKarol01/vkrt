@@ -15,7 +15,10 @@ struct Window;
 class Camera;
 class Scene;
 
+namespace assets
+{
 class AssetManager;
+}
 
 namespace ui
 {
@@ -85,7 +88,7 @@ class Engine
     void start();
 
     fs::FileSystem* fs{};
-    AssetManager* assets{};
+    assets::AssetManager* assets{};
 
     Window* window{};
     Camera* camera{};

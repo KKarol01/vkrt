@@ -2,19 +2,47 @@
 
 #include <memory>
 #include <unordered_map>
+#include <deque>
+#include <eng/common/handle.hpp>
 #include <eng/fs/fs.hpp>
-#include <eng/common/callback.hpp>
 
 namespace eng
 {
+namespace assets
+{
+
+class DirectoryListener
+{
+  public:
+    void add_paths(std::span<const fs::Path> paths)
+    {
+        std::scoped_lock lock{ mutex };
+        changed_files.insert(changed_files.end(), paths.begin(), paths.end());
+    }
+
+    void consume_paths(auto&& cb)
+    {
+        std::scoped_lock lock{ mutex };
+        if(changed_files.empty()) { return; }
+        cb(std::move(changed_files));
+        ENG_ASSERT(changed_files.empty());
+    }
+
+    std::vector<fs::Path> changed_files;
+    std::unordered_map<fs::Path, std::shared_ptr<void>> listeners;
+    std::mutex mutex;
+};
+
+} // namespace assets
+
+ENG_DEFINE_HANDLE_STORAGE(assets::DirectoryListener, uintptr_t);
+ENG_DEFINE_HANDLE_ALL_GETTERS(assets::DirectoryListener,
+                              { return handle ? reinterpret_cast<assets::DirectoryListener*>(*handle) : nullptr; });
+
+namespace assets
+{
 class AssetManager
 {
-    struct DirCallback
-    {
-        Signal<void(const fs::Path&)> on_dir_change;
-        std::shared_ptr<void> handle{};
-    };
-
   public:
     void init();
     bool was_properly_init() const { return !assets_dir_path.empty(); }
@@ -23,22 +51,18 @@ class AssetManager
     fs::FilePtr get_asset(const fs::Path& path, fs::OpenMode mode);
     fs::Path get_assets_path() const { return assets_dir_path; }
 
-    void notify_on_dir_change(const fs::Path& virtual_path, const auto& callback)
+    Handle<DirectoryListener> make_listener()
     {
-        if(virtual_path.empty()) { return; }
-        if(!virtual_path.string().starts_with('/')) { return; }
-        if(virtual_path.has_extension()) { return; }
-        auto physical_path = make_path(virtual_path);
-        if(!physical_path.is_absolute()) { physical_path = std::filesystem::absolute(physical_path); }
-        auto it = dir_change_cb_map.emplace(virtual_path, DirCallback{});
-        it.first->second.on_dir_change += callback;
-        if(it.second) { install_notify_on_dir_change_callback(virtual_path, physical_path); }
+        auto* ptr = &dir_listeners.emplace_back();
+        return Handle<DirectoryListener>{ reinterpret_cast<uintptr_t>(ptr) };
     }
 
-  private:
-    void install_notify_on_dir_change_callback(const fs::Path& virtual_path, const fs::Path& physical_path);
+    void listen_for_path(const fs::Path& virtual_path, Handle<DirectoryListener> listener);
 
-    std::unordered_map<fs::Path, DirCallback> dir_change_cb_map;
+  private:
+    std::deque<DirectoryListener> dir_listeners;
     fs::Path assets_dir_path;
 };
+
+} // namespace assets
 } // namespace eng

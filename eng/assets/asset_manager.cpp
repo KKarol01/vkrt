@@ -9,8 +9,8 @@ namespace eng
 
 struct Win32DirChangeHandle
 {
-    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, Signal<void(const fs::Path&)>* signal)
-        : virtual_path(virtual_path), physical_path(physical_path), signal(signal)
+    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, Handle<assets::DirectoryListener> listener)
+        : virtual_path(virtual_path), physical_path(physical_path), listener(listener)
     {
     }
     ~Win32DirChangeHandle() { close(); }
@@ -60,20 +60,31 @@ struct Win32DirChangeHandle
                     continue;
                 }
                 FILE_NOTIFY_INFORMATION info{};
-                for(size_t offset = 0; rec_bytes > 0; offset += info.NextEntryOffset)
+                std::vector<fs::Path> paths;
+                paths.reserve(rec_bytes / sizeof(FILE_NOTIFY_INFORMATION));
+                size_t offset = 0;
+                while(true)
                 {
-                    memcpy(&info, &buffer[offset], sizeof(info));
-                    std::wstring wstr(info.FileNameLength / sizeof(wchar_t), L'\0');
-                    memcpy(wstr.data(), ((char*)&buffer[offset] + offsetof(FILE_NOTIFY_INFORMATION, FileName)),
-                           wstr.size() * sizeof(wstr[0]));
-                    auto win_path = std::filesystem::path{ wstr };
-                    const auto p = (virtual_path / win_path).generic_string();
-                    signal->signal(p);
+                    FILE_NOTIFY_INFORMATION info;
+                    memcpy(&info, &buffer[offset], offsetof(FILE_NOTIFY_INFORMATION, FileName));
+                    if(info.FileNameLength > 0)
+                    {
+                        std::wstring wstr(info.FileNameLength / sizeof(wchar_t), L'\0');
+                        memcpy(wstr.data(), &buffer[offset + offsetof(FILE_NOTIFY_INFORMATION, FileName)], info.FileNameLength);
+                        auto win_path = std::filesystem::path{ wstr };
+                        paths.push_back((virtual_path / win_path).generic_string());
+                    }
                     if(info.NextEntryOffset == 0) { break; }
+                    offset += info.NextEntryOffset;
+                    if(offset >= rec_bytes) { break; }
                 }
+
+                
+                listener->add_paths(paths);
 
                 if(!stop)
                 {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     const auto queued = ReadDirectoryChangesW(notification, buffer, sizeof(buffer), true,
                                                               FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, &overlap, nullptr);
                     if(!queued) { break; }
@@ -102,13 +113,13 @@ struct Win32DirChangeHandle
     HANDLE notification{};
     HANDLE event{};
     OVERLAPPED overlap{};
-    Signal<void(const fs::Path&)>* signal{};
+    Handle<assets::DirectoryListener> listener;
     uint32_t buffer[1024 / 4]{};
     bool stop{};
     std::thread wait_thread;
 };
 
-void AssetManager::init()
+void assets::AssetManager::init()
 {
     static constexpr int MAX_UP = 5;
     std::filesystem::path cwd = "./";
@@ -132,24 +143,33 @@ void AssetManager::init()
     }
 }
 
-fs::Path AssetManager::make_path(const fs::Path& path)
+fs::Path assets::AssetManager::make_path(const fs::Path& path)
 {
     if(path.string().starts_with("/")) { return assets_dir_path / fs::Path{ path.string().erase(0, 1) }; }
     return path;
 }
 
-fs::FilePtr AssetManager::get_asset(const fs::Path& path, fs::OpenMode mode)
+fs::FilePtr assets::AssetManager::get_asset(const fs::Path& path, fs::OpenMode mode)
 {
     const auto _path = make_path(path);
     return get_engine().fs->open_file(_path, mode);
 }
 
-void AssetManager::install_notify_on_dir_change_callback(const fs::Path& virtual_path, const fs::Path& physical_path)
+void assets::AssetManager::listen_for_path(const fs::Path& virtual_path, Handle<DirectoryListener> listener)
 {
-    auto& dir_callback = dir_change_cb_map[virtual_path];
-    auto ptr = std::make_shared<Win32DirChangeHandle>(virtual_path, physical_path, &dir_callback.on_dir_change);
-    dir_callback.handle = ptr;
-    ptr->start();
+    if(!listener) { return; }
+    if(virtual_path.empty()) { return; }
+    if(!virtual_path.string().starts_with('/')) { return; }
+    if(virtual_path.has_extension()) { return; }
+    auto physical_path = make_path(virtual_path);
+    if(!physical_path.is_absolute()) { physical_path = std::filesystem::absolute(physical_path); }
+    auto it = listener->listeners.emplace(virtual_path, nullptr);
+    if(it.second)
+    {
+        auto ptr = std::make_shared<Win32DirChangeHandle>(virtual_path, physical_path, listener);
+        it.first->second = ptr;
+        ptr->start();
+    }
 }
 
 } // namespace eng

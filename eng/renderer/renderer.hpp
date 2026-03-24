@@ -25,6 +25,7 @@
 #include <eng/common/callback.hpp>
 #include <eng/common/slotallocator.hpp>
 #include <eng/ecs/components.hpp>
+#include <eng/assets/asset_manager.hpp>
 
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
 ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range));
@@ -832,7 +833,7 @@ class Renderer
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
-    std::vector<Handle<Shader>> shaders_to_recompile;
+    Handle<assets::DirectoryListener> new_shaders_listener;
     HandleFlatSet<DescriptorLayout, std::hash<DescriptorLayout>, LayoutCompatibilityChecker<DescriptorLayout>> dlayouts;
     HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>, LayoutCompatibilityChecker<PipelineLayout>> pplayouts;
     std::vector<Pipeline> pipelines;

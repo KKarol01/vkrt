@@ -20,7 +20,7 @@ template <typename T> struct HandleStorage
 };
 
 #define ENG_DEFINE_HANDLE_STORAGE(type, storage)                                                                       \
-    template <> struct ::eng::HandleStorage<type>                                                                      \
+    template <> struct HandleStorage<type>                                                                             \
     {                                                                                                                  \
         using storage_type = storage;                                                                                  \
     }
