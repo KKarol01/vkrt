@@ -59,32 +59,28 @@ struct Win32DirChangeHandle
                     if(stop) { break; }
                     continue;
                 }
-                FILE_NOTIFY_INFORMATION info{};
                 std::vector<fs::Path> paths;
                 paths.reserve(rec_bytes / sizeof(FILE_NOTIFY_INFORMATION));
                 size_t offset = 0;
-                while(true)
+                FILE_NOTIFY_INFORMATION info{};
+                while(offset < rec_bytes)
                 {
-                    FILE_NOTIFY_INFORMATION info;
-                    memcpy(&info, &buffer[offset], offsetof(FILE_NOTIFY_INFORMATION, FileName));
+                    auto* file_info = (char*)buffer + offset;
+                    memcpy(&info, file_info, sizeof(FILE_NOTIFY_INFORMATION));
                     if(info.FileNameLength > 0)
                     {
-                        std::wstring wstr(info.FileNameLength / sizeof(wchar_t), L'\0');
-                        memcpy(wstr.data(), &buffer[offset + offsetof(FILE_NOTIFY_INFORMATION, FileName)], info.FileNameLength);
-                        auto win_path = std::filesystem::path{ wstr };
-                        paths.push_back((virtual_path / win_path).generic_string());
+                        std::wstring_view filename((wchar_t*)(file_info + offsetof(FILE_NOTIFY_INFORMATION, FileName)),
+                                                   info.FileNameLength / sizeof(wchar_t));
+                        paths.push_back((virtual_path / filename).generic_string());
                     }
                     if(info.NextEntryOffset == 0) { break; }
                     offset += info.NextEntryOffset;
-                    if(offset >= rec_bytes) { break; }
                 }
 
-                
                 listener->add_paths(paths);
 
                 if(!stop)
                 {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     const auto queued = ReadDirectoryChangesW(notification, buffer, sizeof(buffer), true,
                                                               FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, &overlap, nullptr);
                     if(!queued) { break; }
@@ -114,7 +110,7 @@ struct Win32DirChangeHandle
     HANDLE event{};
     OVERLAPPED overlap{};
     Handle<assets::DirectoryListener> listener;
-    uint32_t buffer[1024 / 4]{};
+    uint32_t buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128]{};
     bool stop{};
     std::thread wait_thread;
 };

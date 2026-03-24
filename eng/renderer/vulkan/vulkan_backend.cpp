@@ -1364,6 +1364,11 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         ENG_WARN("Shader {} does not have metadata; cannot compile.", shader.path.string());
         return false;
     }
+    if(shmd->shader)
+    {
+        ENG_WARN("Shader {} was already compiled.", shader.path.string());
+        return false;
+    }
 
     fs::FilePtr shaderfile = get_engine().assets->get_asset(shader.path, fs::OpenMode::RB);
     if(!shaderfile)

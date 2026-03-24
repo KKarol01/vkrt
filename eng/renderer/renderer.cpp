@@ -423,22 +423,38 @@ void Renderer::update()
     }
 
     new_shaders_listener->consume_paths([this](std::vector<fs::Path> paths) {
-        return;
+        if(paths.empty()) { return; }
         vkDeviceWaitIdle(RendererBackendVk::get_dev());
-        for(const auto& path : paths)
+        const auto to_recompile = [this, &paths] {
+            std::vector<Handle<Shader>> ret;
+            ret.reserve(paths.size());
+            for(const auto& p : paths)
+            {
+                auto it = std::ranges::find_if(shaders, [&p](const auto& sh) { return sh.path == p; });
+                if(it != shaders.end()) { ret.emplace_back((uint32_t)std::distance(shaders.begin(), it)); }
+            }
+            return ret;
+        }();
+        for(auto sh : to_recompile)
         {
-            auto shaderit = std::ranges::find_if(shaders, [&path](const auto& sh) { return sh.path == path; });
-            if(shaderit == shaders.end()) { continue; }
-            auto sh = Handle<Shader>{ (uint32_t)std::distance(shaders.begin(), shaderit) };
-            this->backend->destroy_shader(sh.get());
-            this->backend->make_shader(sh.get());
-            new_shaders.push_back(sh);
+            auto new_shader = Shader::init(sh->path);
+            backend->make_shader(new_shader);
+            const auto compilation_res = backend->compile_shader(new_shader);
+            if(!compilation_res)
+            {
+                backend->destroy_shader(new_shader);
+                continue;
+            }
+            backend->destroy_shader(sh.get());
+            ENG_ASSERT(!sh->md.ptr && new_shader.md.ptr);
+            sh->md = new_shader.md;
             for(auto pipelineh : sh->using_pipelines)
             {
-                this->backend->destroy_pipeline(pipelineh.get());
-                this->backend->make_pipeline(pipelineh.get());
+                backend->destroy_pipeline(pipelineh.get());
+                backend->make_pipeline(pipelineh.get());
                 new_pipelines.push_back(pipelineh);
             }
+            sh->using_pipelines.clear();
         }
     });
 

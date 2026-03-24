@@ -17,18 +17,21 @@ class DirectoryListener
     void add_paths(std::span<const fs::Path> paths)
     {
         std::scoped_lock lock{ mutex };
-        changed_files.insert(changed_files.end(), paths.begin(), paths.end());
+        changed_files.insert(paths.begin(), paths.end());
     }
 
     void consume_paths(auto&& cb)
     {
         std::scoped_lock lock{ mutex };
         if(changed_files.empty()) { return; }
-        cb(std::move(changed_files));
-        ENG_ASSERT(changed_files.empty());
+
+        auto vec = std::vector<fs::Path>(std::make_move_iterator(changed_files.begin()),
+                                         std::make_move_iterator(changed_files.end()));
+        cb(std::move(vec));
+        changed_files.clear();
     }
 
-    std::vector<fs::Path> changed_files;
+    std::unordered_set<fs::Path> changed_files;
     std::unordered_map<fs::Path, std::shared_ptr<void>> listeners;
     std::mutex mutex;
 };
