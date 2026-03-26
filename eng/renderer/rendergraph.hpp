@@ -16,8 +16,8 @@ namespace gfx
 {
 
 class GPUTransientAllocator;
-using RGResourceId = Handle<RGResource>;
-using RGAccessId = Handle<RGAccess>;
+using RGResourceId = TypedId<RGResource, uint32_t>;
+using RGAccessId = TypedId<RGAccess, uint32_t>;
 
 struct RGPass
 {
@@ -224,6 +224,10 @@ struct RGBuilder
         return access_resource(acc, stage, access, range);
     }
 
+    RGResourceId as_res_id(RGAccessId acc) const;
+
+    RGAccessId as_acc_id(RGResourceId res) const;
+
     ICommandBuffer* open_cmd_buf();
 
     RGPass* pass{};
@@ -247,10 +251,9 @@ class RGRenderGraph
 
     // utility funcs for easy access to resources
     RGAccess& get_acc(RGAccessId a) { return accesses[*a]; }
-    RGAccessId get_acc(RGResourceId a) { return get_res(a).last_access; }
+    RGAccess& get_acc(RGResourceId a) { return get_acc(get_res(a).last_access); }
     RGResource& get_res(RGResourceId a) { return resources[*a]; }
     RGResource& get_res(RGAccessId a) { return resources[*get_acc(a).resource]; }
-    RGResourceId get_res_id(RGAccessId a) { return get_acc(a).resource; }
     Handle<Buffer> get_buf(RGAccessId a) { return get_res(a).as_buffer(); }
     Handle<Buffer> get_buf(RGResourceId a) { return get_res(a).as_buffer(); }
     Handle<Image> get_img(RGAccessId a) { return get_res(a).as_image(); }

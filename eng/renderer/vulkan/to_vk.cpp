@@ -132,6 +132,7 @@ VkCompareOp to_vk(const DepthCompare& a)
     {
         case DepthCompare::NEVER: { return VK_COMPARE_OP_NEVER; }
         case DepthCompare::LESS: { return VK_COMPARE_OP_LESS; }
+        case DepthCompare::LEQUAL: { return VK_COMPARE_OP_LESS_OR_EQUAL; }
         case DepthCompare::GREATER: { return VK_COMPARE_OP_GREATER; }
         case DepthCompare::GEQUAL: { return VK_COMPARE_OP_GREATER_OR_EQUAL; }
         case DepthCompare::EQUAL: { return VK_COMPARE_OP_EQUAL; }

@@ -35,6 +35,7 @@ enum class DepthCompare
 {
     NEVER,
     LESS,
+    LEQUAL,
     GREATER,
     GEQUAL,
     EQUAL
@@ -429,12 +430,7 @@ struct MeshInstance;
 struct InstanceBatch;
 struct IndirectDrawParams;
 struct IndirectBatch;
-class RenderPass;
-
-namespace pass
-{
-class IPass;
-}
+class MeshRenderData;
 
 struct BufferView
 {

@@ -17,6 +17,6 @@ VS_OUT main(uint vertex_index : SV_VertexID)
     output.color = unpackUnorm4x8(vx.color);
     output.color.xyz = pow(output.color.xyz, float3(2.2, 2.2, 2.2));
     output.uv = vx.uv;
-    output.pos = float4(vx.pos * pc.scale + pc.translate, 0.0, 1.0);
+    output.pos = float4(vx.pos * pc.scale + pc.translate, 0.0, 1.0); 
     return output;
 }

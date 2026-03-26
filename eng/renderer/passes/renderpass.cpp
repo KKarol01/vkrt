@@ -9,7 +9,7 @@ namespace eng
 namespace gfx
 {
 
-void RenderPass::build()
+void MeshRenderData::build()
 {
     if(!mesh_instances.empty()) { return; }
 
@@ -102,7 +102,7 @@ void RenderPass::build()
     draw.cmds_view = BufferView::init(draw.indirect_buf, cmds_start, cmds_size);
 }
 
-void RenderPass::add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh)
+void MeshRenderData::add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh)
 {
     mesh_instances.clear();
     const auto& m = mesh.get();

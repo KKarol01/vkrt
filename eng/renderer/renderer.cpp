@@ -86,7 +86,7 @@ void Renderer::init(IRendererBackend* backend)
 
             for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
             {
-                if(mp.effects[i]) { render_passes[i].add_mesh(mesh.gpu_resource, rm); }
+                if(mp.effects[i]) { mesh_render_data[i].add_mesh(mesh.gpu_resource, rm); }
             }
         }
     });
@@ -97,9 +97,9 @@ void Renderer::init(IRendererBackend* backend)
 
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
-        RenderPass rp{};
+        MeshRenderData rp{};
         rp.type = (RenderPassType)i;
-        render_passes[i] = rp;
+        mesh_render_data[i] = rp;
     }
 }
 
@@ -215,6 +215,14 @@ void Renderer::init_pipelines()
     // });
 
     {
+        settings.default_z_prepass_pipeline = make_pipeline(
+            PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/default_z_prepass/z_prepass.vs.hlsl"),
+                                       make_shader("/eng/renderer/shaders/default_z_prepass/z_prepass.ps.hlsl") })
+                .init_image_attachments(PipelineCreateInfo::AttachmentState{
+                    .count = 0, .color_formats = {}, .blend_states = {}, .depth_format = settings.depth_format })
+                .init_depth_test(true, true, settings.rw_depth_compare)
+                .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
+
         settings.default_forward_pipeline = make_pipeline(
             PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/default_unlit/default_unlit.vs.hlsl"),
                                        make_shader("/eng/renderer/shaders/default_unlit/default_unlit.ps.hlsl") })
@@ -229,13 +237,15 @@ void Renderer::init_pipelines()
                                                                       .dst_alpha_factor = BlendFactor::ZERO,
                                                                       .alpha_op = BlendOp::ADD } },
                     .depth_format = settings.depth_format })
-                .init_depth_test(true, true, settings.depth_compare)
+                .init_depth_test(true, false, settings.read_depth_compare)
                 .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
     }
 
     {
+        const auto zprepass_effect = make_shader_effect(ShaderEffect{ .pipeline = settings.default_z_prepass_pipeline });
         const auto unlit_effect = make_shader_effect(ShaderEffect{ .pipeline = settings.default_forward_pipeline });
         MeshPass::Effects effects{};
+        effects[(int)RenderPassType::Z_PREPASS] = zprepass_effect;
         effects[(int)RenderPassType::FORWARD] = unlit_effect;
 
         settings.default_meshpass = make_mesh_pass(MeshPass::init("mesh_pass_default_unlit", effects));
@@ -400,7 +410,7 @@ void Renderer::update()
 
     if(current_data->retired_resources.size() > 0)
     {
-        ENG_LOG("Removing {} retired resources", current_data->retired_resources.size());
+        // ENG_LOG("Removing {} retired resources", current_data->retired_resources.size());
         auto remove_until = current_data->retired_resources.begin();
         for(auto& rs : current_data->retired_resources)
         {
@@ -408,13 +418,13 @@ void Renderer::update()
             ++remove_until;
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
-                ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
+                // ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
                 backend->destroy_buffer(buf->get());
                 buffers.erase(Slotmap<Buffer, 1024>::SlotId{ buf->handle });
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
-                ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
+                // ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
                 backend->destroy_image(img->get());
                 images.erase(Slotmap<Image, 1024>::SlotId{ img->handle });
             }
@@ -532,6 +542,12 @@ void Renderer::update()
 
     compile_rendergraph();
 
+    {
+        auto* cmd = current_data->cmdpool->begin();
+        cmd->reset_query_pool(current_data->timestamp_pool);
+        current_data->cmdpool->end(cmd);
+    }
+
     Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->get_wait_sem() };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
     auto* cmd = current_data->cmdpool->begin();
@@ -548,123 +564,38 @@ void Renderer::update()
 
 void Renderer::compile_rendergraph()
 {
+    current_data->passes.clear();
+
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
-        render_passes[i].build();
+        mesh_render_data[i].build();
     }
 
-    current_data->render_targets = rgraph->add_graphics_pass<RenderTargets>(
-        "Setup render targets", RenderOrder::SETUP_TARGETS,
-        [this](RGBuilder& builder, RenderTargets& rt) {
-            RGAccessId res;
-            const auto resolution = settings.render_resolution;
-            const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT;
-            for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
-            {
-                auto str = ENG_FMT("Color{}", i);
-                res = builder.create_resource(str, Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
-                                              RGClear::color());
-                rt.color[i] = builder.graph->get_res_id(res);
-            }
-
-            res = builder.create_resource("Depth",
-                                          Image::init(resolution.x, resolution.y, settings.depth_format,
-                                                      ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                          RGClear::depth_stencil(1.0, 0u));
-            rt.depth = builder.graph->get_res_id(res);
-
-            res = builder.create_resource("constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
-            res = builder.write_buffer(res);
-            rt.constants = builder.graph->get_res_id(res);
+    current_data->render_resources = rgraph->add_graphics_pass<RenderResources>(
+        "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
+        [](RGBuilder& b, RenderResources& d) {
+            auto constsacc = b.create_resource("constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
+            constsacc = b.write_buffer(constsacc);
+            d.constants = b.as_res_id(constsacc);
         },
-        [](RGBuilder& b, const RenderTargets& rt) {
+        [](RGBuilder& b, const RenderResources& d) {
             auto* c = get_engine().camera;
             GPUEngConstants constants_buffer{};
             constants_buffer.proj_view = c->get_projection() * c->get_view();
 
             auto* cmd = b.open_cmd_buf();
-            get_renderer().staging->copy(get_renderer().rgraph->get_buf(rt.constants), &constants_buffer, 0ull,
-                                         sizeof(constants_buffer), false);
+            get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)), &constants_buffer,
+                                         0ull, sizeof(constants_buffer), false);
             cmd->wait_sync(get_renderer().staging->flush());
         });
 
-    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
-    {
-        RenderPassType type = (RenderPassType)i;
-        const auto name = ENG_FMT("DrawMaterial{}", i);
-        struct MaterialDrawData
-        {
-            RGAccessId color;
-            RGAccessId depth;
-        };
-
-        if(render_passes[i].draw.batches.empty()) { continue; }
-
-        rgraph->add_graphics_pass<MaterialDrawData>(
-            name.c_str(), RenderOrder::DEFAULT_UNLIT,
-            [this, i](RGBuilder& pb, MaterialDrawData& data) {
-                auto* w = get_engine().window;
-                const auto& rp = get_renderer().render_passes[i];
-
-                auto res = pb.import_resource(rp.draw.indirect_buf);
-                pb.access_resource(res, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-                res = pb.import_resource(rp.instance_buffer);
-                pb.read_buffer(res);
-
-                data.color = pb.access_color(pb.graph->get_acc(current_data->render_targets.color[i]));
-                pb.read_buffer(pb.graph->get_acc(current_data->render_targets.constants));
-
-                data.depth = res = pb.access_depth(pb.graph->get_acc(current_data->render_targets.depth));
-
-                auto positions = pb.import_resource(bufs.positions);
-                pb.read_buffer(positions);
-            },
-            [this, i](RGBuilder& pb, const MaterialDrawData& data) {
-                const auto& rp = get_renderer().render_passes[i];
-                auto render_res = settings.render_resolution;
-
-                vk::VkRenderingAttachmentInfo vkcols[1]{};
-                vkcols[0].imageView = pb.graph->get_acc(data.color).image_view.get_md().vk->view;
-                vkcols[0].imageLayout = to_vk(pb.graph->get_acc(data.color).layout);
-                vkcols[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-                auto vkdep = vk::VkRenderingAttachmentInfo{};
-                vkdep.imageView = pb.graph->get_acc(data.depth).image_view.get_md().vk->view;
-                vkdep.imageLayout = to_vk(pb.graph->get_acc(data.depth).layout);
-                vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-                auto vkrinfo = vk::VkRenderingInfo{};
-                vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-                vkrinfo.layerCount = 1;
-                vkrinfo.colorAttachmentCount = 1;
-                vkrinfo.pColorAttachments = vkcols;
-                vkrinfo.pDepthAttachment = &vkdep;
-                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 1.0, 0.0 };
-                VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-                DescriptorResource shaderresources[]{
-                    DescriptorResource::storage_buffer(0, pb.graph->get_buf(current_data->render_targets.constants)),
-                    DescriptorResource::storage_buffer(1, get_renderer().bufs.positions)
-                };
-                auto* cmd = pb.open_cmd_buf();
-                {
-                    ScopedTimestampQuery query{ ENG_FMT("MaterialPassDraw{}", i), cmd };
-                    cmd->begin_rendering(vkrinfo);
-                    cmd->set_viewports(&viewport, 1);
-                    cmd->set_scissors(&scissor, 1);
-                    cmd->bind_set(0, shaderresources);
-                    rp.draw.draw([&](const IndirectDrawParams& params) {
-                        cmd->bind_pipeline(params.draw->pipeline.get());
-                        cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                        cmd->draw_indexed_indirect_count(rp.draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                         rp.draw.counts_view.buffer.get(), params.count_offset_bytes,
-                                                         params.max_draw_count, params.stride);
-                    });
-                    cmd->end_rendering();
-                }
-            });
-    }
+    auto& zprepass = (pass::ZPrepass&)*current_data->passes.emplace_back(std::make_shared<pass::ZPrepass>("Z_PREPASS"));
+    auto& ompass =
+        (pass::MeshPass&)*current_data->passes.emplace_back(std::make_shared<pass::ZPrepass>("MESH_PASS_OPAQUE"));
+    const auto& zprepassd = zprepass.init(rgraph, settings.default_z_prepass_pipeline, &mesh_render_data[0]);
+    current_data->render_resources.zpdepth = zprepassd.out_depth;
+    const auto& ompassd = ompass.init(rgraph, &mesh_render_data[1]);
+    current_data->render_resources.color = ompassd.out_color;
 
     const auto imdata = imgui_renderer->update(rgraph);
 
@@ -745,7 +676,7 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
     for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
-    ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
+    // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
     auto it = buffers.insert(std::move(buffer));
@@ -1097,7 +1028,7 @@ ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffe
     query->label = label;
     query->pool = cd->timestamp_pool;
     query->index = query->pool->allocate_queries(2);
-    cmd->reset_query_pool(query->pool, query->index, 2);
+    cmd->reset_query_indices(query->pool, query->index, 2);
     cmd->write_timestamp(query->pool, PipelineStage::ALL, query->index);
 }
 

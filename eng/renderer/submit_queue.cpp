@@ -257,12 +257,17 @@ void CommandBufferVk::end_label()
 #endif
 }
 
-void CommandBufferVk::reset_query_pool(QueryPool* pool, uint32_t query_index, uint32_t count)
+void CommandBufferVk::reset_query_pool(QueryPool* pool)
+{
+    reset_query_indices(pool, 0, pool->max_queries);
+    pool->index = 0;
+}
+
+void CommandBufferVk::reset_query_indices(QueryPool* pool, uint32_t query_index, uint32_t count)
 {
     if(!pool || !pool->md.ptr) { return; }
     if(pool->index == 0) { return; }
     vkCmdResetQueryPool(cmd, pool->md.vk()->vkpool, query_index, count);
-    pool->index = 0;
 }
 
 void CommandBufferVk::write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, uint32_t index)

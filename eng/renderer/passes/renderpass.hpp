@@ -45,7 +45,7 @@ struct IndirectBatch
     BufferView cmds_view;
 };
 
-class RenderPass
+class MeshRenderData
 {
   public:
     void build();

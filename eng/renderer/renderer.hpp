@@ -35,6 +35,11 @@ namespace eng
 namespace gfx
 {
 
+namespace pass
+{
+struct Pass;
+}
+
 class Renderer;
 
 inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
@@ -659,11 +664,11 @@ enum class SubmitFlags : uint32_t
 {
 };
 
-struct RenderTargets
+struct RenderResources
 {
     RGResourceId constants;
-    RGResourceId color[3];
-    RGResourceId depth;
+    RGResourceId zpdepth;
+    RGResourceId color;
 };
 
 struct TimestampQueryResult
@@ -694,10 +699,11 @@ struct ScopedTimestampQuery
 // from one segment BEFORE adding anything ordered after.
 namespace RenderOrder
 {
-inline constexpr uint32_t SETUP_TARGETS = 90;
-inline constexpr uint32_t DEFAULT_UNLIT = 100;
-inline constexpr uint32_t UI = 200;
-inline constexpr uint32_t PRESENT = 300;
+inline constexpr uint32_t SETUP_TARGETS = 0;
+inline constexpr uint32_t Z_PREPASS = 50;
+inline constexpr uint32_t MESH_RENDER = 100;
+inline constexpr uint32_t UI = 150;
+inline constexpr uint32_t PRESENT = 200;
 }; // namespace RenderOrder
 
 class Renderer
@@ -715,7 +721,8 @@ class Renderer
         QueryPool* timestamp_pool;
         std::deque<TimestampQuery> timestamp_queries;
 
-        RenderTargets render_targets;
+        RenderResources render_resources;
+        std::deque<std::shared_ptr<pass::Pass>> passes;
 
         struct RetiredResource
         {
@@ -767,9 +774,11 @@ class Renderer
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 
-        DepthCompare depth_compare{ DepthCompare::LESS };
+        DepthCompare read_depth_compare{ DepthCompare::LEQUAL };
+        DepthCompare rw_depth_compare{ DepthCompare::LESS };
 
         Handle<PipelineLayout> common_layout;
+        Handle<Pipeline> default_z_prepass_pipeline;
         Handle<Pipeline> default_forward_pipeline;
         Handle<MeshPass> default_meshpass;
         Handle<Material> default_material;
@@ -847,7 +856,7 @@ class Renderer
     HandleFlatSet<Material> materials;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::EntityId> new_transforms;
-    std::array<RenderPass, (int)RenderPassType::LAST_ENUM> render_passes;
+    std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
     std::vector<ecs::EntityId> new_lights;
 
     GeometryBuffers bufs;
