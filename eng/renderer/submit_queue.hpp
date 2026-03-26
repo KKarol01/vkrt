@@ -215,11 +215,25 @@ struct QueryPoolCreateInfo
 
 struct QueryPool
 {
+    // Ring-buffer-like allocation with wraparound.
     uint32_t allocate_queries(uint32_t count)
     {
-        const auto offset = index.fetch_add(count);
-        if(offset > max_queries || offset + count >= max_queries) { return ~0u; }
-        return offset;
+        // Get proposal offset
+        auto offset = index.load();
+        const auto overflow_desired = count; // cas will set to count, meaning it will allocate 2 right out.
+        while(true)
+        {
+            auto next = offset + count;
+            // if oob, wraparound
+            if(next > max_queries) { next = overflow_desired; }
+            // try commiting allocation, on fail, update offset and try again
+            if(index.compare_exchange_weak(offset, next))
+            {
+                offset = next - count; // if cas succeeds, it doesn't update offset, so it still may be max_queries, when next already will have been count.
+                ENG_ASSERT(offset + count <= max_queries);
+                return offset;
+            }
+        }
     }
     QueryType type{};
     uint32_t max_queries{};

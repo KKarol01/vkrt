@@ -542,12 +542,6 @@ void Renderer::update()
 
     compile_rendergraph();
 
-    {
-        auto* cmd = current_data->cmdpool->begin();
-        cmd->reset_query_pool(current_data->timestamp_pool);
-        current_data->cmdpool->end(cmd);
-    }
-
     Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->get_wait_sem() };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
     auto* cmd = current_data->cmdpool->begin();
