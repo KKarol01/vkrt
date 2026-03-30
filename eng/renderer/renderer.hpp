@@ -668,6 +668,8 @@ struct RenderResources
 {
     RGResourceId constants;
     RGResourceId zpdepth;
+    RGResourceId normal;
+    RGResourceId ao;
     RGResourceId color;
 };
 
@@ -701,6 +703,7 @@ namespace RenderOrder
 {
 inline constexpr uint32_t SETUP_TARGETS = 0;
 inline constexpr uint32_t Z_PREPASS = 50;
+inline constexpr uint32_t PRE_MESH = 75;
 inline constexpr uint32_t MESH_RENDER = 100;
 inline constexpr uint32_t UI = 150;
 inline constexpr uint32_t PRESENT = 200;
@@ -722,7 +725,6 @@ class Renderer
         std::deque<TimestampQuery> timestamp_queries;
 
         RenderResources render_resources;
-        std::deque<std::shared_ptr<pass::Pass>> passes;
 
         struct RetiredResource
         {
@@ -769,13 +771,13 @@ class Renderer
     struct Settings
     {
         ImageFormat color_format{ ImageFormat::R8G8B8A8_SRGB };
-        ImageFormat depth_format{ ImageFormat::D24_S8_UNORM };
+        ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 
-        DepthCompare read_depth_compare{ DepthCompare::LEQUAL };
-        DepthCompare rw_depth_compare{ DepthCompare::LESS };
+        DepthCompare read_depth_compare{ DepthCompare::GEQUAL };
+        DepthCompare rw_depth_compare{ DepthCompare::GEQUAL };
 
         Handle<PipelineLayout> common_layout;
         Handle<Pipeline> default_z_prepass_pipeline;
@@ -869,6 +871,14 @@ class Renderer
     std::vector<FrameData> frame_datas;
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
+    std::vector<std::shared_ptr<pass::Pass>> render_passes_name_vec;
+    // template <typename T> std::shared_ptr<T> get_render_pass(const char* pass_name) const
+    //{
+    //     const auto hash = ENG_HASH_STR(pass_name);
+    //     auto it = std::ranges::find_if(render_passes_name_vec, [&hash](const auto& p) { return p.first == hash; });
+    //     if(it == render_passes_name_vec.end()) { return {}; }
+    //     return it->second;
+    // }
 };
 
 } // namespace gfx

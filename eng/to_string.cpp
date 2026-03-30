@@ -59,6 +59,7 @@ std::string to_string(const RenderPassType& a)
 {
     switch(a)
     {
+        case RenderPassType::Z_PREPASS: { return "Z_PREPASS"; }
         case RenderPassType::FORWARD: { return "FORWARD"; }
         case RenderPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }

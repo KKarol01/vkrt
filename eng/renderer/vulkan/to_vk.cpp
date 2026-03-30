@@ -36,9 +36,11 @@ VkFormat to_vk(const ImageFormat& a)
         case ImageFormat::R8G8B8A8_SRGB: { return VK_FORMAT_R8G8B8A8_SRGB; }
         case ImageFormat::D16_UNORM: { return VK_FORMAT_D16_UNORM; }
         case ImageFormat::D24_S8_UNORM: { return VK_FORMAT_D24_UNORM_S8_UINT; }
+        case ImageFormat::D24_X8_TYPELESS_UNORM: { return VK_FORMAT_D24_UNORM_S8_UINT; }
         case ImageFormat::D32_SFLOAT: { return VK_FORMAT_D32_SFLOAT; }
         case ImageFormat::R16F: { return VK_FORMAT_R16_SFLOAT; }
         case ImageFormat::R32F: { return VK_FORMAT_R32_SFLOAT; }
+        case ImageFormat::R16FG16FB16FA16F: { return VK_FORMAT_R16G16B16A16_SFLOAT; }
         case ImageFormat::R32FG32FB32FA32F: { return VK_FORMAT_R32G32B32A32_SFLOAT; }
         default: { ENG_ERROR("Unhandled case."); return {}; }
     }
@@ -110,7 +112,9 @@ VkImageUsageFlags to_vk(const Flags<ImageUsage>& a)
     if(a.test(gfx::ImageUsage::TRANSFER_SRC_BIT))               { flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; }
     if(a.test(gfx::ImageUsage::TRANSFER_DST_BIT))               { flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; }
     if(a.test(gfx::ImageUsage::COLOR_ATTACHMENT_BIT))           { flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; }
-    if(a.test(gfx::ImageUsage::DEPTH_BIT) || a.test(gfx::ImageUsage::STENCIL_BIT)) { flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; }
+    if(a.test(gfx::ImageUsage::DEPTH_BIT) || a.test(gfx::ImageUsage::STENCIL_BIT)) { 
+		flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; 
+	}
     return flags;
 }
 

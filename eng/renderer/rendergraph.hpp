@@ -283,7 +283,7 @@ class RGRenderGraph
 
         RGBuilder pb{ &*it->pass, this };
         auto* user_data = static_cast<UserType*>(it->pass->get_user_data());
-        setup_func(pb, *user_data);
+        std::invoke(setup_func, pb, *user_data);
         return *user_data;
     }
 
@@ -318,8 +318,8 @@ class RGRenderGraph
     std::vector<ExecutionGroup> groups;
     std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
 
-    bool serialize_passes{};
-    bool disable_memory_aliasing{};
+    bool passes_serialized{};
+    bool memory_aliasing_disabled{};
 };
 
 } // namespace gfx

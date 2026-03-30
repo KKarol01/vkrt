@@ -55,8 +55,8 @@ class MeshRenderData
     IndirectBatch draw;
     Handle<Buffer> instance_buffer;
     BufferView instance_view;
-    std::vector<MeshInstance> mesh_instances;
-    std::vector<MeshInstance> meshes;
+    std::vector<MeshInstance> built_instances;
+    std::vector<MeshInstance> instances;
 };
 
 } // namespace gfx

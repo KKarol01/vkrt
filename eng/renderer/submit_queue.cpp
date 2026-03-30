@@ -135,7 +135,7 @@ void CommandBufferVk::clear_color(const Image& image, const Color4f& color)
 
 void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil)
 {
-    const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil ? 0 : *clear_stencil };
+    const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil ? *clear_stencil : 0u };
     const auto range = VkImageSubresourceRange{ to_vk(clear_stencil ? ImageAspect::DEPTH_STENCIL : ImageAspect::DEPTH),
                                                 0u, VK_REMAINING_MIP_LEVELS, 0u, VK_REMAINING_ARRAY_LAYERS };
     vkCmdClearDepthStencilImage(cmd, image.md.vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);

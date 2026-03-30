@@ -106,7 +106,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     std::array<uint32_t, PushRange::MAX_PUSH_BYTES / sizeof(uint32_t)> push_values;
     std::vector<Range32u> push_ranges;
 
-    std::vector<VkWriteDescriptorSet> writes;
+	std::vector<VkWriteDescriptorSet> writes;
     std::deque<VkDescriptorBufferInfo> buf_writes;
     std::deque<VkDescriptorImageInfo> img_writes;
 

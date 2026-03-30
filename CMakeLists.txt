@@ -132,7 +132,8 @@ add_executable(eng
     "eng/renderer/submit_queue.cpp"
 	"eng/renderer/passes/renderpass.cpp"
 	"eng/renderer/rendergraph.cpp"
- "eng/assets/asset_manager.cpp")
+	"eng/assets/asset_manager.cpp"
+)
 
 target_include_directories(eng 
 	PRIVATE 

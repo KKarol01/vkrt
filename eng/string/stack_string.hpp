@@ -50,8 +50,11 @@ template <size_t size> struct StackString
     const char* c_str() const { return string.data(); }
 
     uint64_t hash() const { return eng::hash::combine_fnv1a(string.data()); }
-
+#ifdef ENG_DEBUG_BUILD1
+    std::string string;
+#else
     std::array<char, size> string{};
+#endif
 };
 
 } // namespace eng

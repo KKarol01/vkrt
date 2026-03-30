@@ -11,20 +11,20 @@ namespace gfx
 
 void MeshRenderData::build()
 {
-    if(!mesh_instances.empty()) { return; }
+    if(!built_instances.empty()) { return; }
 
-    mesh_instances.clear();
+    built_instances.clear();
     draw.batches.clear();
 
     auto& r = get_renderer();
     const auto rpidx = (int)type;
 
-    for(const auto& m : meshes)
+    for(const auto& m : instances)
     {
         for(auto i = 0u; i < m.geometry->meshlet_range.size; ++i)
         {
             const auto mltidx = m.geometry->meshlet_range.offset + i;
-            mesh_instances.push_back(MeshInstance{
+            built_instances.push_back(MeshInstance{
                 .geometry = m.geometry,
                 .material = m.material,
                 .instance_index = m.instance_index,
@@ -33,23 +33,23 @@ void MeshRenderData::build()
         }
     }
 
-    if(mesh_instances.empty()) { return; }
+    if(built_instances.empty()) { return; }
 
-    std::sort(mesh_instances.begin(), mesh_instances.end(), [](const MeshInstance& a, const MeshInstance& b) {
+    std::sort(built_instances.begin(), built_instances.end(), [](const MeshInstance& a, const MeshInstance& b) {
         return std::tie(a.material, a.meshlet_index) < std::tie(b.material, b.meshlet_index);
     });
 
     std::vector<GPUInstanceId> insts;
     std::vector<IndexedIndirectDrawCommand> cmds;
     std::vector<uint32_t> counts;
-    insts.reserve(mesh_instances.size());
-    cmds.reserve(mesh_instances.size());
-    counts.reserve(mesh_instances.size());
+    insts.reserve(built_instances.size());
+    cmds.reserve(built_instances.size());
+    counts.reserve(built_instances.size());
     Handle<Pipeline> prev_pipeline;
     uint32_t prev_meshlet = ~0u;
-    for(auto i = 0u; i < mesh_instances.size(); ++i)
+    for(auto i = 0u; i < built_instances.size(); ++i)
     {
-        const auto& inst = mesh_instances[i];
+        const auto& inst = built_instances[i];
         const auto& mat = inst.material.get();
         const auto& mp = mat.mesh_pass->effects[rpidx].get();
         if(prev_pipeline != mp.pipeline)
@@ -104,13 +104,13 @@ void MeshRenderData::build()
 
 void MeshRenderData::add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh)
 {
-    mesh_instances.clear();
+    built_instances.clear();
     const auto& m = mesh.get();
     MeshInstance mi{};
     mi.material = m.material;
     mi.geometry = m.geometry;
     mi.instance_index = instance_index;
-    meshes.push_back(mi);
+    instances.push_back(mi);
 }
 
 void IndirectBatch::draw(const Callback<void(const IndirectDrawParams&)>& draw_callback) const

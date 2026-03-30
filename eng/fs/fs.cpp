@@ -64,7 +64,6 @@ std::string_view File::read()
 {
     if(!file) { return {}; }
     if(!content.empty()) { return content; }
-
     content.resize(size);
     const auto readchars = fread(content.data(), 1, size, (FILE*)file);
     ENG_ASSERT(readchars == size);

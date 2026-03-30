@@ -16,7 +16,7 @@ class Camera
     glm::mat4 get_projection() const { return projection; }
     void on_mouse_move(float px, float py);
 
-    glm::vec3 pos{ 0.24723034, 0.3212749, 2.013261 };
+    glm::vec3 pos{ 0.0f, 1.0f, 1.0f };
 
     glm::mat4 prev_view{ 1.0f };
 

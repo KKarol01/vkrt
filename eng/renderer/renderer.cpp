@@ -254,6 +254,13 @@ void Renderer::init_pipelines()
                 .insert(Material::init("material_default_opaque", MaterialType::OPAQUE, {}, settings.default_meshpass))
                 .handle;
     }
+
+    {
+        render_passes_name_vec.push_back(std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS));
+        render_passes_name_vec.push_back(std::make_shared<pass::NormalFromDepth>());
+        render_passes_name_vec.push_back(std::make_shared<pass::SSAO>());
+        render_passes_name_vec.push_back(std::make_shared<pass::MeshPass>(RenderPassType::FORWARD));
+    }
 }
 
 void Renderer::init_perframes()
@@ -403,7 +410,7 @@ void Renderer::update()
             uint64_t ts[2];
             backend->get_query_pool_results(q.pool, q.index, 2, ts);
             const auto ms = (ts[1] - ts[0]) * backend->limits.timestampPeriodNs * 1e-6;
-            ENG_LOG("Query {} took {:.3f}ms", q.label.c_str(), ms);
+            // ENG_LOG("Query {} took {:.3f}ms", q.label.c_str(), ms);
         }
         current_data->timestamp_queries.clear();
     }
@@ -558,8 +565,6 @@ void Renderer::update()
 
 void Renderer::compile_rendergraph()
 {
-    current_data->passes.clear();
-
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
         mesh_render_data[i].build();
@@ -575,7 +580,13 @@ void Renderer::compile_rendergraph()
         [](RGBuilder& b, const RenderResources& d) {
             auto* c = get_engine().camera;
             GPUEngConstants constants_buffer{};
+            constants_buffer.view = c->get_view();
+            constants_buffer.proj = c->get_projection();
             constants_buffer.proj_view = c->get_projection() * c->get_view();
+            constants_buffer.inv_view = glm::inverse(c->get_view());
+            constants_buffer.inv_proj = glm::inverse(c->get_projection());
+            constants_buffer.inv_proj_view = constants_buffer.inv_view * constants_buffer.inv_proj;
+            constants_buffer.cam_pos = c->pos;
 
             auto* cmd = b.open_cmd_buf();
             get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)), &constants_buffer,
@@ -583,13 +594,10 @@ void Renderer::compile_rendergraph()
             cmd->wait_sync(get_renderer().staging->flush());
         });
 
-    auto& zprepass = (pass::ZPrepass&)*current_data->passes.emplace_back(std::make_shared<pass::ZPrepass>("Z_PREPASS"));
-    auto& ompass =
-        (pass::MeshPass&)*current_data->passes.emplace_back(std::make_shared<pass::ZPrepass>("MESH_PASS_OPAQUE"));
-    const auto& zprepassd = zprepass.init(rgraph, settings.default_z_prepass_pipeline, &mesh_render_data[0]);
-    current_data->render_resources.zpdepth = zprepassd.out_depth;
-    const auto& ompassd = ompass.init(rgraph, &mesh_render_data[1]);
-    current_data->render_resources.color = ompassd.out_color;
+    for(auto& e : render_passes_name_vec)
+    {
+        e->init(rgraph);
+    }
 
     const auto imdata = imgui_renderer->update(rgraph);
 

@@ -50,7 +50,7 @@ void StagingBuffer::reset()
 {
     flush(nullptr); // send, if any, staged transactions before optional forwarding.
     sync->wait_cpu(~0ull);
-    sync->reset();
+    //sync->reset();
     get_context().pool->reset();
     get_context().cmd = nullptr;
     head = 0;

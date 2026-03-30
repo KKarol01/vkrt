@@ -13,7 +13,7 @@ float4 unpackUnorm4x8(uint col)
 VS_OUT main(uint vertex_index : SV_VertexID)
 {
     VS_OUT output;
-    ImGuiVertex vx = gsb_get(ImGuiVertex, vertex_index);
+    ImGuiVertex vx = get_gsb(ImGuiVertex, vertex_index);
     output.color = unpackUnorm4x8(vx.color);
     output.color.xyz = pow(output.color.xyz, float3(2.2, 2.2, 2.2));
     output.uv = vx.uv;

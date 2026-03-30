@@ -29,7 +29,7 @@ class GamePanel : public Panel
 
     ~GamePanel() noexcept override = default;
 
-    void draw(gfx::RGBuilder& rg) override
+    void draw(gfx::RGBuilder& b) override
     {
         if(ImGui::Begin("Game Panel", 0, ImGuiWindowFlags_NoMove))
         {
@@ -53,8 +53,8 @@ class GamePanel : public Panel
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().current_data->render_resources;
-            auto color = rg.access_color(rg.as_acc_id(rt.color));
-            ImGui::Image(*rg.graph->get_img(color), ImVec2{ width, height });
+            auto color = b.sample_texture(b.as_acc_id(rt.ao));
+            ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height });
         }
         ImGui::End();
     }
@@ -67,7 +67,7 @@ class ScenePanel : public Panel
 
     ~ScenePanel() noexcept override = default;
 
-    void draw(gfx::RGBuilder& rg) override
+    void draw(gfx::RGBuilder& b) override
     {
         if(ImGui::Begin("Scene Panel", 0))
         {
@@ -144,7 +144,7 @@ class InspectorPanel : public Panel
 
     ~InspectorPanel() noexcept override = default;
 
-    void draw(gfx::RGBuilder& rg) override
+    void draw(gfx::RGBuilder& b) override
     {
         if(!scene->selected_node) { return; }
         if(ImGui::Begin("Inspector Panel", 0)) {}
@@ -161,7 +161,7 @@ class ConsolePanel : public Panel
 
     ~ConsolePanel() noexcept override = default;
 
-    void draw(gfx::RGBuilder& rg) override
+    void draw(gfx::RGBuilder& b) override
     {
         if(ImGui::Begin("Console Panel")) {}
         ImGui::End();
@@ -179,7 +179,7 @@ void UI::init()
     auto& consolepanel = panels.emplace_back(new ConsolePanel{ *this, &console });
 }
 
-void UI::draw(gfx::RGBuilder& rg)
+void UI::draw(gfx::RGBuilder& b)
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     dock_id = ImGui::GetID("ViewportDockspace");
@@ -215,7 +215,7 @@ void UI::draw(gfx::RGBuilder& rg)
 
     for(const auto& p : panels)
     {
-        p->draw(rg);
+        p->draw(b);
     }
 }
 

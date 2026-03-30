@@ -110,7 +110,7 @@ struct Win32DirChangeHandle
     HANDLE event{};
     OVERLAPPED overlap{};
     Handle<assets::DirectoryListener> listener;
-    uint32_t buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128]{};
+    uint32_t buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128 / sizeof(uint32_t)]{};
     bool stop{};
     std::thread wait_thread;
 };
@@ -127,12 +127,12 @@ void assets::AssetManager::init()
             });
         if(found_dir)
         {
-            assets_dir_path = cwd;
+            root_dir_path = cwd;
             break;
         }
         else { cwd += "../"; }
     }
-    if(assets_dir_path.empty())
+    if(root_dir_path.empty())
     {
         ENG_WARN("Could not find correct directory with eng/ and assets/ dirs in it.");
         return;
@@ -141,7 +141,7 @@ void assets::AssetManager::init()
 
 fs::Path assets::AssetManager::make_path(const fs::Path& path)
 {
-    if(path.string().starts_with("/")) { return assets_dir_path / fs::Path{ path.string().erase(0, 1) }; }
+    if(path.string().starts_with("/")) { return root_dir_path / fs::Path{ path.string().erase(0, 1) }; }
     return path;
 }
 

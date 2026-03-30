@@ -74,3 +74,5 @@ struct PairHash
         size_t operator()(const type& t) const { return code; }                                                        \
     };                                                                                                                 \
     }
+
+#define ENG_HASH_STR(str) eng::hash::combine_fnv1a(str)

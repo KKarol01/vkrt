@@ -48,11 +48,11 @@ class AssetManager
 {
   public:
     void init();
-    bool was_properly_init() const { return !assets_dir_path.empty(); }
+    bool was_properly_init() const { return !root_dir_path.empty(); }
 
     fs::Path make_path(const fs::Path& path);
     fs::FilePtr get_asset(const fs::Path& path, fs::OpenMode mode);
-    fs::Path get_assets_path() const { return assets_dir_path; }
+    fs::Path get_assets_path() const { return root_dir_path; }
 
     Handle<DirectoryListener> make_listener()
     {
@@ -64,7 +64,7 @@ class AssetManager
 
   private:
     std::deque<DirectoryListener> dir_listeners;
-    fs::Path assets_dir_path;
+    fs::Path root_dir_path;
 };
 
 } // namespace assets

@@ -56,49 +56,7 @@ void App::on_init()
 {
     auto* ecs = get_engine().ecs;
 
-    // auto e1 = ecs->create();
-    // ecs->emplace(e1, ecs::Node{}, ecs::Transform{});
-    // auto v1 =
-    //     get_engine().ecs->get_view<ecs::Mesh, ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 1 {}", e); },
-    //                                                            [](auto e, auto sig) {
-    //                                                                ENG_LOG("ENTS UPDATED 1 {} {}", e, sig.to_string());
-    //                                                            });
-    // auto v2 = get_engine().ecs->get_view<ecs::Transform>([](auto e) { ENG_LOG("NEW ENTITY IN VIEW 2 {}", e); },
-    //                                                       [](auto e, auto sig) {
-    //                                                           ENG_LOG("ENTS UPDATED 2 {} {}", e, sig.to_string());
-    //                                                       });
-    // for(auto [e, m, t] : v1)
-    //{
-    //     ENG_LOG("ENTS IN VIEW 1 {}", e);
-    // }
-    // for(auto [e, t] : v2)
-    //{
-    //     ENG_LOG("ENTS IN VIEW 2 {}", e);
-    // }
-    // auto e2 = ecs->create();
-    // struct XX
-    //{
-    // };
-    // ecs->emplace(e2, ecs::Transform{}, ecs::Mesh{});
-    // ecs->emplace(e2, XX{});
-
-    // for(auto [e, m, t] : v1)
-    //{
-    //     ENG_LOG("ENTS IN VIEW 1 {}", e);
-    // }
-    // for(auto [e, t] : v2)
-    //{
-    //     ENG_LOG("ENTS IN VIEW 2 {}", e);
-    // }
-
-    // auto* e1t = ecs->get<ecs::Transform>(e1);
-    // auto* e2m = ecs->get<ecs::Mesh>(e2);
-
-    // e2m->name = "sdafsdf";
-    // ecs->update<ecs::Mesh>(e2);
-    // ecs->update<ecs::Transform>(e1);
-
-    SceneNodeId cyberpunk = get_engine().scene->load_from_file("/assets/models/cyberpunk.glb");
+    SceneNodeId cyberpunk = get_engine().scene->load_from_file("/assets/models/cornell.glb");
     get_engine().scene->instance_model(cyberpunk);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);

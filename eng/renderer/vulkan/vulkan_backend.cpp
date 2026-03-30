@@ -601,7 +601,7 @@ void RendererBackendVk::initialize_vulkan()
                         .enable_validation_layers()
                         .use_default_debug_messenger()
 #endif
-                        .require_api_version(VK_MAKE_API_VERSION(0, 1, 3, 0))
+                        .require_api_version(VK_API_VERSION_1_3)
                         .build();
 
     if(!inst_ret)
@@ -1422,7 +1422,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         if(!shader_target) { return false; }
 
         // compilation should happen from where the folder assets/ is
-        const auto include_path = get_engine().assets->get_assets_path().string();
+        const auto include_path = get_engine().assets->make_path("/").string();
         const auto hlsl_path = get_engine().assets->make_path(shader.path).string();
         const auto spv_path = get_engine().assets->make_path(shader.path.string() + ".spv").string();
         const char* args[]{

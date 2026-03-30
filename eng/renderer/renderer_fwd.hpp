@@ -159,9 +159,11 @@ enum class ImageFormat : uint8_t
     R8G8B8A8_SRGB,
     D16_UNORM,
     D24_S8_UNORM,
+    D24_X8_TYPELESS_UNORM,
     D32_SFLOAT,
     R16F,
     R32F,
+    R16FG16FB16FA16F,
     R32FG32FB32FA32F,
 };
 
@@ -566,10 +568,12 @@ inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
     case ImageFormat::R8G8B8A8_SRGB:
     case ImageFormat::R16F:
     case ImageFormat::R32F:
+    case ImageFormat::R16FG16FB16FA16F:
     case ImageFormat::R32FG32FB32FA32F:
         return ImageAspect::COLOR;
 
     case ImageFormat::D16_UNORM:
+    case ImageFormat::D24_X8_TYPELESS_UNORM:
     case ImageFormat::D32_SFLOAT:
         return ImageAspect::DEPTH;
 

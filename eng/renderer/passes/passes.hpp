@@ -20,6 +20,8 @@ namespace pass
 struct Pass
 {
     Pass(std::string_view name) : name(name) {}
+    virtual ~Pass() = default;
+    virtual void init(RGRenderGraph* graph) = 0;
     std::string name;
 };
 
@@ -35,42 +37,50 @@ struct ZPrepass : public Pass
         RGResourceId out_depth;
     };
 
-    ZPrepass(std::string_view name) : Pass(name) {}
-
-    PassData init(RGRenderGraph* graph, Handle<Pipeline> pp_prepass, const MeshRenderData* meshdata)
+    ZPrepass(RenderPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type))), type(type)
     {
-        if(!graph || !pp_prepass || !meshdata) { return PassData{}; }
+        auto& r = get_renderer();
+        pipeline = r.settings.default_z_prepass_pipeline;
+    }
 
-        return graph->add_graphics_pass<PassData>(
+    ~ZPrepass() override = default;
+
+    void init(RGRenderGraph* graph) override
+    {
+        if(!graph || !pipeline) { return; }
+        graph->add_graphics_pass<PassData>(
             name.data(), RenderOrder::Z_PREPASS,
-            [this, meshdata](RGBuilder& b, PassData& d) {
+            [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto& cd = *r.current_data;
                 const auto& settings = r.settings;
+                const auto& md = r.mesh_render_data[(int)type];
                 const auto resolution = settings.render_resolution;
                 auto depacc = b.create_resource(ENG_FMT("{}_DEPTH", name),
                                                 Image::init(resolution.x, resolution.y, settings.depth_format,
                                                             ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                                RGClear::depth_stencil(1.0, 0u));
-                depacc = b.access_depth(depacc);
+                                                RGClear::depth_stencil(0.0, {}));
+                depacc = b.access_depth(depacc, ImageFormat::D32_SFLOAT);
 
                 d.constants = b.as_acc_id(cd.render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
                 // todo: add access_indirect
-                d.indirect = b.import_resource(meshdata->draw.indirect_buf);
+                d.indirect = b.import_resource(md.draw.indirect_buf);
                 d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-                d.instances = b.import_resource(meshdata->instance_buffer);
+                d.instances = b.import_resource(md.instance_buffer);
                 d.instances = b.read_buffer(d.instances);
                 d.positions = b.import_resource(r.bufs.positions);
                 d.positions = b.read_buffer(d.positions);
 
                 d.out_depth = b.as_res_id(depacc);
+                r.current_data->render_resources.zpdepth = d.out_depth;
             },
-            [this, pp_prepass, meshdata](RGBuilder& b, const PassData& d) {
+            [this](RGBuilder& b, const PassData& d) {
                 const auto& r = get_renderer();
                 const auto& cd = *r.current_data;
                 const auto& settings = r.settings;
                 const auto render_res = settings.render_resolution;
+                const auto& md = r.mesh_render_data[(int)type];
 
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
                 vkdep.imageView = b.graph->get_acc(d.out_depth).image_view.get_md().vk->view;
@@ -82,7 +92,7 @@ struct ZPrepass : public Pass
                 vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 vkrinfo.layerCount = 1;
                 vkrinfo.pDepthAttachment = &vkdep;
-                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 1.0, 0.0 };
+                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(0, b.graph->get_buf(d.constants)),
                                                       DescriptorResource::storage_buffer(1, b.graph->get_buf(d.positions)) };
@@ -92,16 +102,137 @@ struct ZPrepass : public Pass
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
                 cmd->bind_set(0, shaderresources);
-                meshdata->draw.draw([&](const IndirectDrawParams& params) {
+                md.draw.draw([&](const IndirectDrawParams& params) {
                     cmd->bind_pipeline(params.draw->pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(meshdata->draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     meshdata->draw.counts_view.buffer.get(), params.count_offset_bytes,
+                    cmd->draw_indexed_indirect_count(md.draw.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                     md.draw.counts_view.buffer.get(), params.count_offset_bytes,
                                                      params.max_draw_count, params.stride);
                 });
                 cmd->end_rendering();
             });
     }
+
+    RenderPassType type{ RenderPassType::LAST_ENUM };
+    Handle<Pipeline> pipeline;
+    PassData data;
+};
+
+struct NormalFromDepth : public Pass
+{
+    struct PassData
+    {
+        RGAccessId constants;
+        RGAccessId depth;
+        RGResourceId out_normals;
+    };
+
+    NormalFromDepth() : Pass("DEPTH_NORMAL")
+    {
+        auto& r = get_renderer();
+        pipeline = r.make_pipeline(
+            PipelineCreateInfo::init({ r.make_shader("/eng/renderer/shaders/normal_reconstruction/normal.cs.hlsl") }));
+    }
+
+    ~NormalFromDepth() override = default;
+
+    void init(RGRenderGraph* graph) override
+    {
+        if(!graph) { return; }
+        data = graph->add_compute_pass<PassData>(
+            name.data(), RenderOrder::PRE_MESH,
+            [this](RGBuilder& b, PassData& d) {
+                const auto& r = get_renderer();
+                const auto res = r.settings.render_resolution;
+                if(!r.current_data->render_resources.zpdepth) { return; }
+                d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
+                d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
+                auto out_normals = b.create_resource(ENG_FMT("{}_NORMAL", name),
+                                                     Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
+                                                                 ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+                out_normals = b.read_write_image(out_normals);
+                d.out_normals = b.as_res_id(out_normals);
+                r.current_data->render_resources.normal = d.out_normals;
+            },
+            [this](RGBuilder& b, const PassData& d) {
+                if(!d.out_normals) { return; }
+                const auto& r = get_renderer();
+                const auto& normals_img = b.graph->get_img(b.as_acc_id(d.out_normals));
+                auto* cmd = b.open_cmd_buf();
+                cmd->bind_pipeline(pipeline.get());
+
+                DescriptorResource resources[]{
+                    DescriptorResource::storage_buffer(0, b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::sampled_image(1, b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::storage_image(2, b.graph->get_acc(b.as_acc_id(d.out_normals)).image_view)
+                };
+                cmd->bind_set(1, resources);
+                cmd->dispatch((normals_img->width + 7) / 8, (normals_img->height + 7) / 8, 1);
+            });
+    }
+
+    Handle<Pipeline> pipeline;
+    PassData data;
+};
+
+struct SSAO : public Pass
+{
+    struct PassData
+    {
+        RGAccessId constants;
+        RGAccessId depth;
+        RGAccessId normals;
+        RGResourceId out_ao;
+    };
+
+    SSAO() : Pass("SSAO")
+    {
+        auto& r = get_renderer();
+        pipeline =
+            r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/eng/renderer/shaders/ssao/main.cs.hlsl") }));
+    }
+
+    ~SSAO() override = default;
+
+    void init(RGRenderGraph* graph) override
+    {
+        if(!graph) { return; }
+        data = graph->add_compute_pass<PassData>(
+            name.data(), RenderOrder::PRE_MESH,
+            [this](RGBuilder& b, PassData& d) {
+                const auto& r = get_renderer();
+                const auto res = r.settings.render_resolution;
+                if(!r.current_data->render_resources.zpdepth) { return; }
+                d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
+                d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
+                d.normals = b.read_image(b.as_acc_id(r.current_data->render_resources.normal));
+                auto out_ao =
+                    b.create_resource(ENG_FMT("{}_AO", name), Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
+                                                                          ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+                out_ao = b.read_write_image(out_ao);
+                d.out_ao = b.as_res_id(out_ao);
+                r.current_data->render_resources.ao = d.out_ao;
+            },
+            [this](RGBuilder& b, const PassData& d) {
+                if(!d.out_ao) { return; }
+                const auto& r = get_renderer();
+                const auto& out_img = b.graph->get_img(b.as_acc_id(d.out_ao));
+                auto* cmd = b.open_cmd_buf();
+                cmd->bind_pipeline(pipeline.get());
+
+                DescriptorResource resources[]{
+                    DescriptorResource::storage_buffer(0, b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::sampled_image(1, b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::storage_image(2, b.graph->get_acc(d.normals).image_view),
+                    DescriptorResource::storage_image(3, b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view)
+                };
+                cmd->bind_set(1, resources);
+                cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
+            });
+    }
+
+    Handle<Pipeline> pipeline;
+    PassData data;
 };
 
 struct MeshPass : public Pass
@@ -112,50 +243,55 @@ struct MeshPass : public Pass
         RGAccessId instances;
         RGAccessId positions;
         RGAccessId indirect;
-
-        RGResourceId out_color;
-        RGResourceId out_depth;
+        RGAccessId depth;
+        RGAccessId out_color;
     };
 
-    MeshPass(std::string_view name) : Pass(name) {}
+    MeshPass(RenderPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type))), type(type) {}
 
-    PassData init(RGRenderGraph* graph, const MeshRenderData* meshdata)
+    ~MeshPass() override = default;
+
+    void init(RGRenderGraph* graph) override
     {
-        if(!graph || !meshdata) { return PassData{}; }
-        if(meshdata->mesh_instances.empty()) { return PassData{}; }
-        return graph->add_graphics_pass<PassData>(
+        if(!graph) { return; }
+        data = graph->add_graphics_pass<PassData>(
             name.data(), RenderOrder::MESH_RENDER,
-            [this, meshdata](RGBuilder& b, PassData& d) {
+            [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto& cd = *r.current_data;
                 const auto& settings = r.settings;
+                const auto& md = r.mesh_render_data[(int)type];
+                if(md.built_instances.empty()) { return; }
                 const auto resolution = settings.render_resolution;
                 const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT;
-                auto colacc = b.create_resource(ENG_FMT("{}_COLOR", name),
+                d.out_color = b.create_resource(ENG_FMT("{}_COLOR", name),
                                                 Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
                                                 RGClear::color());
                 auto depacc = b.as_acc_id(cd.render_resources.zpdepth);
-                colacc = b.access_color(colacc);
+                d.out_color = b.access_color(d.out_color);
                 depacc = b.access_depth(depacc);
 
                 d.constants = b.as_acc_id(cd.render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
                 // todo: add access_indirect
-                d.indirect = b.import_resource(meshdata->draw.indirect_buf);
+                d.indirect = b.import_resource(md.draw.indirect_buf);
                 d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-                d.instances = b.import_resource(meshdata->instance_buffer);
+                d.instances = b.import_resource(md.instance_buffer);
                 d.instances = b.read_buffer(d.instances);
                 d.positions = b.import_resource(r.bufs.positions);
                 d.positions = b.read_buffer(d.positions);
+                d.depth = depacc;
 
-                d.out_color = b.as_res_id(colacc);
-                d.out_depth = b.as_res_id(depacc);
+                r.current_data->render_resources.color = b.as_res_id(d.out_color);
             },
-            [this, meshdata](RGBuilder& b, const PassData& d) {
+            [this](RGBuilder& b, const PassData& d) {
+                if(!d.out_color) { return; }
+
                 const auto& r = get_renderer();
                 const auto& cd = *r.current_data;
                 const auto& settings = r.settings;
                 const auto render_res = settings.render_resolution;
+                const auto& md = r.mesh_render_data[(int)type];
 
                 vk::VkRenderingAttachmentInfo vkcols[1]{};
                 vkcols[0].imageView = b.graph->get_acc(d.out_color).image_view.get_md().vk->view;
@@ -164,8 +300,8 @@ struct MeshPass : public Pass
                 vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
-                vkdep.imageView = b.graph->get_acc(d.out_depth).image_view.get_md().vk->view;
-                vkdep.imageLayout = to_vk(b.graph->get_acc(d.out_depth).layout);
+                vkdep.imageView = b.graph->get_acc(d.depth).image_view.get_md().vk->view;
+                vkdep.imageLayout = to_vk(b.graph->get_acc(d.depth).layout);
                 vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                 vkdep.storeOp = VK_ATTACHMENT_STORE_OP_NONE;
 
@@ -175,7 +311,7 @@ struct MeshPass : public Pass
                 vkrinfo.colorAttachmentCount = 1;
                 vkrinfo.pColorAttachments = vkcols;
                 vkrinfo.pDepthAttachment = &vkdep;
-                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 1.0, 0.0 };
+                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(0, b.graph->get_buf(d.constants)),
                                                       DescriptorResource::storage_buffer(1, b.graph->get_buf(d.positions)) };
@@ -185,16 +321,19 @@ struct MeshPass : public Pass
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
                 cmd->bind_set(0, shaderresources);
-                meshdata->draw.draw([&](const IndirectDrawParams& params) {
+                md.draw.draw([&](const IndirectDrawParams& params) {
                     cmd->bind_pipeline(params.draw->pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(meshdata->draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     meshdata->draw.counts_view.buffer.get(), params.count_offset_bytes,
+                    cmd->draw_indexed_indirect_count(md.draw.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                     md.draw.counts_view.buffer.get(), params.count_offset_bytes,
                                                      params.max_draw_count, params.stride);
                 });
                 cmd->end_rendering();
             });
     }
+
+    RenderPassType type{ RenderPassType::LAST_ENUM };
+    PassData data;
 };
 
 namespace culling

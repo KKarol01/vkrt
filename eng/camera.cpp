@@ -8,6 +8,7 @@
 namespace eng
 {
 
+// right-handed coordinate system: +X right, +Y up, -Z forward, Z reversed in [1, 0] range with infinite far
 static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, float height, float zNear)
 {
     const float h = 1.0f / glm::tan(0.5f * fov);
@@ -25,7 +26,9 @@ Camera::Camera(float fov_radians, float min_dist, float max_dist)
 {
     GLFWwindow* window = get_engine().window->window;
     projection = infinitePerspectiveFovReverseZRH_ZO(fov_radians, 1280.0f, 768.0f, min_dist);
-    projection[1][1] *= -1.0f;
+    projection[1][1] *= -1.0f; // invert Y so it points down, because vulkan NDC has +Y down
+                               // otherwise, we would have to put negative height in vkviewport
+                               // and ALWAYS invert Y whenever sampling textures in shaders from ndc coords.
 
     double pos[2];
     glfwGetCursorPos(window, &pos[0], &pos[1]);

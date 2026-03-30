@@ -152,7 +152,7 @@ PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
 RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool persistent)
 {
     ENG_ASSERT(!name.empty());
-    const bool is_aliased = !persistent && !graph->disable_memory_aliasing;
+    const bool is_aliased = !persistent && !graph->memory_aliasing_disabled;
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
@@ -176,7 +176,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
 RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
 {
     ENG_ASSERT(!name.empty());
-    const bool is_aliased = !persistent && !graph->disable_memory_aliasing;
+    const bool is_aliased = !persistent && !graph->memory_aliasing_disabled;
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
@@ -294,7 +294,7 @@ void RGRenderGraph::compile()
                     if(acc.is_first_access()) { return 0u; }
                     const auto& res = get_res(val);
                     // if current access is a write, we need to wait for previous reads and writes.
-                    if(acc.is_write() || serialize_passes)
+                    if(acc.is_write() || passes_serialized)
                     {
                         return std::max(res.last_read_group + 1, res.last_write_group + 1);
                     }
