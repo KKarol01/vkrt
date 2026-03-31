@@ -2,8 +2,6 @@
 #include "./assets/shaders/util.hlsli"
 
 static const uint LOCAL_SIZE = 8;
-static const float RADIUS = 0.5;
-static const float BIAS = 0.1;
 
 float rand2dTo1d(float2 value, float2 dotDir = float2(12.9898, 78.233))
 {
@@ -32,6 +30,8 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     out_ao.GetDimensions(dims.x, dims.y);
     if(any(thread_id.xy >= dims.xy)) { return; } 
 	
+	GPUEngAOSettings in_ao_settings = get_gsb(GPUEngAOSettings, 0);
+	
     const float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
     float depth = in_depth.Load(int3(thread_id.xy, 0)).x; 
 	
@@ -59,7 +59,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
         // If vs_normal.z is negative in your view space, 
         // you might need to flip the Z of the sample.
         float3 sample_vs_offset = mul(TBN, SSAO_SAMPLES[i].xyz);
-        float3 sample_pos = vs_pos + sample_vs_offset * RADIUS;
+        float3 sample_pos = vs_pos + sample_vs_offset * in_ao_settings.radius;
 		
         // 2. Project back to screen (Vector * Matrix)
         float4 offset = mul(proj, float4(sample_pos, 1.0));
@@ -76,12 +76,12 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 		
         // 4. RANGE CHECK: If the depth difference is too large, it's a different object
         float dist_diff = abs(vs_pos.z - actual_vs_pos.z);
-        float range_check = smoothstep(0.0, 1.0, RADIUS / dist_diff);
+        float range_check = smoothstep(0.0, 1.0, in_ao_settings.radius / dist_diff);
         
         // 5. OCCLUSION LOGIC: 
         // If geometry (actual) is closer to camera than the sample, it's occluded.
         // Try flipping '<' to '>' if your Z-axis is inverted.
-        if (actual_vs_pos.z > (sample_pos.z + BIAS)) {
+        if (actual_vs_pos.z > (sample_pos.z + in_ao_settings.bias)) {
             occlusion += range_check;
         }
     }

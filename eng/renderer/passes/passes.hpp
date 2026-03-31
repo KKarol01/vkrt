@@ -190,6 +190,11 @@ struct SSAO : public Pass
         auto& r = get_renderer();
         pipeline =
             r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/eng/renderer/shaders/ssao/main.cs.hlsl") }));
+        settings = GPUEngAOSettings{
+            .radius = 0.5f,
+            .bias = 0.1f,
+        };
+        upload_settings = true;
     }
 
     ~SSAO() override = default;
@@ -212,6 +217,9 @@ struct SSAO : public Pass
                 out_ao = b.read_write_image(out_ao);
                 d.out_ao = b.as_res_id(out_ao);
                 r.current_data->render_resources.ao = d.out_ao;
+                settings_buffer =
+                    b.create_resource("SSAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings), BufferUsage::STORAGE_BIT), true);
+                settings_buffer = b.read_buffer(settings_buffer);
             },
             [this](RGBuilder& b, const PassData& d) {
                 if(!d.out_ao) { return; }
@@ -220,18 +228,34 @@ struct SSAO : public Pass
                 auto* cmd = b.open_cmd_buf();
                 cmd->bind_pipeline(pipeline.get());
 
+                if(upload_settings)
+                {
+                    r.staging->copy(b.graph->get_buf(settings_buffer), &settings, 0ull, sizeof(settings));
+                    cmd->wait_sync(r.staging->flush());
+                }
+
                 DescriptorResource resources[]{
                     DescriptorResource::storage_buffer(0, b.graph->get_acc(d.constants).buffer_view),
-                    DescriptorResource::sampled_image(1, b.graph->get_acc(d.depth).image_view),
-                    DescriptorResource::storage_image(2, b.graph->get_acc(d.normals).image_view),
-                    DescriptorResource::storage_image(3, b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view)
+                    DescriptorResource::storage_buffer(1, b.graph->get_acc(settings_buffer).buffer_view),
+                    DescriptorResource::sampled_image(2, b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::storage_image(3, b.graph->get_acc(d.normals).image_view),
+                    DescriptorResource::storage_image(4, b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view)
                 };
                 cmd->bind_set(1, resources);
                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
             });
     }
 
+    void set_settings(const GPUEngAOSettings& settings)
+    {
+        this->settings = settings;
+        upload_settings = true;
+    }
+
     Handle<Pipeline> pipeline;
+    GPUEngAOSettings settings{};
+    bool upload_settings{};
+    RGAccessId settings_buffer;
     PassData data;
 };
 

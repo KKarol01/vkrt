@@ -93,6 +93,12 @@ struct GPUEngConstants
 
 };
 
+struct GPUEngAOSettings
+{
+	ENG_TYPE_FLOAT radius;
+	ENG_TYPE_FLOAT bias;
+};
+
 struct GPUVertexPosition
 {
     ENG_TYPE_FLOAT3 pos;
