@@ -85,5 +85,5 @@ void main(uint3 thread_id : SV_DispatchThreadID)
             occlusion += range_check;
         }
     }
-    out_ao[thread_id.xy] = (1.0 - (occlusion / 64.0)) * in_normal[thread_id.xy];
+    out_ao[thread_id.xy] = (1.0 - (occlusion / 64.0));
 }

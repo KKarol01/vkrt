@@ -770,7 +770,7 @@ class Renderer
 
     struct Settings
     {
-        ImageFormat color_format{ ImageFormat::R8G8B8A8_SRGB };
+        ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
         Vec2f render_resolution{};
@@ -782,6 +782,7 @@ class Renderer
         Handle<PipelineLayout> common_layout;
         Handle<Pipeline> default_z_prepass_pipeline;
         Handle<Pipeline> default_forward_pipeline;
+        Handle<Pipeline> apply_ao_pipeline;
         Handle<MeshPass> default_meshpass;
         Handle<Material> default_material;
 

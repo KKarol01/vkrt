@@ -239,6 +239,8 @@ void Renderer::init_pipelines()
                     .depth_format = settings.depth_format })
                 .init_depth_test(true, false, settings.read_depth_compare)
                 .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
+        settings.apply_ao_pipeline =
+            make_pipeline(PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/ssao/apply.cs.hlsl") }));
     }
 
     {
@@ -598,6 +600,29 @@ void Renderer::compile_rendergraph()
     {
         e->init(rgraph);
     }
+
+    struct ApplyAOData
+    {
+        RGAccessId in_out_color;
+        RGAccessId in_ao;
+    };
+    rgraph->add_graphics_pass<ApplyAOData>(
+        "APPLY_AO", RenderOrder::MESH_RENDER,
+        [this](RGBuilder& b, ApplyAOData& d) {
+            d.in_out_color = b.read_write_image(b.as_acc_id(current_data->render_resources.color));
+            d.in_ao = b.read_image(b.as_acc_id(current_data->render_resources.ao));
+        },
+        [this](RGBuilder& b, const ApplyAOData& d) {
+            auto* cmd = b.open_cmd_buf();
+            cmd->bind_pipeline(settings.apply_ao_pipeline.get());
+            DescriptorResource resources[]{
+                DescriptorResource::storage_image(0, b.graph->get_acc(d.in_out_color).image_view),
+                DescriptorResource::storage_image(1, b.graph->get_acc(d.in_ao).image_view),
+            };
+            const auto& img = b.graph->get_img(d.in_ao).get();
+            cmd->bind_set(1, resources);
+            cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
+        });
 
     const auto imdata = imgui_renderer->update(rgraph);
 

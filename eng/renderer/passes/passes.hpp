@@ -192,8 +192,8 @@ struct SSAO : public Pass
         pipeline =
             r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/eng/renderer/shaders/ssao/main.cs.hlsl") }));
         settings = GPUEngAOSettings{
-            .radius = 0.5f,
-            .bias = 0.1f,
+            .radius = 0.08f,
+            .bias = 0.04f,
         };
         upload_settings = true;
     }
@@ -290,7 +290,7 @@ struct MeshPass : public Pass
                 const auto& md = r.mesh_render_data[(int)type];
                 if(md.built_instances.empty()) { return; }
                 const auto resolution = settings.render_resolution;
-                const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT;
+                const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
                 d.out_color = b.create_resource(ENG_FMT("{}_COLOR", name),
                                                 Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
                                                 RGClear::color());
@@ -340,8 +340,10 @@ struct MeshPass : public Pass
                 vkrinfo.pDepthAttachment = &vkdep;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-                DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(0, b.graph->get_buf(d.constants)),
-                                                      DescriptorResource::storage_buffer(1, b.graph->get_buf(d.positions)) };
+                DescriptorResource shaderresources[]{
+                    DescriptorResource::storage_buffer(0, b.graph->get_buf(d.constants)),
+                    DescriptorResource::storage_buffer(1, b.graph->get_buf(d.positions)),
+                };
                 auto* cmd = b.open_cmd_buf();
                 ScopedTimestampQuery query{ this->name, cmd };
                 cmd->begin_rendering(vkrinfo);
