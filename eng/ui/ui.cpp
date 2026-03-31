@@ -4,6 +4,7 @@
 #include <third_party/imgui/imgui_internal.h>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/renderer/passes/passes.hpp>
 
 #include <eng/scene.hpp>
 
@@ -163,7 +164,12 @@ class ConsolePanel : public Panel
 
     void draw(gfx::RGBuilder& b) override
     {
-        if(ImGui::Begin("Console Panel")) {}
+        if(ImGui::Begin("Console Panel"))
+        {
+            auto aoptr = eng::gfx::get_renderer().get_render_pass<gfx::pass::SSAO>("SSAO");
+            aoptr->upload_settings |= ImGui::DragFloat("AO_RADIUS", &aoptr->settings.radius);
+            aoptr->upload_settings |= ImGui::DragFloat("AO_BIAS", &aoptr->settings.bias);
+        }
         ImGui::End();
     }
 };

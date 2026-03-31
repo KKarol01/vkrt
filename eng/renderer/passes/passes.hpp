@@ -19,10 +19,11 @@ namespace pass
 
 struct Pass
 {
-    Pass(std::string_view name) : name(name) {}
+    Pass(std::string_view name, uint32_t order) : name(name), order(order) {}
     virtual ~Pass() = default;
     virtual void init(RGRenderGraph* graph) = 0;
     std::string name;
+    uint32_t order{};
 };
 
 struct ZPrepass : public Pass
@@ -37,7 +38,7 @@ struct ZPrepass : public Pass
         RGResourceId out_depth;
     };
 
-    ZPrepass(RenderPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type))), type(type)
+    ZPrepass(RenderPassType type) : Pass("MESH_PASS_Z_PREPASS", RenderOrder::Z_PREPASS), type(type)
     {
         auto& r = get_renderer();
         pipeline = r.settings.default_z_prepass_pipeline;
@@ -49,7 +50,7 @@ struct ZPrepass : public Pass
     {
         if(!graph || !pipeline) { return; }
         graph->add_graphics_pass<PassData>(
-            name.data(), RenderOrder::Z_PREPASS,
+            name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto& cd = *r.current_data;
@@ -127,7 +128,7 @@ struct NormalFromDepth : public Pass
         RGResourceId out_normals;
     };
 
-    NormalFromDepth() : Pass("DEPTH_NORMAL")
+    NormalFromDepth() : Pass("DEPTH_NORMAL", RenderOrder::PRE_MESH)
     {
         auto& r = get_renderer();
         pipeline = r.make_pipeline(
@@ -140,7 +141,7 @@ struct NormalFromDepth : public Pass
     {
         if(!graph) { return; }
         data = graph->add_compute_pass<PassData>(
-            name.data(), RenderOrder::PRE_MESH,
+            name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -185,7 +186,7 @@ struct SSAO : public Pass
         RGResourceId out_ao;
     };
 
-    SSAO() : Pass("SSAO")
+    SSAO() : Pass("SSAO", RenderOrder::PRE_MESH)
     {
         auto& r = get_renderer();
         pipeline =
@@ -203,7 +204,7 @@ struct SSAO : public Pass
     {
         if(!graph) { return; }
         data = graph->add_compute_pass<PassData>(
-            name.data(), RenderOrder::PRE_MESH,
+            name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -271,7 +272,9 @@ struct MeshPass : public Pass
         RGAccessId out_color;
     };
 
-    MeshPass(RenderPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type))), type(type) {}
+    MeshPass(RenderPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type)), RenderOrder::MESH_RENDER), type(type)
+    {
+    }
 
     ~MeshPass() override = default;
 
@@ -279,7 +282,7 @@ struct MeshPass : public Pass
     {
         if(!graph) { return; }
         data = graph->add_graphics_pass<PassData>(
-            name.data(), RenderOrder::MESH_RENDER,
+            name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto& cd = *r.current_data;

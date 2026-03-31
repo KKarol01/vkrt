@@ -872,13 +872,12 @@ class Renderer
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
     std::vector<std::shared_ptr<pass::Pass>> render_passes_name_vec;
-    // template <typename T> std::shared_ptr<T> get_render_pass(const char* pass_name) const
-    //{
-    //     const auto hash = ENG_HASH_STR(pass_name);
-    //     auto it = std::ranges::find_if(render_passes_name_vec, [&hash](const auto& p) { return p.first == hash; });
-    //     if(it == render_passes_name_vec.end()) { return {}; }
-    //     return it->second;
-    // }
+    template <typename T> std::shared_ptr<T> get_render_pass(std::string_view name) const
+    {
+        auto it = std::ranges::find_if(render_passes_name_vec, [&name](const auto& p) { return p->name == name; });
+        if(it == render_passes_name_vec.end()) { return {}; }
+        return std::static_pointer_cast<T>(*it);
+    }
 };
 
 } // namespace gfx
