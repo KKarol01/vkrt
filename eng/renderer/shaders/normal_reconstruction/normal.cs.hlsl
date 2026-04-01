@@ -15,63 +15,29 @@ float3 depth_to_view_pos(uint2 dtid, uint2 dims, float depth)
 	return unproject_inf_revz_depth(float3(ndc_xy.xy, depth)); 
 }
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
-void main(uint3 dtid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID, uint gi : SV_GroupIndex)
+void main(uint3 dtid : SV_DispatchThreadID)
 {
-    RWTexture2D<float4> normal = gRWTexture2Df4s[pc.NormalImageIndex];
-    Texture2D<float4> depth = gTexture2Ds[pc.DepthImageIndex];
-    uint2 normal_dims;
-    normal.GetDimensions(normal_dims.x, normal_dims.y);
-	
-    if (any(dtid.xy >= normal_dims)) { return; }
+    RWTexture2D<float4> normalTex = gRWTexture2Df4s[pc.NormalImageIndex];
+    Texture2D<float4> depthTex = gTexture2Ds[pc.DepthImageIndex];
     
-	const float3 cross_pos[5] = {
-		depth_to_view_pos(dtid.xy + int2(0, 0),  normal_dims, depth.Load(dtid + int3(0, 0, 0)).x),
-		depth_to_view_pos(dtid.xy + int2(1, 0),  normal_dims, depth.Load(dtid + int3(1, 0, 0)).x),
-		depth_to_view_pos(dtid.xy + int2(-1, 0), normal_dims, depth.Load(dtid + int3(-1, 0, 0)).x),
-		depth_to_view_pos(dtid.xy + int2(0, 1),  normal_dims, depth.Load(dtid + int3(0, 1, 0)).x),
-		depth_to_view_pos(dtid.xy + int2(0, -1), normal_dims, depth.Load(dtid + int3(0, -1, 0)).x),
-	};
-	
-	const float z0 = cross_pos[0].z;
+    uint2 dims;
+    normalTex.GetDimensions(dims.x, dims.y);
+    if (any(dtid.xy >= dims)) return;
 
-	const uint best_Z_horizontal = (abs(cross_pos[1].z - z0) < abs(cross_pos[2].z - z0)) ? 1 : 2;
-	const uint best_Z_vertical   = (abs(cross_pos[3].z - z0) < abs(cross_pos[4].z - z0)) ? 3 : 4;
+    // Load center and 4 neighbors
+    float3 p0 = depth_to_view_pos(dtid.xy, dims, depthTex.Load(int3(dtid.xy, 0)).x);
+    float3 pR = depth_to_view_pos(dtid.xy + int2(1, 0),  dims, depthTex.Load(int3(dtid.xy + int2(1, 0), 0)).x);
+    float3 pL = depth_to_view_pos(dtid.xy + int2(-1, 0), dims, depthTex.Load(int3(dtid.xy + int2(-1, 0), 0)).x);
+    float3 pD = depth_to_view_pos(dtid.xy + int2(0, 1),  dims, depthTex.Load(int3(dtid.xy + int2(0, 1), 0)).x);
+    float3 pU = depth_to_view_pos(dtid.xy + int2(0, -1), dims, depthTex.Load(int3(dtid.xy + int2(0, -1), 0)).x);
 
-	float3 P1 = 0, P2 = 0;
+    // Pick best horizontal and vertical vectors based on smallest depth delta
+    float3 vH = (abs(pR.z - p0.z) < abs(pL.z - p0.z)) ? (pR - p0) : (p0 - pL);
+    float3 vV = (abs(pD.z - p0.z) < abs(pU.z - p0.z)) ? (pD - p0) : (p0 - pU);
 
-	if (best_Z_horizontal == 1 && best_Z_vertical == 4)
-	{
-		P1 = cross_pos[1];
-		P2 = cross_pos[4];
-	}
-	else if (best_Z_horizontal == 1 && best_Z_vertical == 3)
-	{
-		P1 = cross_pos[3];
-		P2 = cross_pos[1];
-	}
-	else if (best_Z_horizontal == 2 && best_Z_vertical == 4)
-	{
-		P1 = cross_pos[4];
-		P2 = cross_pos[2];
-	}
-	else if (best_Z_horizontal == 2 && best_Z_vertical == 3)
-	{
-		P1 = cross_pos[2];
-		P2 = cross_pos[3];
-	}
+    // Right-Handed (+X Right, +Y Down): Normal = Horizontal x Vertical
+    // This results in +Z pointing toward the camera.
+    float3 n = normalize(cross(vV, vH));
 
-	// 3. Final Normal calculation using your center point P0
-	const float3 P0 = cross_pos[0];
-	
-	const bool find_best = true;
-	float3 n;
-	if(find_best) {
-		n = normalize(cross(P2 - P0, P1 - P0));
-	} else {
-		P1 = cross_pos[1];
-		P2 = cross_pos[3];
-		n = normalize(cross(P1 - P0, P2 - P0));
-	}
-	 
-	normal[dtid.xy] = float4(n, 1.0); 
+    normalTex[dtid.xy] = float4(n, 1.0);
 }

@@ -30,6 +30,11 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     out_ao.GetDimensions(dims.x, dims.y);
     if(any(thread_id.xy >= dims.xy)) { return; } 
 	
+	//float normll = in_normal[thread_id.xy].z;
+	//normll *= -1.0;
+	//out_ao[thread_id.xy] = normll;
+	//return;
+	
 	GPUEngAOSettings in_ao_settings = get_gsb(GPUEngAOSettings, 0);
 	
     const float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
@@ -43,7 +48,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 	const float3 vs_normal = (in_normal[thread_id.xy].xyz);
 
     const float3 random_vec = gTexture2Ds[pc.NoiseTextureIndex].SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv * (float2(dims.xy) / 4.0), 0).xyz;
-    const float3 tangent = normalize(random_vec - vs_normal * dot(random_vec, vs_normal));
+    const float3 tangent = normalize(random_vec + vs_normal * dot(random_vec, vs_normal));
     const float3 bitangent = cross(vs_normal, tangent); 
     
     const float3x3 TBN = float3x3(tangent, bitangent, vs_normal); 
@@ -59,7 +64,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 		// that need to be multiplied from the left :).
         float3 sample_vs_offset = mul(gRWBuffers[pc.SampleBufferIndex].Load<float3>(i * sizeof(float3)).xyz, TBN);
 		// sample has to have offset subtracted, not added, for some reason.
-        float3 sample_pos = vs_pos - sample_vs_offset * in_ao_settings.radius;
+        float3 sample_pos = vs_pos + sample_vs_offset * in_ao_settings.radius;
 		
         float4 offset = mul(proj, float4(sample_pos, 1.0));
         float2 sample_ndc = offset.xy / offset.w;
