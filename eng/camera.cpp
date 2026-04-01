@@ -54,7 +54,7 @@ void Camera::update()
         else { glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); }
     }
 
-    if(!enabled) { return; }
+    if(!enabled && get_engine().tick != 0) { return; }
 
     glm::quat rot = glm::angleAxis(yaw, glm::vec3{ 0.0f, 1.0f, 0.0f });
     rot = rot * glm::angleAxis(pitch, glm::vec3{ 1.0f, 0.0f, 0.0f });
