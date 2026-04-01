@@ -1,5 +1,6 @@
 #pragma once
 
+#include <random>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan/vulkan_backend.hpp> // todo: remove this
 #include <eng/engine.hpp>
@@ -183,6 +184,8 @@ struct SSAO : public Pass
         RGAccessId constants;
         RGAccessId depth;
         RGAccessId normals;
+        RGAccessId samples;
+        RGAccessId noise;
         RGResourceId out_ao;
     };
 
@@ -196,6 +199,8 @@ struct SSAO : public Pass
             .bias = 0.04f,
         };
         upload_settings = true;
+        generate_samples();
+        generate_noise();
     }
 
     ~SSAO() override = default;
@@ -212,6 +217,8 @@ struct SSAO : public Pass
                 d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
                 d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
                 d.normals = b.read_image(b.as_acc_id(r.current_data->render_resources.normal));
+                d.noise = b.sample_texture(b.import_resource(noise_texture));
+                d.samples = b.read_buffer(b.import_resource(sample_buffer));
                 auto out_ao =
                     b.create_resource(ENG_FMT("{}_AO", name), Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
                                                                           ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
@@ -240,7 +247,9 @@ struct SSAO : public Pass
                     DescriptorResource::storage_buffer(1, b.graph->get_acc(settings_buffer).buffer_view),
                     DescriptorResource::sampled_image(2, b.graph->get_acc(d.depth).image_view),
                     DescriptorResource::storage_image(3, b.graph->get_acc(d.normals).image_view),
-                    DescriptorResource::storage_image(4, b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view)
+                    DescriptorResource::storage_image(4, b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
+                    DescriptorResource::storage_buffer(5, b.graph->get_acc(d.samples).buffer_view),
+                    DescriptorResource::sampled_image(6, b.graph->get_acc(d.noise).image_view)
                 };
                 cmd->bind_set(1, resources);
                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
@@ -253,9 +262,54 @@ struct SSAO : public Pass
         upload_settings = true;
     }
 
+    void generate_samples()
+    {
+        glm::vec3 samples[64];
+        std::default_random_engine eng(0);
+        std::uniform_real_distribution<float> dist(0.0, 1.0);
+        const auto lerp = [](auto a, auto b, auto t) { return a + (b - a) * t; };
+        for(auto i = 0u; i < std::size(samples); ++i)
+        {
+            samples[i] = glm::vec3{ dist(eng) * 2.0 - 1.0, dist(eng) * 2.0 - 1.0, dist(eng) };
+            samples[i] = glm::normalize(samples[i]);
+            auto scale = (float)i / std::size(samples);
+            scale = lerp(0.1f, 1.0f, scale * scale);
+            samples[i] = samples[i] * scale;
+        }
+        if(!sample_buffer)
+        {
+            sample_buffer =
+                get_renderer().make_buffer("SSAO_KERNELS",
+                                           Buffer::init(sizeof(samples), BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
+        }
+        get_renderer().staging->copy(sample_buffer, samples, 0ull, sizeof(samples));
+    }
+
+    void generate_noise()
+    {
+        glm::vec4 noise[16];
+        std::default_random_engine eng(133543);
+        std::uniform_real_distribution<float> dist(0.0, 1.0);
+        for(auto i = 0u; i < std::size(noise); ++i)
+        {
+            glm::vec3 n{ dist(eng) * 2.0f - 1.0f, dist(eng) * 2.0f - 1.0f, 0.0f };
+            noise[i] = glm::vec4{ n.x, n.y, n.z, 0.0 };
+        }
+        if(!noise_texture)
+        {
+            noise_texture = get_renderer().make_image("SSAO_NOISE", Image::init(4, 4, ImageFormat::R16FG16FB16FA16F,
+                                                                                ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_DST_BIT,
+                                                                                ImageLayout::READ_ONLY));
+        }
+        get_renderer().staging->copy(noise_texture, noise, 0, 0);
+        get_renderer().staging->flush()->wait_cpu(~0ull);
+    }
+
     Handle<Pipeline> pipeline;
     GPUEngAOSettings settings{};
     bool upload_settings{};
+    Handle<Buffer> sample_buffer;
+    Handle<Image> noise_texture;
     RGAccessId settings_buffer;
     PassData data;
 };

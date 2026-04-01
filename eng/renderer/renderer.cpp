@@ -31,6 +31,10 @@ ImageBlockData get_block_data(ImageFormat format)
     {
         return { 4, { 1, 1, 1 } };
     }
+    case ImageFormat::R16FG16FB16FA16F:
+    {
+        return { 8, { 1, 1, 1 } };
+    }
     default:
     {
         ENG_ASSERT(false && "Bad format.");

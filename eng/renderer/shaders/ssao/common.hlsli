@@ -11,6 +11,8 @@ struct PushConstants
     ENG_TYPE_UINT DepthTextureIndex;
     ENG_TYPE_UINT NormalImageIndex;
     ENG_TYPE_UINT AOImageIndex;
+    ENG_TYPE_UINT SampleBufferIndex;
+    ENG_TYPE_UINT NoiseTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 #endif

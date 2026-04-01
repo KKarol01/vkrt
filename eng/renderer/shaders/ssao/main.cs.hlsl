@@ -40,14 +40,12 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     if(depth < 1e-5) { out_ao[thread_id.xy] = 0.0; return; }  
 	
     const float3 vs_pos = unproject_inf_revz_depth(float3(uv * 2.0 - 1.0, depth));
-    const float3 vs_normal = normalize(in_normal[thread_id.xy].xyz);
-     
-    const float3 random_vec = normalize(hash32(uv) * 2.0 - 1.0);
+	const float3 vs_normal = (in_normal[thread_id.xy].xyz);
+
+    const float3 random_vec = gTexture2Ds[pc.NoiseTextureIndex].SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv * (float2(dims.xy) / 4.0), 0).xyz;
     const float3 tangent = normalize(random_vec - vs_normal * dot(random_vec, vs_normal));
-    const float3 bitangent = cross(vs_normal, tangent);
+    const float3 bitangent = cross(vs_normal, tangent); 
     
-    // Construct TBN as rows: [tangent, bitangent, normal]
-    // To transform from Tangent -> View using mul(vec, TBN)
     const float3x3 TBN = float3x3(tangent, bitangent, vs_normal); 
 	
 	float occlusion = 0.0;
@@ -55,35 +53,33 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 
     for(uint i=0; i<64; ++i)
     {
-        // 1. Ensure sample is pushed OUTWARD from the surface
-        // If vs_normal.z is negative in your view space, 
-        // you might need to flip the Z of the sample.
-        float3 sample_vs_offset = mul(TBN, SSAO_SAMPLES[i].xyz);
-        float3 sample_pos = vs_pos + sample_vs_offset * in_ao_settings.radius;
+        // multiply from the right, because this matrix was constructed
+		// inside the shader, which means it's row-major, contrary
+		// to matrices sent from the CPU (which were made using GLM)
+		// that need to be multiplied from the left :).
+        float3 sample_vs_offset = mul(gRWBuffers[pc.SampleBufferIndex].Load<float3>(i * sizeof(float3)).xyz, TBN);
+		// sample has to have offset subtracted, not added, for some reason.
+        float3 sample_pos = vs_pos - sample_vs_offset * in_ao_settings.radius;
 		
-        // 2. Project back to screen (Vector * Matrix)
         float4 offset = mul(proj, float4(sample_pos, 1.0));
         float2 sample_ndc = offset.xy / offset.w;
         float2 sample_uv = sample_ndc * 0.5 + 0.5;
+		
+		if(any(sample_uv < 0.0) || any(sample_uv > 1.0)) continue;
         
-        // 3. Sample the depth buffer
-        const float sampled_z_depth = in_depth.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], sample_uv, 0);
+		uint2 sample_px = uint2(sample_uv * float2(dims));
+		sample_px = clamp(sample_px, uint2(0, 0), dims - 1);
+
+		float sampled_z_depth = in_depth.Load(int3(sample_px, 0));
         
-        // Skip background/skybox samples
         if(sampled_z_depth < 1e-5) continue;
 
-        const float3 actual_vs_pos = unproject_inf_revz_depth(float3(sample_ndc, sampled_z_depth));
+        const float3 actual_vs_pos = unproject_inf_revz_depth(float3(sample_uv * 2.0 - 1.0, sampled_z_depth));
 		
-        // 4. RANGE CHECK: If the depth difference is too large, it's a different object
         float dist_diff = abs(vs_pos.z - actual_vs_pos.z);
-        float range_check = smoothstep(0.0, 1.0, in_ao_settings.radius / dist_diff);
+        float range_check = saturate(1.0 - abs(vs_pos.z - actual_vs_pos.z) / in_ao_settings.radius);
         
-        // 5. OCCLUSION LOGIC: 
-        // If geometry (actual) is closer to camera than the sample, it's occluded.
-        // Try flipping '<' to '>' if your Z-axis is inverted.
-        if (actual_vs_pos.z > (sample_pos.z + in_ao_settings.bias)) {
-            occlusion += range_check;
-        }
+        if (actual_vs_pos.z >= sample_pos.z + in_ao_settings.bias) { occlusion += range_check; }
     }
-    out_ao[thread_id.xy] = (1.0 - (occlusion / 64.0));
+    out_ao[thread_id.xy] = 1.0 - (occlusion / 64.0);
 }

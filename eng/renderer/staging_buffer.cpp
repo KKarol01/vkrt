@@ -214,8 +214,6 @@ Sync* StagingBuffer::get_wait_sem(bool flush)
 
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
-    if(sync->get_next_signal_value() == 0ull) { reset(); }
-
     const auto aligned_size = align_up2(size, ALIGNMENT);
 
     if(get_free_space() == 0) { reset(); }
