@@ -63,7 +63,6 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 		// to matrices sent from the CPU (which were made using GLM)
 		// that need to be multiplied from the left :).
         float3 sample_vs_offset = mul(gRWBuffers[pc.SampleBufferIndex].Load<float3>(i * sizeof(float3)).xyz, TBN);
-		// sample has to have offset subtracted, not added, for some reason.
         float3 sample_pos = vs_pos + sample_vs_offset * in_ao_settings.radius;
 		
         float4 offset = mul(proj, float4(sample_pos, 1.0));
