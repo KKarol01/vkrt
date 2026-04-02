@@ -136,10 +136,15 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
 
 RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear)
 {
+
     const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
                                  [&resource](const auto& e) { return e.native == resource; });
     if(it != graph->resources.end()) { return it->last_access; }
-    return add_resource(RGResource("", resource, true, false, clear));
+    auto res = RGResource{ "", resource, true, false, clear };
+    if((res.is_buffer() && !res.as_buffer()) || (!res.is_buffer() && !res.as_image())) { return RGAccessId{}; }
+    if(res.is_buffer()) { res.name = get_renderer().buffer_names[*res.as_buffer()]; }
+    else { res.name = get_renderer().image_names[*res.as_image()]; }
+    return add_resource(std::move(res));
 }
 
 PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
@@ -222,6 +227,7 @@ RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<
                                       Flags<PipelineAccess> access, std::optional<ImageFormat> format,
                                       std::optional<ImageViewType> type, Range32u mips, Range32u layers)
 {
+    if(!acc) { return RGAccessId{}; }
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
@@ -234,6 +240,7 @@ RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<
 
 RGAccessId RGBuilder::access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
 {
+    if(!acc) { return RGAccessId{}; }
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
@@ -277,6 +284,7 @@ void RGRenderGraph::init(Renderer* r)
         return r->backend->allocate_aliasable_memory(reqs);
     } };
     allocator = allocators[0];
+    debug_data = new RGDebugData{};
 }
 
 void RGRenderGraph::compile()
@@ -391,6 +399,7 @@ void RGRenderGraph::compile()
 
     group_passes();
     bind_aliased_memory_to_resources();
+    debug_data->build(this);
 }
 
 Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
@@ -500,6 +509,34 @@ void RGRenderGraph::free_resource(RGResource& res)
     {
         auto h = res.as_image();
         r.queue_destroy(h);
+    }
+}
+
+void RGDebugData::build(RGRenderGraph* rg)
+{
+    clear();
+    for(const auto& r : rg->resources)
+    {
+        auto& dr = resources.emplace_back();
+        dr.name = r.name.c_str();
+        // if(r.is_buffer()) { dr.resource = r.as_buffer().get(); }
+        // else { dr.resource = r.as_image().get(); }
+        dr.persistent = r.is_persistent;
+        dr.aliased_memory = r.is_aliased;
+    }
+    for(const auto& g : rg->groups)
+    {
+        auto& dg = groups.emplace_back();
+        for(const auto& p : g.passes)
+        {
+            auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {} });
+            for(const auto& pa : p->accesses)
+            {
+                const auto& pacc = rg->get_acc(pa);
+                const auto& pres = rg->get_res(pa);
+                dp.accesses.push_back(Access{ *pacc.resource, pacc.stage, pacc.access, pacc.layout, pres.last_access == pa });
+            }
+        }
     }
 }
 

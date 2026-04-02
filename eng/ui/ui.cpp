@@ -5,6 +5,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/renderer/passes/passes.hpp>
+#include <eng/common/to_string.hpp>
 
 #include <eng/scene.hpp>
 
@@ -174,6 +175,115 @@ class ConsolePanel : public Panel
     }
 };
 
+class DebugPanel : public Panel
+{
+  public:
+    DebugPanel(UI& ui, uint32_t* dock) : Panel("Debug Panel", dock) {}
+
+    ~DebugPanel() noexcept override = default;
+
+    void draw(gfx::RGBuilder& b) override
+    {
+        if(ImGui::Begin(title.c_str()))
+        {
+            if(ImGui::CollapsingHeader("Rendergraph")) { draw_render_graph(); }
+        }
+        ImGui::End();
+    }
+
+    void draw_render_graph()
+    {
+        const auto& r = gfx::get_renderer();
+        const auto& rgdd = *r.rgraph->debug_data;
+
+        if(ImGui::TreeNodeEx("Resources", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if(ImGui::BeginTable("ResourcesTable", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+            {
+                ImGui::TableSetupColumn("Name");
+                ImGui::TableSetupColumn("Persistent");
+                ImGui::TableSetupColumn("Aliased");
+                ImGui::TableHeadersRow();
+
+                for(const auto& res : rgdd.resources)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(res.name.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::Text(res.persistent ? "Yes" : "No");
+                    ImGui::TableNextColumn();
+                    ImGui::Text(res.aliased_memory ? "Yes" : "No");
+                }
+                ImGui::EndTable();
+            }
+            ImGui::TreePop();
+        }
+
+        ImGui::Separator();
+
+        if(ImGui::BeginChild("GroupsRegion", ImVec2(0, 0), ImGuiChildFlags_Borders))
+        {
+            for(size_t g_idx = 0; g_idx < rgdd.groups.size(); ++g_idx)
+            {
+                ImGui::PushID(static_cast<int>(g_idx));
+                if(ImGui::CollapsingHeader(std::string("Group " + std::to_string(g_idx)).c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    for(const auto& pass : rgdd.groups[g_idx].passes)
+                    {
+                        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+                        if(ImGui::TreeNode(pass.name.c_str()))
+                        {
+							ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(12.0f, 4.0f)); 
+                            if(ImGui::BeginTable("AccessTable", 4, ImGuiTableFlags_BordersInnerH))
+                            {
+                                ImGui::TableSetupColumn("Resource");
+                                ImGui::TableSetupColumn("Stage");
+                                ImGui::TableSetupColumn("Access");
+                                ImGui::TableSetupColumn("Layout");
+                                ImGui::TableHeadersRow();
+
+                                const auto tooltip_text = [](std::string_view text) {
+                                    ImGui::Text("%s", text.data());
+                                    if(ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text.data()); }
+                                };
+
+                                for(const auto& acc : pass.accesses)
+                                {
+                                    ImGui::TableNextRow();
+                                    ImGui::TableNextColumn();
+                                    if(acc.resources < rgdd.resources.size())
+                                    {
+                                        tooltip_text(rgdd.resources[acc.resources].name.c_str());
+                                    }
+                                    else { ImGui::TextDisabled("Unknown (%u)", acc.resources); }
+                                    ImGui::TableNextColumn();
+                                    tooltip_text(gfx::to_string(acc.stage).c_str());
+                                    ImGui::TableNextColumn();
+                                    tooltip_text(gfx::to_string(acc.access).c_str());
+                                    ImGui::TableNextColumn();
+                                    tooltip_text(gfx::to_string(acc.layout).c_str());
+
+                                    if(acc.last_access)
+                                    {
+                                        ImGui::SameLine();
+                                        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "[Destroy]");
+                                    }
+                                }
+                                ImGui::EndTable();
+								ImGui::PopStyleVar();
+                            }
+                            ImGui::TreePop();
+                        }
+                    }
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+    }
+};
+
 void UI::init()
 {
     reset_layout |= always_redo_layout_on_start;
@@ -181,7 +291,8 @@ void UI::init()
 
     auto& gamepanel = panels.emplace_back(new GamePanel{ *this, &game });
     auto& scenepanel = panels.emplace_back(new ScenePanel{ *this, &scene });
-    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &inspector });
+    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &scene });
+    auto& debugpanel = panels.emplace_back(new DebugPanel{ *this, &inspector });
     auto& consolepanel = panels.emplace_back(new ConsolePanel{ *this, &console });
 }
 

@@ -118,7 +118,7 @@ void Engine::init(int argc, char* argv[])
 
     fs = new fs::FileSystem{};
     assets = new assets::AssetManager{};
-    window = new Window{ 1280.0f, 768.0f };
+    window = new Window{ 1600.0f, 900.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};
     ui = new ui::UI{};

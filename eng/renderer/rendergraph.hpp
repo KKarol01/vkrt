@@ -15,6 +15,7 @@ namespace eng
 namespace gfx
 {
 
+struct RGDebugData;
 class GPUTransientAllocator;
 using RGResourceId = TypedId<RGResource, uint32_t>;
 using RGAccessId = TypedId<RGAccess, uint32_t>;
@@ -310,6 +311,7 @@ class RGRenderGraph
     Sync* sems[2]{};
     GPUTransientAllocator* allocators[2]{};
     GPUTransientAllocator* allocator{};
+    RGDebugData* debug_data{};
 
     std::unordered_map<std::pair<RGPass::PassId, uint64_t>, PersistentStorage, hash::PairHash> persistent_resources;
     std::vector<RGResource> resources;
@@ -320,6 +322,45 @@ class RGRenderGraph
 
     bool passes_serialized{};
     bool memory_aliasing_disabled{};
+};
+
+struct RGDebugData
+{
+    struct Resource
+    {
+        std::string name;
+        // std::variant<Buffer, Image> resource;
+        bool persistent{};
+        bool aliased_memory{};
+    };
+    struct Access
+    {
+        uint32_t resources{ ~0u };
+        Flags<PipelineStage> stage{};
+        Flags<PipelineAccess> access{};
+        ImageLayout layout{};
+        bool last_access{}; // is getting destroyed here, if temporal
+    };
+    struct Pass
+    {
+        std::string name;
+        std::vector<Access> accesses;
+    };
+    struct Group
+    {
+        std::vector<Pass> passes;
+    };
+
+    void build(RGRenderGraph* rg);
+
+    void clear()
+    {
+        resources.clear();
+        groups.clear();
+    }
+
+    std::vector<Resource> resources;
+    std::vector<Group> groups;
 };
 
 } // namespace gfx
