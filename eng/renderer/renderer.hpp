@@ -228,13 +228,7 @@ struct PipelineCreateInfo
 
     bool operator==(const PipelineCreateInfo& a) const = default;
 
-    static PipelineCreateInfo init(const std::vector<Handle<Shader>> shaders, std::optional<Handle<PipelineLayout>> layout = {})
-    {
-        PipelineCreateInfo info{};
-        info.shaders = shaders;
-        info.layout = layout ? *layout : Handle<PipelineLayout>{};
-        return info;
-    }
+    static PipelineCreateInfo init(const std::vector<fs::Path>& shaders, Handle<PipelineLayout> layout = {});
     PipelineCreateInfo& init_vertex_layout(const std::vector<VertexBinding> bindings, const std::vector<VertexAttribute> attributes)
     {
         this->bindings = { bindings.begin(), bindings.end() };

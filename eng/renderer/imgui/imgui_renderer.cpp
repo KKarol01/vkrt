@@ -35,21 +35,20 @@ void ImGuiRenderer::init()
     int width, height;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
-    pipeline = r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/assets/shaders/imgui/imgui.vs.hlsl"),
-                                                          r.make_shader("/assets/shaders/imgui/imgui.ps.hlsl") })
-                                   .init_image_attachments(PipelineCreateInfo::AttachmentState{
-                                       .count = 1,
-                                       .color_formats = { ImageFormat::R8G8B8A8_SRGB },
-                                       .blend_states = { PipelineCreateInfo::BlendState{
-                                           .enable = true,
-                                           .src_color_factor = BlendFactor::SRC_ALPHA,
-                                           .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                           .color_op = BlendOp::ADD,
-                                           .src_alpha_factor = BlendFactor::ONE,
-                                           .dst_alpha_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                           .alpha_op = BlendOp::ADD,
-                                       } } })
-                                   .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::NONE));
+    pipeline = r.make_pipeline(
+        PipelineCreateInfo::init({ "/assets/shaders/imgui/imgui.vs.hlsl", "/assets/shaders/imgui/imgui.ps.hlsl" })
+            .init_image_attachments(PipelineCreateInfo::AttachmentState{ .count = 1,
+                                                                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                                                                         .blend_states = { PipelineCreateInfo::BlendState{
+                                                                             .enable = true,
+                                                                             .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                             .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                             .color_op = BlendOp::ADD,
+                                                                             .src_alpha_factor = BlendFactor::ONE,
+                                                                             .dst_alpha_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                             .alpha_op = BlendOp::ADD,
+                                                                         } } })
+            .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::NONE));
 
     vertex_buffer = r.make_buffer("imgui vertex buffer", Buffer::init(1024 * 1024, BufferUsage::STORAGE_BIT));
     index_buffer = r.make_buffer("imgui index buffer", Buffer::init(1024 * 1024, BufferUsage::INDEX_BIT));

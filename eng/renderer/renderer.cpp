@@ -219,32 +219,31 @@ void Renderer::init_pipelines()
     // });
 
     {
-        settings.default_z_prepass_pipeline = make_pipeline(
-            PipelineCreateInfo::init({ make_shader("/assets/shaders/default_z_prepass/z_prepass.vs.hlsl"),
-                                       make_shader("/assets/shaders/default_z_prepass/z_prepass.ps.hlsl") })
-                .init_image_attachments(PipelineCreateInfo::AttachmentState{
-                    .count = 0, .color_formats = {}, .blend_states = {}, .depth_format = settings.depth_format })
-                .init_depth_test(true, true, settings.rw_depth_compare)
-                .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
+        settings.default_z_prepass_pipeline =
+            make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/default_z_prepass/z_prepass.vs.hlsl",
+                                                     "/assets/shaders/default_z_prepass/z_prepass.ps.hlsl" })
+                              .init_image_attachments(PipelineCreateInfo::AttachmentState{
+                                  .count = 0, .color_formats = {}, .blend_states = {}, .depth_format = settings.depth_format })
+                              .init_depth_test(true, true, settings.rw_depth_compare)
+                              .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
-        settings.default_forward_pipeline = make_pipeline(
-            PipelineCreateInfo::init({ make_shader("/assets/shaders/default_unlit/default_unlit.vs.hlsl"),
-                                       make_shader("/assets/shaders/default_unlit/default_unlit.ps.hlsl") })
-                .init_image_attachments(PipelineCreateInfo::AttachmentState{
-                    .count = 1,
-                    .color_formats = { settings.color_format },
-                    .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
-                                                                      .src_color_factor = BlendFactor::SRC_ALPHA,
-                                                                      .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
-                                                                      .color_op = BlendOp::ADD,
-                                                                      .src_alpha_factor = BlendFactor::ONE,
-                                                                      .dst_alpha_factor = BlendFactor::ZERO,
-                                                                      .alpha_op = BlendOp::ADD } },
-                    .depth_format = settings.depth_format })
-                .init_depth_test(true, false, settings.read_depth_compare)
-                .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
-        settings.apply_ao_pipeline =
-            make_pipeline(PipelineCreateInfo::init({ make_shader("/assets/shaders/ssao/apply.cs.hlsl") }));
+        settings.default_forward_pipeline =
+            make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/default_unlit/default_unlit.vs.hlsl",
+                                                     "/assets/shaders/default_unlit/default_unlit.ps.hlsl" })
+                              .init_image_attachments(PipelineCreateInfo::AttachmentState{
+                                  .count = 1,
+                                  .color_formats = { settings.color_format },
+                                  .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                                    .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                                    .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                                    .color_op = BlendOp::ADD,
+                                                                                    .src_alpha_factor = BlendFactor::ONE,
+                                                                                    .dst_alpha_factor = BlendFactor::ZERO,
+                                                                                    .alpha_op = BlendOp::ADD } },
+                                  .depth_format = settings.depth_format })
+                              .init_depth_test(true, false, settings.read_depth_compare)
+                              .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
+        settings.apply_ao_pipeline = make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/apply.cs.hlsl" }));
     }
 
     {
@@ -1035,6 +1034,15 @@ bool PipelineLayout::is_compatible(const PipelineLayout& a) const
         if(!s1->is_compatible(s2.get())) { return false; }
     }
     return true;
+}
+
+PipelineCreateInfo PipelineCreateInfo::init(const std::vector<fs::Path>& shaders, Handle<PipelineLayout> layout)
+{
+    PipelineCreateInfo info{};
+    info.shaders = shaders | std::views::transform([](const fs::Path& path) { return get_renderer().make_shader(path); }) |
+                   std::ranges::to<std::vector>();
+    info.layout = layout;
+    return info;
 }
 
 // todo: swapchain impl should not be here

@@ -132,8 +132,8 @@ struct NormalFromDepth : public Pass
     NormalFromDepth() : Pass("DEPTH_NORMAL", RenderOrder::POST_Z)
     {
         auto& r = get_renderer();
-        pipeline = r.make_pipeline(
-            PipelineCreateInfo::init({ r.make_shader("/assets/shaders/normal_reconstruction/normal.cs.hlsl") }));
+        pipeline =
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/normal_reconstruction/normal.cs.hlsl" }));
     }
 
     ~NormalFromDepth() override = default;
@@ -192,10 +192,8 @@ struct SSAO : public Pass
     SSAO() : Pass("SSAO", RenderOrder::POST_Z)
     {
         auto& r = get_renderer();
-        ssao_pipeline =
-            r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/assets/shaders/ssao/ssao.cs.hlsl") }));
-        blur_pipeline =
-            r.make_pipeline(PipelineCreateInfo::init({ r.make_shader("/assets/shaders/ssao/blur.cs.hlsl") }));
+        ssao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
+        blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
         settings = GPUEngAOSettings{
             .radius = 0.5f,
             .bias = 0.05f,
