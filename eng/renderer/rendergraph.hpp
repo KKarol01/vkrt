@@ -335,11 +335,11 @@ struct RGDebugData
     };
     struct Access
     {
-        uint32_t resources{ ~0u };
+        uint32_t resource{ ~0u };
         Flags<PipelineStage> stage{};
         Flags<PipelineAccess> access{};
         ImageLayout layout{};
-        bool last_access{}; // is getting destroyed here, if temporal
+        bool last_access{}; // is getting destroyed here, if !resource.persistent
     };
     struct Pass
     {

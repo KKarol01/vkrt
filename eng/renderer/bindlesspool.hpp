@@ -55,9 +55,9 @@ class IDescriptorSetAllocator
   public:
     virtual ~IDescriptorSetAllocator() = default;
 
-    virtual void bind_set(uint32_t slot, std::span<const DescriptorResource> resources, const PipelineLayout& layout) = 0;
+    virtual void bind_resources(uint32_t slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) = 0;
 
-    virtual uint32_t get_bindless(const DescriptorResourceView& view) { return ~0u; }
+    virtual uint32_t get_bindless(const DescriptorResource& view) { return ~0u; }
 
     virtual void flush(CommandBufferVk* cmd) = 0;
     // virtual void reset() = 0;
@@ -83,14 +83,14 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
     ~DescriptorSetAllocatorBindlessVk() override = default;
 
-    void bind_set(uint32_t slot, std::span<const DescriptorResource> resources, const PipelineLayout& layout) override;
+    void bind_resources(uint32_t slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) override;
 
-    uint32_t get_bindless(const DescriptorResourceView& view) override;
+    uint32_t get_bindless(const DescriptorResource& view) override;
 
     void flush(CommandBufferVk* cmd) override;
 
   private:
-    uint32_t bind_resource(const DescriptorResourceView& view);
+    uint32_t bind_resource(const DescriptorResource& desc);
     void write_descriptor(DescriptorType type, const void* view, uint32_t slot);
     SlotAllocatorType& get_slot_allocator(DescriptorType type)
     {
@@ -106,7 +106,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     std::array<uint32_t, PushRange::MAX_PUSH_BYTES / sizeof(uint32_t)> push_values;
     std::vector<Range32u> push_ranges;
 
-	std::vector<VkWriteDescriptorSet> writes;
+    std::vector<VkWriteDescriptorSet> writes;
     std::deque<VkDescriptorBufferInfo> buf_writes;
     std::deque<VkDescriptorImageInfo> img_writes;
 

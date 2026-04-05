@@ -44,44 +44,40 @@ class Renderer;
 
 inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
 
-struct DescriptorResourceView
-{
-    auto operator<=>(const DescriptorResourceView&) const = default;
-    bool is_buffer() const { return resource.index() == 0; }
-    const BufferView& as_buffer() const { return std::get<0>(resource); }
-    const ImageView& as_image() const { return std::get<1>(resource); }
-    std::variant<BufferView, ImageView> resource;
-    DescriptorType type{};
-};
-
 struct DescriptorResource
 {
-    static DescriptorResource sampled_image(uint32_t binding, const ImageView& view, uint32_t index = 0)
+    static DescriptorResource sampled_image(const ImageView& view, uint32_t index = 0)
     {
-        return DescriptorResource{ .view = { view, DescriptorType::SAMPLED_IMAGE }, .binding = binding, .index = index };
+        return DescriptorResource{ view, DescriptorType::SAMPLED_IMAGE, index };
     }
-    static DescriptorResource sampled_image(uint32_t binding, Handle<Image> image, uint32_t index = 0)
+    static DescriptorResource sampled_image(Handle<Image> image, uint32_t index = 0)
     {
-        return sampled_image(binding, ImageView::init(image), index);
+        return sampled_image(ImageView::init(image), index);
     }
-    static DescriptorResource storage_image(uint32_t binding, const ImageView& view, uint32_t index = 0)
+    static DescriptorResource storage_image(const ImageView& view, uint32_t index = 0)
     {
-        return DescriptorResource{ .view = { view, DescriptorType::STORAGE_IMAGE }, .binding = binding, .index = index };
-    }
-
-    static DescriptorResource storage_buffer(uint32_t binding, const BufferView& view, uint32_t index = 0)
-    {
-        return DescriptorResource{ .view = { view, DescriptorType::STORAGE_BUFFER }, .binding = binding, .index = index };
-    }
-    static DescriptorResource storage_buffer(uint32_t binding, Handle<Buffer> buffer, uint32_t index = 0)
-    {
-        return storage_buffer(binding, BufferView::init(buffer), index);
+        return DescriptorResource{ view, DescriptorType::STORAGE_IMAGE, index };
     }
 
-    DescriptorType get_type() const { return view.type; }
+    static DescriptorResource storage_buffer(const BufferView& view, uint32_t index = 0)
+    {
+        return DescriptorResource{ view, DescriptorType::STORAGE_BUFFER, index };
+    }
+    static DescriptorResource storage_buffer(Handle<Buffer> buffer, uint32_t index = 0)
+    {
+        return storage_buffer(BufferView::init(buffer), index);
+    }
 
-    DescriptorResourceView view;
-    uint32_t binding{ ~0u };
+    operator bool() const { return !is_empty(); }
+
+    bool is_empty() const { return resource.index() == 0; }
+    bool is_buffer() const { return resource.index() == 1; }
+    bool is_image() const { return resource.index() == 2; }
+    const BufferView& as_buffer() const { return std::get<1>(resource); }
+    const ImageView& as_image() const { return std::get<2>(resource); }
+
+    std::variant<std::monostate, BufferView, ImageView> resource;
+    DescriptorType type{};
     uint32_t index{ ~0u };
 };
 

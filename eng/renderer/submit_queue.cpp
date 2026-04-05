@@ -168,7 +168,7 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
     }
 }
 
-void CommandBufferVk::bind_set(uint32_t slot, std::span<DescriptorResource> resources)
+void CommandBufferVk::bind_resources(uint32_t slot, std::span<DescriptorResource> resources)
 {
     rebind_desc_sets = true;
     descs_to_bind[slot] = resources;
@@ -201,7 +201,7 @@ void CommandBufferVk::before_draw_dispatch()
         {
             if(descs_to_bind[i].size())
             {
-                descriptor_allocator->bind_set(i, descs_to_bind[i], current_pipeline->info.layout.get());
+                descriptor_allocator->bind_resources(i, descs_to_bind[i], current_pipeline->info.layout.get());
             }
             descs_to_bind[i] = {};
         }

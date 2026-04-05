@@ -78,8 +78,8 @@ DescriptorSetAllocatorBindlessVk::DescriptorSetAllocatorBindlessVk(const Pipelin
     set = pool.allocate(layout0, 0);
 }
 
-void DescriptorSetAllocatorBindlessVk::bind_set(uint32_t slot, std::span<const DescriptorResource> resources,
-                                                const PipelineLayout& layout)
+void DescriptorSetAllocatorBindlessVk::bind_resources(uint32_t slot, std::span<const DescriptorResource> descriptors,
+                                                      const PipelineLayout& layout)
 {
     slot = 0; // slot 0, because bindless requires all pipeline layouts to be the same and have one descriptor layout/descriptor table
     if(layout.layout.size() != 1)
@@ -88,20 +88,19 @@ void DescriptorSetAllocatorBindlessVk::bind_set(uint32_t slot, std::span<const D
         return;
     }
     const auto& setlayout = layout.layout[slot].get();
-    for(auto i = 0u; i < resources.size(); ++i)
+    for(auto i = 0u; i < descriptors.size(); ++i)
     {
-        const auto& res = resources[i];
-        ENG_ASSERT(res.binding != ~0u && res.index != ~0u);
-        uint32_t bindless_index = bind_resource(res.view);
-        push_values[res.binding] = bindless_index;
-        push_ranges.push_back({ res.binding, 1 });
+        const auto& desc = descriptors[i];
+        if(!desc) { continue; }
+        const auto binding = i;
+        ENG_ASSERT(desc.index != ~0u); // if index > 0, binding should be saved and all with index > 0 be treated as one binding of an array
+        uint32_t bindless_index = bind_resource(desc);
+        push_values[binding] = bindless_index;
+        push_ranges.push_back({ binding, 1 });
     }
 }
 
-uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResourceView& view)
-{
-    return bind_resource(view);
-}
+uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResource& view) { return bind_resource(view); }
 
 void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
 {
@@ -121,25 +120,25 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
     cmd->bind_sets(&set, 1);
 }
 
-uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourceView& view)
+uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResource& desc)
 {
     Slot slot{};
-    slot.allocator = &get_slot_allocator(view.type);
+    slot.allocator = &get_slot_allocator(desc.type);
 
     std::vector<Slot>* found_slots{};
 
-    if(view.is_buffer())
+    if(desc.is_buffer())
     {
-        slot.view = view.as_buffer();
-        slot.vkptr = view.as_buffer().buffer->md.vk()->buffer;
-        auto it = buffer_views.find(*view.as_buffer().buffer);
+        slot.view = desc.as_buffer();
+        slot.vkptr = desc.as_buffer().buffer->md.vk()->buffer;
+        auto it = buffer_views.find(*desc.as_buffer().buffer);
         if(it != buffer_views.end()) { found_slots = &it->second; }
     }
     else
     {
-        slot.view = view.as_image();
-        slot.vkptr = view.as_image().image->md.vk()->image;
-        auto it = image_views.find(*view.as_image().image);
+        slot.view = desc.as_image();
+        slot.vkptr = desc.as_image().image->md.vk()->image;
+        auto it = image_views.find(*desc.as_image().image);
         if(it != image_views.end()) { found_slots = &it->second; }
     }
 
@@ -161,9 +160,9 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
     }
 
     slot.value = *slot.allocator->allocate();
-    write_descriptor(view.type, view.is_buffer() ? (void*)&view.as_buffer() : (void*)&view.as_image(), slot.value);
-    if(view.is_buffer()) { buffer_views[*view.as_buffer().buffer].push_back(slot); }
-    else { image_views[*view.as_image().image].push_back(slot); }
+    write_descriptor(desc.type, desc.is_buffer() ? (void*)&desc.as_buffer() : (void*)&desc.as_image(), slot.value);
+    if(desc.is_buffer()) { buffer_views[*desc.as_buffer().buffer].push_back(slot); }
+    else { image_views[*desc.as_image().image].push_back(slot); }
     return slot.value;
 }
 

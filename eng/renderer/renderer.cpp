@@ -508,8 +508,8 @@ void Renderer::update()
             // use stable handle index inside the storage to index it in the gpu
             if(backend->caps.supports_bindless)
             {
-                GPUMaterial gpumat{ .base_color_idx = descriptor_allocator->get_bindless(DescriptorResourceView{
-                                        e->base_color_texture, DescriptorType::SAMPLED_IMAGE }) };
+                GPUMaterial gpumat{ .base_color_idx =
+                                        descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)) };
                 staging->copy(bufs.materials, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
@@ -620,11 +620,11 @@ void Renderer::compile_rendergraph()
             auto* cmd = b.open_cmd_buf();
             cmd->bind_pipeline(settings.apply_ao_pipeline.get());
             DescriptorResource resources[]{
-                DescriptorResource::storage_image(0, b.graph->get_acc(d.in_out_color).image_view),
-                DescriptorResource::storage_image(1, b.graph->get_acc(d.in_ao).image_view),
+                DescriptorResource::storage_image(b.graph->get_acc(d.in_out_color).image_view),
+                DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
             };
             const auto& img = b.graph->get_img(d.in_ao).get();
-            cmd->bind_set(1, resources);
+            cmd->bind_resources(1, resources);
             cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
         });
 

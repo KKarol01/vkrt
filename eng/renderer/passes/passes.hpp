@@ -96,14 +96,14 @@ struct ZPrepass : public Pass
                 vkrinfo.pDepthAttachment = &vkdep;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-                DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(0, b.graph->get_buf(d.constants)),
-                                                      DescriptorResource::storage_buffer(1, b.graph->get_buf(d.positions)) };
+                DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(b.graph->get_buf(d.constants)),
+                                                      DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)) };
                 auto* cmd = b.open_cmd_buf();
                 ScopedTimestampQuery query{ this->name, cmd };
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
-                cmd->bind_set(0, shaderresources);
+                cmd->bind_resources(0, shaderresources);
                 md.draw.draw([&](const IndirectDrawParams& params) {
                     cmd->bind_pipeline(params.draw->pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
@@ -164,11 +164,11 @@ struct NormalFromDepth : public Pass
                 cmd->bind_pipeline(pipeline.get());
 
                 DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(0, b.graph->get_acc(d.constants).buffer_view),
-                    DescriptorResource::sampled_image(1, b.graph->get_acc(d.depth).image_view),
-                    DescriptorResource::storage_image(2, b.graph->get_acc(b.as_acc_id(d.out_normals)).image_view)
+                    DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_normals)).image_view)
                 };
-                cmd->bind_set(1, resources);
+                cmd->bind_resources(1, resources);
                 cmd->dispatch((normals_img->width + 7) / 8, (normals_img->height + 7) / 8, 1);
             });
     }
@@ -243,15 +243,15 @@ struct SSAO : public Pass
                 }
 
                 DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(0, b.graph->get_acc(d.constants).buffer_view),
-                    DescriptorResource::storage_buffer(1, b.graph->get_acc(settings_buffer).buffer_view),
-                    DescriptorResource::sampled_image(2, b.graph->get_acc(d.depth).image_view),
-                    DescriptorResource::storage_image(3, b.graph->get_acc(d.normals).image_view),
-                    DescriptorResource::storage_image(4, b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
-                    DescriptorResource::storage_buffer(5, b.graph->get_acc(d.samples).buffer_view),
-                    DescriptorResource::sampled_image(6, b.graph->get_acc(d.noise).image_view)
+                    DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::storage_buffer(b.graph->get_acc(settings_buffer).buffer_view),
+                    DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(d.normals).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
+                    DescriptorResource::storage_buffer(b.graph->get_acc(d.samples).buffer_view),
+                    DescriptorResource::sampled_image(b.graph->get_acc(d.noise).image_view)
                 };
-                cmd->bind_set(1, resources);
+                cmd->bind_resources(1, resources);
                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
             });
 
@@ -278,10 +278,10 @@ struct SSAO : public Pass
                 cmd->bind_pipeline(blur_pipeline.get());
                 const auto img = b.graph->get_img(d.in_ao);
                 DescriptorResource resources[]{
-                    DescriptorResource::storage_image(0, b.graph->get_acc(d.in_ao).image_view),
-                    DescriptorResource::storage_image(1, b.graph->get_acc(d.out_blur).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
                 };
-                cmd->bind_set(1, resources);
+                cmd->bind_resources(1, resources);
                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
             });
 
@@ -429,15 +429,15 @@ struct MeshPass : public Pass
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{
-                    DescriptorResource::storage_buffer(0, b.graph->get_buf(d.constants)),
-                    DescriptorResource::storage_buffer(1, b.graph->get_buf(d.positions)),
+                    DescriptorResource::storage_buffer(b.graph->get_buf(d.constants)),
+                    DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)),
                 };
                 auto* cmd = b.open_cmd_buf();
                 ScopedTimestampQuery query{ this->name, cmd };
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
-                cmd->bind_set(0, shaderresources);
+                cmd->bind_resources(0, shaderresources);
                 md.draw.draw([&](const IndirectDrawParams& params) {
                     cmd->bind_pipeline(params.draw->pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);

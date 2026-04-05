@@ -136,8 +136,9 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                 cmd->push_constants(ShaderStage::ALL, translate, { 8, 8 });
             }
 
-            DescriptorResource set0[]{ DescriptorResource::storage_buffer(4, vertex_buffer) };
-            cmd->bind_set(0, set0);
+            DescriptorResource set0[5]{};
+            set0[4] = DescriptorResource::storage_buffer(vertex_buffer);
+            cmd->bind_resources(0, set0);
 
             cmd->begin_rendering(rendering_info);
             {
@@ -184,8 +185,9 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                     cmd->set_scissors(&scissor, 1);
 
                     const auto tid = (uint32_t)imcmd->GetTexID();
-                    DescriptorResource bindresources[]{ DescriptorResource::sampled_image(5, Handle<Image>{ tid }) };
-                    cmd->bind_set(1, bindresources);
+                    DescriptorResource bindresources[6]{};
+                    bindresources[5] = DescriptorResource::sampled_image(Handle<Image>{ tid });
+                    cmd->bind_resources(1, bindresources);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
                                       imcmd->VtxOffset + global_vtx_offset, 0);
                 }

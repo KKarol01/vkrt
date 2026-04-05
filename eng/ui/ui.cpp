@@ -229,12 +229,14 @@ class DebugPanel : public Panel
                 ImGui::PushID(static_cast<int>(g_idx));
                 if(ImGui::CollapsingHeader(std::string("Group " + std::to_string(g_idx)).c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                 {
-                    for(const auto& pass : rgdd.groups[g_idx].passes)
+                    for(const auto& [idx, pass] : rgdd.groups[g_idx].passes | std::views::enumerate)
                     {
                         ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-                        if(ImGui::TreeNode(pass.name.c_str()))
+                        if(idx > 0) { ImGui::Separator(); }
+                        ImGui::Text("%s", pass.name.c_str());
+                        if(true)
                         {
-							ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(12.0f, 4.0f)); 
+                            ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(12.0f, 4.0f));
                             if(ImGui::BeginTable("AccessTable", 4, ImGuiTableFlags_BordersInnerH))
                             {
                                 ImGui::TableSetupColumn("Resource");
@@ -243,37 +245,45 @@ class DebugPanel : public Panel
                                 ImGui::TableSetupColumn("Layout");
                                 ImGui::TableHeadersRow();
 
-                                const auto tooltip_text = [](std::string_view text) {
-                                    ImGui::Text("%s", text.data());
-                                    if(ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text.data()); }
+                                const auto tooltip_text = [](std::string_view text, ImVec4* color = nullptr) {
+                                    if(color) { ImGui::TextColored(*color, "%s", text.data()); }
+                                    else { ImGui::Text("%s", text.data()); }
+                                    if(ImGui::IsItemHovered())
+                                    {
+                                        ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4{ 0.0, 0.0, 0.0, 1.0 });
+                                        if(ImGui::BeginTooltip())
+                                        {
+                                            ImGui::TextUnformatted(text.data());
+                                            if(color) { ImGui::TextColored(*color, "End of lifetime"); }
+                                            ImGui::EndTooltip();
+                                        }
+                                        ImGui::PopStyleColor();
+                                    }
                                 };
 
                                 for(const auto& acc : pass.accesses)
                                 {
                                     ImGui::TableNextRow();
                                     ImGui::TableNextColumn();
-                                    if(acc.resources < rgdd.resources.size())
+                                    if(acc.resource < rgdd.resources.size())
                                     {
-                                        tooltip_text(rgdd.resources[acc.resources].name.c_str());
+                                        const auto& res = rgdd.resources[acc.resource];
+                                        ImVec4 destroyed_color{ 1.0f, 0.4f, 0.4f, 1.0f };
+                                        tooltip_text(rgdd.resources[acc.resource].name.c_str(),
+                                                     acc.last_access && !res.persistent ? &destroyed_color : (ImVec4*)nullptr);
                                     }
-                                    else { ImGui::TextDisabled("Unknown (%u)", acc.resources); }
+                                    else { ImGui::TextDisabled("Unknown (%u)", acc.resource); }
                                     ImGui::TableNextColumn();
                                     tooltip_text(gfx::to_string(acc.stage).c_str());
                                     ImGui::TableNextColumn();
                                     tooltip_text(gfx::to_string(acc.access).c_str());
                                     ImGui::TableNextColumn();
                                     tooltip_text(gfx::to_string(acc.layout).c_str());
-
-                                    if(acc.last_access)
-                                    {
-                                        ImGui::SameLine();
-                                        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "[Destroy]");
-                                    }
                                 }
                                 ImGui::EndTable();
-								ImGui::PopStyleVar();
+                                ImGui::PopStyleVar();
                             }
-                            ImGui::TreePop();
+                            // ImGui::TreePop();
                         }
                     }
                 }
