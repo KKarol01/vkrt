@@ -220,16 +220,16 @@ void Renderer::init_pipelines()
 
     {
         settings.default_z_prepass_pipeline = make_pipeline(
-            PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/default_z_prepass/z_prepass.vs.hlsl"),
-                                       make_shader("/eng/renderer/shaders/default_z_prepass/z_prepass.ps.hlsl") })
+            PipelineCreateInfo::init({ make_shader("/assets/shaders/default_z_prepass/z_prepass.vs.hlsl"),
+                                       make_shader("/assets/shaders/default_z_prepass/z_prepass.ps.hlsl") })
                 .init_image_attachments(PipelineCreateInfo::AttachmentState{
                     .count = 0, .color_formats = {}, .blend_states = {}, .depth_format = settings.depth_format })
                 .init_depth_test(true, true, settings.rw_depth_compare)
                 .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
         settings.default_forward_pipeline = make_pipeline(
-            PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/default_unlit/default_unlit.vs.hlsl"),
-                                       make_shader("/eng/renderer/shaders/default_unlit/default_unlit.ps.hlsl") })
+            PipelineCreateInfo::init({ make_shader("/assets/shaders/default_unlit/default_unlit.vs.hlsl"),
+                                       make_shader("/assets/shaders/default_unlit/default_unlit.ps.hlsl") })
                 .init_image_attachments(PipelineCreateInfo::AttachmentState{
                     .count = 1,
                     .color_formats = { settings.color_format },
@@ -244,7 +244,7 @@ void Renderer::init_pipelines()
                 .init_depth_test(true, false, settings.read_depth_compare)
                 .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
         settings.apply_ao_pipeline =
-            make_pipeline(PipelineCreateInfo::init({ make_shader("/eng/renderer/shaders/ssao/apply.cs.hlsl") }));
+            make_pipeline(PipelineCreateInfo::init({ make_shader("/assets/shaders/ssao/apply.cs.hlsl") }));
     }
 
     {
