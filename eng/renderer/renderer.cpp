@@ -262,10 +262,10 @@ void Renderer::init_pipelines()
     }
 
     {
-        render_passes_name_vec.push_back(std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS));
-        render_passes_name_vec.push_back(std::make_shared<pass::NormalFromDepth>());
-        render_passes_name_vec.push_back(std::make_shared<pass::SSAO>());
-        render_passes_name_vec.push_back(std::make_shared<pass::MeshPass>(RenderPassType::FORWARD));
+        render_passes.push_back(std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS));
+        render_passes.push_back(std::make_shared<pass::NormalFromDepth>());
+        render_passes.push_back(std::make_shared<pass::SSAO>());
+        render_passes.push_back(std::make_shared<pass::MeshPass>(RenderPassType::FORWARD));
     }
 }
 
@@ -600,7 +600,7 @@ void Renderer::compile_rendergraph()
             cmd->wait_sync(get_renderer().staging->flush());
         });
 
-    for(auto& e : render_passes_name_vec)
+    for(auto& e : render_passes)
     {
         e->init(rgraph);
     }
@@ -775,19 +775,17 @@ Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
 Handle<DescriptorLayout> Renderer::make_layout(const DescriptorLayout& info)
 {
     DescriptorLayout layout = info;
-    const auto found_handle = dlayouts.find(layout);
-    if(!found_handle) { backend->compile_layout(layout); }
-    auto it = dlayouts.insert(std::move(layout));
-    return it.handle;
+    backend->compile_layout(layout);
+    dlayouts.push_back(std::move(layout));
+    return Handle<DescriptorLayout>{ (uint32_t)dlayouts.size() - 1 };
 }
 
 Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 {
     PipelineLayout layout = info;
-    const auto found_handle = pplayouts.find(layout);
-    if(!found_handle) { backend->compile_layout(layout); }
-    auto it = pplayouts.insert(std::move(layout));
-    return it.handle;
+    backend->compile_layout(layout);
+    pplayouts.push_back(std::move(layout));
+    return Handle<PipelineLayout>{ (uint32_t)pplayouts.size() - 1 };
 }
 
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)

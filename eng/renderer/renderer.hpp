@@ -842,12 +842,13 @@ class Renderer
     std::vector<Shader> shaders;
     std::vector<Handle<Shader>> new_shaders;
     Handle<assets::DirectoryListener> new_shaders_listener;
-    HandleFlatSet<DescriptorLayout, std::hash<DescriptorLayout>, LayoutCompatibilityChecker<DescriptorLayout>> dlayouts;
-    HandleFlatSet<PipelineLayout, std::hash<PipelineLayout>, LayoutCompatibilityChecker<PipelineLayout>> pplayouts;
+    std::vector<DescriptorLayout> dlayouts;
+    std::vector<PipelineLayout> pplayouts;
     std::vector<Pipeline> pipelines;
     std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
+    std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
 
     std::vector<Geometry> geometries;
     HandleFlatSet<ShaderEffect> shader_effects;
@@ -855,24 +856,22 @@ class Renderer
     HandleFlatSet<Material> materials;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::EntityId> new_transforms;
-    std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
     std::vector<ecs::EntityId> new_lights;
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
     SlotAllocator<uint32_t> gpu_resource_allocator;
     SlotAllocator<uint32_t> gpu_light_allocator;
-    std::vector<Sync*> syncs;
     IDescriptorSetAllocator* descriptor_allocator{};
     ImGuiRenderer* imgui_renderer{};
     std::vector<FrameData> frame_datas;
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
-    std::vector<std::shared_ptr<pass::Pass>> render_passes_name_vec;
+    std::vector<std::shared_ptr<pass::Pass>> render_passes;
     template <typename T> std::shared_ptr<T> get_render_pass(std::string_view name) const
     {
-        auto it = std::ranges::find_if(render_passes_name_vec, [&name](const auto& p) { return p->name == name; });
-        if(it == render_passes_name_vec.end()) { return {}; }
+        auto it = std::ranges::find_if(render_passes, [&name](const auto& p) { return p->name == name; });
+        if(it == render_passes.end()) { return {}; }
         return std::static_pointer_cast<T>(*it);
     }
 };
@@ -891,8 +890,8 @@ ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_ren
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials.at(handle); });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts.at(handle); });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts[*handle]; });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(handle); });
 // clang-format on
