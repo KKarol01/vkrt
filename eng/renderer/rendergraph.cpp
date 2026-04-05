@@ -267,6 +267,12 @@ ICommandBuffer* RGBuilder::open_cmd_buf()
     ENG_ASSERT(pass->cmd == nullptr);
     pass->cmd = graph->cmd_pools[0]->begin();
     pass->cmd->begin_label(pass->name.c_str());
+    pass->query = &get_renderer().current_data->timestamp_queries.emplace_back();
+    pass->query->pool = get_renderer().current_data->timestamp_pool;
+    pass->query->label = pass->name;
+    pass->query->index = get_renderer().current_data->timestamp_pool->allocate_queries(2);
+    pass->cmd->reset_query_indices(pass->query->pool, pass->query->index, 2);
+    pass->cmd->write_timestamp(pass->query->pool, PipelineStage::ALL, pass->query->index);
     return pass->cmd;
 }
 
@@ -277,12 +283,11 @@ void RGRenderGraph::init(Renderer* r)
     sems[1] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
     cmd_pools[0] = queue->make_command_pool();
     cmd_pools[1] = queue->make_command_pool();
-    allocators[0] = new GPUTransientAllocator{ [r](const RendererMemoryRequirements& reqs) {
+    const auto allocate_aliasable = [r](const RendererMemoryRequirements& reqs) {
         return r->backend->allocate_aliasable_memory(reqs);
-    } };
-    allocators[1] = new GPUTransientAllocator{ [r](const RendererMemoryRequirements& reqs) {
-        return r->backend->allocate_aliasable_memory(reqs);
-    } };
+    };
+    allocators[0] = new GPUTransientAllocator{ allocate_aliasable };
+    allocators[1] = new GPUTransientAllocator{ allocate_aliasable };
     allocator = allocators[0];
     debug_data = new RGDebugData{};
 }
@@ -472,6 +477,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
             p->execute(pb);
             if(!p->cmd) { continue; }
             p->cmd->end_label();
+            p->cmd->write_timestamp(p->query->pool, PipelineStage::ALL, p->query->index + 1);
             cmd_pools[0]->end(p->cmd);
             queue->with_cmd_buf(p->cmd);
 
@@ -529,7 +535,7 @@ void RGDebugData::build(RGRenderGraph* rg)
         auto& dg = groups.emplace_back();
         for(const auto& p : g.passes)
         {
-            auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {} });
+            auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {}, &p->query });
             for(const auto& pa : p->accesses)
             {
                 const auto& pacc = rg->get_acc(pa);

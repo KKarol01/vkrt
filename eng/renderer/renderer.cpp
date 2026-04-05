@@ -403,22 +403,13 @@ void Renderer::update()
     current_data->ren_fen->wait_cpu(~0ull);
     current_data->ren_fen->reset();
     current_data->cmdpool->reset();
+    current_data->available_queries = std::move(current_data->timestamp_queries);
     // Stupid swapchain -- cannot reset those (binary sems that need to be destroyed to reset)
     // because waiting on a ren_fen doesn't guarantee that sems are no longer in use, and which
     // get reset only when waited on in the queue submission, so acq_sem gets waited on (reset)
     // during (but before) ren_fen signal operation, and swp_sem during present.
     // current_data->acq_sem->reset();
     // current_data->swp_sem->reset();
-    {
-        for(const auto& q : current_data->timestamp_queries)
-        {
-            uint64_t ts[2];
-            backend->get_query_pool_results(q.pool, q.index, 2, ts);
-            const auto ms = (ts[1] - ts[0]) * backend->limits.timestampPeriodNs * 1e-6;
-            // ENG_LOG("Query {} took {:.3f}ms", q.label.c_str(), ms);
-        }
-        current_data->timestamp_queries.clear();
-    }
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -1055,6 +1046,13 @@ uint32_t Swapchain::acquire(uint64_t timeout, Sync* semaphore, Sync* fence)
 Handle<Image> Swapchain::get_image() const { return images.at(current_index); }
 
 ImageView Swapchain::get_view() const { return views.at(current_index); }
+
+float TimestampQuery::to_ms(const TimestampQuery& q)
+{
+    uint64_t results[2];
+    get_renderer().backend->get_query_pool_results(q.pool, q.index, 2, &results);
+    return (float)(((double)(results[1] - results[0])) * get_renderer().backend->limits.timestampPeriodNs * 1e-6);
+}
 
 ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffer* cmd) : cmd(cmd)
 {

@@ -422,6 +422,9 @@ struct BufferMetadataVk;
 struct IDescriptorSetAllocator;
 class ICommandPool;
 class ICommandBuffer;
+struct TimestampQueryResult;
+struct TimestampQuery;
+struct ScopedTimestampQuery;
 
 class RGRenderGraph;
 struct RGResource;

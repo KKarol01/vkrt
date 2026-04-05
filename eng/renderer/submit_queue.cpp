@@ -257,12 +257,6 @@ void CommandBufferVk::end_label()
 #endif
 }
 
-void CommandBufferVk::reset_query_pool(QueryPool* pool)
-{
-    reset_query_indices(pool, 0, pool->max_queries);
-    pool->index = 0;
-}
-
 void CommandBufferVk::reset_query_indices(QueryPool* pool, uint32_t query_index, uint32_t count)
 {
     if(!pool || !pool->md.ptr) { return; }

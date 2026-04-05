@@ -23,6 +23,10 @@ template <size_t size> struct StackString
     StackString(const char* str) { *this = str; }
     StackString(const std::string& str) { *this = str; }
     StackString(std::string_view str) { *this = str; }
+    template <size_t other_size> StackString& operator=(const StackString<other_size>& str)
+    {
+        return (*this = str.as_view());
+    }
     StackString& operator=(const char* str) { return (*this = std::string_view{ str }); }
     StackString& operator=(const std::string& str) { return (*this = std::string_view{ str.begin(), str.end() }); }
     StackString& operator=(std::string_view str)
@@ -44,12 +48,13 @@ template <size_t size> struct StackString
 
     auto operator<=>(const char* other) const { return as_view() <=> std::string_view{ other }; }
     bool operator==(const char* other) const { return as_view() == std::string_view{ other }; }
+    bool operator==(const std::string& other) const { return as_view() == std::string_view{ other }; }
 
     std::string_view as_view() const { return std::string_view{ string.data() }; }
     std::string to_string() const { return std::string{ string.data() }; }
     const char* c_str() const { return string.data(); }
 
-    uint64_t hash() const { return eng::hash::combine_fnv1a(string.data()); }
+    constexpr uint64_t hash() const { return eng::hash::combine_fnv1a(string.data()); }
 #ifdef ENG_DEBUG_BUILD1
     std::string string;
 #else

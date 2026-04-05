@@ -43,6 +43,7 @@ struct RGPass
     std::vector<RGAccessId> accesses;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
+    TimestampQuery* query{};
 };
 
 template <typename UserType, typename ExecFunc> struct RGUserPass : public RGPass
@@ -345,6 +346,7 @@ struct RGDebugData
     {
         std::string name;
         std::vector<Access> accesses;
+        TimestampQuery** query{};
     };
     struct Group
     {

@@ -670,6 +670,7 @@ struct TimestampQueryResult
 
 struct TimestampQuery
 {
+    static float to_ms(const TimestampQuery& q);
     QueryPool* pool{};
     uint32_t index{}; // index and index+1 for diff
     StackString<64> label;
@@ -713,6 +714,7 @@ class Renderer
 
         QueryPool* timestamp_pool;
         std::deque<TimestampQuery> timestamp_queries;
+        std::deque<TimestampQuery> available_queries;
 
         RenderResources render_resources;
 

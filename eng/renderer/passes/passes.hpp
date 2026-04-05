@@ -99,7 +99,6 @@ struct ZPrepass : public Pass
                 DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(b.graph->get_buf(d.constants)),
                                                       DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)) };
                 auto* cmd = b.open_cmd_buf();
-                ScopedTimestampQuery query{ this->name, cmd };
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
@@ -272,7 +271,6 @@ struct SSAO : public Pass
             [this](RGBuilder& b, const BlurData& d) {
                 if(!blur_pipeline) { return; }
                 auto* cmd = b.open_cmd_buf();
-                ScopedTimestampQuery stq{ "SSAO_BLUR", cmd };
                 cmd->bind_pipeline(blur_pipeline.get());
                 const auto img = b.graph->get_img(d.in_ao);
                 DescriptorResource resources[]{
@@ -431,7 +429,6 @@ struct MeshPass : public Pass
                     DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)),
                 };
                 auto* cmd = b.open_cmd_buf();
-                ScopedTimestampQuery query{ this->name, cmd };
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);

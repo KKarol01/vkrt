@@ -60,7 +60,6 @@ class ICommandBuffer
 
     virtual void begin_label(const char* label) = 0;
     virtual void end_label() = 0;
-    virtual void reset_query_pool(QueryPool* pool) = 0;
     virtual void reset_query_indices(QueryPool* pool, uint32_t query_index, uint32_t count) = 0;
     virtual void write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, uint32_t index) = 0;
 
@@ -127,7 +126,6 @@ class CommandBufferVk : public ICommandBuffer
 
     void begin_label(const char* label) override;
     void end_label() override;
-    void reset_query_pool(QueryPool* pool) override;
     void reset_query_indices(QueryPool* pool, uint32_t query_index, uint32_t count) override;
     void write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, uint32_t index) override;
 

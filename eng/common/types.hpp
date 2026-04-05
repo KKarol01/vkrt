@@ -64,6 +64,7 @@ using Vec2f = glm::vec2;
 using Vec3i32 = glm::i32vec3;
 using Vec3u32 = glm::u32vec3;
 using Color4f = glm::f32vec4;
+using StringHash = uint64_t;
 
 } // namespace eng
 
