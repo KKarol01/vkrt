@@ -136,6 +136,10 @@ struct GPUMaterial
 #endif
 
 #ifndef __cplusplus
+
+#define ENG_PI      3.1415926535897932384626433
+#define ENG_HALF_PI 1.5707963267948966192313216
+
 [[vk::binding(ENG_BINDLESS_STORAGE_BUFFER_BINDING, 0)]] RWByteAddressBuffer gRWBuffers[];
 [[vk::binding(ENG_BINDLESS_STORAGE_IMAGE_BINDING, 0)]] RWTexture2D<float4> gRWTexture2Df4s[];
 [[vk::binding(ENG_BINDLESS_STORAGE_IMAGE_BINDING, 0)]] RWTexture2D<float> gRWTexture2Df1s[];

@@ -344,6 +344,127 @@ struct SSAO : public Pass
     PassData data;
 };
 
+struct GTAO : public Pass
+{
+    struct PassData
+    {
+        RGAccessId constants;
+        RGAccessId depth;
+        RGAccessId normals;
+        RGAccessId samples;
+        RGAccessId noise;
+        RGResourceId out_ao;
+    };
+
+    GTAO() : Pass("GTAO", RenderOrder::POST_Z)
+    {
+        auto& r = get_renderer();
+        gtao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
+        // blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/blur.cs.hlsl" }));
+        settings = GPUEngAOSettings{
+            .radius = 0.5f,
+            .bias = 0.05f,
+        };
+        upload_settings = true;
+    }
+
+    ~GTAO() override = default;
+
+    void init(RGRenderGraph* graph) override
+    {
+        if(!graph) { return; }
+        data = graph->add_compute_pass<PassData>(
+            name.data(), order,
+            [this](RGBuilder& b, PassData& d) {
+                const auto& r = get_renderer();
+                const auto res = r.settings.render_resolution;
+                if(!r.current_data->render_resources.zpdepth) { return; }
+                d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
+                d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
+                d.normals = b.read_image(b.as_acc_id(r.current_data->render_resources.normal));
+                d.noise = b.sample_texture(b.import_resource(noise_texture));
+                d.samples = b.read_buffer(b.import_resource(sample_buffer));
+                auto out_ao = b.create_resource("GTAO_AO", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
+                                                                       ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+                out_ao = b.read_write_image(out_ao);
+                d.out_ao = b.as_res_id(out_ao);
+                settings_buffer =
+                    b.create_resource("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings), BufferUsage::STORAGE_BIT), true);
+                settings_buffer = b.read_buffer(settings_buffer);
+            },
+            [this](RGBuilder& b, const PassData& d) {
+                if(!d.out_ao) { return; }
+                const auto& r = get_renderer();
+                const auto& out_img = b.graph->get_img(b.as_acc_id(d.out_ao));
+                auto* cmd = b.open_cmd_buf();
+                cmd->bind_pipeline(gtao_pipeline.get());
+
+                if(upload_settings)
+                {
+                    r.staging->copy(b.graph->get_buf(settings_buffer), &settings, 0ull, sizeof(settings));
+                    cmd->wait_sync(r.staging->flush());
+                }
+
+                DescriptorResource resources[]{
+                    DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::storage_buffer(b.graph->get_acc(settings_buffer).buffer_view),
+                    DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(d.normals).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
+                };
+                cmd->bind_resources(1, resources);
+                cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
+            });
+
+        struct BlurData
+        {
+            RGAccessId in_ao;
+            RGResourceId out_blur;
+        };
+
+        // const auto blurdata = graph->add_compute_pass<BlurData>(
+        //     "GTAO_BLUR", order,
+        //     [this](RGBuilder& b, BlurData& d) {
+        //         const auto& r = get_renderer();
+        //         const auto res = r.settings.render_resolution;
+        //         d.in_ao = b.read_write_image(b.as_acc_id(data.out_ao));
+        //         d.out_blur = b.as_res_id(b.write_image(
+        //             b.create_resource("GTAO_BLUR", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
+        //                                                        ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT))));
+        //     },
+        //     [this](RGBuilder& b, const BlurData& d) {
+        //         if(!blur_pipeline) { return; }
+        //         auto* cmd = b.open_cmd_buf();
+        //         cmd->bind_pipeline(blur_pipeline.get());
+        //         const auto img = b.graph->get_img(d.in_ao);
+        //         DescriptorResource resources[]{
+        //             DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+        //             DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
+        //         };
+        //         cmd->bind_resources(1, resources);
+        //         cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
+        //     });
+
+        const auto& r = get_renderer();
+        r.current_data->render_resources.ao = data.out_ao;
+    }
+
+    void set_settings(const GPUEngAOSettings& settings)
+    {
+        this->settings = settings;
+        upload_settings = true;
+    }
+
+    Handle<Pipeline> gtao_pipeline;
+    Handle<Pipeline> blur_pipeline;
+    GPUEngAOSettings settings{};
+    bool upload_settings{};
+    Handle<Buffer> sample_buffer;
+    Handle<Image> noise_texture;
+    RGAccessId settings_buffer;
+    PassData data;
+};
+
 struct MeshPass : public Pass
 {
     struct PassData

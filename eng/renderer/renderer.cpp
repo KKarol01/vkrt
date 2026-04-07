@@ -263,7 +263,7 @@ void Renderer::init_pipelines()
     {
         render_passes.push_back(std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS));
         render_passes.push_back(std::make_shared<pass::NormalFromDepth>());
-        render_passes.push_back(std::make_shared<pass::SSAO>());
+        render_passes.push_back(std::make_shared<pass::GTAO>());
         render_passes.push_back(std::make_shared<pass::MeshPass>(RenderPassType::FORWARD));
     }
 }

@@ -28,5 +28,10 @@ float3 unproject_inf_revz_depth(float3 ndc)
 	);
 }
 
+float3 unproject_inf_revz_depth(float2 uv, Texture2D<float> depth_texture) 
+{
+	return unproject_inf_revz_depth(float3(uv * 2.0 - 1.0, depth_texture.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv, 0)));
+}
+
 
 #endif

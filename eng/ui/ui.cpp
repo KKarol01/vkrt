@@ -167,7 +167,7 @@ class ConsolePanel : public Panel
     {
         if(ImGui::Begin("Console Panel"))
         {
-            auto aoptr = eng::gfx::get_renderer().get_render_pass<gfx::pass::SSAO>("SSAO");
+            auto aoptr = eng::gfx::get_renderer().get_render_pass<gfx::pass::GTAO>("GTAO");
             aoptr->upload_settings |= ImGui::DragFloat("AO_RADIUS", &aoptr->settings.radius);
             aoptr->upload_settings |= ImGui::DragFloat("AO_BIAS", &aoptr->settings.bias);
         }
@@ -250,11 +250,11 @@ class DebugPanel : public Panel
                             if(it != gfx::get_renderer().current_data->available_queries.end())
                             {
                                 auto& times = pass_times[it->label.hash()];
-                                const auto time_now = get_engine().get_time_secs();
-                                if(time_now - times.last_update_secs >= 0.05f)
+                                const auto time_now_secs = get_engine().get_time_secs();
+                                if(time_now_secs - times.last_update_secs >= 0.05f)
                                 {
                                     const auto query_res = gfx::TimestampQuery::to_ms(*it);
-                                    times.last_update_secs = time_now;
+                                    times.last_update_secs = time_now_secs;
                                     times.time_ms = query_res;
                                 }
                                 ImGui::SameLine();
