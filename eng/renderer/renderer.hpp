@@ -103,11 +103,10 @@ struct Shader
             else { ENG_WARN("Unrecognized shader extension: {}", ext.string()); }
             return stage;
         }();
-        return Shader{ path, stage, {}, {} };
+        return Shader{ path, stage, {} };
     }
     std::filesystem::path path;
     ShaderStage stage{ ShaderStage::NONE };
-    std::vector<Handle<Pipeline>> using_pipelines;
     struct Metadata
     {
         ShaderMetadataVk* vk() const { return (ShaderMetadataVk*)ptr; }
@@ -777,6 +776,7 @@ class Renderer
         Handle<Pipeline> apply_ao_pipeline;
         Handle<MeshPass> default_meshpass;
         Handle<Material> default_material;
+        Handle<Image> default_base_color;
 
         bool regenerate_swapchain{};
     };
@@ -836,6 +836,7 @@ class Renderer
 
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
+    std::unordered_map<Handle<Shader>, std::vector<Handle<Pipeline>>> shader_usage_pipeline_map;
     std::vector<Handle<Shader>> new_shaders;
     Handle<assets::DirectoryListener> new_shaders_listener;
     std::vector<DescriptorLayout> dlayouts;

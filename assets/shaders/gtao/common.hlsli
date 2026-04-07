@@ -10,6 +10,7 @@ struct PushConstants
 	ENG_TYPE_UINT GPUEngAOSettingsBufferIndex;
     ENG_TYPE_UINT DepthTextureIndex;
     ENG_TYPE_UINT NormalImageIndex;
+    ENG_TYPE_UINT NoiseTextureIndex;
     ENG_TYPE_UINT AOImageIndex;
 };
 [[vk::push_constant]] PushConstants pc;

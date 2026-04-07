@@ -97,7 +97,7 @@ void Renderer::init(IRendererBackend* backend)
 
     new_shaders_listener = get_engine().assets->make_listener();
     get_engine().assets->listen_for_path("/assets/shaders", new_shaders_listener);
-    get_engine().assets->listen_for_path("/eng/renderer/shaders", new_shaders_listener);
+    // get_engine().assets->listen_for_path("/eng/renderer/shaders", new_shaders_listener);
 
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
@@ -258,6 +258,17 @@ void Renderer::init_pipelines()
             materials
                 .insert(Material::init("material_default_opaque", MaterialType::OPAQUE, {}, settings.default_meshpass))
                 .handle;
+
+        settings.default_base_color =
+            make_image("ENG_default_base_color",
+                       Image::init(2, 2, ImageFormat::R8G8B8A8_UNORM, ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
+        uint8_t data[] = {
+            255, 0, 255, 255, // Pixel 1: Magenta
+            0,   0, 0,   255, // Pixel 2: Black
+            0,   0, 0,   255, // Pixel 3: Black
+            255, 0, 255, 255  // Pixel 4: Magenta
+        };
+        staging->copy(settings.default_base_color, data, 0, 0);
     }
 
     {
@@ -448,9 +459,9 @@ void Renderer::update()
             }
             return ret;
         }();
-        for(auto sh : to_recompile)
+        for(auto shaderh : to_recompile)
         {
-            auto new_shader = Shader::init(sh->path);
+            auto new_shader = Shader::init(shaderh->path);
             backend->make_shader(new_shader);
             const auto compilation_res = backend->compile_shader(new_shader);
             if(!compilation_res)
@@ -458,16 +469,16 @@ void Renderer::update()
                 backend->destroy_shader(new_shader);
                 continue;
             }
-            backend->destroy_shader(sh.get());
-            ENG_ASSERT(!sh->md.ptr && new_shader.md.ptr);
-            sh->md = new_shader.md;
-            for(auto pipelineh : sh->using_pipelines)
+            backend->destroy_shader(shaderh.get());
+            ENG_ASSERT(!shaderh->md.ptr && new_shader.md.ptr);
+            shaderh->md = new_shader.md;
+            for(auto pipelineh : shader_usage_pipeline_map[shaderh])
             {
                 backend->destroy_pipeline(pipelineh.get());
                 backend->make_pipeline(pipelineh.get());
                 new_pipelines.push_back(pipelineh);
             }
-            sh->using_pipelines.clear();
+            shader_usage_pipeline_map[shaderh].clear();
         }
     });
 
@@ -481,13 +492,13 @@ void Renderer::update()
     }
     if(new_pipelines.size())
     {
-        for(auto& e : new_pipelines)
+        for(auto pipelineh : new_pipelines)
         {
-            for(auto shaderh : e->info.shaders)
+            for(auto shaderh : pipelineh->info.shaders)
             {
-                shaderh->using_pipelines.push_back(e);
+                shader_usage_pipeline_map[shaderh].push_back(pipelineh);
             }
-            backend->compile_pipeline(e.get());
+            backend->compile_pipeline(pipelineh.get());
         }
         new_pipelines.clear();
     }
@@ -808,6 +819,7 @@ Handle<Material> Renderer::make_material(const Material& desc)
 {
     Material mat = desc;
     if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpass; }
+    if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.default_base_color); }
 
     auto ret = materials.insert(std::move(mat));
     if(ret.success) { new_materials.push_back(ret.handle); }
