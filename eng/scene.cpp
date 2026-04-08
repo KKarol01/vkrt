@@ -234,7 +234,7 @@ Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
         }
 
         const fastgltf::Material& gltfmat = gltfasset.materials[*gltfprim.materialIndex];
-        auto mat = gfx::Material::init(gltfmat.name.c_str(), gfx::MaterialType::OPAQUE);
+        auto mat = gfx::Material::init(gltfmat.name.c_str());
         if(gltfmat.pbrData.baseColorTexture)
         {
             uint32_t texidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,

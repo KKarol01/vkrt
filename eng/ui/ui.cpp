@@ -165,11 +165,29 @@ class ConsolePanel : public Panel
 
     void draw(gfx::RGBuilder& b) override
     {
+        auto& r = gfx::get_renderer();
         if(ImGui::Begin("Console Panel"))
         {
-            auto aoptr = eng::gfx::get_renderer().get_render_pass<gfx::pass::GTAO>("GTAO");
-            aoptr->upload_settings |= ImGui::DragFloat("AO_RADIUS", &aoptr->settings.radius);
-            aoptr->upload_settings |= ImGui::DragFloat("AO_BIAS", &aoptr->settings.bias);
+            auto& gfx_settings = r.settings.gfx_settings;
+            auto& pass = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
+            if(ImGui::BeginCombo("AO_MODE", pass->name.c_str()))
+            {
+                for(auto i = 0; i < (int)gfx::AOMode::LAST_ENUM; ++i)
+                {
+                    if(ImGui::Selectable(r.passes.ao[i]->name.c_str()))
+                    {
+                        r.settings.gfx_settings.ao_mode = (gfx::AOMode)i;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            auto& ao_mode = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
+            auto& settings = ao_mode->settings;
+            settings.iterate_settings([](std::string_view name, gfx::pass::PassSettings::Value& value) {
+                if(auto** s = std::get_if<float*>(&value)) { return ImGui::DragFloat(name.data(), *s); }
+                else { ENG_ASSERT(false && "Unhandled setting"); }
+                return false;
+            });
         }
         ImGui::End();
     }

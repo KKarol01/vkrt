@@ -251,13 +251,11 @@ void Renderer::init_pipelines()
         const auto unlit_effect = make_shader_effect(ShaderEffect{ .pipeline = settings.default_forward_pipeline });
         MeshPass::Effects effects{};
         effects[(int)RenderPassType::Z_PREPASS] = zprepass_effect;
-        effects[(int)RenderPassType::FORWARD] = unlit_effect;
+        effects[(int)RenderPassType::OPAQUE] = unlit_effect;
 
         settings.default_meshpass = make_mesh_pass(MeshPass::init("mesh_pass_default_unlit", effects));
         settings.default_material =
-            materials
-                .insert(Material::init("material_default_opaque", MaterialType::OPAQUE, {}, settings.default_meshpass))
-                .handle;
+            materials.insert(Material::init("material_default_opaque", settings.default_meshpass)).handle;
 
         settings.default_base_color =
             make_image("ENG_default_base_color",
@@ -272,10 +270,11 @@ void Renderer::init_pipelines()
     }
 
     {
-        render_passes.push_back(std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS));
-        render_passes.push_back(std::make_shared<pass::NormalFromDepth>());
-        render_passes.push_back(std::make_shared<pass::GTAO>());
-        render_passes.push_back(std::make_shared<pass::MeshPass>(RenderPassType::FORWARD));
+        passes.reconstruct_normals = std::make_shared<pass::NormalFromDepth>();
+        passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
+        passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
+        passes.mesh_passes[(int)RenderPassType::Z_PREPASS] = std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS);
+        passes.mesh_passes[(int)RenderPassType::OPAQUE] = std::make_shared<pass::MeshPass>(RenderPassType::OPAQUE);
     }
 }
 
@@ -601,10 +600,10 @@ void Renderer::compile_rendergraph()
             cmd->wait_sync(get_renderer().staging->flush());
         });
 
-    for(auto& e : render_passes)
-    {
-        e->init(rgraph);
-    }
+    passes.mesh_passes[(int)RenderPassType::Z_PREPASS]->init(rgraph);
+    passes.reconstruct_normals->init(rgraph);
+    passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
+    passes.mesh_passes[(int)RenderPassType::OPAQUE]->init(rgraph);
 
     struct ApplyAOData
     {
@@ -789,7 +788,7 @@ Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
     return Handle<PipelineLayout>{ (uint32_t)pplayouts.size() - 1 };
 }
 
-Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
+Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compilation compilation)
 {
     Pipeline p{ .info = info, .type = PipelineType::NONE, .md = {} };
     if(!p.info.layout) { p.info.layout = settings.common_layout; }
@@ -802,13 +801,31 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info)
     const auto found_handle = it != pipelines.end();
     if(!found_handle)
     {
-        const auto handle = Handle<Pipeline>{ (Handle<Pipeline>::StorageType)pipelines.size() };
+        const auto reuse_handle = destroyed_pipelines.size();
+        auto handle = Handle<Pipeline>{ (Handle<Pipeline>::StorageType)pipelines.size() };
+        if(reuse_handle)
+        {
+            handle = destroyed_pipelines.back();
+            destroyed_pipelines.pop_back();
+        }
         backend->make_pipeline(p);
-        new_pipelines.push_back(handle);
-        pipelines.push_back(std::move(p));
+        if(compilation == Compilation::BATCHED) { new_pipelines.push_back(handle); }
+        else { compile_pipeline(p); }
+        if(reuse_handle) { pipelines[*handle] = std::move(p); }
+        else { pipelines.push_back(std::move(p)); }
         return handle;
     }
     return Handle<Pipeline>{ (Handle<Pipeline>::StorageType)std::distance(pipelines.begin(), it) };
+}
+
+void Renderer::destroy_pipeline(Handle<Pipeline> pipeline)
+{
+    ENG_ERROR("TODO: ADD TO DELETEION QUEUE");
+    return;
+    if(!pipeline) { return; }
+    backend->destroy_pipeline(pipeline.get());
+    destroyed_pipelines.push_back(pipeline);
+    ENG_ASSERT(std::ranges::none_of(destroyed_pipelines, [pipeline](auto p) { return p == pipeline; }));
 }
 
 Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_sync(info); }
@@ -997,6 +1014,17 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
     if(new_size < req_capacity) { new_size = req_capacity; }
     new_size = std::ceil(new_size);
     resize_buffer(handle, new_size, copy_data);
+}
+
+void Renderer::compile_pipeline(Pipeline& p)
+{
+    for(auto sh : p.info.shaders)
+    {
+        auto it = std::ranges::find(new_shaders, sh);
+        if(it != new_shaders.end()) { backend->compile_shader(it->get()); }
+        new_shaders.erase(it);
+    }
+    backend->compile_pipeline(p);
 }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }

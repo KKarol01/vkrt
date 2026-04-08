@@ -235,24 +235,10 @@ enum class ImageAddressing : uint8_t
 enum class RenderPassType : uint8_t
 {
     Z_PREPASS,
-    FORWARD,
+    OPAQUE,
     DIRECTIONAL_SHADOW,
     LAST_ENUM,
 };
-
-enum class MaterialType : uint16_t
-{
-    NONE,
-    OPAQUE,
-};
-
-enum class MaterialFlags : uint16_t
-{
-    NONE = 0x0,
-    Z_PREPASS,
-
-};
-ENG_ENABLE_FLAGS_OPERATORS(MaterialFlags);
 
 enum class PipelineStage : uint16_t
 {
@@ -349,6 +335,19 @@ enum class AllocateMemory : uint8_t
     ALIASED,  // Gpu memory allocator will not create unique memory for this resource.
     EXTERNAL, // Memory is managed by someone else (swapchain images).
     YES,
+};
+
+enum class Compilation : uint8_t
+{
+    NOW,    // resources get compiled now
+    BATCHED // resources are put in a queue and batch-compiled
+};
+
+enum class AOMode
+{
+    SSAO,
+    GTAO,
+    LAST_ENUM,
 };
 
 enum class QueryType : uint8_t

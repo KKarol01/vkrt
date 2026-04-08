@@ -328,20 +328,15 @@ struct MeshPass
 
 struct Material
 {
-    static Material init(std::string_view name, MaterialType type,
-                         Flags<MaterialFlags> flags = MaterialFlags::Z_PREPASS, Handle<MeshPass> mesh_pass = {})
+    static Material init(std::string_view name, Handle<MeshPass> mesh_pass = {})
     {
         Material mat{};
         mat.name = name;
-        mat.type = type;
-        mat.flags = flags;
         mat.mesh_pass = mesh_pass;
         return mat;
     }
     auto operator<=>(const Material& t) const = default;
     StackString<64> name;
-    MaterialType type{};
-    Flags<MaterialFlags> flags;
     Handle<MeshPass> mesh_pass;
     ImageView base_color_texture;         // todo: put those in an array?
     ImageView normal_texture;             // todo: put those in an array?
@@ -759,6 +754,11 @@ class Renderer
         // size_t light_count{};
     };
 
+    struct GraphicsSettings
+    {
+        AOMode ao_mode{ AOMode::SSAO };
+    };
+
     struct Settings
     {
         ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
@@ -778,7 +778,16 @@ class Renderer
         Handle<Material> default_material;
         Handle<Image> default_base_color;
 
+        GraphicsSettings gfx_settings;
+
         bool regenerate_swapchain{};
+    };
+
+    struct Passes
+    {
+        std::shared_ptr<pass::Pass> reconstruct_normals;
+        std::array<std::shared_ptr<pass::Pass>, (int)AOMode::LAST_ENUM> ao{};
+        std::array<std::shared_ptr<pass::Pass>, (int)RenderPassType::LAST_ENUM> mesh_passes{};
     };
 
     void init(IRendererBackend* backend);
@@ -802,7 +811,8 @@ class Renderer
     Handle<Shader> make_shader(const std::filesystem::path& path);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
     Handle<PipelineLayout> make_layout(const PipelineLayout& info);
-    Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info);
+    Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info, Compilation compilation = Compilation::BATCHED);
+    void destroy_pipeline(Handle<Pipeline> pipeline);
     Sync* make_sync(const SyncCreateInfo& info);
     void destroy_sync(Sync* sync);
     Handle<Material> make_material(const Material& info);
@@ -816,8 +826,8 @@ class Renderer
 
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
-
-    // void instance_blas(const BLASInstanceSettings& settings);
+    void compile_pipeline(Pipeline& p);
+    // void instance_blas(const BLASInstanceSettings& settingsi);
     // void update_transform(ecs::entity_id entity);
 
     SubmitQueue* get_queue(QueueType type);
@@ -842,6 +852,7 @@ class Renderer
     std::vector<DescriptorLayout> dlayouts;
     std::vector<PipelineLayout> pplayouts;
     std::vector<Pipeline> pipelines;
+    std::vector<Handle<Pipeline>> destroyed_pipelines;
     std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Meshlet> meshlets;
     std::vector<Mesh> meshes;
@@ -864,13 +875,7 @@ class Renderer
     std::vector<FrameData> frame_datas;
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
-    std::vector<std::shared_ptr<pass::Pass>> render_passes;
-    template <typename T> std::shared_ptr<T> get_render_pass(std::string_view name) const
-    {
-        auto it = std::ranges::find_if(render_passes, [&name](const auto& p) { return p->name == name; });
-        if(it == render_passes.end()) { return {}; }
-        return std::static_pointer_cast<T>(*it);
-    }
+    Passes passes;
 };
 
 } // namespace gfx

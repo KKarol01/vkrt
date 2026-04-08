@@ -61,9 +61,11 @@ float GTAO(
 		float cos_n = saturate(dot(proj_norm_v, view_v) / weight);
 		float n = sgn_n * acos(cos_n); 
 		
+		[unroll]
 		for(float side = 0.0; side < 2; ++side)
 		{
 			float horizon_cos_angle = -1.0;
+			[unroll]
 			for(float k=0.0; k < NUM_SAMPLES; ++k)
 			{
 				float s = (k + noise.y) / NUM_SAMPLES;
@@ -96,7 +98,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 	if(any(thread_id.xy >= out_size)) { return; }
 	
 	const float2 uv = float2(thread_id.xy + 0.5) / float2(out_size.xy);
-	const float3 normal_v = -in_normal[thread_id.xy].xyz;
+	const float3 normal_v = in_normal[thread_id.xy].xyz;
 	const float3 pos_v = unproject_inf_revz_depth(uv, in_depth);
 	float2 noise = in_noise.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv * out_size.xy / 4.0, 0).xy
 	//*0.5 + 0.5
