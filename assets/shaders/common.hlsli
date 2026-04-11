@@ -146,6 +146,8 @@ struct GPUMaterial
 [[vk::binding(ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 0)]] Texture2D gTexture2Ds[];
 [[vk::binding(ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 0)]] Texture2D<float> gTexture2Df1s[];
 [[vk::binding(ENG_BINDLESS_SAMPLER_BINDING, 0)]] SamplerState gSamplerStates[];
+[[vk::binding(ENG_BINDLESS_ACCELERATION_STRUCT_BINDING, 0)]] RaytracingAccelerationStructure gTLASs[];
+
 
 #define get_gsb(type, index) gRWBuffers[pc.type##BufferIndex].Load<type>(index * sizeof(type))
 

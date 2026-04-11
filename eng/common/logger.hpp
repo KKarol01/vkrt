@@ -58,7 +58,7 @@
 
 #define ENG_TODO(msg, ...) ENG_PRTLN("[TODO][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__)
 #else
-#ifdef _WIN32
+#ifdef ENG_PLATFORM_WIN32
 #include <WinUser.h>
 #define ENG_ERROR(msg, ...)                                                                                            \
     do                                                                                                                 \

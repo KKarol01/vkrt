@@ -149,6 +149,9 @@ enum class BufferUsage
     TRANSFER_SRC_BIT = 0x8,
     TRANSFER_DST_BIT = 0x10,
     CPU_ACCESS = 0x20,
+    AS_BUILD_INPUT = 0x40,
+    AS_STORAGE = 0x80,
+    AS_SCRATCH = 0x100,
 };
 ENG_ENABLE_FLAGS_OPERATORS(BufferUsage);
 
@@ -302,6 +305,7 @@ enum class DescriptorType
     SAMPLED_IMAGE,
     STORAGE_IMAGE,
     SEPARATE_SAMPLER,
+    ACCELERATION_STRUCTURE,
 };
 
 enum class DescriptorPoolFlags
@@ -347,6 +351,7 @@ enum class AOMode
 {
     SSAO,
     GTAO,
+    RTAO,
     LAST_ENUM,
 };
 
@@ -406,6 +411,7 @@ class StagingBuffer;
 enum class QueryType : uint8_t;
 struct QueryPoolCreateInfo;
 struct QueryPoolMetadataVk;
+struct GeometryMetadataVk;
 struct QueryPool;
 class SubmitQueue;
 struct ImageMetadataVk;
@@ -421,7 +427,6 @@ struct BufferMetadataVk;
 struct IDescriptorSetAllocator;
 class ICommandPool;
 class ICommandBuffer;
-struct TimestampQueryResult;
 struct TimestampQuery;
 struct ScopedTimestampQuery;
 
@@ -439,6 +444,7 @@ class MeshRenderData;
 struct BufferView
 {
     auto operator<=>(const BufferView&) const = default;
+    explicit operator bool() const { return (bool)buffer; }
     static BufferView init(Handle<Buffer> buffer, size_t start = 0, size_t size = ~0ull)
     {
         return BufferView{ .buffer = buffer, .range = { start, size } };

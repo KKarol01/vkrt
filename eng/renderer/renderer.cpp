@@ -14,6 +14,7 @@
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
 #include <eng/renderer/passes/renderpass.hpp>
+#include <eng/math/align.hpp>
 #include <assets/shaders/common.hlsli>
 
 namespace eng
@@ -183,7 +184,10 @@ void Renderer::init_pipelines()
                 { DescriptorType::STORAGE_IMAGE, ENG_BINDLESS_STORAGE_IMAGE_BINDING, 1024, ShaderStage::ALL },
                 { DescriptorType::SAMPLED_IMAGE, ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 1024, ShaderStage::ALL },
                 { DescriptorType::SEPARATE_SAMPLER, ENG_BINDLESS_SAMPLER_BINDING, std::size(imsamplers), ShaderStage::ALL, imsamplers },
-            } ,.md = {},});
+                { DescriptorType::ACCELERATION_STRUCTURE, ENG_BINDLESS_ACCELERATION_STRUCT_BINDING, 8, ShaderStage::ALL },
+            },
+			.md = {},
+			});
         settings.common_layout = make_layout(PipelineLayout{
             .layout = { common_dlayout },
             .push_range = { ShaderStage::ALL, PushRange::MAX_PUSH_BYTES },
@@ -273,6 +277,7 @@ void Renderer::init_pipelines()
         passes.reconstruct_normals = std::make_shared<pass::NormalFromDepth>();
         passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
         passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
+        passes.ao[(int)AOMode::RTAO] = std::make_shared<pass::RTAO>();
         passes.mesh_passes[(int)RenderPassType::Z_PREPASS] = std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS);
         passes.mesh_passes[(int)RenderPassType::OPAQUE] = std::make_shared<pass::MeshPass>(RenderPassType::OPAQUE);
     }
@@ -294,9 +299,10 @@ void Renderer::init_perframes()
 
 void Renderer::init_bufs()
 {
-    bufs.positions = make_buffer("vertex positions", Buffer::init(1024, BufferUsage::STORAGE_BIT));
+    bufs.positions = make_buffer("vertex positions", Buffer::init(1024, BufferUsage::STORAGE_BIT | BufferUsage::AS_BUILD_INPUT));
     bufs.attributes = make_buffer("vertex attributes", Buffer::init(1024, BufferUsage::STORAGE_BIT));
-    bufs.indices = make_buffer("vertex indices", Buffer::init(1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT));
+    bufs.indices = make_buffer("vertex indices", Buffer::init(1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT |
+                                                                        BufferUsage::AS_BUILD_INPUT));
     bufs.bspheres = make_buffer("bounding spheres", Buffer::init(1024, BufferUsage::STORAGE_BIT));
     bufs.materials = make_buffer("materials", Buffer::init(1024, BufferUsage::STORAGE_BIT));
     for(uint32_t i = 0; i < 2; ++i)
@@ -550,6 +556,86 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
         //  new_lights.clear();
     }
+    if(new_blases.size())
+    {
+        staging->flush()->wait_cpu(~0ull);
+        std::vector<ASRequirements> reqs_vec;
+        ASRequirements total_reqs{};
+        for(auto gh : new_blases)
+        {
+            auto& reqs = reqs_vec.emplace_back();
+            backend->make_blas(gh.get(), reqs, nullptr, nullptr, 0, nullptr, 0);
+            reqs.acceleration_structure_size = align_up2(reqs.acceleration_structure_size, 256);
+            ENG_ASSERT(reqs.build_scratch_size % backend->props.min_acceleration_structure_scratch_offset_alignment == 0);
+            total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
+            total_reqs.build_scratch_size += reqs.build_scratch_size;
+        }
+
+        if(!bufs.geom_blas)
+        {
+            bufs.geom_blas =
+                make_buffer("blas buffer", Buffer::init(total_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
+        }
+        if(bufs.geom_blas->capacity < total_reqs.acceleration_structure_size)
+        {
+            backend->destroy_buffer(bufs.geom_blas.get());
+            bufs.geom_blas->capacity = total_reqs.acceleration_structure_size;
+            backend->allocate_buffer(bufs.geom_blas.get());
+        }
+        auto blas_scratch = Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
+        backend->allocate_buffer(blas_scratch);
+
+        auto* cmd = current_data->cmdpool->begin();
+        total_reqs = {};
+        for(auto i = 0u; i < reqs_vec.size(); ++i)
+        {
+            ASRequirements reqs = reqs_vec[i];
+            ASRequirements _reqs;
+            backend->make_blas(new_blases[i].get(), _reqs, cmd, &bufs.geom_blas.get(),
+                               total_reqs.acceleration_structure_size, &blas_scratch, total_reqs.build_scratch_size);
+            total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
+            total_reqs.build_scratch_size += reqs.build_scratch_size;
+        }
+        current_data->cmdpool->end(cmd);
+        gq->with_cmd_buf(cmd).submit_wait(~0ull);
+        backend->destroy_buffer(blas_scratch);
+
+        std::vector<uint32_t> instance_ids;
+        std::vector<const Geometry*> tlas_geoms;
+        std::vector<glm::mat3x4> trs;
+        get_engine().ecs->iterate_components<ecs::Mesh, ecs::Transform>([&](ecs::EntityId e, const ecs::Mesh& m,
+                                                                            const ecs::Transform& t) {
+            for(auto rmh : m.render_meshes)
+            {
+                instance_ids.push_back(m.gpu_resource);
+                tlas_geoms.push_back(&rmh->geometry.get());
+                glm::mat4x3 mat = t.to_mat4();
+                trs.push_back(glm::transpose(mat));
+            }
+        });
+
+        ASRequirements tlas_reqs;
+        backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
+                           std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
+        {
+            auto scratch = Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
+            bufs.geom_tlas_buffer =
+                make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
+            auto instances = Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT);
+            backend->allocate_buffer(scratch);
+            backend->allocate_buffer(instances);
+            auto* cmd = current_data->cmdpool->begin();
+            bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
+                                                std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
+                                                &bufs.geom_tlas_buffer.get(), 0, &scratch, 0, &instances, 0);
+            current_data->cmdpool->end(cmd);
+            gq->with_cmd_buf(cmd).submit_wait(~0ull);
+            backend->destroy_buffer(scratch);
+            backend->destroy_buffer(instances);
+        }
+
+        new_blases.clear();
+    }
 
     swapchain->acquire(~0ull, current_data->acq_sem);
 
@@ -801,12 +887,12 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compila
     const auto found_handle = it != pipelines.end();
     if(!found_handle)
     {
-        const auto reuse_handle = destroyed_pipelines.size();
+        const auto reuse_handle = false; // destroyed_pipelines.size();
         auto handle = Handle<Pipeline>{ (Handle<Pipeline>::StorageType)pipelines.size() };
         if(reuse_handle)
         {
-            handle = destroyed_pipelines.back();
-            destroyed_pipelines.pop_back();
+            // handle = destroyed_pipelines.back();
+            // destroyed_pipelines.pop_back();
         }
         backend->make_pipeline(p);
         if(compilation == Compilation::BATCHED) { new_pipelines.push_back(handle); }
@@ -822,10 +908,10 @@ void Renderer::destroy_pipeline(Handle<Pipeline> pipeline)
 {
     ENG_ERROR("TODO: ADD TO DELETEION QUEUE");
     return;
-    if(!pipeline) { return; }
-    backend->destroy_pipeline(pipeline.get());
-    destroyed_pipelines.push_back(pipeline);
-    ENG_ASSERT(std::ranges::none_of(destroyed_pipelines, [pipeline](auto p) { return p == pipeline; }));
+    // if(!pipeline) { return; }
+    // backend->destroy_pipeline(pipeline.get());
+    // destroyed_pipelines.push_back(pipeline);
+    // ENG_ASSERT(std::ranges::none_of(destroyed_pipelines, [pipeline](auto p) { return p == pipeline; }));
 }
 
 Sync* Renderer::make_sync(const SyncCreateInfo& info) { return backend->make_sync(info); }
@@ -897,6 +983,8 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
             static_cast<float>(out_vertices.size() * sizeof(out_vertices[0])) / 1024.0f,
             static_cast<float>(out_indices.size() * sizeof(out_indices[0])) / 1024.0f);
 
+    make_blas(handle);
+
     if(!handle) { return Handle<Geometry>{}; }
     return Handle<Geometry>{ *handle };
 }
@@ -940,20 +1028,19 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
         memcpy(pdst + i * vx_size, psrc + mlt_vxs[i] * vx_size, vx_size);
     }
 
-    out_indices.resize(mlt_ids.size());
-    std::transform(mlt_ids.begin(), mlt_ids.end(), out_indices.begin(), [](auto idx) { return (uint16_t)idx; });
-    out_meshlets.resize(mltcnt);
-    for(auto i = 0u; i < mltcnt; ++i)
-    {
-        const auto& mlt = mlts.at(i);
-        const auto& mltb = mlt_bnds.at(i);
-        out_meshlets.at(i) =
-            Meshlet{ .vertex_offset = (int32_t)mlt.vertex_offset,
-                     .vertex_count = mlt.vertex_count,
-                     .index_offset = mlt.triangle_offset,
-                     .index_count = mlt.triangle_count * 3,
-                     .bounding_sphere = glm::vec4{ mltb.center[0], mltb.center[1], mltb.center[2], mltb.radius } };
-    }
+    out_indices =
+        std::views::transform(mlt_ids, [](auto idx) { return (uint16_t)idx; }) | std::ranges::to<std::vector<uint16_t>>();
+    out_meshlets =
+        std::views::zip_transform(
+            [](const meshopt_Meshlet& mlt, const meshopt_Bounds& mltb) {
+                return Meshlet{ .vertex_offset = (int32_t)mlt.vertex_offset,
+                                .vertex_count = mlt.vertex_count,
+                                .index_offset = mlt.triangle_offset,
+                                .index_count = mlt.triangle_count * 3,
+                                .bounding_sphere = glm::vec4{ mltb.center[0], mltb.center[1], mltb.center[2], mltb.radius } };
+            },
+            mlts, mlt_bnds) |
+        std::ranges::to<std::vector<Meshlet>>();
 }
 
 Handle<Mesh> Renderer::make_mesh(const MeshDescriptor& batch)
@@ -966,6 +1053,12 @@ Handle<Mesh> Renderer::make_mesh(const MeshDescriptor& batch)
     return Handle<Mesh>{ idx };
 }
 
+void Renderer::make_blas(Handle<Geometry> geom)
+{
+    if(!geom) { return; }
+    new_blases.push_back(geom);
+}
+
 Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 {
     return shader_effects.insert(info).handle;
@@ -973,11 +1066,11 @@ Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
 
-Handle<MeshPass> Renderer::find_mesh_pass(std::string_view name)
-{
-    MeshPass mp{ .name = name, .effects = {} };
-    return mesh_passes.find(mp);
-}
+// Handle<MeshPass> Renderer::find_mesh_pass(std::string_view name)
+//{
+//     MeshPass mp{ .name = { name.begin(), name.end() }, .effects = {} };
+//     return mesh_passes.find(mp);
+// }
 
 void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data)
 {

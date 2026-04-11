@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
-#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/handleflatset.hpp>
@@ -133,7 +133,6 @@ struct PipelineMetadataVk
 struct BufferMetadataVk
 {
     static void init(Buffer& a, AllocateMemory allocate);
-    static void init(const Buffer& a, VkBufferCreateInfo& info);
     static void destroy(Buffer& a);
     VkBuffer buffer{};
     VmaAllocation vma_alloc{};
@@ -180,6 +179,24 @@ struct QueryPoolMetadataVk
     VkQueryPool vkpool{};
 };
 
+struct GeometryMetadataVk
+{
+    VkAccelerationStructureKHR blas{};
+};
+
+struct AsRequirementsMetadataVk
+{
+    struct BlasData
+    {
+    };
+    struct TlasData
+    {
+        std::vector<VkAccelerationStructureInstanceKHR> instances;
+    };
+    BlasData blas;
+    TlasData tlas;
+};
+
 class RendererBackendVk : public IRendererBackend
 {
   public:
@@ -222,6 +239,12 @@ class RendererBackendVk : public IRendererBackend
     Swapchain* make_swapchain() override;
     void destroy_swapchain(Swapchain* swapchain) override;
     SubmitQueue* get_queue(QueueType type) override;
+    void make_blas(Geometry& geom, ASRequirements& reqs, ICommandBuffer* cmd, Buffer* as_buffer, size_t as_offset,
+                   Buffer* scratch_buffer, size_t scratch_offset) override;
+    TopAccelerationStructure make_tlas(std::span<const Geometry*> geoms, std::span<const glm::mat3x4> transforms,
+                                       std::span<const uint32_t> instance_ids, ASRequirements& reqs, ICommandBuffer* cmd,
+                                       Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
+                                       size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) override;
 
     ImageView::Metadata get_md(const ImageView& view) override;
 

@@ -40,7 +40,7 @@ class DirectoryListener
 
 ENG_DEFINE_HANDLE_STORAGE(assets::DirectoryListener, uintptr_t);
 ENG_DEFINE_HANDLE_ALL_GETTERS(assets::DirectoryListener,
-                              { return handle ? reinterpret_cast<assets::DirectoryListener*>(*handle) : nullptr; });
+                              { return reinterpret_cast<assets::DirectoryListener*>(*handle); });
 
 namespace assets
 {

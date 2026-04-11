@@ -56,6 +56,8 @@ class StagingBuffer
     void copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier = false);
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     void copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size, bool insert_barrier = false);
+    // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
+    void copy(Buffer& dst, const void* const src, size_t dst_offset, size_t src_size, bool insert_barrier = false);
     // Copies data from src vector to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     template <typename T>
     void copy(Handle<Buffer> dst, const std::vector<T>& src, size_t dst_offset, bool insert_barrier = false)
@@ -102,7 +104,7 @@ class StagingBuffer
     void prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
                        ImageMipLayerRange dst_range = { { 0u, ~0u }, { 0u, ~0u } },
                        ImageMipLayerRange src_range = { { 0u, ~0u }, { 0u, ~0u } });
-    bool translate_dst_offset(Handle<Buffer> dst, size_t& offset, size_t size);
+    bool translate_dst_offset(Buffer& dst, size_t& offset, size_t size);
 
     Buffer buffer;
     SubmitQueue* queue{};

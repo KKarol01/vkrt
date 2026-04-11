@@ -15,6 +15,11 @@ struct RendererBackendLimits
     float timestampPeriodNs{};
 };
 
+struct RendererBackendProps
+{
+    size_t min_acceleration_structure_scratch_offset_alignment{};
+};
+
 struct RendererMemoryRequirements
 {
     auto operator<=>(const RendererMemoryRequirements&) const = default;
@@ -22,6 +27,15 @@ struct RendererMemoryRequirements
     size_t alignment{};
     uintptr_t backend_data{}; // for storing additional backend-specific data (vulkan uses it to store memory type bits)
 };
+
+struct ASRequirements
+{
+    size_t acceleration_structure_size{};
+    size_t build_scratch_size{};
+    size_t instance_data_buffer_size{};
+};
+
+using TopAccelerationStructure = void*;
 
 class IRendererBackend
 {
@@ -49,6 +63,12 @@ class IRendererBackend
     virtual Swapchain* make_swapchain() = 0;
     virtual void destroy_swapchain(Swapchain* swapchain) = 0;
     virtual SubmitQueue* get_queue(QueueType type) = 0;
+    virtual void make_blas(Geometry& geom, ASRequirements& reqs, ICommandBuffer* cmd, Buffer* as_buffer,
+                           size_t as_offset, Buffer* scratch_buffer, size_t scratch_offset) = 0;
+    virtual TopAccelerationStructure make_tlas(std::span<const Geometry*> geoms, std::span<const glm::mat3x4> transforms,
+                                               std::span<const uint32_t> instance_ids, ASRequirements& reqs,
+                                               ICommandBuffer* cmd, Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
+                                               size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) = 0;
 
     virtual ImageView::Metadata get_md(const ImageView& view) = 0;
 
@@ -76,6 +96,7 @@ class IRendererBackend
 
     RendererBackendCaps caps{};
     RendererBackendLimits limits{};
+    RendererBackendProps props{};
 };
 
 } // namespace gfx

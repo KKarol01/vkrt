@@ -46,6 +46,17 @@ VkFormat to_vk(const ImageFormat& a)
     }
 }
 
+VkIndexType to_vk(IndexFormat a)
+{
+	switch(a)
+	{
+		case IndexFormat::U8: { return VK_INDEX_TYPE_UINT8; }
+		case IndexFormat::U16: { return VK_INDEX_TYPE_UINT16; }
+		case IndexFormat::U32: { return VK_INDEX_TYPE_UINT32; }
+		default: { ENG_WARN("Unhandled case"); return {}; }
+	}
+}
+
 VkFormat to_vk(const VertexFormat & a)
 {
     switch(a) 
@@ -276,6 +287,9 @@ VkBufferUsageFlags to_vk(const Flags<BufferUsage>& a)
     if(a.test(gfx::BufferUsage::INDIRECT_BIT))      { flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT; }
     if(a.test(gfx::BufferUsage::TRANSFER_SRC_BIT))  { flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT; }
     if(a.test(gfx::BufferUsage::TRANSFER_DST_BIT))  { flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT; }
+    if(a.test(gfx::BufferUsage::AS_BUILD_INPUT))	{ flags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; }
+    if(a.test(gfx::BufferUsage::AS_STORAGE))		{ flags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; }
+    if(a.test(gfx::BufferUsage::AS_SCRATCH))		{ flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; }
     return flags;
 }
 
@@ -347,6 +361,7 @@ VkDescriptorType to_vk(const DescriptorType& a)
         case DescriptorType::SAMPLED_IMAGE: { return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; }
         case DescriptorType::STORAGE_IMAGE: { return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; }
         case DescriptorType::SEPARATE_SAMPLER: { return VK_DESCRIPTOR_TYPE_SAMPLER; }
+        case DescriptorType::ACCELERATION_STRUCTURE: { return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR; }
         default: { ENG_ERROR("Unhandled case."); return {}; }
     }
 }

@@ -226,7 +226,7 @@ struct SSAO : public Pass
                 { "radius", &ao_settings.radius },
                 { "bias", &ao_settings.bias },
             },
-            false,
+            true,
         };
         generate_samples();
         generate_noise();
@@ -401,7 +401,7 @@ struct GTAO : public Pass
                 { "radius", &ao_settings.radius },
                 { "bias", &ao_settings.bias },
             },
-            false,
+            true,
         };
         generate_noise();
     }
@@ -518,6 +518,58 @@ struct GTAO : public Pass
     Handle<Buffer> sample_buffer;
     Handle<Image> noise_texture;
     Handle<Buffer> settings_buffer;
+    PassData data;
+};
+
+struct RTAO : public Pass
+{
+    RTAO() : Pass("RTAO", RenderOrder::MESH_RENDER)
+    {
+        pipeline = get_renderer().make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+    }
+    ~RTAO() override = default;
+
+    struct PassData
+    {
+        RGAccessId constants;
+        RGResourceId out_ao;
+    };
+
+    void init(RGRenderGraph* graph) override
+    {
+        const auto& r = get_renderer();
+        const auto res = r.settings.render_resolution;
+        data = graph->add_compute_pass<PassData>(
+            name.c_str(), order,
+            [=](RGBuilder& b, PassData& d) {
+                if(!r.current_data->render_resources.zpdepth) { return; }
+                d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
+                // d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
+                // d.normals = b.read_image(b.as_acc_id(r.current_data->render_resources.normal));
+                // d.noise = b.sample_texture(b.import_resource(noise_texture));
+                auto out_ao = b.create_resource("RTAO_OUTPUT", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
+                                                                           ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+                out_ao = b.read_write_image(out_ao);
+                d.out_ao = b.as_res_id(out_ao);
+                /*d.settings = b.import_resource(settings_buffer);
+                d.settings = b.read_buffer(d.settings);*/
+            },
+            [=, this](RGBuilder& b, const PassData& d) {
+                auto* cmd = b.open_cmd_buf();
+                cmd->bind_pipeline(pipeline.get());
+                DescriptorResource resources[]{
+                    DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::acceleration_struct(get_renderer().bufs.geom_tlas),
+                    DescriptorResource::storage_image(b.graph->get_acc(d.out_ao).image_view),
+                };
+                cmd->bind_resources(0, resources);
+                cmd->dispatch((res.x + 7) / 8, (res.y + 7) / 8, 1);
+            });
+
+        r.current_data->render_resources.ao = data.out_ao;
+    }
+
+    Handle<Pipeline> pipeline;
     PassData data;
 };
 

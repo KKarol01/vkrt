@@ -68,15 +68,22 @@ struct DescriptorResource
         return storage_buffer(BufferView::init(buffer), index);
     }
 
+    static DescriptorResource acceleration_struct(TopAccelerationStructure tlas, uint32_t index = 0)
+    {
+        return DescriptorResource{ tlas, DescriptorType::ACCELERATION_STRUCTURE, index };
+    }
+
     operator bool() const { return !is_empty(); }
 
     bool is_empty() const { return resource.index() == 0; }
     bool is_buffer() const { return resource.index() == 1; }
     bool is_image() const { return resource.index() == 2; }
+    bool is_tlas() const { return resource.index() == 3; }
     const BufferView& as_buffer() const { return std::get<1>(resource); }
     const ImageView& as_image() const { return std::get<2>(resource); }
+    const TopAccelerationStructure& as_tlas() const { return std::get<3>(resource); }
 
-    std::variant<std::monostate, BufferView, ImageView> resource;
+    std::variant<std::monostate, BufferView, ImageView, TopAccelerationStructure> resource;
     DescriptorType type{};
     uint32_t index{ ~0u };
 };
@@ -298,10 +305,15 @@ struct Pipeline
 
 struct Geometry
 {
-    auto operator<=>(const Geometry& a) const = default;
+    auto operator<=>(const Geometry& a) const { return meshlet_range <=> a.meshlet_range; }
+    auto operator==(const Geometry& a) const { return meshlet_range == a.meshlet_range; }
     Range32u meshlet_range{}; // position inside meshlet buffer
-    // VkAccelerationStructureKHR blas{};
-    // Handle<Buffer> blas_buffer{};
+    Handle<Buffer> blas_buffer{};
+    struct Metadata
+    {
+        GeometryMetadataVk* vk() const { return (GeometryMetadataVk*)ptr; }
+        void* ptr{};
+    } md{};
 };
 
 struct ShaderEffect
@@ -322,7 +334,7 @@ struct MeshPass
         return pass;
     }
     bool operator==(const MeshPass& o) const { return name == o.name; }
-    StackString<64> name;
+    std::string name;
     Effects effects;
 };
 
@@ -657,11 +669,6 @@ struct RenderResources
     RGResourceId color;
 };
 
-struct TimestampQueryResult
-{
-    uint64_t timestamp;
-};
-
 struct TimestampQuery
 {
     static float to_ms(const TimestampQuery& q);
@@ -747,11 +754,17 @@ class Renderer
         uint32_t fwdp_lights_per_tile{ 256 }; // changing requires resizing the buffers
         uint32_t fwdp_num_tiles{};
 
-        VkIndexType index_type{ VK_INDEX_TYPE_UINT16 };
+        IndexFormat index_type{ IndexFormat::U16 };
         size_t vertex_count{};
         size_t index_count{};
         // size_t transform_count{};
         // size_t light_count{};
+
+        Handle<Buffer> geom_blas; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
+        // Handle<Buffer> geom_scratch; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
+
+        Handle<Buffer> geom_tlas_buffer;
+        TopAccelerationStructure geom_tlas;
     };
 
     struct GraphicsSettings
@@ -820,9 +833,10 @@ class Renderer
     static void meshletize_geometry(const GeometryDescriptor& info, std::vector<float>& out_vertices,
                                     std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
+    void make_blas(Handle<Geometry> geom);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
     Handle<MeshPass> make_mesh_pass(const MeshPass& info);
-    Handle<MeshPass> find_mesh_pass(std::string_view name);
+    // Handle<MeshPass> find_mesh_pass(std::string_view name);
 
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
@@ -847,21 +861,23 @@ class Renderer
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
     std::unordered_map<Handle<Shader>, std::vector<Handle<Pipeline>>> shader_usage_pipeline_map;
-    std::vector<Handle<Shader>> new_shaders;
     Handle<assets::DirectoryListener> new_shaders_listener;
+
     std::vector<DescriptorLayout> dlayouts;
     std::vector<PipelineLayout> pplayouts;
     std::vector<Pipeline> pipelines;
-    std::vector<Handle<Pipeline>> destroyed_pipelines;
-    std::vector<Handle<Pipeline>> new_pipelines;
-    std::vector<Meshlet> meshlets;
-    std::vector<Mesh> meshes;
-    std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
 
     std::vector<Geometry> geometries;
+    std::vector<Meshlet> meshlets;
+    HandleFlatSet<Material> materials;
+    std::vector<Mesh> meshes;
     HandleFlatSet<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
-    HandleFlatSet<Material> materials;
+    std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
+
+    std::vector<Handle<Geometry>> new_blases;
+    std::vector<Handle<Shader>> new_shaders;
+    std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Handle<Material>> new_materials;
     std::vector<ecs::EntityId> new_transforms;
     std::vector<ecs::EntityId> new_lights;

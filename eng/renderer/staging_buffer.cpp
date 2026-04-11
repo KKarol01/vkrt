@@ -50,7 +50,7 @@ void StagingBuffer::reset()
 {
     flush(nullptr); // send, if any, staged transactions before optional forwarding.
     sync->wait_cpu(~0ull);
-    //sync->reset();
+    // sync->reset();
     get_context().pool->reset();
     get_context().cmd = nullptr;
     head = 0;
@@ -60,9 +60,9 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
 {
     ENG_ASSERT(dst && src);
     if(src_range.size == 0) { return; }
-    if(!translate_dst_offset(dst, dst_offset, src_range.size)) { return; }
     auto& dstb = dst.get();
     const auto& srcb = src.get();
+    if(!translate_dst_offset(dstb, dst_offset, src_range.size)) { return; }
     if(dstb.memory != nullptr && srcb.memory != nullptr)
     {
         memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)srcb.memory + src_range.offset, src_range.size);
@@ -77,12 +77,17 @@ void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offs
 
 void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size, bool insert_barrier)
 {
+    if(!dst) { return; }
+    copy(dst.get(), src, dst_offset, src_size, insert_barrier);
+}
+
+void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, size_t src_size, bool insert_barrier)
+{
     if(src_size == 0) { return; }
-    ENG_ASSERT(dst && src);
+    ENG_ASSERT(src);
     if(!translate_dst_offset(dst, dst_offset, src_size)) { return; }
 
-    auto& dstb = dst.get();
-    if(dstb.memory) { memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)src, src_size); }
+    if(dst.memory) { memcpy((std::byte*)dst.memory + dst_offset, (const std::byte*)src, src_size); }
     else
     {
         size_t uploaded = 0;
@@ -91,13 +96,13 @@ void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_o
             const auto upload_size = src_size - uploaded;
             auto alloc = partial_allocate(upload_size);
             memcpy(get_alloc_mem(alloc), (const std::byte*)src + uploaded, alloc.size);
-            get_cmd()->copy(dstb, buffer, dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
+            get_cmd()->copy(dst, buffer, dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
             uploaded += alloc.size;
         }
         ENG_ASSERT(uploaded == src_size);
         if(insert_barrier) { barrier(); }
     }
-    dstb.size = std::max(dstb.size, dst_offset + src_size);
+    dst.size = std::max(dst.size, dst_offset + src_size);
 }
 
 void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy, bool transition_back)
@@ -284,10 +289,10 @@ void StagingBuffer::prepare_image(const Image* dst, const Image* src, bool disca
     }
 }
 
-bool StagingBuffer::translate_dst_offset(Handle<Buffer> dst, size_t& offset, size_t size)
+bool StagingBuffer::translate_dst_offset(Buffer& dst, size_t& offset, size_t size)
 {
-    if(offset == STAGING_APPEND) { offset = dst->size; }
-    if(dst->capacity < offset + size)
+    if(offset == STAGING_APPEND) { offset = dst.size; }
+    if(dst.capacity < offset + size)
     {
         ENG_ERROR("Buffer too small");
         return false;

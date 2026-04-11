@@ -182,6 +182,7 @@ target_compile_definitions(eng
         IMGUI_DEFINE_MATH_OPERATORS
 		ImTextureID_Invalid=~0ull
 		$<$<CONFIG:Debug>:ENG_DEBUG_BUILD>
+        $<$<PLATFORM_ID:Windows>:ENG_PLATFORM_WIN32>
 )
 
 target_precompile_headers(eng

@@ -10,6 +10,7 @@ namespace gfx
 VkFilter to_vk(const ImageFilter& a);
 VkSamplerAddressMode to_vk(const ImageAddressing& a);
 VkFormat to_vk(const ImageFormat& a);
+VkIndexType to_vk(IndexFormat a);
 VkFormat to_vk(const VertexFormat& a);
 VkImageType to_vk(const ImageType& a);
 VkImageViewType to_vk(const ImageViewType& a);

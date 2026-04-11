@@ -73,7 +73,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
         {
             return std::tie(view, vkptr, allocator) == std::tie(s.view, s.vkptr, s.allocator);
         }
-        std::variant<BufferView, ImageView> view;
+        std::variant<BufferView, ImageView, TopAccelerationStructure> view;
         uint32_t value{ ~0u };
         const void* vkptr{};
         SlotAllocatorType* allocator{};
@@ -97,6 +97,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
         if(type == DescriptorType::STORAGE_BUFFER) { return storage_buffer_slots; }
         if(type == DescriptorType::STORAGE_IMAGE) { return storage_image_slots; }
         if(type == DescriptorType::SAMPLED_IMAGE) { return sampled_image_slots; }
+        if(type == DescriptorType::ACCELERATION_STRUCTURE) { return tlas_slots; }
         ENG_ERROR("Invalid type");
         return storage_buffer_slots;
     }
@@ -109,13 +110,16 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     std::vector<VkWriteDescriptorSet> writes;
     std::deque<VkDescriptorBufferInfo> buf_writes;
     std::deque<VkDescriptorImageInfo> img_writes;
+    std::deque<VkWriteDescriptorSetAccelerationStructureKHR> tlas_writes;
 
     SlotAllocatorType storage_buffer_slots;
     SlotAllocatorType storage_image_slots;
     SlotAllocatorType sampled_image_slots;
+    SlotAllocatorType tlas_slots;
 
     std::unordered_map<uint32_t, std::vector<Slot>> image_views;
     std::unordered_map<uint32_t, std::vector<Slot>> buffer_views;
+    std::unordered_map<uintptr_t, std::vector<Slot>> tlas_views;
 };
 
 } // namespace gfx

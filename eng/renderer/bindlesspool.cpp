@@ -134,12 +134,24 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
         auto it = buffer_views.find(*desc.as_buffer().buffer);
         if(it != buffer_views.end()) { found_slots = &it->second; }
     }
-    else
+    else if(desc.is_image())
     {
         slot.view = desc.as_image();
         slot.vkptr = desc.as_image().image->md.vk()->image;
         auto it = image_views.find(*desc.as_image().image);
         if(it != image_views.end()) { found_slots = &it->second; }
+    }
+    else if(desc.is_tlas())
+    {
+        slot.view = desc.as_tlas();
+        slot.vkptr = (VkAccelerationStructureKHR)desc.as_tlas();
+        auto it = tlas_views.find((uintptr_t)desc.as_tlas());
+        if(it != tlas_views.end()) { found_slots = &it->second; }
+    }
+    else
+    {
+        ENG_WARN("Unknown descriptor type {}", desc.resource.index());
+        return ~0u;
     }
 
     if(found_slots && found_slots->size())
@@ -160,9 +172,14 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
     }
 
     slot.value = *slot.allocator->allocate();
-    write_descriptor(desc.type, desc.is_buffer() ? (void*)&desc.as_buffer() : (void*)&desc.as_image(), slot.value);
+    const auto* view = desc.is_buffer()  ? (void*)&desc.as_buffer()
+                       : desc.is_image() ? (void*)&desc.as_image()
+                       : desc.is_tlas()  ? (void*)&desc.as_tlas()
+                                         : nullptr;
+    write_descriptor(desc.type, view, slot.value);
     if(desc.is_buffer()) { buffer_views[*desc.as_buffer().buffer].push_back(slot); }
-    else { image_views[*desc.as_image().image].push_back(slot); }
+    else if(desc.is_image()) { image_views[*desc.as_image().image].push_back(slot); }
+    else if(desc.is_tlas()) { tlas_views[(uintptr_t)desc.as_tlas()].push_back(slot); }
     return slot.value;
 }
 
@@ -173,10 +190,11 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     write.descriptorCount = 1;
     write.descriptorType = to_vk(type);
     write.dstArrayElement = slot;
-    write.dstBinding = type == DescriptorType::STORAGE_BUFFER  ? ENG_BINDLESS_STORAGE_BUFFER_BINDING
-                       : type == DescriptorType::STORAGE_IMAGE ? ENG_BINDLESS_STORAGE_IMAGE_BINDING
-                       : type == DescriptorType::SAMPLED_IMAGE ? ENG_BINDLESS_SAMPLED_IMAGE_BINDING
-                                                               : ~0u;
+    write.dstBinding = type == DescriptorType::STORAGE_BUFFER           ? ENG_BINDLESS_STORAGE_BUFFER_BINDING
+                       : type == DescriptorType::STORAGE_IMAGE          ? ENG_BINDLESS_STORAGE_IMAGE_BINDING
+                       : type == DescriptorType::SAMPLED_IMAGE          ? ENG_BINDLESS_SAMPLED_IMAGE_BINDING
+                       : type == DescriptorType::ACCELERATION_STRUCTURE ? ENG_BINDLESS_ACCELERATION_STRUCT_BINDING
+                                                                        : ~0u;
     assert(write.dstBinding != ~0u);
 
     if(type == DescriptorType::STORAGE_BUFFER)
@@ -191,20 +209,29 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     else if(type == DescriptorType::STORAGE_IMAGE)
     {
         auto* info = &img_writes.emplace_back();
-        const auto& engview = (const ImageView*)view;
+        const auto& engview = *(const ImageView*)view;
         info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        info->imageView = engview->get_md().vk->view;
+        info->imageView = engview.get_md().vk->view;
         info->sampler = {};
         write.pImageInfo = info;
     }
     else if(type == DescriptorType::SAMPLED_IMAGE)
     {
         auto* info = &img_writes.emplace_back();
-        const auto& engview = (const ImageView*)view;
+        const auto& engview = *(const ImageView*)view;
         info->imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-        info->imageView = engview->get_md().vk->view;
+        info->imageView = engview.get_md().vk->view;
         info->sampler = {};
         write.pImageInfo = info;
+    }
+    else if(type == DescriptorType::ACCELERATION_STRUCTURE)
+    {
+        auto* info = &tlas_writes.emplace_back();
+        const auto& engview = *(const VkAccelerationStructureKHR*)view;
+        info->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        info->accelerationStructureCount = 1;
+        info->pAccelerationStructures = &engview;
+        write.pNext = info;
     }
     else
     {

@@ -5,30 +5,22 @@
 #include <utility>
 #include <chrono>
 #include <cstring>
-#include <eng/ecs/ecs.hpp>
-#include <eng/ecs/components.hpp>
-#include <eng/engine.hpp>
+#include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan/vulkan_backend.hpp>
-#include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/renderer/set_debug_name.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
-#include <eng/renderer/vulkan/to_vk.hpp>
-#include <eng/common/to_string.hpp>
-#include <eng/camera.hpp>
-#include <eng/assets/asset_manager.hpp>
 
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
 #include <volk/volk.h>
-#include <glm/mat3x3.hpp>
-#include <glm/gtc/quaternion.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <vulkan/vulkan.h>
+#ifdef ENG_PLATFORM_WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
+#endif
 #include <reproc++/run.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
@@ -308,9 +300,11 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
     a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
 
     auto& backend = RendererBackendVk::get_instance();
-    VkBufferCreateInfo vkinfo;
+    vk::VkBufferCreateInfo vkinfo;
+    vkinfo.size = a.capacity;
+    vkinfo.usage = to_vk(a.usage);
+
     VmaAllocationInfo vmaai{};
-    init(a, vkinfo);
     auto vmainfo = VmaAllocationCreateInfo{};
     vmainfo.flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u;
     vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -332,13 +326,6 @@ void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
     }
 }
 
-void BufferMetadataVk::init(const Buffer& a, VkBufferCreateInfo& info)
-{
-    info = vk::VkBufferCreateInfo{};
-    info.size = a.capacity;
-    info.usage = to_vk(a.usage);
-}
-
 void BufferMetadataVk::destroy(Buffer& a)
 {
     if(!a.md.vk())
@@ -350,7 +337,7 @@ void BufferMetadataVk::destroy(Buffer& a)
     auto* md = a.md.vk();
     if(!md) { return; }
     if(!md->is_aliased) { vmaDestroyBuffer(backend.vma, md->buffer, md->vma_alloc); }
-    else { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
+    else if(md->buffer) { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
     delete md;
     a.md.ptr = nullptr;
 }
@@ -699,8 +686,6 @@ void RendererBackendVk::init_vulkan()
     auto rayq_features = vk::VkPhysicalDeviceRayQueryFeaturesKHR{};
     rayq_features.rayQuery = true;
 
-    rt_props = vk::VkPhysicalDeviceRayTracingPipelinePropertiesKHR{};
-    rt_acc_props = vk::VkPhysicalDeviceAccelerationStructurePropertiesKHR{};
     vkb::DeviceBuilder device_builder{ phys_ret };
     device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
     if(supports_raytracing)
@@ -718,10 +703,11 @@ void RendererBackendVk::init_vulkan()
 
     VkDevice device = vkb_device.device;
 
+    rt_props = vk::VkPhysicalDeviceRayTracingPipelinePropertiesKHR{};
+    rt_acc_props = vk::VkPhysicalDeviceAccelerationStructurePropertiesKHR{};
+    rt_props.pNext = &rt_acc_props;
     auto pdev_props = vk::VkPhysicalDeviceProperties2{};
     pdev_props.pNext = &rt_props;
-
-    rt_props.pNext = &rt_acc_props;
     vkGetPhysicalDeviceProperties2(phys_ret.physical_device, &pdev_props);
 
     instance = vkb_inst.instance;
@@ -775,6 +761,9 @@ void RendererBackendVk::init_vulkan()
     pdev_limits = pdev_props.properties.limits;
     limits = RendererBackendLimits{
         .timestampPeriodNs = pdev_limits.timestampPeriod,
+    };
+    props = {
+        .min_acceleration_structure_scratch_offset_alignment = rt_acc_props.minAccelerationStructureScratchOffsetAlignment,
     };
 }
 
@@ -1565,6 +1554,164 @@ SubmitQueue* RendererBackendVk::get_queue(QueueType type)
     return nullptr;
 }
 
+void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommandBuffer* cmd, Buffer* as_buffer,
+                                  size_t as_offset, Buffer* scratch_buffer, size_t scratch_offset)
+{
+    if(!geom.md.ptr) { geom.md.ptr = new GeometryMetadataVk{}; }
+    ENG_ASSERT(geom.md.ptr);
+    auto* md = geom.md.vk();
+    if(md->blas) { return; }
+
+    auto& r = get_renderer();
+    std::vector<uint32_t> vk_prim_counts;
+    std::vector<vk::VkAccelerationStructureBuildRangeInfoKHR> vk_build_ranges;
+    const auto vk_geoms = std::views::iota(geom.meshlet_range.offset) | std::views::take(geom.meshlet_range.size) |
+                          std::views::transform([&](auto mltidx) {
+                              const auto& mlt = get_renderer().meshlets[mltidx];
+                              auto vk_tris_data = vk::VkAccelerationStructureGeometryTrianglesDataKHR{};
+                              vk_tris_data.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+                              vk_tris_data.vertexData.deviceAddress = r.bufs.positions->md.vk()->device_address;
+                              vk_tris_data.vertexStride = sizeof(glm::vec3);
+                              vk_tris_data.maxVertex = r.bufs.vertex_count - 1;
+                              vk_tris_data.indexType = to_vk(r.bufs.index_type);
+                              vk_tris_data.indexData.deviceAddress = r.bufs.indices->md.vk()->device_address;
+
+                              vk::VkAccelerationStructureGeometryKHR vk_geom;
+                              vk_geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+                              vk_geom.geometry.triangles = vk_tris_data;
+                              vk_geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+                              vk_prim_counts.push_back(mlt.index_count / 3);
+
+                              vk_build_ranges.emplace_back();
+                              vk_build_ranges.back().primitiveCount = mlt.index_count / 3;
+                              vk_build_ranges.back().primitiveOffset = mlt.index_offset * get_index_size(r.bufs.index_type);
+                              vk_build_ranges.back().firstVertex = mlt.vertex_offset;
+                              vk_build_ranges.back().transformOffset = 0;
+
+                              return vk_geom;
+                          }) |
+                          std::ranges::to<std::vector<VkAccelerationStructureGeometryKHR>>();
+
+    vk::VkAccelerationStructureBuildGeometryInfoKHR vk_build_info{};
+    vk_build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    vk_build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    vk_build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    vk_build_info.geometryCount = (uint32_t)vk_geoms.size();
+    vk_build_info.pGeometries = vk_geoms.data();
+
+    ENG_ASSERT(vk_prim_counts.size() == vk_build_info.geometryCount);
+
+    vk::VkAccelerationStructureBuildSizesInfoKHR vk_build_sizes;
+    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &vk_build_info,
+                                            vk_prim_counts.data(), &vk_build_sizes);
+
+    reqs.acceleration_structure_size = vk_build_sizes.accelerationStructureSize;
+    reqs.build_scratch_size = vk_build_sizes.buildScratchSize;
+
+    if(!as_buffer || !scratch_buffer || !cmd) { return; }
+
+    vk::VkAccelerationStructureCreateInfoKHR vk_blas_info;
+    vk_blas_info.buffer = as_buffer->md.vk()->buffer;
+    vk_blas_info.offset = as_offset;
+    vk_blas_info.size = reqs.acceleration_structure_size;
+    vk_blas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+    VK_CHECK(vkCreateAccelerationStructureKHR(dev, &vk_blas_info, nullptr, &md->blas));
+    if(!md->blas) { return; }
+
+    vk_build_info.dstAccelerationStructure = md->blas;
+    vk_build_info.scratchData.deviceAddress = scratch_buffer->md.vk()->device_address + scratch_offset;
+    ENG_ASSERT(vk_build_info.scratchData.deviceAddress % props.min_acceleration_structure_scratch_offset_alignment == 0);
+
+    auto vkcmd = ((CommandBufferVk*)cmd)->cmd;
+    const VkAccelerationStructureBuildRangeInfoKHR* const vp_vk_build_ranges[]{ vk_build_ranges.data() };
+    vkCmdBuildAccelerationStructuresKHR(vkcmd, 1, &vk_build_info, vp_vk_build_ranges);
+}
+
+TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*> geoms, std::span<const glm::mat3x4> transforms,
+                                                      std::span<const uint32_t> instance_ids, ASRequirements& reqs,
+                                                      ICommandBuffer* cmd, Buffer* tlas_buffer, size_t tlas_offset,
+                                                      Buffer* scratch_buffer, size_t scratch_offset,
+                                                      Buffer* instances_buffer, size_t instances_offset)
+{
+    ENG_ASSERT(geoms.size() == transforms.size() && geoms.size() == instance_ids.size());
+
+    const auto vk_instances = std::views::zip_transform(
+                                  [this](const Geometry* geom, const glm::mat3x4& t, uint32_t instance_id) {
+                                      vk::VkAccelerationStructureDeviceAddressInfoKHR vk_blas_address_info;
+                                      vk_blas_address_info.accelerationStructure = geom->md.vk()->blas;
+                                      const auto vk_blas_address =
+                                          vkGetAccelerationStructureDeviceAddressKHR(dev, &vk_blas_address_info);
+
+                                      vk::VkAccelerationStructureInstanceKHR vk_instance{};
+                                      memcpy(&vk_instance.transform, &t, sizeof(t));
+                                      vk_instance.mask = 0xFF;
+                                      vk_instance.instanceCustomIndex = instance_id;
+                                      vk_instance.accelerationStructureReference = vk_blas_address;
+                                      return vk_instance;
+                                  },
+                                  geoms, transforms, instance_ids) |
+                              std::ranges::to<std::vector<VkAccelerationStructureInstanceKHR>>();
+
+    vk::VkAccelerationStructureGeometryInstancesDataKHR vk_geom_instances;
+    vk_geom_instances.arrayOfPointers = false;
+    vk_geom_instances.data.deviceAddress = {};
+
+    vk::VkAccelerationStructureGeometryKHR vk_geom;
+    vk_geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    vk_geom.geometry.instances = vk_geom_instances;
+
+    vk::VkAccelerationStructureBuildGeometryInfoKHR vk_build_info;
+    vk_build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    vk_build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    vk_build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    vk_build_info.geometryCount = 1;
+    vk_build_info.pGeometries = &vk_geom;
+
+    std::vector<uint32_t> vk_prim_counts{ (uint32_t)vk_instances.size() };
+    vk::VkAccelerationStructureBuildSizesInfoKHR vk_build_sizes;
+    vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &vk_build_info,
+                                            vk_prim_counts.data(), &vk_build_sizes);
+
+    reqs.acceleration_structure_size = vk_build_sizes.accelerationStructureSize;
+    reqs.build_scratch_size = vk_build_sizes.buildScratchSize;
+    reqs.instance_data_buffer_size = vk_instances.size() * sizeof(vk_instances[0]);
+
+    if(!cmd) { return nullptr; }
+
+    ENG_ASSERT(tlas_buffer && instances_buffer && scratch_buffer);
+    ENG_ASSERT(tlas_offset % 256 == 0);
+    ENG_ASSERT(scratch_offset % props.min_acceleration_structure_scratch_offset_alignment == 0);
+
+    vk_geom.geometry.instances.data.deviceAddress = instances_buffer->md.vk()->device_address + instances_offset;
+
+    get_renderer().staging->copy(*instances_buffer, vk_instances.data(), instances_offset,
+                                 vk_instances.size() * sizeof(vk_instances[0]));
+    get_renderer().staging->flush()->wait_cpu(~0ull);
+
+    vk::VkAccelerationStructureCreateInfoKHR vk_tlas_info;
+    vk_tlas_info.buffer = tlas_buffer->md.vk()->buffer;
+    vk_tlas_info.offset = tlas_offset;
+    vk_tlas_info.size = reqs.acceleration_structure_size;
+    vk_tlas_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+
+    VkAccelerationStructureKHR tlas{};
+    VK_CHECK(vkCreateAccelerationStructureKHR(dev, &vk_tlas_info, nullptr, &tlas));
+    if(!tlas) { return nullptr; }
+
+    vk_build_info.dstAccelerationStructure = tlas;
+    vk_build_info.scratchData.deviceAddress = scratch_buffer->md.vk()->device_address + scratch_offset;
+
+    auto vkcmd = ((CommandBufferVk*)cmd)->cmd;
+    vk::VkAccelerationStructureBuildRangeInfoKHR tlas_range_info{};
+    tlas_range_info.primitiveCount = vk_prim_counts[0];
+    const VkAccelerationStructureBuildRangeInfoKHR* const vp_vk_build_ranges[]{ &tlas_range_info };
+    vkCmdBuildAccelerationStructuresKHR(vkcmd, 1, &vk_build_info, vp_vk_build_ranges);
+
+    return (TopAccelerationStructure)tlas;
+}
+
 ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
     auto& img = view.image.get();
@@ -1655,8 +1802,9 @@ void RendererBackendVk::bind_aliasable_memory(Buffer& resource, void* memory, si
     ENG_ASSERT(resource.md.vk());
     if(!resource.md.vk()->buffer)
     {
-        VkBufferCreateInfo vkinfo;
-        BufferMetadataVk::init(resource, vkinfo);
+        vk::VkBufferCreateInfo vkinfo;
+        vkinfo.size = resource.capacity;
+        vkinfo.usage = to_vk(resource.usage);
         VK_CHECK(vkCreateBuffer(dev, &vkinfo, nullptr, &resource.md.vk()->buffer));
     }
     if(!resource.md.vk()->buffer)

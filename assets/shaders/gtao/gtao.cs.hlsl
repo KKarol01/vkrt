@@ -100,11 +100,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 	const float2 uv = float2(thread_id.xy + 0.5) / float2(out_size.xy);
 	const float3 normal_v = in_normal[thread_id.xy].xyz;
 	const float3 pos_v = unproject_inf_revz_depth(uv, in_depth);
-	float2 noise = in_noise.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv * out_size.xy / 4.0, 0).xy
-	//*0.5 + 0.5
-	//* 2.0 - 1.0
-	;
-	noise = IGN2D(thread_id.xy); 
+	float2 noise = IGN2D(thread_id.xy); 
 	const float gtao = GTAO(in_depth, in_normal[thread_id.xy].xyz, gSamplerStates[ENG_SAMPLER_NEAREST], uv, noise);
 	
 	out_ao[thread_id.xy] = float4(gtao.xxx, 1.0);
