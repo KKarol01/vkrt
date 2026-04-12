@@ -8,6 +8,8 @@
 #include <eng/renderer/renderer.hpp>
 
 #include <unordered_map>
+#include <set>
+#include <map>
 #include <vector>
 #include <deque>
 #include <memory>
@@ -31,26 +33,37 @@ class StagingBuffer
     static constexpr size_t CAPACITY = 64ull * 1024 * 1024;
     static constexpr size_t ALIGNMENT = 1024ull;
 
-    struct Allocation
+    struct FreeAllocation
     {
+        bool operator<(const FreeAllocation& a) const { return std::tie(index, offset) < std::tie(a.index, a.offset); }
+        uint32_t index{};
         size_t offset{};
         size_t size{};
-        size_t real_size{}; // not min'd down to user req size, if alloc happened to be bigger
-        uint64_t signal_value{};
     };
 
+    struct Allocation
+    {
+        size_t offset{};         // offset from the start of the buffer's memory
+        size_t size{};           // may be less_eq than real_size, if user requested size not multiple of alignment
+        size_t real_size{};      // not min'd down to user req size, if alloc happened to be bigger
+        Sync* semaphore{};       // signaled when completed
+        uint64_t signal_value{}; // value to wait on
+    };
+
+    // double buffered context so each frame cmd pool can be reset and cmd bufs reused.
     struct Context
     {
         ICommandPool* pool{};
         ICommandBuffer* cmd{};
+        Sync* semaphore{};
     };
 
   public:
     void init(SubmitQueue* queue);
-    // Flushes pending transactions and optionally notifies supplied sync.
-    Sync* flush(Sync* signal_sync = nullptr);
+    // Flushes pending transactions.
+    void flush();
     // Flushes pending transactions and waits for completions of all submissions.
-    void reset();
+    // void reset();
 
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier = false);
@@ -84,31 +97,34 @@ class StagingBuffer
     void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range = {});
 
     // Gets the semaphore to wait on until all issued transactions have happened.
-    Sync* get_wait_sem(bool flush = true);
+     Sync* get_wait_sem(bool flush = true);
 
   private:
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
+    void scan_for_finished_allocations();
+    void merge_free_allocations();
     // Get frame dependent context
     Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
-
-    size_t get_free_space() const { return CAPACITY - head; }
+    Sync* get_sem();
 
     void* get_alloc_mem(const Allocation& alloc) const;
 
     void prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
                        ImageMipLayerRange dst_range = { { 0u, ~0u }, { 0u, ~0u } },
                        ImageMipLayerRange src_range = { { 0u, ~0u }, { 0u, ~0u } });
-    bool translate_dst_offset(Buffer& dst, size_t& offset, size_t size);
+    bool translate_dst_offset(const Buffer& dst, size_t& offset, size_t size);
 
-    Buffer buffer;
     SubmitQueue* queue{};
-    size_t head{};
-    Sync* sync{};
+    Buffer buffer;
     std::vector<Context> contexts;
+    std::vector<Sync*> semaphores;
+    std::deque<Allocation> allocations;
+    std::set<FreeAllocation> free_list; // key is floor(log2) of alloc size. min key is log2(alignment), max key is log2(capacity)
     uint64_t last_frame{};
+	Sync* common_sem{};
 };
 } // namespace gfx
 } // namespace eng

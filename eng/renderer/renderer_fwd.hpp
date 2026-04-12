@@ -255,6 +255,9 @@ enum class PipelineStage : uint16_t
     COMPUTE_BIT = 0x40,
     INDIRECT_BIT = 0x80,
     ALL = 0x100, // vulkan uses special value; it's not all bits set to 1
+
+    AS_BUILD_BIT = 0x200,
+    RAY_TRACING_BIT = 0x400,
 };
 ENG_ENABLE_FLAGS_OPERATORS(PipelineStage);
 

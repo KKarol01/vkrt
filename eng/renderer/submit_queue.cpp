@@ -452,6 +452,11 @@ SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, uin
 
 SubmitQueue& SubmitQueue::signal_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
 {
+    if(!sync)
+    {
+        ENG_WARN("Signal sync is null");
+        return *this;
+    }
     if(sync->type == SyncType::FENCE)
     {
         ENG_ASSERT(!submission.fence);

@@ -1684,7 +1684,7 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
 
     get_renderer().staging->copy(*instances_buffer, vk_instances.data(), instances_offset,
                                  vk_instances.size() * sizeof(vk_instances[0]));
-    get_renderer().staging->flush()->wait_cpu(~0ull);
+    cmd->wait_sync(get_renderer().staging->get_wait_sem(), PipelineStage::AS_BUILD_BIT);
 
     vk::VkAccelerationStructureCreateInfoKHR vk_tlas_info;
     vk_tlas_info.buffer = tlas_buffer->md.vk()->buffer;

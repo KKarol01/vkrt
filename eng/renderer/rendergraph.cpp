@@ -481,6 +481,10 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
             cmd_pools[0]->end(p->cmd);
             queue->with_cmd_buf(p->cmd);
 
+            for(const auto& [sync, stages, value] : p->wait_syncs)
+            {
+                queue->wait_sync(sync, stages, value);
+            }
             for(const auto& ra : p->accesses)
             {
                 auto& res = get_res(ra);

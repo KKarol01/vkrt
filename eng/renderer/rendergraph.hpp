@@ -41,6 +41,7 @@ struct RGPass
     StackString<32> name;
     Type type{ Type::NONE };
     std::vector<RGAccessId> accesses;
+    std::vector<std::tuple<Sync*, Flags<PipelineStage>, uint64_t>> wait_syncs;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
     TimestampQuery* query{};
@@ -231,6 +232,11 @@ struct RGBuilder
     RGAccessId as_acc_id(RGResourceId res) const;
 
     ICommandBuffer* open_cmd_buf();
+
+    void wait_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value = ~0ull)
+    {
+        pass->wait_syncs.emplace_back(sync, stages, value);
+    }
 
     RGPass* pass{};
     RGRenderGraph* graph{};

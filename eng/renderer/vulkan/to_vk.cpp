@@ -306,6 +306,9 @@ VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
     if(a.test(gfx::PipelineStage::COLOR_OUT_BIT))   { flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT; }
     if(a.test(gfx::PipelineStage::COMPUTE_BIT))     { flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; }
     if(a.test(gfx::PipelineStage::INDIRECT_BIT))    { flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT; }
+
+    if(a.test(gfx::PipelineStage::AS_BUILD_BIT))    { flags |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR; }
+    if(a.test(gfx::PipelineStage::RAY_TRACING_BIT))    { flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR; }
     return flags;
 }
 

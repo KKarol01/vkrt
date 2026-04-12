@@ -350,7 +350,7 @@ struct SSAO : public Pass
                                                                                 ImageLayout::READ_ONLY));
         }
         get_renderer().staging->copy(noise_texture.get(), noise, 0, 0);
-        get_renderer().staging->flush()->wait_cpu(~0ull);
+        get_renderer().staging->get_wait_sem()->wait_cpu(~0ull);
     }
 
     void poll_settings_change()
@@ -499,7 +499,7 @@ struct GTAO : public Pass
                                                                                 ImageLayout::READ_ONLY));
         }
         get_renderer().staging->copy(noise_texture.get(), noise, 0, 0);
-        get_renderer().staging->flush()->wait_cpu(~0ull);
+        //get_renderer().staging->flush()->wait_cpu(~0ull);
     }
 
     void poll_settings_change()

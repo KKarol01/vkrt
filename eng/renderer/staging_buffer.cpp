@@ -32,43 +32,40 @@ void StagingBuffer::init(SubmitQueue* queue)
     {
         contexts[i].pool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     }
-    sync = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
+    common_sem = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
+
+    free_list.insert(FreeAllocation{ .index = (uint32_t)std::log2(CAPACITY), .offset = 0, .size = CAPACITY });
 }
 
-Sync* StagingBuffer::flush(Sync* signal_sync)
+void StagingBuffer::flush()
 {
-    if(!get_context().cmd) { return sync; } // no transactions issued since previous flush
+    if(!get_context().cmd) { return; } // no transactions issued since previous flush
     get_context().pool->end(get_context().cmd);
-    queue->with_cmd_buf(get_context().cmd).signal_sync(sync, PipelineStage::TRANSFER_BIT);
-    if(signal_sync != nullptr) { queue->signal_sync(signal_sync, PipelineStage::TRANSFER_BIT); }
+    queue->with_cmd_buf(get_context().cmd)
+        .signal_sync(common_sem, PipelineStage::TRANSFER_BIT)
+        .signal_sync(get_context().semaphore, PipelineStage::TRANSFER_BIT);
     queue->submit();
     get_context().cmd = nullptr;
-    return sync;
+    auto* sem = get_context().semaphore;
+    get_context().semaphore = nullptr;
 }
 
-void StagingBuffer::reset()
-{
-    flush(nullptr); // send, if any, staged transactions before optional forwarding.
-    sync->wait_cpu(~0ull);
-    // sync->reset();
-    get_context().pool->reset();
-    get_context().cmd = nullptr;
-    head = 0;
-}
+// void StagingBuffer::reset()
+//{
+//     flush(); // send, if any, staged transactions before optional forwarding.
+//     sync->wait_cpu(~0ull);
+//     // sync->reset();
+//     get_context().pool->reset();
+//     get_context().cmd = nullptr;
+//     head = 0;
+// }
 
 void StagingBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier)
 {
     if(src_range.size == 0) { return; }
     if(!translate_dst_offset(dst, dst_offset, src_range.size)) { return; }
-    if(dst.memory != nullptr && src.memory != nullptr)
-    {
-        memcpy((std::byte*)dst.memory + dst_offset, (const std::byte*)src.memory + src_range.offset, src_range.size);
-    }
-    else
-    {
-        if(insert_barrier) { barrier(); }
-        get_cmd()->copy(dst, src, dst_offset, src_range);
-    }
+    if(insert_barrier) { barrier(); }
+    get_cmd()->copy(dst, src, dst_offset, src_range);
     dst.size = std::max(dst.size, dst_offset + src_range.size);
 }
 
@@ -77,22 +74,17 @@ void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, 
     if(src_size == 0) { return; }
     ENG_ASSERT(src);
     if(!translate_dst_offset(dst, dst_offset, src_size)) { return; }
-
-    if(dst.memory) { memcpy((std::byte*)dst.memory + dst_offset, (const std::byte*)src, src_size); }
-    else
+    size_t uploaded = 0;
+    while(uploaded < src_size)
     {
-        size_t uploaded = 0;
-        while(uploaded < src_size)
-        {
-            const auto upload_size = src_size - uploaded;
-            auto alloc = partial_allocate(upload_size);
-            memcpy(get_alloc_mem(alloc), (const std::byte*)src + uploaded, alloc.size);
-            get_cmd()->copy(dst, buffer, dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
-            uploaded += alloc.size;
-        }
-        ENG_ASSERT(uploaded == src_size);
-        if(insert_barrier) { barrier(); }
+        const auto upload_size = src_size - uploaded;
+        auto alloc = partial_allocate(upload_size);
+        memcpy(get_alloc_mem(alloc), (const std::byte*)src + uploaded, alloc.size);
+        get_cmd()->copy(dst, buffer, dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
+        uploaded += alloc.size;
     }
+    ENG_ASSERT(uploaded == src_size);
+    if(insert_barrier) { barrier(); }
     dst.size = std::max(dst.size, dst_offset + src_size);
 }
 
@@ -149,7 +141,7 @@ size_t StagingBuffer::copy(Image& dst, const void* const src, uint32_t layer, ui
         auto alloc = partial_allocate(remaining_bytes);
         if(alloc.size < row_bytes)
         {
-            reset();
+            scan_for_finished_allocations();
             continue;
         }
 
@@ -196,25 +188,93 @@ void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_
 
 Sync* StagingBuffer::get_wait_sem(bool flush)
 {
-    if(flush) { this->flush(nullptr); }
-    return sync;
+    if(flush) { this->flush(); }
+    return common_sem;
 }
 
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
     const auto aligned_size = align_up2(size, ALIGNMENT);
+    const auto bucket_index = (uint32_t)std::log2(aligned_size);
+    auto it = free_list.end();
+    while(it == free_list.end())
+    {
+        it = free_list.lower_bound(FreeAllocation{ bucket_index, 0, 0 });
+        if(it == free_list.end())
+        {
+            if(free_list.size()) { it = std::prev(free_list.end()); }
+            else { scan_for_finished_allocations(); }
+        }
+        else { break; }
+    }
+    ENG_ASSERT(it != free_list.end() && it->offset % ALIGNMENT == 0 && it->size % ALIGNMENT == 0);
 
-    if(get_free_space() == 0) { reset(); }
+    const FreeAllocation found_block = *it;
+    free_list.erase(it);
 
-    const auto free_space = get_free_space();
-    ENG_ASSERT(free_space >= ALIGNMENT && free_space % ALIGNMENT == 0);
-    const auto real_size = std::min(free_space, aligned_size);
-    const auto alloc = Allocation{
-        .offset = head, .size = std::min(size, real_size), .real_size = real_size, .signal_value = sync->get_next_signal_value()
-    };
-    head = alloc.offset + alloc.real_size;
-    ENG_ASSERT(head % ALIGNMENT == 0 && head <= CAPACITY);
+    const size_t actual_take = std::min(found_block.size, aligned_size);
+
+    auto* sem = get_sem();
+    const auto alloc = Allocation{ .offset = found_block.offset,
+                                   .size = std::min(size, actual_take),
+                                   .real_size = actual_take,
+                                   .semaphore = sem,
+                                   .signal_value = sem->get_next_signal_value() };
+
+    const size_t remainder = found_block.size - actual_take;
+    if(remainder >= ALIGNMENT)
+    {
+        FreeAllocation split_block{};
+        split_block.offset = found_block.offset + actual_take;
+        split_block.size = remainder;
+        split_block.index = (uint32_t)std::floor(std::log2(remainder));
+        free_list.insert(split_block);
+    }
+
+    allocations.push_back(alloc);
     return alloc;
+}
+
+void StagingBuffer::scan_for_finished_allocations()
+{
+    bool needs_merge = false;
+    while(!allocations.empty())
+    {
+        auto& alloc = allocations.front();
+        if(alloc.semaphore->wait_cpu(0ull, alloc.signal_value))
+        {
+            semaphores.push_back(alloc.semaphore);
+
+            free_list.emplace((uint32_t)std::log2(alloc.real_size), alloc.offset, alloc.real_size);
+
+            needs_merge = true;
+            allocations.pop_front();
+        }
+        else { break; }
+    }
+    if(needs_merge) { merge_free_allocations(); }
+}
+
+void StagingBuffer::merge_free_allocations()
+{
+    std::vector<FreeAllocation> blocks{ free_list.begin(), free_list.end() };
+    std::ranges::sort(blocks, [](const FreeAllocation& a, const FreeAllocation& b) { return a.offset < b.offset; });
+
+    auto write_idx = 0ull;
+    for(auto read_idx = 1ull; read_idx < blocks.size(); ++read_idx)
+    {
+        auto& c = blocks[write_idx];
+        const auto& n = blocks[read_idx];
+        if(c.offset + c.size == n.offset) { c.size += n.size; }
+        else { blocks[++write_idx] = n; }
+    }
+    blocks.resize(write_idx + 1);
+    free_list.clear();
+    for(auto& b : blocks)
+    {
+        b.index = (uint32_t)std::log2(b.size);
+    }
+    free_list.insert_range(blocks);
 }
 
 StagingBuffer::Context& StagingBuffer::get_context()
@@ -224,6 +284,7 @@ StagingBuffer::Context& StagingBuffer::get_context()
     {
         last_frame = get_renderer().current_frame;
         ctx.pool->reset(); // can safely assume all the transactions during that frame must have had completed (render graph waits for the semaphore)
+        ENG_ASSERT(!ctx.semaphore);
     }
     return ctx;
 }
@@ -233,6 +294,20 @@ ICommandBuffer* StagingBuffer::get_cmd()
     auto& ctx = get_context();
     if(!ctx.cmd) { ctx.cmd = ctx.pool->begin(); }
     return ctx.cmd;
+}
+
+Sync* StagingBuffer::get_sem()
+{
+    auto& ctx = get_context();
+    if(ctx.semaphore) { return ctx.semaphore; }
+    if(semaphores.size())
+    {
+        ctx.semaphore = semaphores.back();
+        semaphores.pop_back();
+        return ctx.semaphore;
+    }
+    ctx.semaphore = get_renderer().make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
+    return ctx.semaphore;
 }
 
 void* StagingBuffer::get_alloc_mem(const Allocation& alloc) const
@@ -272,7 +347,7 @@ void StagingBuffer::prepare_image(const Image* dst, const Image* src, bool disca
     }
 }
 
-bool StagingBuffer::translate_dst_offset(Buffer& dst, size_t& offset, size_t size)
+bool StagingBuffer::translate_dst_offset(const Buffer& dst, size_t& offset, size_t size)
 {
     if(offset == STAGING_APPEND) { offset = dst.size; }
     if(dst.capacity < offset + size)

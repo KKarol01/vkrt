@@ -558,7 +558,7 @@ void Renderer::update()
     }
     if(new_blases.size())
     {
-        staging->flush()->wait_cpu(~0ull);
+        staging->get_wait_sem()->wait_cpu(~0ull);
         std::vector<ASRequirements> reqs_vec;
         ASRequirements total_reqs{};
         for(auto gh : new_blases)
@@ -683,7 +683,7 @@ void Renderer::compile_rendergraph()
             auto* cmd = b.open_cmd_buf();
             get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)).get(),
                                          &constants_buffer, 0ull, sizeof(constants_buffer), false);
-            cmd->wait_sync(get_renderer().staging->flush());
+            cmd->wait_sync(get_renderer().staging->get_wait_sem());
         });
 
     passes.mesh_passes[(int)RenderPassType::Z_PREPASS]->init(rgraph);
