@@ -824,7 +824,7 @@ class Renderer
     Handle<Shader> make_shader(const std::filesystem::path& path);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
     Handle<PipelineLayout> make_layout(const PipelineLayout& info);
-    Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info, Compilation compilation = Compilation::BATCHED);
+    Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info, Compilation compilation = Compilation::DEFERRED);
     void destroy_pipeline(Handle<Pipeline> pipeline);
     Sync* make_sync(const SyncCreateInfo& info);
     void destroy_sync(Sync* sync);

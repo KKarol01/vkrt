@@ -95,8 +95,8 @@ void MeshRenderData::build()
                                                  cmds[i].indexCount, cmds[i].instanceCount, cmds[i].firstIndex,
                                                  cmds[i].vertexOffset, cmds[i].firstInstance);
     }
-    r.staging->copy(draw.indirect_buf, counts, 0ull, false);
-    r.staging->copy(draw.indirect_buf, backendcmds, cmds_start, false);
+    r.staging->copy(draw.indirect_buf.get(), counts, 0ull, false);
+    r.staging->copy(draw.indirect_buf.get(), backendcmds, cmds_start, false);
 
     draw.counts_view = BufferView::init(draw.indirect_buf, 0ull, cnts_size);
     draw.cmds_view = BufferView::init(draw.indirect_buf, cmds_start, cmds_size);

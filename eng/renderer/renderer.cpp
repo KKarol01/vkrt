@@ -270,7 +270,7 @@ void Renderer::init_pipelines()
             0,   0, 0,   255, // Pixel 3: Black
             255, 0, 255, 255  // Pixel 4: Magenta
         };
-        staging->copy(settings.default_base_color, data, 0, 0);
+        staging->copy(settings.default_base_color.get(), data, 0, 0);
     }
 
     {
@@ -516,7 +516,7 @@ void Renderer::update()
             {
                 GPUMaterial gpumat{ .base_color_idx =
                                         descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)) };
-                staging->copy(bufs.materials, &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+                staging->copy(bufs.materials.get(), &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
         }
@@ -527,13 +527,13 @@ void Renderer::update()
         std::swap(bufs.transforms[0], bufs.transforms[1]);
         const auto req_size = gpu_resource_allocator.size() * sizeof(glm::mat4);
         resize_buffer(bufs.transforms[0], req_size, false);
-        staging->copy(bufs.transforms[0], bufs.transforms[1], 0, { 0, bufs.transforms[1]->size }, true);
+        staging->copy(bufs.transforms[0].get(), bufs.transforms[1].get(), 0, { 0, bufs.transforms[1]->size }, true);
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto entity = new_transforms[i];
             const auto [transform, mesh] = get_engine().ecs->get<ecs::Transform, ecs::Mesh>(entity);
             const auto trsmat4x4 = transform.to_mat4();
-            staging->copy(bufs.transforms[0], &trsmat4x4[0][0], mesh.gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
+            staging->copy(bufs.transforms[0].get(), &trsmat4x4[0][0], mesh.gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
         }
         new_transforms.clear();
     }
@@ -681,8 +681,8 @@ void Renderer::compile_rendergraph()
             constants_buffer.cam_pos = c->pos;
 
             auto* cmd = b.open_cmd_buf();
-            get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)), &constants_buffer,
-                                         0ull, sizeof(constants_buffer), false);
+            get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)).get(),
+                                         &constants_buffer, 0ull, sizeof(constants_buffer), false);
             cmd->wait_sync(get_renderer().staging->flush());
         });
 
@@ -895,7 +895,7 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compila
             // destroyed_pipelines.pop_back();
         }
         backend->make_pipeline(p);
-        if(compilation == Compilation::BATCHED) { new_pipelines.push_back(handle); }
+        if(compilation == Compilation::DEFERRED) { new_pipelines.push_back(handle); }
         else { compile_pipeline(p); }
         if(reuse_handle) { pipelines[*handle] = std::move(p); }
         else { pipelines.push_back(std::move(p)); }
@@ -966,10 +966,10 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     resize_buffer(bufs.attributes, attributes.size() * sizeof(attributes[0]), STAGING_APPEND, true);
     resize_buffer(bufs.indices, out_indices.size() * sizeof(out_indices[0]), STAGING_APPEND, true);
     resize_buffer(bufs.bspheres, bounding_spheres.size() * sizeof(bounding_spheres[0]), STAGING_APPEND, true);
-    staging->copy(bufs.positions, positions, STAGING_APPEND);
-    staging->copy(bufs.attributes, attributes, STAGING_APPEND);
-    staging->copy(bufs.indices, out_indices, STAGING_APPEND);
-    staging->copy(bufs.bspheres, bounding_spheres, STAGING_APPEND);
+    staging->copy(bufs.positions.get(), positions, STAGING_APPEND);
+    staging->copy(bufs.attributes.get(), attributes, STAGING_APPEND);
+    staging->copy(bufs.indices.get(), out_indices, STAGING_APPEND);
+    staging->copy(bufs.bspheres.get(), bounding_spheres, STAGING_APPEND);
 
     bufs.vertex_count += vertex_count;
     bufs.index_count += index_count;
@@ -1000,7 +1000,6 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
 
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
     std::vector<meshopt_Meshlet> mlts(max_meshlets);
-    std::vector<meshopt_Bounds> mlt_bnds;
     std::vector<uint32_t> mlt_vxs(max_meshlets * max_verts);
     std::vector<uint8_t> mlt_ids(max_meshlets * max_tris * 3);
 
@@ -1012,14 +1011,19 @@ void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<
     mlt_vxs.resize(last_mlt.vertex_offset + last_mlt.vertex_count);
     mlt_ids.resize(last_mlt.triangle_offset + ((last_mlt.triangle_count * 3 + 3) & ~3));
     mlts.resize(mltcnt);
-    mlt_bnds.reserve(mltcnt);
+
     for(auto& m : mlts)
     {
-        meshopt_optimizeMeshlet(&mlt_vxs.at(m.vertex_offset), &mlt_ids.at(m.triangle_offset), m.triangle_count, m.vertex_count);
-        const auto mbounds = meshopt_computeMeshletBounds(&mlt_vxs.at(m.vertex_offset), &mlt_ids.at(m.triangle_offset),
-                                                          m.triangle_count, batch.vertices.data(), vx_count, vx_size);
-        mlt_bnds.push_back(mbounds);
+        meshopt_optimizeMeshlet(&mlt_vxs[m.vertex_offset], &mlt_ids[m.triangle_offset], m.triangle_count, m.vertex_count);
     }
+
+    const std::vector<meshopt_Bounds> mlt_bnds =
+        std::views::transform(mlts,
+                              [&batch, &mlt_vxs, &mlt_ids, vx_count, vx_size](const meshopt_Meshlet& m) {
+                                  return meshopt_computeMeshletBounds(&mlt_vxs[m.vertex_offset], &mlt_ids[m.triangle_offset],
+                                                                      m.triangle_count, batch.vertices.data(), vx_count, vx_size);
+                              }) |
+        std::ranges::to<std::vector<meshopt_Bounds>>();
     out_vertices.resize(mlt_vxs.size() * vx_size / sizeof(float));
     for(auto i = 0ull; i < mlt_vxs.size(); ++i)
     {
@@ -1087,7 +1091,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
     }
 
     auto dsth = make_buffer(buffer_names[*handle], Buffer::init(new_size, handle->usage));
-    if(copy_data) { staging->copy(dsth, handle, 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
+    if(copy_data) { staging->copy(dsth.get(), handle.get(), 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
     queue_destroy(handle);
     handle = dsth;
 }

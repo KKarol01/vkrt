@@ -87,8 +87,10 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
             for(int n = 0; n < draw_data->CmdListsCount; n++)
             {
                 const ImDrawList* draw_list = draw_data->CmdLists[n];
-                r.staging->copy(vertex_buffer, draw_list->VtxBuffer.Data, vtx_off, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
-                r.staging->copy(index_buffer, draw_list->IdxBuffer.Data, idx_off, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
+                r.staging->copy(vertex_buffer.get(), draw_list->VtxBuffer.Data, vtx_off,
+                                draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
+                r.staging->copy(index_buffer.get(), draw_list->IdxBuffer.Data, idx_off,
+                                draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
                 vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
                 idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
             }
@@ -221,7 +223,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
         const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
         ENG_ASSERT(image);
         ENG_ASSERT(upload_x == 0 && upload_y == 0 && upload_w == imtex->Width && upload_h == imtex->Height);
-        r.staging->copy(image, imtex->Pixels, 0, 0);
+        r.staging->copy(image.get(), imtex->Pixels, 0, 0);
         imtex->SetStatus(ImTextureStatus_OK);
     }
 }

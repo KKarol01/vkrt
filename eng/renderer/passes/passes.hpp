@@ -330,7 +330,7 @@ struct SSAO : public Pass
                 get_renderer().make_buffer("SSAO_KERNELS",
                                            Buffer::init(sizeof(samples), BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
         }
-        get_renderer().staging->copy(sample_buffer, samples, 0ull, sizeof(samples));
+        get_renderer().staging->copy(sample_buffer.get(), samples, 0ull, sizeof(samples));
     }
 
     void generate_noise()
@@ -349,7 +349,7 @@ struct SSAO : public Pass
                                                                                 ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_DST_BIT,
                                                                                 ImageLayout::READ_ONLY));
         }
-        get_renderer().staging->copy(noise_texture, noise, 0, 0);
+        get_renderer().staging->copy(noise_texture.get(), noise, 0, 0);
         get_renderer().staging->flush()->wait_cpu(~0ull);
     }
 
@@ -358,7 +358,7 @@ struct SSAO : public Pass
         if(settings.modified)
         {
             auto& r = get_renderer();
-            r.staging->copy(settings_buffer, &ao_settings, 0ull, sizeof(ao_settings));
+            r.staging->copy(settings_buffer.get(), &ao_settings, 0ull, sizeof(ao_settings));
             settings.modified = false;
         }
     }
@@ -498,7 +498,7 @@ struct GTAO : public Pass
                                                                                 ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_DST_BIT,
                                                                                 ImageLayout::READ_ONLY));
         }
-        get_renderer().staging->copy(noise_texture, noise, 0, 0);
+        get_renderer().staging->copy(noise_texture.get(), noise, 0, 0);
         get_renderer().staging->flush()->wait_cpu(~0ull);
     }
 
@@ -507,7 +507,7 @@ struct GTAO : public Pass
         if(settings.modified)
         {
             auto& r = get_renderer();
-            r.staging->copy(settings_buffer, &ao_settings, 0ull, sizeof(ao_settings));
+            r.staging->copy(settings_buffer.get(), &ao_settings, 0ull, sizeof(ao_settings));
             settings.modified = false;
         }
     }

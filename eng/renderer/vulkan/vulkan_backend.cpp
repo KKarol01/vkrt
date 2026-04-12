@@ -1654,13 +1654,9 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
                                   geoms, transforms, instance_ids) |
                               std::ranges::to<std::vector<VkAccelerationStructureInstanceKHR>>();
 
-    vk::VkAccelerationStructureGeometryInstancesDataKHR vk_geom_instances;
-    vk_geom_instances.arrayOfPointers = false;
-    vk_geom_instances.data.deviceAddress = {};
-
     vk::VkAccelerationStructureGeometryKHR vk_geom;
     vk_geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    vk_geom.geometry.instances = vk_geom_instances;
+    vk_geom.geometry.instances = vk::VkAccelerationStructureGeometryInstancesDataKHR{};
 
     vk::VkAccelerationStructureBuildGeometryInfoKHR vk_build_info;
     vk_build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;

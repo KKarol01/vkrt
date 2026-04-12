@@ -8,6 +8,20 @@ float3 get_camera_pos()
 	return get_gsb(GPUEngConstants, 0).cam_pos;
 }
 
+float IGN(float2 pixel)
+{
+    const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+    return frac(magic.z * frac(dot(pixel, magic.xy)));
+}
+
+float2 IGN2D(float2 pixel)
+{
+    float n1 = IGN(pixel);
+    // Offset by a value that breaks the grid pattern
+    float n2 = IGN(pixel + float2(47.0, 17.0)); 
+    return float2(n1, n2);
+}
+
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
@@ -41,6 +55,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     if(q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
         depth = q.CommittedRayT();
+		depth = float(q.CommittedInstanceIndex()) / 100.0;
     }
 
     out_image[thread_id.xy] = float4(depth.xxx, 1.0);

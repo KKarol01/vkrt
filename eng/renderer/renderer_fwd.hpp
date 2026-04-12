@@ -343,8 +343,8 @@ enum class AllocateMemory : uint8_t
 
 enum class Compilation : uint8_t
 {
-    NOW,    // resources get compiled now
-    BATCHED // resources are put in a queue and batch-compiled
+    NOW,     // resources get compiled now
+    DEFERRED // resources are put in a queue and batch-compiled
 };
 
 enum class AOMode

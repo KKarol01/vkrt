@@ -185,7 +185,7 @@ uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFo
     if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
     else
     {
-        gfx::get_renderer().staging->copy(img, imgdata, 0, 0, true, gfx::DiscardContents::YES);
+        gfx::get_renderer().staging->copy(img.get(), imgdata, 0, 0, true, gfx::DiscardContents::YES);
         ENG_TODO("TODO: Process mips");
     }
     stbi_image_free(imgdata);

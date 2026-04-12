@@ -56,29 +56,20 @@ void StagingBuffer::reset()
     head = 0;
 }
 
-void StagingBuffer::copy(Handle<Buffer> dst, Handle<Buffer> src, size_t dst_offset, Range64u src_range, bool insert_barrier)
+void StagingBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier)
 {
-    ENG_ASSERT(dst && src);
     if(src_range.size == 0) { return; }
-    auto& dstb = dst.get();
-    const auto& srcb = src.get();
-    if(!translate_dst_offset(dstb, dst_offset, src_range.size)) { return; }
-    if(dstb.memory != nullptr && srcb.memory != nullptr)
+    if(!translate_dst_offset(dst, dst_offset, src_range.size)) { return; }
+    if(dst.memory != nullptr && src.memory != nullptr)
     {
-        memcpy((std::byte*)dstb.memory + dst_offset, (const std::byte*)srcb.memory + src_range.offset, src_range.size);
+        memcpy((std::byte*)dst.memory + dst_offset, (const std::byte*)src.memory + src_range.offset, src_range.size);
     }
     else
     {
         if(insert_barrier) { barrier(); }
-        get_cmd()->copy(dstb, srcb, dst_offset, src_range);
+        get_cmd()->copy(dst, src, dst_offset, src_range);
     }
-    dstb.size = std::max(dstb.size, dst_offset + src_range.size);
-}
-
-void StagingBuffer::copy(Handle<Buffer> dst, const void* const src, size_t dst_offset, size_t src_size, bool insert_barrier)
-{
-    if(!dst) { return; }
-    copy(dst.get(), src, dst_offset, src_size, insert_barrier);
+    dst.size = std::max(dst.size, dst_offset + src_range.size);
 }
 
 void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, size_t src_size, bool insert_barrier)
@@ -105,48 +96,40 @@ void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, 
     dst.size = std::max(dst.size, dst_offset + src_size);
 }
 
-void StagingBuffer::copy(Handle<Image> dst, Handle<Image> src, const ImageCopy& copy, bool transition_back)
+void StagingBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, bool transition_back)
 {
-    ENG_ASSERT(dst && src);
-    auto& dsti = dst.get();
-    const auto& srci = src.get();
     const auto dstrange = ImageMipLayerRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
     const auto srcrange = ImageMipLayerRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
-    prepare_image(&dsti, &srci, true, false, dstrange, srcrange);
-    get_cmd()->copy(dsti, srci, copy);
-    if(transition_back) { prepare_image(&dsti, &srci, false, true, dstrange, srcrange); }
+    prepare_image(&dst, &src, true, false, dstrange, srcrange);
+    get_cmd()->copy(dst, src, copy);
+    if(transition_back) { prepare_image(&dst, &src, false, true, dstrange, srcrange); }
     else { barrier(); }
 }
 
-void StagingBuffer::blit(Handle<Image> dst, Handle<Image> src, const ImageBlit& blit, bool transition_back)
+void StagingBuffer::blit(Image& dst, const Image& src, const ImageBlit& blit, bool transition_back)
 {
-    ENG_ASSERT(dst && src);
-    auto& dsti = dst.get();
-    const auto& srci = src.get();
     const auto dstrange = ImageMipLayerRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
     const auto srcrange = ImageMipLayerRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
-    prepare_image(&dsti, &srci, true, false, dstrange, srcrange);
-    get_cmd()->blit(dsti, srci, blit);
-    if(transition_back) { prepare_image(&dsti, &srci, false, true, dstrange, srcrange); }
+    prepare_image(&dst, &src, true, false, dstrange, srcrange);
+    get_cmd()->blit(dst, src, blit);
+    if(transition_back) { prepare_image(&dst, &src, false, true, dstrange, srcrange); }
     else { barrier(); }
 }
 
-size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back,
+size_t StagingBuffer::copy(Image& dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back,
                            DiscardContents discard, Vec3i32 offset, Vec3u32 extent)
 {
-    ENG_ASSERT(dst && src);
+    ENG_ASSERT(src);
     ENG_ASSERT(offset.z == 0);
     ENG_ASSERT(offset.x >= 0 && offset.y >= 0 && offset.z >= 0);
 
-    auto& img = dst.get();
+    const glm::u32vec3 mip_texels = { std::max(dst.width >> mip, 1u), std::max(dst.height >> mip, 1u),
+                                      std::max(dst.depth >> mip, 1u) };
 
-    const glm::u32vec3 mip_texels = { std::max(img.width >> mip, 1u), std::max(img.height >> mip, 1u),
-                                      std::max(img.depth >> mip, 1u) };
-
-    const auto block_data = get_block_data(img.format);
-    if(extent.x == ~0u) { extent.x = img.width; }
-    if(extent.y == ~0u) { extent.y = img.height; }
-    if(extent.z == ~0u) { extent.z = img.depth; }
+    const auto block_data = get_block_data(dst.format);
+    if(extent.x == ~0u) { extent.x = dst.width; }
+    if(extent.y == ~0u) { extent.y = dst.height; }
+    if(extent.z == ~0u) { extent.z = dst.depth; }
     ENG_ASSERT(extent.z == 1u);
 
     const glm::u32vec3 blocks =
@@ -156,7 +139,7 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
     const auto row_bytes = blocks.x * block_data.bytes_per_texel;
     const auto src_bytes = block_count * block_data.bytes_per_texel;
 
-    prepare_image(&img, nullptr, discard == DiscardContents::YES, false, { { mip, 1 }, { layer, 1 } });
+    prepare_image(&dst, nullptr, discard == DiscardContents::YES, false, { { mip, 1 }, { layer, 1 } });
 
     size_t bytes_uploaded = 0;
     while(bytes_uploaded < src_bytes)
@@ -184,15 +167,15 @@ size_t StagingBuffer::copy(Handle<Image> dst, const void* const src, uint32_t la
         copy.bufferOffset = alloc.offset;
         copy.bufferRowLength = 0;
         copy.bufferImageHeight = 0;
-        copy.imageSubresource = { to_vk(get_aspect_from_format(img.format)), mip, layer, 1 };
+        copy.imageSubresource = { to_vk(get_aspect_from_format(dst.format)), mip, layer, 1 };
         copy.imageOffset = { copy_offset.x, copy_offset.y, copy_offset.z };
         copy.imageExtent = { copy_extent.x, copy_extent.y, copy_extent.z };
 
-        get_cmd()->copy(img, buffer, &copy, 1);
+        get_cmd()->copy(dst, buffer, &copy, 1);
 
         bytes_uploaded += usable_bytes;
     }
-    if(transition_back) { prepare_image(&img, nullptr, false, true, { { mip, 1 }, { layer, 1 } }); }
+    if(transition_back) { prepare_image(&dst, nullptr, false, true, { { mip, 1 }, { layer, 1 } }); }
     else { barrier(); }
     ENG_ASSERT(bytes_uploaded == src_bytes);
     return src_bytes;
@@ -204,10 +187,10 @@ void StagingBuffer::barrier()
                        PipelineAccess::TRANSFER_RW);
 }
 
-void StagingBuffer::barrier(Handle<Image> dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range)
+void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range)
 {
-    ENG_ASSERT(dst && dst_layout != ImageLayout::UNDEFINED);
-    get_cmd()->barrier(dst.get(), PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
+    ENG_ASSERT(dst_layout != ImageLayout::UNDEFINED);
+    get_cmd()->barrier(dst, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
                        PipelineAccess::TRANSFER_RW, src_layout, dst_layout, range);
 }
 
