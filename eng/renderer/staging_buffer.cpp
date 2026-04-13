@@ -34,7 +34,7 @@ void StagingBuffer::init(SubmitQueue* queue)
     }
     common_sem = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
 
-    free_list.insert(FreeAllocation{ .index = (uint32_t)std::log2(CAPACITY), .offset = 0, .size = CAPACITY });
+    free_list.push_back(FreeAllocation{ .index = (uint32_t)std::log2(CAPACITY), .offset = 0, .size = CAPACITY });
 }
 
 void StagingBuffer::flush()
@@ -196,16 +196,21 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 {
     const auto aligned_size = align_up2(size, ALIGNMENT);
     const auto bucket_index = (uint32_t)std::log2(aligned_size);
+
     auto it = free_list.end();
-    while(it == free_list.end())
+    while(true)
     {
-        it = free_list.lower_bound(FreeAllocation{ bucket_index, 0, 0 });
+        it = std::lower_bound(free_list.begin(), free_list.end(), FreeAllocation{ bucket_index, 0, 0 });
+        if(it != free_list.end()) { break; }
         if(it == free_list.end())
         {
-            if(free_list.size()) { it = std::prev(free_list.end()); }
+            if(free_list.size())
+            {
+                it = std::prev(free_list.end());
+                break;
+            }
             else { scan_for_finished_allocations(); }
         }
-        else { break; }
     }
     ENG_ASSERT(it != free_list.end() && it->offset % ALIGNMENT == 0 && it->size % ALIGNMENT == 0);
 
@@ -228,7 +233,7 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
         split_block.offset = found_block.offset + actual_take;
         split_block.size = remainder;
         split_block.index = (uint32_t)std::floor(std::log2(remainder));
-        free_list.insert(split_block);
+        insert_free_alloc(split_block);
     }
 
     allocations.push_back(alloc);
@@ -245,7 +250,7 @@ void StagingBuffer::scan_for_finished_allocations()
         {
             semaphores.push_back(alloc.semaphore);
 
-            free_list.emplace((uint32_t)std::log2(alloc.real_size), alloc.offset, alloc.real_size);
+            insert_free_alloc(FreeAllocation{ (uint32_t)std::log2(alloc.real_size), alloc.offset, alloc.real_size });
 
             needs_merge = true;
             allocations.pop_front();
@@ -257,24 +262,28 @@ void StagingBuffer::scan_for_finished_allocations()
 
 void StagingBuffer::merge_free_allocations()
 {
-    std::vector<FreeAllocation> blocks{ free_list.begin(), free_list.end() };
-    std::ranges::sort(blocks, [](const FreeAllocation& a, const FreeAllocation& b) { return a.offset < b.offset; });
-
+    std::ranges::sort(free_list, [](const FreeAllocation& a, const FreeAllocation& b) { return a.offset < b.offset; });
     auto write_idx = 0ull;
-    for(auto read_idx = 1ull; read_idx < blocks.size(); ++read_idx)
+    for(auto read_idx = 1ull; read_idx < free_list.size(); ++read_idx)
     {
-        auto& c = blocks[write_idx];
-        const auto& n = blocks[read_idx];
-        if(c.offset + c.size == n.offset) { c.size += n.size; }
-        else { blocks[++write_idx] = n; }
+        if(free_list[write_idx].offset + free_list[write_idx].size == free_list[read_idx].offset)
+        {
+            free_list[write_idx].size += free_list[read_idx].size;
+        }
+        else
+        {
+            free_list[write_idx].index = (uint32_t)std::log2(free_list[write_idx].size);
+            ++write_idx;
+            free_list[write_idx] = free_list[read_idx];
+        }
     }
-    blocks.resize(write_idx + 1);
-    free_list.clear();
-    for(auto& b : blocks)
-    {
-        b.index = (uint32_t)std::log2(b.size);
-    }
-    free_list.insert_range(blocks);
+    free_list[write_idx].index = (uint32_t)std::log2(free_list[write_idx].size);
+    free_list.resize(write_idx + 1);
+}
+
+void StagingBuffer::insert_free_alloc(const FreeAllocation& alloc)
+{
+    free_list.insert(std::lower_bound(free_list.begin(), free_list.end(), alloc), alloc);
 }
 
 StagingBuffer::Context& StagingBuffer::get_context()

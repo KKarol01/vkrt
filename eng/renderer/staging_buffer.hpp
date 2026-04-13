@@ -104,6 +104,7 @@ class StagingBuffer
     Allocation partial_allocate(size_t size);
     void scan_for_finished_allocations();
     void merge_free_allocations();
+	void insert_free_alloc(const FreeAllocation& alloc);
     // Get frame dependent context
     Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
@@ -122,7 +123,7 @@ class StagingBuffer
     std::vector<Context> contexts;
     std::vector<Sync*> semaphores;
     std::deque<Allocation> allocations;
-    std::set<FreeAllocation> free_list; // key is floor(log2) of alloc size. min key is log2(alignment), max key is log2(capacity)
+    std::vector<FreeAllocation> free_list; // key is floor(log2) of alloc size. min key is log2(alignment), max key is log2(capacity)
     uint64_t last_frame{};
 	Sync* common_sem{};
 };
