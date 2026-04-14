@@ -246,6 +246,9 @@ void StagingBuffer::scan_for_finished_allocations()
     while(!allocations.empty())
     {
         auto& alloc = allocations.front();
+        // if value < signal_value, the alloc is still pending, and there is no more free memory
+        // so to avoid infinite waiting, flush.
+        if(alloc.semaphore->value < alloc.signal_value) { flush(); }
         if(alloc.semaphore->wait_cpu(0ull, alloc.signal_value))
         {
             semaphores.push_back(alloc.semaphore);
