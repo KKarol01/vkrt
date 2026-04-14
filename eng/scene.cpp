@@ -245,14 +245,17 @@ Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
                                            gltfmat.pbrData.baseColorTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
-                mat.base_color_texture = scene.textures[gltfmat.pbrData.baseColorTexture->textureIndex];
+                mat.base_color_texture = scene.textures[ctx.textures[gltfmat.pbrData.baseColorTexture->textureIndex]];
             }
         }
         if(gltfmat.normalTexture)
         {
             uint32_t texidx =
                 load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM, gltfmat.normalTexture->textureIndex, ctx);
-            if(texidx != ~0u) { mat.normal_texture = scene.textures[gltfmat.normalTexture->textureIndex]; }
+            if(texidx != ~0u)
+            {
+                mat.normal_texture = scene.textures[ctx.textures[gltfmat.normalTexture->textureIndex]];
+            }
         }
         if(gltfmat.pbrData.metallicRoughnessTexture)
         {
@@ -260,7 +263,8 @@ Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gl
                                            gltfmat.pbrData.metallicRoughnessTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
-                mat.metallic_roughness_texture = scene.textures[gltfmat.pbrData.metallicRoughnessTexture->textureIndex];
+                mat.metallic_roughness_texture =
+                    scene.textures[ctx.textures[gltfmat.pbrData.metallicRoughnessTexture->textureIndex]];
             }
         }
 
