@@ -157,6 +157,10 @@ uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFo
             data = { fastarrsrc->bytes.data() + fastbufview.byteOffset, fastbufview.byteLength };
         }
     }
+    else if(auto* fastarrsrc = std::get_if<fastgltf::sources::Array>(&gltfimg.data))
+    {
+        data = { fastarrsrc->bytes.begin(), fastarrsrc->bytes.end() };
+    }
 
     if(data.empty())
     {
@@ -168,8 +172,8 @@ uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFo
     std::byte* imgdata = reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()),
                                                                             data.size(), &x, &y, &ch, 4));
 
-	const auto write_path = get_engine().assets->make_path(ENG_FMT("/assets/{}", gltfimg.name.c_str()));
-	stbi_write_png(write_path.string().c_str(), x, y, ch, imgdata, 4);
+    // const auto write_path = get_engine().assets->make_path(ENG_FMT("/assets/{}", gltfimg.name.c_str()));
+    // stbi_write_png(write_path.string().c_str(), x, y, ch, imgdata, 4);
 
     if(!imgdata)
     {
@@ -343,13 +347,21 @@ SceneNodeId load_from_file(Scene& scene, const std::filesystem::path& model_path
     static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     fastgltf::Parser gltfparser;
-    auto gltfassetexp = gltfparser.loadGltfBinary(fastdatabuf.get(), model_path.parent_path(), gltfOptions);
-    if(!gltfassetexp) { return SceneNodeId{}; }
+    const auto gltfasset = [&model_path, &gltfparser, &fastdatabuf] {
+        if(model_path.extension() == ".glb")
+        {
+            return gltfparser.loadGltfBinary(fastdatabuf.get(), model_path.parent_path(), gltfOptions);
+        }
+        else if(model_path.extension() == ".gltf")
+        {
+            return gltfparser.loadGltfJson(fastdatabuf.get(), model_path.parent_path(), gltfOptions);
+        }
+    }();
 
-    auto& gltfasset = gltfassetexp.get();
-    if(gltfasset.scenes.empty()) { return SceneNodeId{}; }
+    if(!gltfasset) { return SceneNodeId{}; }
+    if(gltfasset->scenes.empty()) { return SceneNodeId{}; }
 
-    auto& gltfscene = gltfasset.scenes.at(0);
+    auto& gltfscene = gltfasset->scenes.at(0);
 
     const auto rootnodeid = scene.make_node(model_path.filename().string());
     scene.get_node(rootnodeid).transform = scene.transforms.size();
@@ -358,7 +370,7 @@ SceneNodeId load_from_file(Scene& scene, const std::filesystem::path& model_path
     Context ctx;
     for(auto i = 0u; i < gltfscene.nodeIndices.size(); ++i)
     {
-        load_node(scene, gltfasset, gltfscene.nodeIndices[i], rootnodeid, ctx);
+        load_node(scene, gltfasset.get<1>(), gltfscene.nodeIndices[i], rootnodeid, ctx);
     }
 
     return rootnodeid;
@@ -373,6 +385,7 @@ SceneNodeId Scene::load_from_file(const std::filesystem::path& model_path)
     auto full_path = model_path;
     const auto ext = full_path.extension();
     if(ext == ".glb") { return gltf::load_from_file(*this, get_engine().assets->make_path(full_path)); }
+    else if(ext == ".gltf") { return gltf::load_from_file(*this, get_engine().assets->make_path(full_path)); }
 
     ENG_ERROR("Extension not supported {}", ext.string());
     return SceneNodeId{};
