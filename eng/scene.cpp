@@ -16,7 +16,7 @@
 #include <eng/common/logger.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
-#include <eng/assets/asset_manager.hpp>
+#include <eng/fs/fs.hpp>
 #include <eng/physics/bvh.hpp>
 
 namespace eng
@@ -384,8 +384,8 @@ SceneNodeId Scene::load_from_file(const std::filesystem::path& model_path)
 {
     auto full_path = model_path;
     const auto ext = full_path.extension();
-    if(ext == ".glb") { return gltf::load_from_file(*this, get_engine().assets->make_path(full_path)); }
-    else if(ext == ".gltf") { return gltf::load_from_file(*this, get_engine().assets->make_path(full_path)); }
+    if(ext == ".glb") { return gltf::load_from_file(*this, get_engine().fs->make_rel_path(full_path)); }
+    else if(ext == ".gltf") { return gltf::load_from_file(*this, get_engine().fs->make_rel_path(full_path)); }
 
     ENG_ERROR("Extension not supported {}", ext.string());
     return SceneNodeId{};

@@ -1,13 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include <string_view>
-#include <span>
-#include <compare>
-#include <memory>
-#include <utility>
-#include <array>
-#include <filesystem>
+
 #include <unordered_set>
 #include <glm/glm.hpp>
 #include <eng/engine.hpp>
@@ -22,10 +15,10 @@
 #include <eng/common/hash.hpp>
 #include <eng/common/slotmap.hpp>
 #include <eng/common/handleflatset.hpp>
-#include <eng/common/callback.hpp>
 #include <eng/common/slotallocator.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/assets/asset_manager.hpp>
+#include <eng/fs/fs.hpp>
 
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
 ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range));
@@ -861,7 +854,7 @@ class Renderer
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
     std::unordered_map<Handle<Shader>, std::vector<Handle<Pipeline>>> shader_usage_pipeline_map;
-    Handle<assets::DirectoryListener> new_shaders_listener;
+    Handle<fs::DirectoryListener> new_shaders_listener;
 
     std::vector<DescriptorLayout> dlayouts;
     std::vector<PipelineLayout> pplayouts;

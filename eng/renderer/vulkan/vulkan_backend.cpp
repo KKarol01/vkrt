@@ -11,6 +11,7 @@
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/submit_queue.hpp>
+#include <eng/fs/fs.hpp>
 
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 #include <vk-bootstrap/src/VkBootstrap.h>
@@ -1359,7 +1360,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         return false;
     }
 
-    fs::FilePtr shaderfile = get_engine().assets->get_asset(shader.path, fs::OpenMode::RB);
+    fs::FilePtr shaderfile = get_engine().fs->get_asset(shader.path, fs::OpenMode::RB);
     if(!shaderfile)
     {
         ENG_WARN("Could not open shader file {}", shader.path.string());
@@ -1373,7 +1374,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
 
     // check if precompiled
     {
-        fs::FilePtr precompfile = get_engine().assets->get_asset(precomppath, fs::OpenMode::RB);
+        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::RB);
         if(precompfile && precompfile->size > 8)
         {
             std::byte readhash8[8];
@@ -1411,9 +1412,9 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         if(!shader_target) { return false; }
 
         // compilation should happen from where the folder assets/ is
-        const auto include_path = get_engine().assets->make_path("/").string();
-        const auto hlsl_path = get_engine().assets->make_path(shader.path).string();
-        const auto spv_path = get_engine().assets->make_path(shader.path.string() + ".spv").string();
+        const auto include_path = get_engine().fs->make_rel_path("/").string();
+        const auto hlsl_path = get_engine().fs->make_rel_path(shader.path).string();
+        const auto spv_path = get_engine().fs->make_rel_path(shader.path.string() + ".spv").string();
         const char* args[]{
             "dxc.exe",
             "-T",
@@ -1435,7 +1436,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         };
         auto [ret, code] = reproc::run(args, opts);
 
-        fs::FilePtr compiledspvfile = get_engine().assets->get_asset(spv_path, fs::OpenMode::RB);
+        fs::FilePtr compiledspvfile = get_engine().fs->get_asset(spv_path, fs::OpenMode::RB);
         if(!compiledspvfile)
         {
             ENG_WARN("Could not open spv output file after compilation {}", spv_path);
@@ -1447,7 +1448,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         out_spv.resize(compiled_spv.size() / 4);
         memcpy(out_spv.data(), compiled_spv.data(), compiled_spv.size());
 
-        fs::FilePtr precompfile = get_engine().assets->get_asset(precomppath, fs::OpenMode::WB);
+        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::WB);
         if(precompfile)
         {
             std::byte contenthash8[8];

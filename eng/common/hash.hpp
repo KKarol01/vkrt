@@ -28,9 +28,12 @@ template <typename T> inline constexpr uint64_t fnv1a_value(uint64_t hash, const
         auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(t);
         return fnv1a_bytes(hash, bytes.data(), bytes.size());
     }
-    auto thash = std::hash<T>{}(t);
-    auto bytes = std::bit_cast<std::array<uint8_t, sizeof(thash)>>(thash);
-    return fnv1a_bytes(hash, bytes.data(), bytes.size());
+    else
+    {
+        auto thash = std::hash<T>{}(t);
+        auto bytes = std::bit_cast<std::array<uint8_t, sizeof(thash)>>(thash);
+        return fnv1a_bytes(hash, bytes.data(), bytes.size());
+    }
 }
 
 inline constexpr uint64_t combine_fnv1a(const auto&... args)

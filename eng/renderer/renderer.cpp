@@ -8,9 +8,8 @@
 #include <eng/renderer/vulkan/to_vk.hpp>
 #include <eng/common/to_string.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
-#include <eng/ecs/ecs.hpp>
 #include <eng/ecs/components.hpp>
-#include <eng/assets/asset_manager.hpp>
+#include <eng/fs/fs.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
 #include <eng/renderer/passes/renderpass.hpp>
@@ -96,8 +95,8 @@ void Renderer::init(IRendererBackend* backend)
         }
     });
 
-    new_shaders_listener = get_engine().assets->make_listener();
-    get_engine().assets->listen_for_path("/assets/shaders", new_shaders_listener);
+    new_shaders_listener = get_engine().fs->make_listener();
+    get_engine().fs->listen_for_path("/assets/shaders", new_shaders_listener);
     // get_engine().assets->listen_for_path("/eng/renderer/shaders", new_shaders_listener);
 
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)

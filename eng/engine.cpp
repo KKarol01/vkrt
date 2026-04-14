@@ -117,15 +117,14 @@ void Engine::init(int argc, char* argv[])
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     fs = new fs::FileSystem{};
-    assets = new assets::AssetManager{};
+    // assets = new assets::AssetManager{};
     window = new Window{ 1600.0f, 900.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};
     ui = new ui::UI{};
     scene = new eng::Scene{};
 
-    assets->init();
-    if(!assets->was_properly_init())
+    if(!fs->init())
     {
         destroy();
         ENG_ERROR("Engine assets manager initialization failed.");

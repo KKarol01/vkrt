@@ -56,7 +56,7 @@ void App::on_init()
 {
     auto* ecs = get_engine().ecs;
 
-    SceneNodeId cyberpunk = get_engine().scene->load_from_file("/assets/models/datsun/scene.gltf");
+    SceneNodeId cyberpunk = get_engine().scene->load_from_file("/assets/models/audi.glb");
     get_engine().scene->instance_model(cyberpunk);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);

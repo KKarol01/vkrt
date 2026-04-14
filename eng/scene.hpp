@@ -3,6 +3,7 @@
 #include <deque>
 #include <stack>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <eng/common/types.hpp>
@@ -17,6 +18,15 @@
 
 namespace eng
 {
+namespace scene
+{
+
+struct Asset
+{
+	
+};
+
+} // namespace scene
 
 struct SceneNode
 {

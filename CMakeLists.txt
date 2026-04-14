@@ -234,6 +234,7 @@ target_precompile_headers(eng
         <eng/common/sparseset.hpp>
         <eng/common/to_string.hpp>
         <eng/common/types.hpp>
+        <eng/ecs/ecs.hpp>
 
         <eng/renderer/renderer_fwd.hpp>
         <eng/renderer/vulkan/to_vk.hpp>
