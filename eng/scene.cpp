@@ -9,6 +9,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stb/stb_image.h>
+#include <stb/stb_image_write.h>
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
 #include <eng/ecs/components.hpp>
@@ -16,12 +17,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/assets/asset_manager.hpp>
-// #include <eng/renderer/vulkan/vulkan_backend.hpp>
-#include <eng/camera.hpp>
 #include <eng/physics/bvh.hpp>
-#include <third_party/imgui/imgui.h>
-#include <third_party/imgui/imgui_internal.h>
-#include <third_party/ImGuizmo/ImGuizmo.h>
 
 namespace eng
 {
@@ -171,6 +167,10 @@ uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFo
     int x, y, ch;
     std::byte* imgdata = reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()),
                                                                             data.size(), &x, &y, &ch, 4));
+
+	const auto write_path = get_engine().assets->make_path(ENG_FMT("/assets/{}", gltfimg.name.c_str()));
+	stbi_write_png(write_path.string().c_str(), x, y, ch, imgdata, 4);
+
     if(!imgdata)
     {
         ENG_ERROR("Stbi failed for image {}: {}", gltfimg.name.c_str(), stbi_failure_reason());

@@ -46,6 +46,7 @@ add_library(build_header_only STATIC
 target_compile_definitions(build_header_only
     PRIVATE
         STB_IMAGE_IMPLEMENTATION
+		STB_IMAGE_WRITE_IMPLEMENTATION
         VOLK_IMPLEMENTATION
         VMA_IMPLEMENTATION
         VMA_STATIC_VULKAN_FUNCTIONS=0

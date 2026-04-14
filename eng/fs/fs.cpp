@@ -34,47 +34,37 @@ void File::close()
 {
     if(file) { fclose((FILE*)file); }
     file = nullptr;
-    content = {};
     content_hash = {};
 }
 
-void File::read(std::byte* out_bytes, size_t bytes, size_t offset)
+size_t File::read(std::byte* out_bytes, size_t bytes, size_t offset)
 {
-    if(!out_bytes) { return; }
-    if(file && fseek((FILE*)file, this->offset + offset, SEEK_SET) == 0)
-    {
-        const auto readchars = fread_s(out_bytes, bytes, 1, bytes, (FILE*)file);
-        ENG_ASSERT(readchars == bytes);
-        return;
-    }
+    if(!out_bytes) { return 0ull; }
+    if(file && fseek((FILE*)file, offset, SEEK_SET) == 0) { return fread_s(out_bytes, bytes, 1, bytes, (FILE*)file); }
+}
+
+std::string File::read(size_t bytes, size_t offset)
+{
+    offset = std::min(size, offset);
+    bytes = std::min(bytes, size - offset);
+    std::string str(bytes, '\0');
+    const auto read_bytes = read((std::byte*)str.data(), bytes, offset);
+    str.resize(read_bytes);
+    return str;
 }
 
 void File::write(const std::byte* bytes, size_t size, size_t offset)
 {
     if(!file || !bytes || size == 0) { return; }
     size_t writechars = 0;
-    if(fseek((FILE*)file, this->offset + offset, SEEK_SET) == 0)
-    {
-        writechars = (size_t)fwrite(bytes, 1, size, (FILE*)file);
-    }
+    if(fseek((FILE*)file, offset, SEEK_SET) == 0) { writechars = (size_t)fwrite(bytes, 1, size, (FILE*)file); }
     ENG_ASSERT(writechars == size);
-}
-
-std::string_view File::read()
-{
-    if(!file) { return {}; }
-    if(!content.empty()) { return content; }
-    content.resize(size);
-    const auto readchars = fread(content.data(), 1, size, (FILE*)file);
-    ENG_ASSERT(readchars == size);
-    return content;
 }
 
 uint64_t File::get_hash()
 {
     if(content_hash != 0) { return content_hash; }
-    if(content.empty()) { read(); }
-    content_hash = hash::combine_fnv1a(content);
+    content_hash = hash::combine_fnv1a(read(size, 0));
     return content_hash;
 }
 
@@ -109,7 +99,7 @@ FilePtr FileSystem::open_file(const Path& path, OpenMode mode)
         fseek(rawfile, 0, SEEK_SET);
     }
 
-    auto sharedfile = std::make_shared<File>(this, (void*)rawfile, 0ull, size, path);
+    auto sharedfile = std::make_shared<File>(this, (void*)rawfile, size, path);
     filemap.emplace(std::make_pair(hash, mode), sharedfile);
     return sharedfile;
 }
