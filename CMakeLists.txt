@@ -123,6 +123,7 @@ add_executable(eng
     "eng/scene.cpp"
 	"eng/ui/ui.cpp" 
     "eng/to_string.cpp" 
+	"eng/ecs/components.cpp"
     "eng/physics/bvh.cpp"
     "eng/renderer/renderer.cpp"
     "eng/renderer/imgui/imgui_renderer.cpp"

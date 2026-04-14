@@ -112,18 +112,16 @@ using ViewEntityRemovedFunc = void(EntityId eid);
 
 struct ComponentTraits
 {
-    template <typename Component> static ComponentId get_id_()
+    template <typename Component> struct Id
     {
         static_assert(!std::is_reference_v<Component> && !std::is_pointer_v<Component>);
         static_assert(!std::is_const_v<Component> && !std::is_volatile_v<Component>);
         static_assert(std::is_object_v<Component>);
-        static auto id = counter.fetch_add(1);
-        ENG_ASSERT(id < MAX_COMPONENTS);
-        return id;
-    }
+        static ComponentId id;
+    };
 
     // Gets stable unique 0-based index for component
-    template <typename Component> static ComponentId get_id() { return get_id_<std::remove_cvref_t<Component>>(); }
+    template <typename Component> static ComponentId get_id() { return Id<std::remove_cvref_t<Component>>::id; }
     // Returns bit mask of given components
     template <typename... Components> static Signature get_signature()
     {
