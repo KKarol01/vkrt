@@ -135,7 +135,7 @@ add_executable(eng
 	"eng/renderer/passes/renderpass.cpp"
 	"eng/renderer/rendergraph.cpp"
 	"eng/assets/asset_manager.cpp"
-)
+ "eng/assets/loaders.cpp")
 
 target_include_directories(eng 
 	PRIVATE 

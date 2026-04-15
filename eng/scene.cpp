@@ -3,453 +3,67 @@
 #include <array>
 #include <filesystem>
 #include <unordered_map>
-#include <fastgltf/core.hpp>
-#include <fastgltf/types.hpp>
-#include <fastgltf/tools.hpp>
+
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <stb/stb_image.h>
-#include <stb/stb_image_write.h>
+
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/common/logger.hpp>
-#include <eng/renderer/renderer.hpp>
-#include <eng/renderer/staging_buffer.hpp>
 #include <eng/fs/fs.hpp>
 #include <eng/physics/bvh.hpp>
+#include <eng/assets/asset_manager.hpp>
 
 namespace eng
 {
 
-namespace gltf
+ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
 {
+    ENG_ASSERT(asset.root_nodes.size() > 0);
 
-struct Context
-{
-    std::vector<uint32_t> images;
-    std::vector<uint32_t> textures;
-    std::vector<Range32u> materials;
-    std::vector<Range32u> geometries;
-    std::vector<Range32u> meshes;
-};
+    const auto recursive_instance = [&asset](const auto& self, const assets::Asset::Node& node,
+                                             ecs::EntityId parent_entity) -> ecs::EntityId {
+        auto* ecs = get_engine().ecs;
+        auto e = ecs->create();
+        ecs->add_components<ecs::Node>(e, ecs::Node{ .name = node.name });
+        if(node.transform != ~0u)
+        {
+            ecs->add_components<ecs::Transform>(e, ecs::Transform{ asset.transforms[node.transform] });
+        }
+        if(node.meshes.size > 0)
+        {
+            ecs::Mesh ecsmesh{};
+            ecsmesh.name = "EMPTY NAME";
+            ecsmesh.render_meshes = { asset.meshes.begin() + node.meshes.offset,
+                                      asset.meshes.begin() + node.meshes.offset + node.meshes.size };
+            ecs->add_components<ecs::Mesh>(e, std::move(ecsmesh));
+        }
+        if(parent_entity) { ecs->make_child(parent_entity, e); }
+        for(auto i = 0u; i < node.children.size; ++i)
+        {
+            self(self, asset.nodes[node.children.offset + i], e);
+        }
+        return e;
+    };
 
-Range32u load_geometry(Scene& scene, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Context& ctx)
-{
-    if(ctx.geometries.empty()) { ctx.geometries.insert(ctx.geometries.begin(), gltfasset.meshes.size(), Range32u{}); }
-    if(ctx.geometries[gltfmeshidx].size != 0u) { return ctx.geometries[gltfmeshidx]; }
-
-    const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
-
-    Range32u geoms{ (uint32_t)scene.geometries.size(), 0u };
-    std::vector<float> vertices;
-    std::vector<uint32_t> indices;
-    for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
+    ecs::EntityId e;
+    if(asset.root_nodes.size() > 1)
     {
-        vertices.clear();
-        indices.clear();
-        const fastgltf::Primitive& gltfprim = gltfmesh.primitives[i];
-
-        static constexpr const char* FAST_COMPS[]{ "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0" };
-        static constexpr gfx::VertexComponent GFX_COMPS[]{ gfx::VertexComponent::POSITION_BIT, gfx::VertexComponent::NORMAL_BIT,
-                                                           gfx::VertexComponent::TANGENT_BIT, gfx::VertexComponent::UV0_BIT };
-        const auto vertex_layout = [&gltfprim] {
-            Flags<gfx::VertexComponent> vertex_layout{};
-            for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
-            {
-                if(gltfprim.findAttribute(FAST_COMPS[i]) != gltfprim.attributes.end())
-                {
-                    vertex_layout |= GFX_COMPS[i];
-                }
-            }
-            return vertex_layout;
-        }();
-        const auto vertex_size = gfx::get_vertex_layout_size(vertex_layout);
-        const auto get_vertex_component = [&vertices, &vertex_size,
-                                           &vertex_layout](size_t vidx, gfx::VertexComponent comp) -> std::byte* {
-            auto* ptr = (std::byte*)vertices.data();
-            return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
-        };
-
-        const auto fast_iterate = [&gltfasset, &get_vertex_component](int comp, const auto& gltfacc, gfx::VertexComponent gfxcomp) {
-            const auto copy_bytes = [&get_vertex_component, &gfxcomp]<size_t num_floats>(const auto& vec, auto idx) {
-                std::array<float, num_floats> v{};
-                for(auto i = 0u; i < num_floats; ++i)
-                {
-                    v[i] = (float)vec[i];
-                }
-                auto* pdst = get_vertex_component(idx, gfxcomp);
-                memcpy(pdst, v.data(), num_floats * sizeof(v[0]));
-            };
-            const auto cb2 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<2>(vec, idx); };
-            const auto cb3 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<3>(vec, idx); };
-            const auto cb4 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<4>(vec, idx); };
-
-            if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, gltfacc, cb3); }
-            else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, gltfacc, cb3); }
-            else if(comp == 2) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(gltfasset, gltfacc, cb4); }
-            else if(comp == 3) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(gltfasset, gltfacc, cb2); }
-        };
-
-        for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
+        e = get_engine().ecs->create();
+        get_engine().ecs->add_components<ecs::Node>(e, ecs::Node{ .name = ENG_FMT("{}_root", asset.path.filename().string()) });
+        for(auto rn : asset.root_nodes)
         {
-            if(!vertex_layout.test(GFX_COMPS[i]))
-            {
-                if(i == 0)
-                {
-                    ENG_ERROR("Mesh does not have positions");
-                    continue;
-                }
-                continue;
-            }
-            auto it = gltfprim.findAttribute(FAST_COMPS[i]);
-            auto& acc = gltfasset.accessors.at(it->accessorIndex);
-            if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
-            fast_iterate(i, acc, GFX_COMPS[i]);
-        }
-
-        if(gltfprim.indicesAccessor)
-        {
-            auto& acc = gltfasset.accessors.at(*gltfprim.indicesAccessor);
-            if(!acc.bufferViewIndex)
-            {
-                ENG_ERROR("No bufferViewIndex...");
-                continue;
-            }
-            indices.resize(acc.count);
-            fastgltf::copyFromAccessor<uint32_t>(gltfasset, acc, indices.data());
-        }
-        else
-        {
-            ENG_WARN("Mesh {} primitive {} does not have mandatory vertex indices. Skipping...", gltfmesh.name.c_str(), i);
-            continue;
-        }
-
-        scene.geometries.push_back(ecs::Geometry{
-            .render_geometry = get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
-                .flags = {}, .vertex_layout = vertex_layout, .vertices = vertices, .indices = std::span{ indices } }) });
-        ++geoms.size;
-        // auto& geom = model.geometries.emplace_back();
-        // geom.render_geometry = render_geometry;
-        // geom.bvh = physics::BVH{ std::as_bytes(std::span{ vertices }), gfx::get_vertex_layout_size(vertex_layout),
-        //                          std::as_bytes(std::span{ indices }), gfx::IndexFormat::U32 };
-    }
-
-    ctx.geometries[gltfmeshidx] = geoms;
-    return geoms;
-}
-
-uint32_t load_image(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltfimgidx, Context& ctx)
-{
-    // todo: check if image format matches with the currently requested.
-    if(ctx.images.empty()) { ctx.images.insert(ctx.images.begin(), gltfasset.images.size(), ~0u); }
-    if(ctx.images[gltfimgidx] != ~0u) { return ctx.images[gltfimgidx]; }
-
-    const fastgltf::Image& gltfimg = gltfasset.images[gltfimgidx];
-
-    std::span<const std::byte> data;
-    if(auto* fastbufviewsrc = std::get_if<fastgltf::sources::BufferView>(&gltfimg.data))
-    {
-        auto& fastbufview = gltfasset.bufferViews.at(fastbufviewsrc->bufferViewIndex);
-        auto& fastbuf = gltfasset.buffers.at(fastbufview.bufferIndex);
-        if(auto* fastarrsrc = std::get_if<fastgltf::sources::Array>(&fastbuf.data))
-        {
-            data = { fastarrsrc->bytes.data() + fastbufview.byteOffset, fastbufview.byteLength };
+            const auto& node = asset.nodes[rn];
+            recursive_instance(recursive_instance, node, e);
         }
     }
-    else if(auto* fastarrsrc = std::get_if<fastgltf::sources::Array>(&gltfimg.data))
+    else if(asset.root_nodes.size() == 1)
     {
-        data = { fastarrsrc->bytes.begin(), fastarrsrc->bytes.end() };
+        e = recursive_instance(recursive_instance, asset.nodes[asset.root_nodes[0]], ecs::EntityId{});
     }
 
-    if(data.empty())
-    {
-        ENG_WARN("Could not load image {}", gltfimg.name.c_str());
-        return ~0u;
-    }
-
-    int x, y, ch;
-    std::byte* imgdata = reinterpret_cast<std::byte*>(stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()),
-                                                                            data.size(), &x, &y, &ch, 4));
-
-    // const auto write_path = get_engine().assets->make_path(ENG_FMT("/assets/{}", gltfimg.name.c_str()));
-    // stbi_write_png(write_path.string().c_str(), x, y, ch, imgdata, 4);
-
-    if(!imgdata)
-    {
-        ENG_ERROR("Stbi failed for image {}: {}", gltfimg.name.c_str(), stbi_failure_reason());
-        return ~0u;
-    }
-
-    const auto img = get_engine().renderer->make_image(gltfimg.name.c_str(),
-                                                       gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
-                                                                        gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                            gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                        0, 1, gfx::ImageLayout::READ_ONLY));
-    if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
-    else
-    {
-        gfx::get_renderer().staging->copy(img.get(), imgdata, 0, 0, true, gfx::DiscardContents::YES);
-        ENG_TODO("TODO: Process mips");
-    }
-    stbi_image_free(imgdata);
-    if(!img) { return ~0u; }
-
-    const uint32_t imgidx = scene.images.size();
-    scene.images.push_back(img);
-    ctx.images[gltfimgidx] = imgidx;
-    return imgidx;
-}
-
-uint32_t load_texture(Scene& scene, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltftexidx, Context& ctx)
-{
-    if(ctx.textures.empty()) { ctx.textures.insert(ctx.textures.begin(), gltfasset.textures.size(), ~0u); }
-    if(ctx.textures[gltftexidx] != ~0u) { return ctx.textures[gltftexidx]; }
-    const auto& gltftex = gltfasset.textures[gltftexidx];
-    if(!gltftex.imageIndex)
-    {
-        ENG_ERROR("Texture {} does not have associated image", gltftex.name.c_str());
-        return ~0u;
-    }
-    uint32_t image = load_image(scene, gltfasset, format, *gltftex.imageIndex, ctx);
-    if(image == ~0u) { return ~0u; }
-
-    uint32_t texidx = scene.textures.size();
-    scene.textures.push_back(gfx::ImageView::init(scene.images[image], format));
-    ctx.textures[gltftexidx] = texidx;
-    return texidx;
-}
-
-Range32u load_material(Scene& scene, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Context& ctx)
-{
-    if(ctx.materials.empty()) { ctx.materials.insert(ctx.materials.begin(), gltfasset.meshes.size(), Range32u{}); }
-    if(ctx.materials[gltfmeshidx].size != 0u) { return ctx.materials[gltfmeshidx]; }
-
-    const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
-    Range32u mats{ (uint32_t)scene.materials.size(), 0u };
-    for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
-    {
-        const fastgltf::Primitive& gltfprim = gltfmesh.primitives[i];
-
-        if(!gltfprim.materialIndex)
-        {
-            ENG_ERROR("Primitive {} in mesh {} does not have a material", gltfmesh.name.c_str(), i);
-            continue;
-        }
-
-        const fastgltf::Material& gltfmat = gltfasset.materials[*gltfprim.materialIndex];
-        auto mat = gfx::Material::init(gltfmat.name.c_str());
-        if(gltfmat.pbrData.baseColorTexture)
-        {
-            uint32_t texidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,
-                                           gltfmat.pbrData.baseColorTexture->textureIndex, ctx);
-            if(texidx != ~0u)
-            {
-                mat.base_color_texture = scene.textures[ctx.textures[gltfmat.pbrData.baseColorTexture->textureIndex]];
-            }
-        }
-        if(gltfmat.normalTexture)
-        {
-            uint32_t texidx =
-                load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM, gltfmat.normalTexture->textureIndex, ctx);
-            if(texidx != ~0u)
-            {
-                mat.normal_texture = scene.textures[ctx.textures[gltfmat.normalTexture->textureIndex]];
-            }
-        }
-        if(gltfmat.pbrData.metallicRoughnessTexture)
-        {
-            uint32_t texidx = load_texture(scene, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM,
-                                           gltfmat.pbrData.metallicRoughnessTexture->textureIndex, ctx);
-            if(texidx != ~0u)
-            {
-                mat.metallic_roughness_texture =
-                    scene.textures[ctx.textures[gltfmat.pbrData.metallicRoughnessTexture->textureIndex]];
-            }
-        }
-
-        scene.materials.push_back(ecs::Material{
-            .name = gltfmat.name.c_str(),
-            .render_material = get_engine().renderer->make_material(mat),
-        });
-        ++mats.size;
-    }
-
-    ctx.materials[gltfmeshidx] = mats;
-    return mats;
-}
-
-Range32u load_mesh(Scene& scene, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, SceneNode& node, Context& ctx)
-{
-    if(ctx.meshes.empty()) { ctx.meshes.insert(ctx.meshes.begin(), gltfasset.meshes.size(), Range32u{}); }
-    if(ctx.meshes[gltfmeshidx].size != 0u) { return ctx.meshes[gltfmeshidx]; }
-
-    const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
-
-    Range32u geoms = load_geometry(scene, gltfasset, gltfmeshidx, ctx);
-    Range32u mats = load_material(scene, gltfasset, gltfmeshidx, ctx);
-    ENG_ASSERT(geoms == mats && geoms.offset == (uint32_t)scene.meshes.size());
-    for(auto i = 0u; i < geoms.size; ++i)
-    {
-        scene.meshes.push_back(gfx::get_renderer().make_mesh(gfx::MeshDescriptor{
-            .geometry = scene.geometries[geoms.offset + i].render_geometry, .material = scene.materials[mats.offset + i].render_material }));
-    }
-    ctx.meshes[gltfmeshidx] = geoms;
-    return geoms;
-}
-
-SceneNodeId load_node(Scene& scene, const fastgltf::Asset& gltfasset, uint32_t gltfnodeidx, SceneNodeId parentnodeid, Context& ctx)
-{
-    const auto& gltfnode = gltfasset.nodes[gltfnodeidx];
-    const auto nodeid = scene.make_node(gltfnode.name.c_str());
-    scene.hierarchy.make_child(parentnodeid, nodeid);
-
-    auto& node = scene.get_node(nodeid);
-    node.transform = scene.transforms.size();
-    auto& transform = scene.transforms.emplace_back(scene.transforms[scene.get_node(parentnodeid).transform]);
-
-    if(gltfnode.transform.index() == 0)
-    {
-        const auto& gltftrs = std::get<fastgltf::TRS>(gltfnode.transform);
-        ecs::Transform trs{ .position = glm::vec3{ gltftrs.translation.x(), gltftrs.translation.y(), gltftrs.translation.z() },
-                            .rotation = glm::quat{ gltftrs.rotation.w(), gltftrs.rotation.x(), gltftrs.rotation.y(),
-                                                   gltftrs.rotation.z() },
-                            .scale = glm::vec3{ gltftrs.scale.x(), gltftrs.scale.y(), gltftrs.scale.z() } };
-        transform = ecs::Transform::init(trs.to_mat4() * transform.to_mat4());
-    }
-    else
-    {
-        const auto& trs = std::get<fastgltf::math::fmat4x4>(gltfnode.transform);
-        glm::mat4 glmtrs;
-        memcpy(&glmtrs, &trs, sizeof(trs));
-        transform = ecs::Transform::init(glmtrs * transform.to_mat4());
-    }
-
-    if(gltfnode.meshIndex)
-    {
-        node.meshes = load_mesh(scene, gltfasset, *gltfnode.meshIndex, node, ctx);
-        if(node.meshes.size == 0u)
-        {
-            ENG_ERROR("Failed to load mesh {} for node {}.", gltfasset.meshes.at(*gltfnode.meshIndex).name.c_str(),
-                      gltfnode.name.c_str());
-        }
-    }
-
-    for(const auto& e : gltfnode.children)
-    {
-        load_node(scene, gltfasset, e, nodeid, ctx);
-    }
-
-    return nodeid;
-}
-
-SceneNodeId load_from_file(Scene& scene, const std::filesystem::path& model_path)
-{
-    auto fastdatabuf = fastgltf::GltfDataBuffer::FromPath(model_path);
-    if(!fastdatabuf) { return SceneNodeId{}; }
-
-    static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
-                                        fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
-    fastgltf::Parser gltfparser;
-    const auto gltfasset = [&model_path, &gltfparser, &fastdatabuf] {
-        if(model_path.extension() == ".glb")
-        {
-            return gltfparser.loadGltfBinary(fastdatabuf.get(), model_path.parent_path(), gltfOptions);
-        }
-        else if(model_path.extension() == ".gltf")
-        {
-            return gltfparser.loadGltfJson(fastdatabuf.get(), model_path.parent_path(), gltfOptions);
-        }
-    }();
-
-    if(!gltfasset) { return SceneNodeId{}; }
-    if(gltfasset->scenes.empty()) { return SceneNodeId{}; }
-
-    auto& gltfscene = gltfasset->scenes.at(0);
-
-    const auto rootnodeid = scene.make_node(model_path.filename().string());
-    scene.get_node(rootnodeid).transform = scene.transforms.size();
-    scene.transforms.emplace_back();
-
-    Context ctx;
-    for(auto i = 0u; i < gltfscene.nodeIndices.size(); ++i)
-    {
-        load_node(scene, gltfasset.get<1>(), gltfscene.nodeIndices[i], rootnodeid, ctx);
-    }
-
-    return rootnodeid;
-}
-
-} // namespace gltf
-
-void Scene::init() {}
-
-SceneNodeId Scene::load_from_file(const std::filesystem::path& model_path)
-{
-    auto full_path = model_path;
-    const auto ext = full_path.extension();
-    if(ext == ".glb") { return gltf::load_from_file(*this, get_engine().fs->make_rel_path(full_path)); }
-    else if(ext == ".gltf") { return gltf::load_from_file(*this, get_engine().fs->make_rel_path(full_path)); }
-
-    ENG_ERROR("Extension not supported {}", ext.string());
-    return SceneNodeId{};
-}
-
-ecs::EntityId Scene::instance_model(SceneNodeId nodeid)
-{
-    if(!hierarchy.has(nodeid))
-    {
-        ENG_WARN("Cannot instatiate node {}", *nodeid);
-        return ecs::EntityId{};
-    }
-    auto* reg = get_engine().ecs;
-    ecs::EntityId ret;
-    std::unordered_map<SceneNodeId, ecs::EntityId> parents;
-    hierarchy.traverse_hierarchy(nodeid, [this, reg, &ret, &parents](IndexedHierarchy::NodeId nodeid) {
-        const SceneNodeId sceneid{ *nodeid };
-        const SceneNode& node = get_node(sceneid);
-        ENG_ASSERT(node.transform != ~0u);
-        const auto e = reg->create();
-        if(!ret) { ret = e; }
-        reg->add_components(e, ecs::Node{ node.name }, transforms[node.transform]);
-        if(node.meshes.size != 0)
-        {
-            ecs::Mesh ecsmesh{ .name = {},
-                               .render_meshes = { meshes.begin() + node.meshes.offset,
-                                                  meshes.begin() + node.meshes.offset + node.meshes.size },
-                               .gpu_resource = ~0u };
-            reg->add_components(e, ecsmesh);
-        }
-
-        auto parentid = hierarchy.get_parent(nodeid);
-        if(hierarchy.has(parentid)) { reg->make_child(parents[SceneNodeId{ *parentid }], e); }
-        parents[sceneid] = e;
-    });
-    scene.push_back(ret);
-    ENG_ASSERT(ret);
-    return ret;
-}
-
-SceneNodeId Scene::make_node(const std::string& name)
-{
-    const auto idx = hierarchy.create();
-    if(!idx)
-    {
-        ENG_ERROR("Could not create new scene node");
-        return SceneNodeId{ *idx };
-    }
-    if(nodes.size() == *idx) { nodes.push_back(SceneNode{ .name = name }); }
-    return SceneNodeId{ *idx };
-}
-
-SceneNode& Scene::get_node(SceneNodeId id)
-{
-    if(!hierarchy.has(id))
-    {
-        ENG_ERROR("Invalid node id");
-        return null_node;
-    }
-    return nodes[*id];
+    return e;
 }
 
 } // namespace eng

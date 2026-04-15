@@ -117,7 +117,7 @@ void Engine::init(int argc, char* argv[])
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     fs = new fs::FileSystem{};
-    // assets = new assets::AssetManager{};
+    assets = new assets::AssetManager{};
     window = new Window{ 1600.0f, 900.0f };
     ecs = new ecs::Registry{};
     renderer = new gfx::Renderer{};
@@ -140,7 +140,6 @@ void Engine::init(int argc, char* argv[])
 
     camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
     renderer->init(new gfx::RendererBackendVk{});
-    scene->init();
     ui->init();
 }
 

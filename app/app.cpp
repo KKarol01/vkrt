@@ -3,6 +3,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/engine.hpp>
 #include <eng/scene.hpp>
+#include <eng/assets/asset_manager.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/rendergraph.hpp>
@@ -56,8 +57,8 @@ void App::on_init()
 {
     auto* ecs = get_engine().ecs;
 
-    SceneNodeId cyberpunk = get_engine().scene->load_from_file("/assets/models/audi.glb");
-    get_engine().scene->instance_model(cyberpunk);
+    auto model = get_engine().assets->get_asset("/assets/models/audi.glb");
+    get_engine().scene->instance_asset(model);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);

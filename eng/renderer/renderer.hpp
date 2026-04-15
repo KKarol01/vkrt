@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include <unordered_set>
 #include <glm/glm.hpp>
 #include <eng/engine.hpp>
@@ -350,7 +349,7 @@ struct Material
 
 struct Mesh
 {
-    bool operator==(const Mesh& a) const { return geometry == a.geometry && material == a.material; }
+    auto operator<=>(const Mesh&) const = default;
     Handle<Geometry> geometry;
     Handle<Material> material;
 };
@@ -767,7 +766,7 @@ class Renderer
 
     struct Settings
     {
-        ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
+        ImageFormat color_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
         Vec2f render_resolution{};

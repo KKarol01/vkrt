@@ -209,7 +209,11 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
                 it = std::prev(free_list.end());
                 break;
             }
-            else { scan_for_finished_allocations(); }
+            else
+            {
+                flush();
+                scan_for_finished_allocations();
+            }
         }
     }
     ENG_ASSERT(it != free_list.end() && it->offset % ALIGNMENT == 0 && it->size % ALIGNMENT == 0);
@@ -246,9 +250,6 @@ void StagingBuffer::scan_for_finished_allocations()
     while(!allocations.empty())
     {
         auto& alloc = allocations.front();
-        // if value < signal_value, the alloc is still pending, and there is no more free memory
-        // so to avoid infinite waiting, flush.
-        if(alloc.semaphore->value < alloc.signal_value) { flush(); }
         if(alloc.semaphore->wait_cpu(0ull, alloc.signal_value))
         {
             semaphores.push_back(alloc.semaphore);

@@ -33,21 +33,6 @@ template <typename T, std::integral Storage> struct TypedId
     StorageType handle{ ~StorageType{} };
 };
 
-template <typename T, typename Storage> struct VersionedIndex;
-
-// todo: maybe add configurable num of bits for index (cannot set index_bits to 32, as shifting uint32 by >=32 bits is ub...)
-template <typename T> struct VersionedIndex<T, uint32_t> : public TypedId<T, uint32_t>
-{
-    using Base = TypedId<T, uint32_t>;
-    using typename Base::StorageType;
-    inline static constexpr StorageType INDEX_BITS = 21;
-    inline static constexpr StorageType INDEX_MASK = (StorageType{ 1u } << INDEX_BITS) - 1;
-    using Base::Base;
-    VersionedIndex(StorageType index, StorageType version) : Base((version << INDEX_BITS) | (index & INDEX_MASK)) {}
-    StorageType get_index() const { return Base::handle & INDEX_MASK; }
-    StorageType get_version() const { return Base::handle >> INDEX_BITS; }
-};
-
 template <typename Storage = size_t> struct Range_T
 {
     auto operator<=>(const Range_T&) const = default;

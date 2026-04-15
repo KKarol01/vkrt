@@ -663,7 +663,7 @@ void Renderer::compile_rendergraph()
 
     current_data->render_resources = rgraph->add_graphics_pass<RenderResources>(
         "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
-        [](RGBuilder& b, RenderResources& d) {
+        [this](RGBuilder& b, RenderResources& d) {
             auto constsacc = b.create_resource("constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
             constsacc = b.write_buffer(constsacc);
             d.constants = b.as_res_id(constsacc);
