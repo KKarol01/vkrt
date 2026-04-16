@@ -499,7 +499,7 @@ struct GTAO : public Pass
                                                                                 ImageLayout::READ_ONLY));
         }
         get_renderer().staging->copy(noise_texture.get(), noise, 0, 0);
-        //get_renderer().staging->flush()->wait_cpu(~0ull);
+        // get_renderer().staging->flush()->wait_cpu(~0ull);
     }
 
     void poll_settings_change()
@@ -525,40 +525,61 @@ struct RTAO : public Pass
 {
     RTAO() : Pass("RTAO", RenderOrder::MESH_RENDER)
     {
-        pipeline = get_renderer().make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+        auto& r = get_renderer();
+        pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+        settings_buffer = r.make_buffer("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
+                                                                      BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
+        blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+        ao_settings = {
+            .radius = 0.006f,
+            .bias = 0.0f,
+        };
+        settings = {
+            {
+                { "radius", &ao_settings.radius },
+                { "bias", &ao_settings.bias },
+            },
+            true,
+        };
     }
     ~RTAO() override = default;
 
     struct PassData
     {
         RGAccessId constants;
+        RGAccessId depth;
+        RGAccessId normals;
         RGResourceId out_ao;
+        RGAccessId settings;
     };
 
     void init(RGRenderGraph* graph) override
     {
         const auto& r = get_renderer();
         const auto res = r.settings.render_resolution;
+        poll_settings_change();
         data = graph->add_compute_pass<PassData>(
             name.c_str(), order,
             [=](RGBuilder& b, PassData& d) {
                 if(!r.current_data->render_resources.zpdepth) { return; }
                 d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
-                // d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
-                // d.normals = b.read_image(b.as_acc_id(r.current_data->render_resources.normal));
-                // d.noise = b.sample_texture(b.import_resource(noise_texture));
+                d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
+                d.normals = b.read_image(b.as_acc_id(r.current_data->render_resources.normal));
                 auto out_ao = b.create_resource("RTAO_OUTPUT", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
                                                                            ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
                 out_ao = b.read_write_image(out_ao);
                 d.out_ao = b.as_res_id(out_ao);
-                /*d.settings = b.import_resource(settings_buffer);
-                d.settings = b.read_buffer(d.settings);*/
+                d.settings = b.import_resource(settings_buffer);
+                d.settings = b.read_buffer(d.settings);
             },
             [=, this](RGBuilder& b, const PassData& d) {
                 auto* cmd = b.open_cmd_buf();
                 cmd->bind_pipeline(pipeline.get());
                 DescriptorResource resources[]{
                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+                    DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
+                    DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+                    DescriptorResource::sampled_image(b.graph->get_acc(d.normals).image_view),
                     DescriptorResource::acceleration_struct(get_renderer().bufs.geom_tlas),
                     DescriptorResource::storage_image(b.graph->get_acc(d.out_ao).image_view),
                 };
@@ -566,10 +587,53 @@ struct RTAO : public Pass
                 cmd->dispatch((res.x + 7) / 8, (res.y + 7) / 8, 1);
             });
 
+        struct BlurData
+        {
+            RGAccessId in_ao;
+            RGResourceId out_blur;
+        };
+
+        const auto blurdata = graph->add_compute_pass<BlurData>(
+            "GTAO_BLUR", order,
+            [this](RGBuilder& b, BlurData& d) {
+                const auto& r = get_renderer();
+                const auto res = r.settings.render_resolution;
+                d.in_ao = b.read_write_image(b.as_acc_id(data.out_ao));
+                d.out_blur = b.as_res_id(b.write_image(
+                    b.create_resource("GTAO_BLUR", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
+                                                               ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT))));
+                data.out_ao = d.out_blur;
+            },
+            [this](RGBuilder& b, const BlurData& d) {
+                if(!blur_pipeline) { return; }
+                auto* cmd = b.open_cmd_buf();
+                cmd->bind_pipeline(blur_pipeline.get());
+                const auto img = b.graph->get_img(d.in_ao);
+                DescriptorResource resources[]{
+                    DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+                    DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
+                };
+                cmd->bind_resources(1, resources);
+                cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
+            });
+
         r.current_data->render_resources.ao = data.out_ao;
     }
 
+    void poll_settings_change()
+    {
+        if(settings.modified)
+        {
+            auto& r = get_renderer();
+            r.staging->copy(settings_buffer.get(), &ao_settings, 0ull, sizeof(ao_settings));
+            settings.modified = false;
+        }
+    }
+
+    GPUEngAOSettings ao_settings;
     Handle<Pipeline> pipeline;
+    Handle<Pipeline> blur_pipeline;
+    Handle<Buffer> settings_buffer;
     PassData data;
 };
 

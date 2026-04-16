@@ -2,10 +2,11 @@
 #include "./assets/shaders/util.hlsli"
 
 #define LOCAL_SIZE 8
+#define NUM_RAYS 64
 
 float3 get_camera_pos()
 {
-	return get_gsb(GPUEngConstants, 0).cam_pos;
+    return get_gsb(GPUEngConstants, 0).cam_pos;
 }
 
 float IGN(float2 pixel)
@@ -17,46 +18,94 @@ float IGN(float2 pixel)
 float2 IGN2D(float2 pixel)
 {
     float n1 = IGN(pixel);
-    // Offset by a value that breaks the grid pattern
     float n2 = IGN(pixel + float2(47.0, 17.0)); 
     return float2(n1, n2);
+}
+
+// Cosine-weighted hemisphere sampling
+float3 sample_hemisphere(float2 xi)
+{
+    float phi = 2.0 * ENG_PI * xi.x;
+    float cosTheta = sqrt(1.0 - xi.y);
+    float sinTheta = sqrt(xi.y);
+
+    return float3(
+        cos(phi) * sinTheta,
+        sin(phi) * sinTheta,
+        cosTheta
+    );
+}
+
+// Build TBN from normal
+float3x3 make_tbn(float3 n)
+{
+    float3 up = abs(n.z) < 0.999 ? float3(0,0,1) : float3(1,0,0);
+    float3 t = normalize(cross(up, n));
+    float3 b = cross(n, t);
+    return float3x3(t, b, n);
 }
 
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
-	RWTexture2D<float4> out_image = gRWTexture2Df4s[pc.AOImageIndex];
-    
-    uint2 out_size;
-    out_image.GetDimensions(out_size.x, out_size.y);
-    if(any(thread_id.xy >= out_size)) return;
+    Texture2D<float> in_depth = gTexture2Df1s[pc.DepthTextureIndex];
+    Texture2D<float4> in_normal = gTexture2Ds[pc.NormalTextureIndex];
+    RWTexture2D<float4> out_image = gRWTexture2Df4s[pc.AOImageIndex];
 
-    // 1. Calculate Ray Direction
-    const float2 uv = (float2(thread_id.xy) + 0.5) / float2(out_size) * 2.0 - 1.0;
-    const float3 ray_origin = get_camera_pos(); 
-    // Unprojecting UV to a point in world space to find the direction vector
-    const float3 world_pos = mul(get_gsb(GPUEngConstants, 0).inv_view,  float4(unproject_inf_revz_depth(float3(uv, 1.0)), 1.0)).xyz; 
-    const float3 ray_dir = normalize(world_pos - ray_origin);
+    uint2 size;
+    out_image.GetDimensions(size.x, size.y);
+    if(any(thread_id.xy >= size)) return;
 
-    // 2. Define Ray
-    RayDesc ray;
-    ray.Origin    = ray_origin;
-    ray.Direction = ray_dir;
-    ray.TMin      = 0.001;
-    ray.TMax      = 1000.0;
+    float2 uv = (float2(thread_id.xy) + 0.5) / float2(size);
 
-    // 3. Trace Geometry
-    RayQuery<RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(gTLASs[pc.SceneTlasIndex], RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
-    q.Proceed();
+	// 1. Reconstruct view-space position
+	float depth = in_depth.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv, 0).x;
+	if(depth < 0.01) 
+	{ 
+		out_image[thread_id.xy] = float4(0.0.xxx, 1.0);
+		return; 
+	}
+	
+    float3 pos_v = unproject_inf_revz_depth(float3(uv*2.0 - 1.0, depth));
 
-    // 4. Write Result
-    float depth = 0.0;
-    if(q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    // 2. Get normal (assume view-space)
+    float3 normal_v = normalize(in_normal[thread_id.xy].xyz);
+
+    // 3. Convert to world space
+    float3 pos_w = mul(get_gsb(GPUEngConstants, 0).inv_view, float4(pos_v, 1)).xyz;
+    float3 normal_w = normalize(mul((float3x3)get_gsb(GPUEngConstants, 0).inv_view, normal_v));
+
+    float3x3 tbn = make_tbn(normal_w);
+
+    float2 noise = IGN2D(thread_id.xy);
+
+    float occlusion = 0.0;
+
+    // 4. Shoot hemisphere rays
+    for(int i = 0; i < NUM_RAYS; ++i)
     {
-        depth = q.CommittedRayT();
-		depth = float(q.CommittedInstanceIndex()) / 100.0;
+        float2 xi = frac(noise + float2(i * 0.37, i * 0.73));
+        float3 local_dir = sample_hemisphere(xi);
+        float3 ray_dir = mul(local_dir, tbn);
+
+        RayDesc ray;
+        ray.Origin    = pos_w + normal_w * 0.01; // bias
+        ray.Direction = ray_dir;
+        ray.TMin      = 0.0;
+        ray.TMax      = get_gsb(GPUEngAOSettings, 0).radius;
+
+        RayQuery<RAY_FLAG_FORCE_OPAQUE> q;
+        q.TraceRayInline(gTLASs[pc.SceneTlasIndex], RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
+
+        q.Proceed();
+
+        if(q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        {
+            occlusion += 1.0;
+        }
     }
 
-    out_image[thread_id.xy] = float4(depth.xxx, 1.0);
+    float ao = 1.0 - (occlusion / NUM_RAYS);
+
+    out_image[thread_id.xy] = float4(ao.xxx, 1.0);
 }
