@@ -32,8 +32,8 @@ float GTAO(
 	float2 noise
 ) 
 {
-    const float NUM_SAMPLES = 8.0;
-    const float NUM_DIRECTIONS = 8.0;
+    const float NUM_SAMPLES = 4.0;
+    const float NUM_DIRECTIONS = 4.0;
 	float3 pos_v = unproject_inf_revz_depth(uv, depthTex); 
 	float3 view_v = normalize(-pos_v);
 	
@@ -70,6 +70,7 @@ float GTAO(
 			{
 				float s = (k + noise.y) / NUM_SAMPLES;
 				float2 sample_uv = uv + (side * 2.0 - 1.0) * s * scaling * float2(omega.x, omega.y);
+				if (any(sample_uv < 0) || any(sample_uv > 1)) break;
 				float3 sample_pos = unproject_inf_revz_depth(sample_uv, depthTex);
 				float3 sample_horizon = normalize(sample_pos - pos_v);
 				if(distance(sample_pos, pos_v) < 0.01) { continue; }
