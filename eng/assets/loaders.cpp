@@ -98,7 +98,9 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             auto it = gltfprim.findAttribute(FAST_COMPS[i]);
             auto& acc = gltfasset.accessors.at(it->accessorIndex);
             if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
+			ENG_TIMER_START("Iterating");
             fast_iterate(i, acc, GFX_COMPS[i]);
+			ENG_TIMER_END();
         }
 
         if(gltfprim.indicesAccessor)
@@ -118,8 +120,10 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             continue;
         }
 
+		ENG_TIMER_START("Making geometry");
         asset.geometries.push_back(get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
             .flags = {}, .vertex_layout = vertex_layout, .vertices = vertices, .indices = std::span{ indices } }));
+		ENG_TIMER_END();
         ++geoms.size;
     }
 
@@ -268,8 +272,12 @@ Range32u load_mesh(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfme
 
     const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
 
+    ENG_TIMER_START("Load geometry {}", node.name);
     Range32u geoms = load_geometry(asset, gltfasset, gltfmeshidx, ctx);
+    ENG_TIMER_END();
+    ENG_TIMER_START("Load material {}", node.name);
     Range32u mats = load_material(asset, gltfasset, gltfmeshidx, ctx);
+    ENG_TIMER_END();
     ENG_ASSERT(geoms == mats && geoms.offset == (uint32_t)asset.meshes.size());
     for(auto i = 0u; i < geoms.size; ++i)
     {

@@ -796,9 +796,11 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
     auto it = buffers.insert(std::move(buffer));
-    if(!it) { return Handle<Buffer>{}; }
-    if(*it == buffer_names.size()) { buffer_names.emplace_back(name); }
-    else { buffer_names[*it] = name; }
+    if(!it)
+    {
+        ENG_WARN("Could not create buffer {}", name);
+        return Handle<Buffer>{};
+    }
     return Handle<Buffer>{ *it };
 }
 
@@ -814,9 +816,11 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
     auto it = images.insert(std::move(image));
-    if(!it) { return Handle<Image>{}; }
-    if(*it == image_names.size()) { image_names.emplace_back(name); }
-    else { image_names[*it] = name; }
+    if(!it)
+    {
+        ENG_WARN("Could not create image {}", name);
+        return Handle<Image>{};
+    }
     return Handle<Image>{ *it };
 }
 
@@ -826,7 +830,7 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
     if(destroy_now)
     {
         backend->destroy_image(image.get());
-        images.erase(Slotmap<Image, 1024>::SlotId{ *image });
+        images.erase(*image);
     }
     else { current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
     image = {};
@@ -937,7 +941,9 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     std::vector<float> out_vertices;
     std::vector<uint16_t> out_indices;
     std::vector<Meshlet> out_meshlets;
+    ENG_TIMER_START("Meshletizing geometry");
     meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
+    ENG_TIMER_END();
 
     const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
     const auto index_count = out_indices.size();
@@ -1089,7 +1095,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
         return;
     }
 
-    auto dsth = make_buffer(buffer_names[*handle], Buffer::init(new_size, handle->usage));
+    auto dsth = make_buffer(backend->get_debug_name(handle.get()), Buffer::init(new_size, handle->usage));
     if(copy_data) { staging->copy(dsth.get(), handle.get(), 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
     queue_destroy(handle);
     handle = dsth;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 #include <eng/common/types.hpp>
@@ -7,115 +8,116 @@
 namespace eng
 {
 
-template <typename UserType, size_t PAGE_SIZE, typename Storage = uint32_t> class Slotmap
+template <typename UserType, size_t PAGE_SIZE = 1024, size_t NUM_PAGES = 64> class Slotmap
 {
   public:
+    using Storage = uint32_t;
     using SlotId = TypedId<UserType, Storage>;
     inline static constexpr auto MAX_ELEMENTS = ~Storage{};
 
   private:
     struct Slot
     {
-        bool has_next() const { return next_or_data.index() == 0; }
-        SlotId& get_next() { return std::get<0>(next_or_data); }
-        UserType& get_data() { return std::get<1>(next_or_data); }
-        const UserType& get_data() const { return std::get<1>(next_or_data); }
-        std::variant<SlotId, UserType> next_or_data;
+        union {
+            UserType data;
+            Storage next_free{ ~0u };
+        };
     };
-
-    using Page = Slot*;
+    struct Head
+    {
+        operator bool() const { return index != ~0u; }
+        uint32_t index{ ~0u };
+        uint32_t tag{};
+    };
 
   public:
     UserType& at(SlotId index)
     {
-        if(!has(index)) { return null_object; }
-        return get_slot(index).get_data();
+        if(!index) { return null_object; }
+        Storage page_index, array_index;
+        unpack_index(*index, page_index, array_index);
+        return slots[page_index][array_index].data;
     }
 
     const UserType& at(SlotId index) const
     {
-        if(!has(index)) { return null_object; }
-        return get_slot(index).get_data();
+        if(!index) { return null_object; }
+        Storage page_index, array_index;
+        unpack_index(*index, page_index, array_index);
+        return slots[page_index][array_index].data;
     }
 
     template <typename... Args> SlotId insert(Args&&... args)
     {
-        if(!next)
+        const auto index = allocate();
+        Storage page_index, array_index;
+        unpack_index(*index, page_index, array_index);
+        if(page_index >= NUM_PAGES) { return SlotId{}; }
+        auto* sp = slots[page_index].load();
+        if(!sp)
         {
-            if(!add_page()) { return SlotId{}; }
+            std::allocator<Slot> allocator;
+            Slot* new_page = allocator.allocate(PAGE_SIZE);
+            Slot* expected = nullptr;
+            if(!slots[page_index].compare_exchange_strong(expected, new_page))
+            {
+                allocator.deallocate(new_page, PAGE_SIZE);
+                sp = expected;
+            }
+            else { sp = new_page; }
         }
-        if(!next) { return next; }
-        const auto index = next;
-        auto& slot = get_slot(index);
-        ENG_ASSERT(slot.has_next());
-        next = slot.get_next();
-        slot.next_or_data.template emplace<UserType>(std::forward<Args>(args)...);
+        ENG_ASSERT(sp);
+        std::construct_at<UserType>(&sp[array_index].data, std::forward<Args>(args)...);
         return index;
     }
 
-    bool erase(SlotId index)
-    {
-        if(!has(index)) { return false; }
-        auto& slot = get_slot(index);
-        slot.next_or_data = next;
-        next = index;
-        return true;
-    }
+    void erase(Storage index) { erase(SlotId{ index }); }
 
-    bool has(SlotId index) const
+    void erase(SlotId index)
     {
-        if(!index) { return false; }
-        size_t page_index = *index / PAGE_SIZE;
-        if(page_index >= pages.size()) { return false; }
-        const auto& slot = get_slot(index);
-        return !slot.has_next();
-    }
-
-    void for_each(const auto& callback)
-    {
-        static_assert(false);
-        // for(auto i=0ull;)
+        Storage page_index, array_index;
+        unpack_index(*index, page_index, array_index);
+        if(page_index >= NUM_PAGES) { return; }
+        auto* sp = slots[page_index].load();
+        if(!sp) { return; }
+        std::destroy_at(&sp[array_index].data);
+        auto head = free_list.load();
+        Head new_head;
+        do
+        {
+            new_head.index = *index;
+            new_head.tag = head.tag + 1;
+            slots[page_index][array_index].next_free = head.index;
+        }
+        while(free_list.compare_exchange_weak(head, new_head));
     }
 
   private:
-    Slot& get_slot(SlotId index)
+    static void unpack_index(Storage index, Storage& out_page, Storage& out_slot)
     {
-        size_t page_index = *index / PAGE_SIZE;
-        size_t elem_index = *index % PAGE_SIZE;
-        return pages[page_index][elem_index];
+        out_page = index / PAGE_SIZE;
+        out_slot = index % PAGE_SIZE;
     }
 
-    const Slot& get_slot(SlotId index) const
-    {
-        size_t page_index = *index / PAGE_SIZE;
-        size_t elem_index = *index % PAGE_SIZE;
-        return pages[page_index][elem_index];
-    }
+    static Storage pack_index(Storage page, Storage slot) { return page * PAGE_SIZE + slot; }
 
-    bool add_page()
+    SlotId allocate()
     {
-        // if we already have max number of pages that our index can reach, we return
-        if(pages.size() >= *SlotId{} / PAGE_SIZE) { return false; }
-        std::allocator<Slot> pageallocator;
-        auto* const page = pageallocator.allocate(PAGE_SIZE);
-        if(!page) { return false; } // oom?
-        pages.push_back(page);
-        const auto page_index = (uint32_t)pages.size() - 1;
-        for(uint32_t i = 0u; i < PAGE_SIZE - 1; ++i)
+        auto head = free_list.load();
+        while(head)
         {
-            // create free list chain from first element to the last
-            page[i].next_or_data = SlotId{ (uint32_t)(page_index * PAGE_SIZE + i + 1) };
+            Storage page_index, array_index;
+            unpack_index(head.index, page_index, array_index);
+            Head new_head{ .index = slots[page_index][array_index].next_free, .tag = head.tag + 1 };
+            if(free_list.compare_exchange_weak(head, new_head)) { return SlotId{ head.index }; }
         }
-        // make last element point to current free list head
-        page[PAGE_SIZE - 1].next_or_data = next;
-        // set current free list head to the beginning of the link
-        next = SlotId{ (uint32_t)(page_index * PAGE_SIZE) };
-        return true;
+        return SlotId{ size.fetch_add(1) };
     }
 
     inline static UserType null_object{};
-    std::vector<Page> pages;
-    SlotId next;
+    std::atomic<Head> free_list{};
+    std::atomic<Storage> size{};
+    std::array<std::atomic<Slot*>, NUM_PAGES> slots{};
 };
 
 } // namespace eng

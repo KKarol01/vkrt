@@ -845,10 +845,8 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer, 128> buffers;
-    Slotmap<Image, 128> images;
-    std::vector<std::string> buffer_names;
-    std::vector<std::string> image_names;
+    Slotmap<Buffer, 1024, 1> buffers;
+    Slotmap<Image, 1024, 1> images;
 
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;

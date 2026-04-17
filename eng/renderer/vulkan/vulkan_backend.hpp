@@ -132,12 +132,11 @@ struct PipelineMetadataVk
 
 struct BufferMetadataVk
 {
-    static void init(Buffer& a, AllocateMemory allocate);
-    static void destroy(Buffer& a);
     VkBuffer buffer{};
     VmaAllocation vma_alloc{};
     VkDeviceAddress device_address{};
     bool is_aliased{};
+    StackString<64> debug_name;
 };
 
 struct ImageMetadataVk
@@ -149,6 +148,7 @@ struct ImageMetadataVk
     VmaAllocation vmaa{};
     std::unordered_map<ImageView, ImageViewMetadataVk> views;
     bool is_aliased{};
+    StackString<64> debug_name;
 };
 
 struct ImageViewMetadataVk
@@ -258,6 +258,8 @@ class RendererBackendVk : public IRendererBackend
     void bind_aliasable_memory(Buffer& resource, void* memory, size_t offset) override;
     void bind_aliasable_memory(Image& resource, void* memory, size_t offset) override;
 
+    std::string_view get_debug_name(const Buffer& resource) const override;
+    std::string_view get_debug_name(const Image& resource) const override;
     void set_debug_name(Buffer& resource, std::string_view name) const override;
     void set_debug_name(Image& resource, std::string_view name) const override;
 

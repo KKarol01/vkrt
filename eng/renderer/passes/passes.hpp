@@ -561,6 +561,7 @@ struct RTAO : public Pass
         data = graph->add_compute_pass<PassData>(
             name.c_str(), order,
             [=](RGBuilder& b, PassData& d) {
+                const auto& r = get_renderer();
                 if(!r.current_data->render_resources.zpdepth) { return; }
                 d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
                 d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);

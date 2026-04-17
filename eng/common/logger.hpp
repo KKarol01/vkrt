@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <eng/string/stack_string.hpp>
 #include <fmt/format.h>
 
 #define ENG_FMT(str, ...) fmt::format(str, __VA_ARGS__)
@@ -57,6 +58,25 @@
     while(0)
 
 #define ENG_TODO(msg, ...) ENG_PRTLN("[TODO][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__)
+
+namespace eng
+{
+
+struct ScopedTimer
+{
+    ScopedTimer(std::string_view label);
+    ~ScopedTimer();
+    StackString<64> label;
+    double start_secs{};
+};
+
+thread_local inline std::deque<ScopedTimer> scoped_timers;
+
+} // namespace eng
+
+#define ENG_TIMER_START(msg, ...) ::eng::scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
+#define ENG_TIMER_END() ::eng::scoped_timers.pop_back();
+
 #else
 #ifdef ENG_PLATFORM_WIN32
 #include <WinUser.h>
@@ -73,4 +93,7 @@
 #define ENG_TODO(...)
 #define ENG_ASSERT(expr, ...)                                                                                          \
     if((bool)(expr) == false) { ENG_ERROR(__VA_ARGS__); }
+#define ENG_TIMER_START(label)
+#define ENG_TIMER_END()
+
 #endif

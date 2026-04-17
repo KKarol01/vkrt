@@ -60,6 +60,18 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 namespace eng
 {
 
+ScopedTimer::ScopedTimer(std::string_view label) : label(label) { start_secs = glfwGetTime(); }
+
+ScopedTimer::~ScopedTimer()
+{
+    const auto delta = glfwGetTime() - start_secs;
+    if(start_secs == 0) { return; }
+    static constexpr const char* tabs[]{
+        "", "\t", "\t\t", "\t\t\t", "\t\t\t\t", "\t\t\t\t\t",
+    };
+    ENG_LOG("{}ScopedTimer {}: {:.2f}ms", tabs[eng::scoped_timers.size() - 1], label.as_view(), delta * 1000.0);
+}
+
 Window::Window(float width, float height) : width(width), height(height) {}
 
 Window::~Window()

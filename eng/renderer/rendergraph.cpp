@@ -142,8 +142,8 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
     if(it != graph->resources.end()) { return it->last_access; }
     auto res = RGResource{ "", resource, true, false, clear };
     if((res.is_buffer() && !res.as_buffer()) || (!res.is_buffer() && !res.as_image())) { return RGAccessId{}; }
-    if(res.is_buffer()) { res.name = get_renderer().buffer_names[*res.as_buffer()]; }
-    else { res.name = get_renderer().image_names[*res.as_image()]; }
+    if(res.is_buffer()) { res.name = get_renderer().backend->get_debug_name(res.as_buffer().get()); }
+    else { res.name = get_renderer().backend->get_debug_name(res.as_image().get()); }
     return add_resource(std::move(res));
 }
 

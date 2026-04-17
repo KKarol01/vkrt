@@ -282,67 +282,6 @@ void PipelineMetadataVk::init(const Pipeline& a)
     VK_CHECK(vkCreateGraphicsPipelines(vkdev, nullptr, 1, &vkinfo, nullptr, &md->pipeline));
 }
 
-void BufferMetadataVk::init(Buffer& a, AllocateMemory allocate)
-{
-    if(a.md.vk())
-    {
-        ENG_ERROR("Trying to init already init buffer");
-        return;
-    }
-
-    auto* md = new BufferMetadataVk{};
-    a.md.ptr = md;
-    const auto cpu_map = a.usage.test(gfx::BufferUsage::CPU_ACCESS);
-    if(a.capacity == 0)
-    {
-        ENG_WARN("Capacity cannot be 0");
-        return;
-    }
-    a.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
-
-    auto& backend = RendererBackendVk::get_instance();
-    vk::VkBufferCreateInfo vkinfo;
-    vkinfo.size = a.capacity;
-    vkinfo.usage = to_vk(a.usage);
-
-    VmaAllocationInfo vmaai{};
-    auto vmainfo = VmaAllocationCreateInfo{};
-    vmainfo.flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u;
-    vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
-    else { VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vma_alloc, &vmaai)); }
-
-    if(!md->buffer)
-    {
-        ENG_WARN("Could not create buffer");
-        return;
-    }
-    if(cpu_map) { a.memory = vmaai.pMappedData; }
-    if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-    {
-        auto vkbdainfo = vk::VkBufferDeviceAddressInfo{};
-        vkbdainfo.buffer = md->buffer;
-        md->device_address = vkGetBufferDeviceAddress(backend.dev, &vkbdainfo);
-    }
-}
-
-void BufferMetadataVk::destroy(Buffer& a)
-{
-    if(!a.md.vk())
-    {
-        ENG_ASSERT(a.capacity == 0);
-        return;
-    }
-    auto& backend = RendererBackendVk::get_instance();
-    auto* md = a.md.vk();
-    if(!md) { return; }
-    if(!md->is_aliased) { vmaDestroyBuffer(backend.vma, md->buffer, md->vma_alloc); }
-    else if(md->buffer) { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
-    delete md;
-    a.md.ptr = nullptr;
-}
-
 void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* vkimage)
 {
     if(a.md.vk())
@@ -1316,10 +1255,64 @@ void RendererBackendVk::init_vulkan()
 
 void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
 {
-    BufferMetadataVk::init(buffer, allocate);
+    if(buffer.md.vk())
+    {
+        ENG_ERROR("Trying to init already init buffer");
+        return;
+    }
+
+    auto* md = new BufferMetadataVk{};
+    buffer.md.ptr = md;
+    const auto cpu_map = buffer.usage.test(gfx::BufferUsage::CPU_ACCESS);
+    if(buffer.capacity == 0)
+    {
+        ENG_WARN("Capacity cannot be 0");
+        return;
+    }
+    buffer.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
+
+    auto& backend = RendererBackendVk::get_instance();
+    vk::VkBufferCreateInfo vkinfo;
+    vkinfo.size = buffer.capacity;
+    vkinfo.usage = to_vk(buffer.usage);
+
+    VmaAllocationInfo vmaai{};
+    auto vmainfo = VmaAllocationCreateInfo{};
+    vmainfo.flags = cpu_map ? VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT : 0u;
+    vmainfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateBuffer(backend.dev, &vkinfo, nullptr, &md->buffer)); }
+    else { VK_CHECK(vmaCreateBuffer(backend.vma, &vkinfo, &vmainfo, &md->buffer, &md->vma_alloc, &vmaai)); }
+
+    if(!md->buffer)
+    {
+        ENG_WARN("Could not create buffer");
+        return;
+    }
+    if(cpu_map) { buffer.memory = vmaai.pMappedData; }
+    if(vkinfo.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+    {
+        auto vkbdainfo = vk::VkBufferDeviceAddressInfo{};
+        vkbdainfo.buffer = md->buffer;
+        md->device_address = vkGetBufferDeviceAddress(backend.dev, &vkbdainfo);
+    }
 }
 
-void RendererBackendVk::destroy_buffer(Buffer& buffer) { BufferMetadataVk::destroy(buffer); }
+void RendererBackendVk::destroy_buffer(Buffer& buffer)
+{
+    if(!buffer.md.vk())
+    {
+        ENG_ASSERT(buffer.capacity == 0);
+        return;
+    }
+    auto& backend = RendererBackendVk::get_instance();
+    auto* md = buffer.md.vk();
+    if(!md) { return; }
+    if(!md->is_aliased) { vmaDestroyBuffer(backend.vma, md->buffer, md->vma_alloc); }
+    else if(md->buffer) { vkDestroyBuffer(backend.dev, md->buffer, nullptr); }
+    delete md;
+    buffer.md.ptr = nullptr;
+}
 
 void RendererBackendVk::allocate_image(Image& image, AllocateMemory allocate, void* vkimage)
 {
@@ -1837,13 +1830,29 @@ void RendererBackendVk::bind_aliasable_memory(Image& resource, void* memory, siz
     resource.md.vk()->vmaa = alloc;
 }
 
+std::string_view RendererBackendVk::get_debug_name(const Buffer& resource) const
+{
+    if(!resource.md.ptr) { return {}; }
+    return resource.md.vk()->debug_name.as_view();
+}
+
+std::string_view RendererBackendVk::get_debug_name(const Image& resource) const
+{
+    if(!resource.md.ptr) { return {}; }
+    return resource.md.vk()->debug_name.as_view();
+}
+
 void RendererBackendVk::set_debug_name(Buffer& resource, std::string_view name) const
 {
+    if(!resource.md.ptr) { return; }
+    resource.md.vk()->debug_name = name;
     eng::gfx::set_debug_name(resource.md.vk()->buffer, name);
 }
 
 void RendererBackendVk::set_debug_name(Image& resource, std::string_view name) const
 {
+    if(!resource.md.ptr) { return; }
+    resource.md.vk()->debug_name = name;
     eng::gfx::set_debug_name(resource.md.vk()->image, name);
 }
 

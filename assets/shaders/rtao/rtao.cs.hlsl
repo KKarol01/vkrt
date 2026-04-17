@@ -89,9 +89,9 @@ void main(uint3 thread_id : SV_DispatchThreadID)
         float3 ray_dir = mul(local_dir, tbn);
 
         RayDesc ray;
-        ray.Origin    = pos_w + normal_w * 0.01; // bias
+        ray.Origin    = pos_w;
         ray.Direction = ray_dir;
-        ray.TMin      = 0.0;
+        ray.TMin      = get_gsb(GPUEngAOSettings, 0).bias;
         ray.TMax      = get_gsb(GPUEngAOSettings, 0).radius;
 
         RayQuery<RAY_FLAG_FORCE_OPAQUE> q;

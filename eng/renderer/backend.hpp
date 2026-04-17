@@ -44,7 +44,9 @@ class IRendererBackend
 
     virtual void init() = 0;
 
+    // Initializes buffer and optionally allocates gpu memory for it. Thread-safe.
     virtual void allocate_buffer(Buffer& buffer, AllocateMemory alloc = AllocateMemory::YES) = 0;
+    // Destroys the buffer and frees the gpu memory. Thread-safe.
     virtual void destroy_buffer(Buffer& buffer) = 0;
     virtual void allocate_image(Image& image, AllocateMemory alloc = AllocateMemory::YES, void* user_data = nullptr) = 0;
     virtual void destroy_image(Image& b) = 0;
@@ -86,6 +88,8 @@ class IRendererBackend
     virtual void bind_aliasable_memory(Buffer& resource, void* memory, size_t offset) = 0;
     virtual void bind_aliasable_memory(Image& resource, void* memory, size_t offset) = 0;
 
+    virtual std::string_view get_debug_name(const Buffer& resource) const = 0;
+    virtual std::string_view get_debug_name(const Image& resource) const = 0;
     virtual void set_debug_name(Buffer& resource, std::string_view name) const = 0;
     virtual void set_debug_name(Image& resource, std::string_view name) const = 0;
 
