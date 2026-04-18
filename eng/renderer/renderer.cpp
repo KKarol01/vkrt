@@ -1014,54 +1014,83 @@ void Renderer::build_pending_geometries()
     };
 
     const auto geom_iota = std::views::iota(0) | std::views::take(num_batches) | std::ranges::to<std::vector<size_t>>();
-    ENG_TIMER_START("PAR MESHLETIZE");
-    std::for_each(std::execution::par, geom_iota.begin(), geom_iota.end(), [&, this](size_t i) {
-        const auto& batch = new_geometries[i];
-        meshletize_geometry(new_geometries[i], temp_results[i].vtx, temp_results[i].idx, temp_results[i].mlt);
+    const auto jobs = std::thread::hardware_concurrency();
+    const auto batches_per_job = (num_batches + 11) / jobs;
+    std::vector<std::jthread> threads(jobs);
+    for(auto i = 0u; i < jobs; ++i)
+    {
+        threads[i] = std::jthread([&, i, batches_per_job]() {
+            const auto start_idx = i * batches_per_job;
+            const auto end_idx = std::min(start_idx + batches_per_job, num_batches);
 
-        const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
-        const auto vertex_count = get_vertex_count(temp_results[i].vtx, batch.vertex_layout);
-        const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
-        const auto attr_size = vertex_size - pos_size;
+            for(auto bi = start_idx; bi < end_idx; ++bi)
+            {
+                const auto& batch = new_geometries[bi];
+                meshletize_geometry(batch, temp_results[bi].vtx, temp_results[bi].idx, temp_results[bi].mlt);
 
-        offsets[i] = GeometryOffsets{ .pos = vertex_count,
-                                      .sphere = temp_results[i].mlt.size(),
-                                      .idx = temp_results[i].idx.size(),
-                                      .mlt = temp_results[i].mlt.size(),
-                                      .vposbytes = pos_size * vertex_count,
-                                      .vattbytes = attr_size * vertex_count };
-    });
-    ENG_TIMER_END();
+                const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
+                const auto vertex_count = get_vertex_count(temp_results[bi].vtx, batch.vertex_layout);
+                const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
+                const auto attr_size = vertex_size - pos_size;
+
+                offsets[bi] = GeometryOffsets{ .pos = vertex_count,
+                                               .sphere = temp_results[bi].mlt.size(),
+                                               .idx = temp_results[bi].idx.size(),
+                                               .mlt = temp_results[bi].mlt.size(),
+                                               .vposbytes = pos_size * vertex_count,
+                                               .vattbytes = attr_size * vertex_count };
+            }
+        });
+    }
+    for(auto& th : threads)
+    {
+        th.join();
+    }
 
     compute_globals();
 
-    std::for_each(std::execution::par, geom_iota.begin(), geom_iota.end(), [&, this](size_t i) {
-        const auto& res = temp_results[i];
-        const auto& start = starts[i];
-        const auto v_stride = get_vertex_layout_size(new_geometries[i].vertex_layout);
-        const auto p_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
-        const auto a_size = v_stride - p_size;
+    for(auto i = 0u; i < jobs; ++i)
+    {
+        threads[i] = std::jthread([&, i, batches_per_job]() {
+            const auto start_idx = i * batches_per_job;
+            const auto end_idx = std::min(start_idx + batches_per_job, num_batches);
 
-        std::byte* src_bytes = (std::byte*)res.vtx.data();
+            for(auto bi = start_idx; bi < end_idx; ++bi)
+            {
+                const auto& res = temp_results[bi];
+                const auto& start = starts[bi];
+                const auto& batch_info = new_geometries[bi];
+                const auto& batch_offset = offsets[bi];
 
-        for(size_t v = 0; v < offsets[i].pos; ++v)
-        {
-            std::memcpy(&global_positions[start.vposbytes + (v * p_size)], &src_bytes[v * v_stride], p_size);
-            std::memcpy(&global_attributes[start.vattbytes + (v * a_size)], &src_bytes[v * v_stride + p_size], a_size);
-        }
+                const auto v_stride = get_vertex_layout_size(batch_info.vertex_layout);
+                const auto p_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
+                const auto a_size = v_stride - p_size;
 
-        std::memcpy(&global_indices[start.idx], res.idx.data(), res.idx.size() * sizeof(uint16_t));
+                const std::byte* src_bytes = reinterpret_cast<const std::byte*>(res.vtx.data());
 
-        for(size_t m = 0; m < res.mlt.size(); ++m)
-        {
-            auto m_copy = res.mlt[m];
-            m_copy.vertex_offset += static_cast<uint32_t>(bufs.vertex_count + start.pos);
-            m_copy.index_offset += static_cast<uint32_t>(bufs.index_count + start.idx);
+                for(size_t v = 0; v < batch_offset.pos; ++v)
+                {
+                    std::memcpy(&global_positions[start.vposbytes + (v * p_size)], &src_bytes[v * v_stride], p_size);
+                    std::memcpy(&global_attributes[start.vattbytes + (v * a_size)], &src_bytes[v * v_stride + p_size], a_size);
+                }
 
-            global_meshlets[start.mlt + m] = m_copy;
-            global_bspheres[start.sphere + m] = m_copy.bounding_sphere;
-        }
-    });
+                std::memcpy(&global_indices[start.idx], res.idx.data(), res.idx.size() * sizeof(uint16_t));
+
+                for(size_t m = 0; m < res.mlt.size(); ++m)
+                {
+                    auto m_copy = res.mlt[m];
+                    m_copy.vertex_offset += static_cast<uint32_t>(bufs.vertex_count + start.pos);
+                    m_copy.index_offset += static_cast<uint32_t>(bufs.index_count + start.idx);
+                    global_meshlets[start.mlt + m] = m_copy;
+                    global_bspheres[start.sphere + m] = m_copy.bounding_sphere;
+                }
+            }
+        });
+    }
+    for(auto& th : threads)
+    {
+        th.join();
+    }
 
     resize_buffer(bufs.positions, global_positions.size(), STAGING_APPEND, true);
     resize_buffer(bufs.attributes, global_attributes.size(), STAGING_APPEND, true);
