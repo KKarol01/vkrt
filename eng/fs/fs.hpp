@@ -36,8 +36,8 @@ class File
     File(FileSystem* fs, void* file, size_t size, const Path& path) : fs(fs), file(file), size(size), path(path) {}
     ~File() noexcept;
     void close();
-    size_t read(std::byte* out_bytes, size_t bytes, size_t offset);
-    std::string read(size_t bytes = ~0ull, size_t offset = 0);
+    size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
+    std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
     void write(const std::byte* bytes, size_t size, size_t offset);
     uint64_t get_hash();
 

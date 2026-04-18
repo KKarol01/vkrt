@@ -154,12 +154,18 @@ void File::close()
 
 size_t File::read(std::byte* out_bytes, size_t bytes, size_t offset)
 {
-    if(!out_bytes) { return 0ull; }
-    if(file && fseek((FILE*)file, offset, SEEK_SET) == 0) { return fread_s(out_bytes, bytes, 1, bytes, (FILE*)file); }
+    if(!file || !out_bytes) { return 0; }
+    if(offset != ~0ull)
+    {
+        if(fseek((FILE*)file, offset, SEEK_SET) != 0) { return 0; }
+    }
+    return fread_s(out_bytes, bytes, 1, bytes, (FILE*)file);
 }
 
 std::string File::read(size_t bytes, size_t offset)
 {
+    if(!file) { return {}; }
+    if(offset == ~0ull) { offset = ftell((FILE*)file); }
     offset = std::min(size, offset);
     bytes = std::min(bytes, size - offset);
     std::string str(bytes, '\0');
