@@ -8,6 +8,9 @@
 namespace eng
 {
 
+/*
+  Thread-safe lockless object pool with a free list.
+ */
 template <typename UserType, size_t PAGE_SIZE = 1024, size_t NUM_PAGES = 64> class Slotmap
 {
   public:
@@ -20,7 +23,7 @@ template <typename UserType, size_t PAGE_SIZE = 1024, size_t NUM_PAGES = 64> cla
     {
         union {
             UserType data;
-            Storage next_free{ ~0u };
+            Storage next_free;
         };
     };
     struct Head

@@ -189,6 +189,7 @@ target_compile_definitions(eng
 
 target_precompile_headers(eng
     PRIVATE
+        <algorithm>
         <atomic>
         <cstddef>
         <deque>
@@ -200,11 +201,12 @@ target_precompile_headers(eng
         <mutex>
         <numeric>
         <queue>
+        <ranges>
         <set>
+        <shared_mutex>
         <span>
         <string>
         <thread>
-        <ranges>
         <unordered_map>
         <unordered_set>
         <utility>

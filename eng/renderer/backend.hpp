@@ -72,6 +72,7 @@ class IRendererBackend
                                                ICommandBuffer* cmd, Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
                                                size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) = 0;
 
+    // Returns cached metadata of image view. If not found, allocates image view in a thread-safe manner.
     virtual ImageView::Metadata get_md(const ImageView& view) = 0;
 
     virtual size_t get_indirect_indexed_command_size() const = 0;

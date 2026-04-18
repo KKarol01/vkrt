@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shared_mutex>
 #include <vector>
 #include <array>
 #include <tuple>
@@ -146,6 +147,7 @@ struct ImageMetadataVk
     static void destroy(Image& a);
     VkImage image{};
     VmaAllocation vmaa{};
+    std::shared_mutex views_mutex;
     std::unordered_map<ImageView, ImageViewMetadataVk> views;
     bool is_aliased{};
     StackString<64> debug_name;

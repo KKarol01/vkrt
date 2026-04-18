@@ -460,7 +460,9 @@ void SwapchainMetadataVk::init(Swapchain& a)
 
     std::vector<VkImage> vkimgs(a.images.size());
     VK_CHECK(vkCreateSwapchainKHR(backend.dev, &vkswpinfo, nullptr, &md->swapchain));
-    VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &Renderer::frame_delay, vkimgs.data()));
+
+    uint32_t swapchain_image_count = Renderer::frame_delay;
+    VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &swapchain_image_count, vkimgs.data()));
 
     auto& r = get_renderer();
     for(uint32_t i = 0; i < vkimgs.size(); ++i)
@@ -1704,18 +1706,27 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
 
 ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 {
+    if(!view.image) { return {}; }
     auto& img = view.image.get();
-    auto it = img.md.vk()->views.find(view);
-    ImageViewMetadataVk* retmd{};
-    if(it == img.md.vk()->views.end())
+    auto* imgmd = img.md.vk();
     {
-        ImageViewMetadataVk* md{};
-        get_renderer().backend->allocate_view(view, (void**)&md);
-        retmd = &img.md.vk()->views.emplace(view, *md).first->second;
-        delete md; // delete md here, as allocate_view currently allocates dynamic memory and we do a copy to views map
+        std::shared_lock lock{ imgmd->views_mutex };
+        auto it = imgmd->views.find(view);
+        if(it != imgmd->views.end()) { return ImageView::Metadata{ .vk = &it->second }; }
     }
-    else { retmd = &it->second; }
-    return ImageView::Metadata{ .vk = retmd };
+
+    std::scoped_lock lock{ imgmd->views_mutex };
+
+    {
+        auto it = imgmd->views.find(view);
+        if(it != imgmd->views.end()) { return ImageView::Metadata{ .vk = &it->second }; }
+    }
+
+    ImageViewMetadataVk* mdvk{};
+    get_renderer().backend->allocate_view(view, (void**)&mdvk);
+    auto retit = imgmd->views.emplace(view, *mdvk);
+    delete mdvk; // delete md here, as allocate_view currently allocates dynamic memory and we do a copy to views map
+    return ImageView::Metadata{ .vk = &retit.first->second };
 }
 
 size_t RendererBackendVk::get_indirect_indexed_command_size() const { return sizeof(IndirectIndexedCommand); }

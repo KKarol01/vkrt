@@ -60,6 +60,7 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 namespace eng
 {
 
+#ifdef ENG_DEBUG_BUILD
 ScopedTimer::ScopedTimer(std::string_view label) : label(label) { start_secs = glfwGetTime(); }
 
 ScopedTimer::~ScopedTimer()
@@ -71,6 +72,7 @@ ScopedTimer::~ScopedTimer()
     };
     ENG_LOG("{}ScopedTimer {}: {:.2f}ms", tabs[eng::scoped_timers.size() - 1], label.as_view(), delta * 1000.0);
 }
+#endif
 
 Window::Window(float width, float height) : width(width), height(height) {}
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <unordered_set>
 #include <glm/glm.hpp>
 #include <eng/engine.hpp>
@@ -696,7 +697,7 @@ inline constexpr uint32_t PRESENT = 200;
 class Renderer
 {
   public:
-    static inline uint32_t frame_delay = 2;
+    constexpr static inline uint32_t frame_delay = 2;
 
     struct FrameData
     {
@@ -716,6 +717,7 @@ class Renderer
             std::variant<Handle<Buffer>, Handle<Image>> resource;
             size_t deleted_at_frame{};
         };
+        std::mutex retired_mutex;
         std::vector<RetiredResource> retired_resources;
     };
 
@@ -795,6 +797,15 @@ class Renderer
         std::array<std::shared_ptr<pass::Pass>, (int)RenderPassType::LAST_ENUM> mesh_passes{};
     };
 
+    struct BuildGeometryBatch
+    {
+        Handle<Geometry> goem;
+        Flags<GeometryFlags> flags;
+        Flags<VertexComponent> vertex_layout;
+        std::vector<float> vertices;
+        std::vector<uint32_t> indices;
+    };
+
     void init(IRendererBackend* backend);
     void init_helper_geom();
     void init_pipelines();
@@ -805,9 +816,11 @@ class Renderer
     void compile_rendergraph();
     void render_debug(const DebugGeometry& geom);
 
+    // Creates buffer with optional gpu memory allocation. Thread-safe.
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool.
     void queue_destroy(Handle<Buffer>& handle);
+    // Creates image with optional gpu memory allocation. Thread-safe.
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool.
@@ -822,7 +835,8 @@ class Renderer
     void destroy_sync(Sync* sync);
     Handle<Material> make_material(const Material& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
-    static void meshletize_geometry(const GeometryDescriptor& info, std::vector<float>& out_vertices,
+    void build_pending_geometries();
+    static void meshletize_geometry(const BuildGeometryBatch& info, std::vector<float>& out_vertices,
                                     std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     void make_blas(Handle<Geometry> geom);
@@ -845,8 +859,8 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer, 1024, 1> buffers;
-    Slotmap<Image, 1024, 1> images;
+    Slotmap<Buffer> buffers;
+    Slotmap<Image> images;
 
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
@@ -865,6 +879,7 @@ class Renderer
     HandleFlatSet<MeshPass> mesh_passes;
     std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
 
+    std::vector<BuildGeometryBatch> new_geometries;
     std::vector<Handle<Geometry>> new_blases;
     std::vector<Handle<Shader>> new_shaders;
     std::vector<Handle<Pipeline>> new_pipelines;
@@ -878,7 +893,7 @@ class Renderer
     SlotAllocator<uint32_t> gpu_light_allocator;
     IDescriptorSetAllocator* descriptor_allocator{};
     ImGuiRenderer* imgui_renderer{};
-    std::vector<FrameData> frame_datas;
+    FrameData frame_datas[2]{};
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
     Passes passes;

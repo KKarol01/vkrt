@@ -1,5 +1,8 @@
 #include <meshoptimizer/src/meshoptimizer.h>
 #include <ranges>
+#include <barrier>
+#include <execution>
+#include <algorithm>
 #include "renderer.hpp"
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/engine.hpp>
@@ -284,7 +287,7 @@ void Renderer::init_pipelines()
 
 void Renderer::init_perframes()
 {
-    frame_datas.resize(frame_delay);
+    static_assert(frame_delay == 2);
     current_data = &frame_datas[0];
     for(auto i = 0u; i < frame_delay; ++i)
     {
@@ -426,7 +429,7 @@ void Renderer::update()
     // current_data->acq_sem->reset();
     // current_data->swp_sem->reset();
 
-    if(current_data->retired_resources.size() > 0)
+    if(auto lock = std::scoped_lock{ current_data->retired_mutex }; current_data->retired_resources.size() > 0)
     {
         // ENG_LOG("Removing {} retired resources", current_data->retired_resources.size());
         auto remove_until = current_data->retired_resources.begin();
@@ -555,6 +558,7 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
         //  new_lights.clear();
     }
+    if(new_geometries.size()) { build_pending_geometries(); }
     if(new_blases.size())
     {
         staging->get_wait_sem()->wait_cpu(~0ull);
@@ -651,7 +655,7 @@ void Renderer::update()
     gq->wait_sync(current_data->swp_sem).present(swapchain);
 
     ++current_frame;
-    current_data = &frame_datas[current_frame % frame_datas.size()];
+    current_data = &frame_datas[current_frame % frame_delay];
 }
 
 void Renderer::compile_rendergraph()
@@ -807,6 +811,7 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
 void Renderer::queue_destroy(Handle<Buffer>& buffer)
 {
     ENG_ASSERT(buffer);
+    std::scoped_lock lock{ current_data->retired_mutex };
     current_data->retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
     buffer = {};
 }
@@ -832,7 +837,11 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
         backend->destroy_image(image.get());
         images.erase(*image);
     }
-    else { current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame }); }
+    else
+    {
+        std::scoped_lock lock{ current_data->retired_mutex };
+        current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
+    }
     image = {};
 }
 
@@ -938,63 +947,152 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
                                         VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT))
                    .empty());
 
-    std::vector<float> out_vertices;
-    std::vector<uint16_t> out_indices;
-    std::vector<Meshlet> out_meshlets;
-    ENG_TIMER_START("Meshletizing geometry");
-    meshletize_geometry(batch, out_vertices, out_indices, out_meshlets);
-    ENG_TIMER_END();
-
-    const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
-    const auto index_count = out_indices.size();
-    const auto vertex_count = get_vertex_count(out_vertices, batch.vertex_layout);
-    const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
-    const auto attr_size = vertex_size - pos_size;
-
-    std::byte* vert_bytes = (std::byte*)out_vertices.data();
-    std::vector<std::byte> positions(vertex_count * pos_size);
-    std::vector<std::byte> attributes(vertex_count * attr_size);
-    for(auto i = 0ull; i < vertex_count; ++i)
-    {
-        memcpy(&positions[i * pos_size], &vert_bytes[i * vertex_size], pos_size);
-        memcpy(&attributes[i * attr_size], &vert_bytes[i * vertex_size + pos_size], attr_size);
-    }
-    std::vector<glm::vec4> bounding_spheres(out_meshlets.size());
-    for(auto i = 0u; i < out_meshlets.size(); ++i)
-    {
-        out_meshlets.at(i).vertex_offset += bufs.vertex_count;
-        out_meshlets.at(i).index_offset += bufs.index_count;
-        bounding_spheres.at(i) = out_meshlets.at(i).bounding_sphere;
-    }
-
-    resize_buffer(bufs.positions, positions.size() * sizeof(positions[0]), STAGING_APPEND, true);
-    resize_buffer(bufs.attributes, attributes.size() * sizeof(attributes[0]), STAGING_APPEND, true);
-    resize_buffer(bufs.indices, out_indices.size() * sizeof(out_indices[0]), STAGING_APPEND, true);
-    resize_buffer(bufs.bspheres, bounding_spheres.size() * sizeof(bounding_spheres[0]), STAGING_APPEND, true);
-    staging->copy(bufs.positions.get(), positions, STAGING_APPEND);
-    staging->copy(bufs.attributes.get(), attributes, STAGING_APPEND);
-    staging->copy(bufs.indices.get(), out_indices, STAGING_APPEND);
-    staging->copy(bufs.bspheres.get(), bounding_spheres, STAGING_APPEND);
-
-    bufs.vertex_count += vertex_count;
-    bufs.index_count += index_count;
-
-    geometries.push_back(Geometry{ .meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)out_meshlets.size() } });
-    Handle<Geometry> handle{ (uint32_t)geometries.size() - 1 };
-
-    meshlets.insert(meshlets.end(), out_meshlets.begin(), out_meshlets.end());
-
-    ENG_LOG("Batching geometry: [VXS: {:.2f} KB, IXS: {:.2f} KB]",
-            static_cast<float>(out_vertices.size() * sizeof(out_vertices[0])) / 1024.0f,
-            static_cast<float>(out_indices.size() * sizeof(out_indices[0])) / 1024.0f);
-
-    make_blas(handle);
-
-    if(!handle) { return Handle<Geometry>{}; }
-    return Handle<Geometry>{ *handle };
+    const auto ret_handle = Handle<Geometry>{ (uint32_t)geometries.size() };
+    new_geometries.emplace_back(ret_handle, Flags<GeometryFlags>{}, batch.vertex_layout,
+                                std::vector<float>{ batch.vertices.begin(), batch.vertices.end() },
+                                std::vector<uint32_t>{ batch.indices.begin(), batch.indices.end() });
+    geometries.emplace_back();
+    return ret_handle;
 }
 
-void Renderer::meshletize_geometry(const GeometryDescriptor& batch, std::vector<float>& out_vertices,
+void Renderer::build_pending_geometries()
+{
+    struct GeometryOffsets
+    {
+        size_t pos;
+        size_t sphere;
+        size_t idx;
+        size_t mlt;
+        size_t vposbytes;
+        size_t vattbytes;
+    };
+    struct TempBatchData
+    {
+        std::vector<float> vtx;
+        std::vector<uint16_t> idx;
+        std::vector<Meshlet> mlt;
+    };
+
+    if(new_geometries.empty()) { return; }
+
+    ENG_TIMER_START("Meshletizing geometry");
+
+    const auto num_batches = new_geometries.size();
+
+    GeometryOffsets offsets_total{};
+    std::vector<GeometryOffsets> offsets(num_batches);
+    std::vector<GeometryOffsets> starts(num_batches);
+    std::vector<TempBatchData> temp_results(num_batches);
+    std::vector<std::byte> global_positions;
+    std::vector<std::byte> global_attributes;
+    std::vector<glm::vec4> global_bspheres;
+    std::vector<uint16_t> global_indices;
+    std::vector<Meshlet> global_meshlets;
+    const auto compute_globals = [&]() noexcept {
+        size_t& pos = offsets_total.pos;
+        size_t& sphere = offsets_total.sphere;
+        size_t& idx = offsets_total.idx;
+        size_t& mlt = offsets_total.mlt;
+        size_t& vposbytes = offsets_total.vposbytes;
+        size_t& vattbytes = offsets_total.vattbytes;
+        for(auto i = 0u; i < num_batches; ++i)
+        {
+            starts[i] =
+                GeometryOffsets{ .pos = pos, .sphere = sphere, .idx = idx, .mlt = mlt, .vposbytes = vposbytes, .vattbytes = vattbytes };
+            pos += offsets[i].pos;
+            sphere += offsets[i].sphere;
+            idx += offsets[i].idx;
+            mlt += offsets[i].mlt;
+            vposbytes += offsets[i].vposbytes;
+            vattbytes += offsets[i].vattbytes;
+        }
+        global_positions.resize(vposbytes);
+        global_attributes.resize(vattbytes);
+        global_bspheres.resize(sphere);
+        global_indices.resize(idx);
+        global_meshlets.resize(mlt);
+    };
+
+    const auto geom_iota = std::views::iota(0) | std::views::take(num_batches) | std::ranges::to<std::vector<size_t>>();
+    ENG_TIMER_START("PAR MESHLETIZE");
+    std::for_each(std::execution::par, geom_iota.begin(), geom_iota.end(), [&, this](size_t i) {
+        const auto& batch = new_geometries[i];
+        meshletize_geometry(new_geometries[i], temp_results[i].vtx, temp_results[i].idx, temp_results[i].mlt);
+
+        const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
+        const auto vertex_count = get_vertex_count(temp_results[i].vtx, batch.vertex_layout);
+        const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
+        const auto attr_size = vertex_size - pos_size;
+
+        offsets[i] = GeometryOffsets{ .pos = vertex_count,
+                                      .sphere = temp_results[i].mlt.size(),
+                                      .idx = temp_results[i].idx.size(),
+                                      .mlt = temp_results[i].mlt.size(),
+                                      .vposbytes = pos_size * vertex_count,
+                                      .vattbytes = attr_size * vertex_count };
+    });
+    ENG_TIMER_END();
+
+    compute_globals();
+
+    std::for_each(std::execution::par, geom_iota.begin(), geom_iota.end(), [&, this](size_t i) {
+        const auto& res = temp_results[i];
+        const auto& start = starts[i];
+        const auto v_stride = get_vertex_layout_size(new_geometries[i].vertex_layout);
+        const auto p_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
+        const auto a_size = v_stride - p_size;
+
+        std::byte* src_bytes = (std::byte*)res.vtx.data();
+
+        for(size_t v = 0; v < offsets[i].pos; ++v)
+        {
+            std::memcpy(&global_positions[start.vposbytes + (v * p_size)], &src_bytes[v * v_stride], p_size);
+            std::memcpy(&global_attributes[start.vattbytes + (v * a_size)], &src_bytes[v * v_stride + p_size], a_size);
+        }
+
+        std::memcpy(&global_indices[start.idx], res.idx.data(), res.idx.size() * sizeof(uint16_t));
+
+        for(size_t m = 0; m < res.mlt.size(); ++m)
+        {
+            auto m_copy = res.mlt[m];
+            m_copy.vertex_offset += static_cast<uint32_t>(bufs.vertex_count + start.pos);
+            m_copy.index_offset += static_cast<uint32_t>(bufs.index_count + start.idx);
+
+            global_meshlets[start.mlt + m] = m_copy;
+            global_bspheres[start.sphere + m] = m_copy.bounding_sphere;
+        }
+    });
+
+    resize_buffer(bufs.positions, global_positions.size(), STAGING_APPEND, true);
+    resize_buffer(bufs.attributes, global_attributes.size(), STAGING_APPEND, true);
+    resize_buffer(bufs.indices, global_indices.size() * sizeof(global_indices[0]), STAGING_APPEND, true);
+    resize_buffer(bufs.bspheres, global_bspheres.size() * sizeof(global_bspheres[0]), STAGING_APPEND, true);
+
+    staging->copy(bufs.positions.get(), global_positions, STAGING_APPEND);
+    staging->copy(bufs.attributes.get(), global_attributes, STAGING_APPEND);
+    staging->copy(bufs.indices.get(), global_indices, STAGING_APPEND);
+    staging->copy(bufs.bspheres.get(), global_bspheres, STAGING_APPEND);
+
+    bufs.vertex_count += offsets_total.pos;
+    bufs.index_count += offsets_total.idx;
+
+    for(auto i = 0u; i < num_batches; ++i)
+    {
+        auto& g = new_geometries[i].goem.get();
+        g.meshlet_range = { (uint32_t)(meshlets.size() + starts[i].mlt), (uint32_t)offsets[i].mlt };
+        make_blas(new_geometries[i].goem);
+    }
+    meshlets.insert(meshlets.end(), global_meshlets.begin(), global_meshlets.end());
+
+    ENG_TIMER_END();
+
+    ENG_LOG("Batching geometry: [VXS: {:.2f} KB, IXS: {:.2f} KB]", static_cast<float>(offsets_total.vposbytes) / 1024.0f,
+            static_cast<float>(offsets_total.idx * sizeof(global_indices[0])) / 1024.0f);
+
+    new_geometries = {};
+}
+
+void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_vertices,
                                    std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets)
 {
     static constexpr auto max_verts = 64u;
