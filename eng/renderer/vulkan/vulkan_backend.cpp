@@ -512,9 +512,7 @@ RendererBackendVk& RendererBackendVk::get_instance()
     return *static_cast<RendererBackendVk*>(get_engine().renderer->backend);
 }
 
-void RendererBackendVk::init() { init_vulkan(); }
-
-void RendererBackendVk::init_vulkan()
+void RendererBackendVk::init()
 {
     if(volkInitialize() != VK_SUCCESS)
     {

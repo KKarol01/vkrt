@@ -220,7 +220,6 @@ class RendererBackendVk : public IRendererBackend
     ~RendererBackendVk() override = default;
 
     void init() override;
-    void init_vulkan();
 
     void allocate_buffer(Buffer& buffer, AllocateMemory allocate = AllocateMemory::YES) override;
     void destroy_buffer(Buffer& buffer) override;
