@@ -1060,6 +1060,8 @@ void Renderer::build_pending_geometries()
 
             b.goem->meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)b.meshlets.size() };
             meshlets.insert(meshlets.end(), b.meshlets.begin(), b.meshlets.end());
+
+            make_blas(b.goem);
         }
 
         new_geometries.erase(it, new_geometries.end());
