@@ -174,18 +174,21 @@ std::string File::read(size_t bytes, size_t offset)
     return str;
 }
 
-void File::write(const std::byte* bytes, size_t size, size_t offset)
+size_t File::write(const std::byte* bytes, size_t size, size_t offset)
 {
-    if(!file || !bytes || size == 0) { return; }
-    size_t writechars = 0;
-    if(fseek((FILE*)file, offset, SEEK_SET) == 0) { writechars = (size_t)fwrite(bytes, 1, size, (FILE*)file); }
-    ENG_ASSERT(writechars == size);
+    if(!file || !bytes || size == 0) { return 0; }
+    if(offset != ~0ull)
+    {
+        if(fseek((FILE*)file, offset, SEEK_SET) != 0) { return 0; }
+    }
+    size_t writechars = fwrite(bytes, 1, size, (FILE*)file);
+    return writechars;
 }
 
 uint64_t File::get_hash()
 {
     if(content_hash != 0) { return content_hash; }
-    content_hash = hash::combine_fnv1a(read(size, 0));
+    content_hash = hash::fnv1a_list(read(size, 0));
     return content_hash;
 }
 

@@ -57,7 +57,7 @@ void App::on_init()
 {
     auto* ecs = get_engine().ecs;
 
-    auto model = get_engine().assets->get_asset("/assets/models/datsun/scene.gltf");
+    auto& model = get_engine().assets->get_asset("/assets/models/datsun/scene.gltf");
     get_engine().scene->instance_asset(model);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);

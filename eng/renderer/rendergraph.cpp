@@ -161,7 +161,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
-            const auto hash = eng::hash::combine_fnv1a(name);
+            const auto hash = eng::hash::fnv1a_list(name);
             if(auto* p = find_persistent(hash)) { return p->native; }
             auto native_handle = get_engine().renderer->make_buffer(name, std::move(a));
             if(persistent)
@@ -185,7 +185,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const st
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
-            const auto hash = eng::hash::combine_fnv1a(name);
+            const auto hash = eng::hash::fnv1a_list(name);
             if(auto* p = find_persistent(hash)) { return p->native; }
             auto native_handle = get_engine().renderer->make_image(name, std::move(a));
             if(persistent)

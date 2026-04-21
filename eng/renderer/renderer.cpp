@@ -950,7 +950,8 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
     const auto ret_handle = Handle<Geometry>{ (uint32_t)geometries.size() };
     new_geometries.emplace_back(ret_handle, Flags<GeometryFlags>{}, batch.vertex_layout,
                                 std::vector<float>{ batch.vertices.begin(), batch.vertices.end() },
-                                std::vector<uint32_t>{ batch.indices.begin(), batch.indices.end() });
+                                std::vector<uint32_t>{ batch.indices.begin(), batch.indices.end() },
+                                std::vector<Meshlet>{ batch.meshlets.begin(), batch.meshlets.end() }, batch.signal);
     geometries.emplace_back();
     return ret_handle;
 }
@@ -973,9 +974,98 @@ void Renderer::build_pending_geometries()
         std::vector<Meshlet> mlt;
     };
 
-    if(new_geometries.empty()) { return; }
-
     ENG_TIMER_START("Meshletizing geometry");
+
+    {
+        auto it = std::remove_if(new_geometries.begin(), new_geometries.end(),
+                                 [](const BuildGeometryBatch& a) { return !a.meshlets.empty(); });
+
+        size_t total_pos_size = 0;
+        size_t total_attr_size = 0;
+        size_t total_idx_size = 0;
+        size_t total_bsph_size = 0;
+        for(auto bit = it; bit != new_geometries.end(); ++bit)
+        {
+            const auto vxcount = get_vertex_count(bit->vertices, bit->vertex_layout);
+            const auto attsize = get_vertex_layout_size(bit->vertex_layout) - sizeof(glm::vec3);
+            total_pos_size += vxcount * sizeof(glm::vec3);
+            total_attr_size += vxcount * attsize;
+            total_idx_size += bit->indices.size() * sizeof(uint16_t);
+            total_bsph_size += bit->meshlets.size() * sizeof(glm::vec4);
+        }
+
+        resize_buffer(bufs.positions, total_pos_size, STAGING_APPEND, true);
+        resize_buffer(bufs.attributes, total_attr_size, STAGING_APPEND, true);
+        resize_buffer(bufs.indices, total_idx_size, STAGING_APPEND, true);
+        resize_buffer(bufs.bspheres, total_bsph_size, STAGING_APPEND, true);
+
+        std::vector<float> local_pos(total_pos_size / sizeof(float));
+        std::vector<float> local_attr(total_attr_size / sizeof(float));
+        std::vector<glm::vec4> local_bsph(total_bsph_size / sizeof(glm::vec4));
+        size_t global_pos_offset = 0;
+        size_t global_attr_offset = 0;
+        size_t global_bsph_offset = 0;
+
+        for(auto bit = it; bit != new_geometries.end(); ++bit)
+        {
+            auto& b = *bit;
+            const size_t floats_per_vert = get_vertex_layout_size(b.vertex_layout) / sizeof(float);
+            const size_t vertex_count = b.vertices.size() / floats_per_vert;
+            const size_t attr_count_per_vert = floats_per_vert - 3;
+
+            float* current_pos_ptr = &local_pos[global_pos_offset];
+            float* current_attr_ptr = &local_attr[global_attr_offset];
+
+            for(size_t i = 0; i < vertex_count; ++i)
+            {
+                const float* src_vertex = &b.vertices[i * floats_per_vert];
+                std::memcpy(current_pos_ptr + (i * 3), src_vertex, 3 * sizeof(float));
+
+                if(attr_count_per_vert > 0)
+                {
+                    std::memcpy(current_attr_ptr + (i * attr_count_per_vert), src_vertex + 3, attr_count_per_vert * sizeof(float));
+                }
+            }
+            staging->copy(bufs.positions.get(), current_pos_ptr, STAGING_APPEND, vertex_count * 3 * sizeof(float));
+            if(attr_count_per_vert > 0)
+            {
+                staging->copy(bufs.attributes.get(), current_attr_ptr, STAGING_APPEND,
+                              vertex_count * attr_count_per_vert * sizeof(float));
+            }
+
+            std::vector<uint16_t> idx16;
+            idx16.reserve(b.indices.size());
+            for(uint32_t idx : b.indices)
+            {
+                idx16.push_back(static_cast<uint16_t>(idx));
+            }
+            staging->copy(bufs.indices.get(), idx16.data(), STAGING_APPEND, idx16.size() * sizeof(uint16_t));
+
+            glm::vec4* current_bsph_ptr = &local_bsph[global_bsph_offset];
+            for(size_t i = 0; i < b.meshlets.size(); ++i)
+            {
+                b.meshlets[i].vertex_offset += bufs.vertex_count;
+                b.meshlets[i].index_offset += bufs.index_count;
+
+                current_bsph_ptr[i] = b.meshlets[i].bounding_sphere;
+            }
+            staging->copy(bufs.bspheres.get(), current_bsph_ptr, STAGING_APPEND, b.meshlets.size() * sizeof(glm::vec4));
+
+            global_pos_offset += vertex_count * 3;
+            global_attr_offset += vertex_count * attr_count_per_vert;
+            global_bsph_offset += b.meshlets.size();
+
+            bufs.vertex_count += (uint32_t)vertex_count;
+            bufs.index_count += (uint32_t)b.indices.size();
+
+            b.goem->meshlet_range = { (uint32_t)meshlets.size(), (uint32_t)b.meshlets.size() };
+            meshlets.insert(meshlets.end(), b.meshlets.begin(), b.meshlets.end());
+        }
+
+        new_geometries.erase(it, new_geometries.end());
+    }
+
+    if(new_geometries.empty()) { return; }
 
     const auto num_batches = new_geometries.size();
 
@@ -1026,7 +1116,15 @@ void Renderer::build_pending_geometries()
             for(auto bi = start_idx; bi < end_idx; ++bi)
             {
                 const auto& batch = new_geometries[bi];
-                meshletize_geometry(batch, temp_results[bi].vtx, temp_results[bi].idx, temp_results[bi].mlt);
+                if(batch.meshlets.size() > 0)
+                {
+                    temp_results[bi].vtx = batch.vertices;
+                    temp_results[bi].idx =
+                        std::views::transform(batch.indices, [](uint32_t idx) { return (uint16_t)idx; }) |
+                        std::ranges::to<std::vector<uint16_t>>();
+                    temp_results[bi].mlt = batch.meshlets;
+                }
+                else { meshletize_geometry(batch, temp_results[bi].vtx, temp_results[bi].idx, temp_results[bi].mlt); }
 
                 const auto vertex_size = get_vertex_layout_size(batch.vertex_layout);
                 const auto vertex_count = get_vertex_count(temp_results[bi].vtx, batch.vertex_layout);
@@ -1039,6 +1137,14 @@ void Renderer::build_pending_geometries()
                                                .mlt = temp_results[bi].mlt.size(),
                                                .vposbytes = pos_size * vertex_count,
                                                .vattbytes = attr_size * vertex_count };
+
+                if(batch.geom_ready_signal)
+                {
+                    batch.geom_ready_signal->set_value(ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
+                                                                           .vertices = temp_results[bi].vtx,
+                                                                           .indices = temp_results[bi].idx,
+                                                                           .meshlet = temp_results[bi].mlt });
+                }
             }
         });
     }
@@ -1067,7 +1173,6 @@ void Renderer::build_pending_geometries()
                 const auto a_size = v_stride - p_size;
 
                 const std::byte* src_bytes = reinterpret_cast<const std::byte*>(res.vtx.data());
-
                 for(size_t v = 0; v < batch_offset.pos; ++v)
                 {
                     std::memcpy(&global_positions[start.vposbytes + (v * p_size)], &src_bytes[v * v_stride], p_size);

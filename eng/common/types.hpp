@@ -61,5 +61,5 @@ template <typename T, typename Storage> struct hash<eng::TypedId<T, Storage>>
 };
 } // namespace std
 
-ENG_DEFINE_STD_HASH(eng::Range32u, eng::hash::combine_fnv1a(t.offset, t.size));
-ENG_DEFINE_STD_HASH(eng::Range64u, eng::hash::combine_fnv1a(t.offset, t.size));
+ENG_DEFINE_STD_HASH(eng::Range32u, ENG_HASH(t.offset, t.size));
+ENG_DEFINE_STD_HASH(eng::Range64u, ENG_HASH(t.offset, t.size));

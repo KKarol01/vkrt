@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <future>
 #include <optional>
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
@@ -13,6 +14,7 @@
 
 namespace eng
 {
+
 namespace gfx
 {
 enum class CullFace
@@ -115,7 +117,8 @@ enum class PipelineType
 
 enum class GeometryFlags
 {
-    DIRTY_BLAS_BIT = 0x1,
+    // MESHLETIZE_BIT = 0x1,
+    DIRTY_BLAS_BIT = 0x2,
 };
 
 enum class IndexFormat
@@ -168,6 +171,7 @@ enum class ImageFormat : uint8_t
     R32F,
     R16FG16FB16FA16F,
     R32FG32FB32FA32F,
+    LAST_ENUM,
 };
 
 enum class ImageAspect : uint8_t
@@ -573,6 +577,7 @@ inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> 
 
 inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
 {
+    static_assert((int)ImageFormat::LAST_ENUM == 11);
     switch(format)
     {
     case ImageFormat::R8G8B8A8_UNORM:
@@ -616,6 +621,47 @@ inline ImageViewType get_view_type_from_image(ImageType type)
     }
     }
 }
+
+struct ParsedGeometryData
+{
+    Flags<gfx::VertexComponent> vertex_layout;
+    std::vector<float> vertices{};
+    std::vector<uint16_t> indices{};
+    std::vector<gfx::Meshlet> meshlet{};
+};
+using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
+
+struct ParsedImageData
+{
+    uint32_t width{};
+    uint32_t height{};
+    gfx::ImageFormat format{};
+    std::vector<std::byte> data;
+};
+
+struct Meshlet
+{
+    int32_t vertex_offset;
+    uint32_t vertex_count;
+    uint32_t index_offset;
+    uint32_t index_count;
+    glm::vec4 bounding_sphere{};
+};
+
+struct GeometryDescriptor
+{
+    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
+    size_t get_num_vertices() const
+    {
+        return vertices.size() * sizeof(vertices[0]) / get_vertex_layout_size(vertex_layout);
+    }
+    Flags<GeometryFlags> flags;
+    Flags<VertexComponent> vertex_layout;
+    std::span<const float> vertices;
+    std::span<const uint32_t> indices;
+    std::span<const Meshlet> meshlets; // optional
+    ParsedGeometryReadySignal* signal{};
+};
 
 } // namespace gfx
 } // namespace eng

@@ -61,7 +61,11 @@ namespace eng
 {
 
 #ifdef ENG_DEBUG_BUILD
-ScopedTimer::ScopedTimer(std::string_view label) : label(label) { start_secs = glfwGetTime(); }
+ScopedTimer::ScopedTimer(std::string_view label) : label(label)
+{
+    start_secs = glfwGetTime();
+    nest_level = (uint32_t)g_scoped_timers.size();
+}
 
 ScopedTimer::~ScopedTimer()
 {
@@ -70,7 +74,7 @@ ScopedTimer::~ScopedTimer()
     static constexpr const char* tabs[]{
         "", "\t", "\t\t", "\t\t\t", "\t\t\t\t", "\t\t\t\t\t",
     };
-    ENG_LOG("{}ScopedTimer {}: {:.2f}ms", tabs[eng::scoped_timers.size() - 1], label.as_view(), delta * 1000.0);
+    ENG_LOG("{}ScopedTimer {}: {:.2f}ms", tabs[eng::g_scoped_timers.size() - 1], label.as_view(), delta * 1000.0);
 }
 #endif
 

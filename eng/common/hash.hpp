@@ -10,51 +10,63 @@ namespace eng
 namespace hash
 {
 
+inline constexpr uint64_t FNV1A_BASIS = 0xcbf29ce484222325ull;
+inline constexpr uint64_t FNV1A_PRIME = 0x100000001b3ull;
+
+template <typename T>
+concept is_range = requires(T t) { std::span{ t }; };
+
 inline constexpr uint64_t fnv1a_bytes(uint64_t hash, const uint8_t* const bytes, size_t size)
 {
-    constexpr uint64_t prime = 0x100000001b3ull;
     for(auto i = 0ull; i < size; ++i)
     {
         hash = hash ^ bytes[i];
-        hash = hash * prime;
+        hash = hash * FNV1A_PRIME;
     }
     return hash;
 }
 
 template <typename T> inline constexpr uint64_t fnv1a_value(uint64_t hash, const T& t)
 {
-    if constexpr(std::is_trivially_copyable_v<T>)
+    using U = std::remove_cvref_t<T>;
+
+    if constexpr(std::integral<U> || std::is_enum_v<U>)
     {
         auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(t);
         return fnv1a_bytes(hash, bytes.data(), bytes.size());
     }
+    else if constexpr(std::convertible_to<U, std::string_view>)
+    {
+        std::string_view sv = t;
+        return fnv1a_bytes(hash, reinterpret_cast<const uint8_t*>(sv.data()), sv.size());
+    }
+    else if constexpr(is_range<U>)
+    {
+        auto s = std::span{ t };
+        if constexpr(sizeof(typename decltype(s)::value_type) == 1)
+        {
+            return fnv1a_bytes(hash, reinterpret_cast<const uint8_t*>(s.data()), s.size());
+        }
+        else
+        {
+            for(const auto& e : s)
+            {
+                hash = fnv1a_value(hash, e);
+            }
+            return hash;
+        }
+    }
     else
     {
-        auto thash = std::hash<T>{}(t);
-        auto bytes = std::bit_cast<std::array<uint8_t, sizeof(thash)>>(thash);
-        return fnv1a_bytes(hash, bytes.data(), bytes.size());
+        const size_t standard_hash = std::hash<U>{}(t);
+        return fnv1a_value(hash, standard_hash);
     }
 }
 
-inline constexpr uint64_t combine_fnv1a(const auto&... args)
+template <typename... Args> inline constexpr uint64_t fnv1a_list(const auto&... args)
 {
-    constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
-    uint64_t hash = offset_basis;
+    uint64_t hash = FNV1A_BASIS;
     ((hash = fnv1a_value(hash, args)), ...);
-    return hash;
-}
-
-inline constexpr uint64_t combine_fnv1a(const char* str)
-{
-    constexpr uint64_t offset_basis = 0xcbf29ce484222325ull;
-    constexpr uint64_t prime = 0x100000001b3ull;
-    uint64_t hash = offset_basis;
-    while(*str)
-    {
-        hash ^= static_cast<unsigned char>(*str);
-        hash *= prime;
-        ++str;
-    }
     return hash;
 }
 
@@ -62,7 +74,7 @@ struct PairHash
 {
     template <typename T1, typename T2> size_t operator()(const std::pair<T1, T2>& p) const
     {
-        return eng::hash::combine_fnv1a(p.first, p.second);
+        return eng::hash::fnv1a_list(p.first, p.second);
     }
 };
 
@@ -78,4 +90,6 @@ struct PairHash
     };                                                                                                                 \
     }
 
-#define ENG_HASH_STR(str) eng::hash::combine_fnv1a(str)
+#define ENG_HASH(...) eng::hash::fnv1a_list(__VA_ARGS__)
+#define ENG_HASH_SPAN(start, count)                                                                                    \
+    std::span { start, count }

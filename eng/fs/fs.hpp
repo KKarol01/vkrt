@@ -38,7 +38,7 @@ class File
     void close();
     size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
     std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
-    void write(const std::byte* bytes, size_t size, size_t offset);
+    size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull);
     uint64_t get_hash();
 
     FileSystem* fs{};

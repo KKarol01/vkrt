@@ -1,5 +1,9 @@
 #include "loaders.hpp"
 
+#include <variant>
+#include <vector>
+#include <cstddef>
+
 #include <fastgltf/core.hpp>
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
@@ -20,6 +24,7 @@ namespace gltf
 
 struct Context
 {
+    Flags<ImportSettings> import_settings;
     std::vector<uint32_t> images;
     std::vector<uint32_t> textures;
     std::vector<Range32u> materials;
@@ -98,9 +103,9 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             auto it = gltfprim.findAttribute(FAST_COMPS[i]);
             auto& acc = gltfasset.accessors.at(it->accessorIndex);
             if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
-			ENG_TIMER_START("Iterating");
+            ENG_TIMER_START("Iterating");
             fast_iterate(i, acc, GFX_COMPS[i]);
-			ENG_TIMER_END();
+            ENG_TIMER_END();
         }
 
         if(gltfprim.indicesAccessor)
@@ -120,10 +125,21 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             continue;
         }
 
-		ENG_TIMER_START("Making geometry");
+        ENG_TIMER_START("Making geometry");
         asset.geometries.push_back(get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
-            .flags = {}, .vertex_layout = vertex_layout, .vertices = vertices, .indices = std::span{ indices } }));
-		ENG_TIMER_END();
+            .flags = {},
+            .vertex_layout = vertex_layout,
+            .vertices = vertices,
+            .indices = std::span{ indices },
+            .signal = ctx.import_settings.test(ImportSettings::KEEP_DATA_BIT)
+                          ? &asset.geometry_data.emplace_back(gfx::ParsedGeometryReadySignal{})
+                          : (gfx::ParsedGeometryReadySignal*)nullptr,
+        }));
+        if(ctx.import_settings & ImportSettings::KEEP_DATA_BIT)
+        {
+            asset.geometry_data_futures.push_back(asset.geometry_data.back().get_future().share());
+        }
+        ENG_TIMER_END();
         ++geoms.size;
     }
 
@@ -181,12 +197,19 @@ uint32_t load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFo
         gfx::get_renderer().staging->copy(img.get(), imgdata, 0, 0, true, gfx::DiscardContents::YES);
         ENG_TODO("TODO: Process mips");
     }
-    stbi_image_free(imgdata);
+
     if(!img) { return ~0u; }
 
     const uint32_t imgidx = asset.images.size();
     asset.images.push_back(img);
     ctx.images[gltfimgidx] = imgidx;
+
+    if(ctx.import_settings & ImportSettings::KEEP_DATA_BIT)
+    {
+        asset.image_data.emplace_back((uint32_t)x, (uint32_t)y, format, std::vector<std::byte>(imgdata, imgdata + x * y * ch));
+    }
+    stbi_image_free(imgdata);
+
     return imgidx;
 }
 
@@ -348,7 +371,7 @@ Asset::Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fast
 
 } // namespace gltf
 
-std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path)
+std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, Flags<ImportSettings> import_settings)
 {
     auto fastdatabuf = fastgltf::GltfDataBuffer::FromPath(file_path);
     if(!fastdatabuf) { return std::nullopt; }
@@ -374,6 +397,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path)
 
     Asset asset{};
     gltf::Context context{};
+    context.import_settings = import_settings;
     for(auto i = 0u; i < gltfscene.nodeIndices.size(); ++i)
     {
         uint32_t out_index;

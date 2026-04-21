@@ -31,7 +31,7 @@ struct RGPass
         COMPUTE,
     };
     RGPass() = default;
-    RGPass(const char* name, Type type) : id(eng::hash::combine_fnv1a(name)), name(name), type(type) {}
+    RGPass(const char* name, Type type) : id(ENG_HASH(name)), name(name), type(type) {}
     virtual ~RGPass() = default;
     bool is_graphics() const { return type == Type::GRAPHICS; }
     bool is_compute() const { return type == Type::COMPUTE; }

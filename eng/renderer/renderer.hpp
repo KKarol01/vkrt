@@ -20,8 +20,8 @@
 #include <eng/assets/asset_manager.hpp>
 #include <eng/fs/fs.hpp>
 
-ENG_DEFINE_STD_HASH(eng::gfx::ImageView, eng::hash::combine_fnv1a(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
-ENG_DEFINE_STD_HASH(eng::gfx::BufferView, eng::hash::combine_fnv1a(t.buffer, t.range));
+ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
+ENG_DEFINE_STD_HASH(eng::gfx::BufferView, ENG_HASH(t.buffer, t.range));
 
 namespace eng
 {
@@ -355,28 +355,6 @@ struct Mesh
     Handle<Material> material;
 };
 
-struct Meshlet
-{
-    int32_t vertex_offset;
-    uint32_t vertex_count;
-    uint32_t index_offset;
-    uint32_t index_count;
-    glm::vec4 bounding_sphere{};
-};
-
-struct GeometryDescriptor
-{
-    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
-    size_t get_num_vertices() const
-    {
-        return vertices.size() * sizeof(vertices[0]) / get_vertex_layout_size(vertex_layout);
-    }
-    Flags<GeometryFlags> flags;
-    Flags<VertexComponent> vertex_layout;
-    std::span<const float> vertices;
-    std::span<const uint32_t> indices;
-};
-
 struct Buffer
 {
     static Buffer init(size_t capacity, Flags<BufferUsage> usage)
@@ -579,57 +557,43 @@ template <typename T> struct LayoutCompatibilityChecker
 } // namespace gfx
 } // namespace eng
 
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexBinding, eng::hash::combine_fnv1a(t.binding, t.stride, t.instanced));
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexAttribute,
-                    eng::hash::combine_fnv1a(t.location, t.binding, t.format, t.offset));
+ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexBinding, ENG_HASH(t.binding, t.stride, t.instanced));
+ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexAttribute, ENG_HASH(t.location, t.binding, t.format, t.offset));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::StencilState,
-                    eng::hash::combine_fnv1a(t.fail, t.pass, t.depth_fail, t.compare, t.compare_mask, t.write_mask, t.ref));
+                    ENG_HASH(t.fail, t.pass, t.depth_fail, t.compare, t.compare_mask, t.write_mask, t.ref));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::BlendState,
-                    eng::hash::combine_fnv1a(t.enable, t.src_color_factor, t.dst_color_factor, t.color_op,
-                                             t.src_alpha_factor, t.dst_alpha_factor, t.alpha_op, t.r > 0 ? true : false,
-                                             t.g > 0 ? true : false, t.b > 0 ? true : false, t.a > 0 ? true : false));
-ENG_DEFINE_STD_HASH(
-    eng::gfx::PipelineCreateInfo::AttachmentState,
-    eng::hash::combine_fnv1a(t.count, t.depth_format, t.stencil_format,
-                             std::accumulate(t.color_formats.begin(), t.color_formats.begin() + t.count, 0ull,
-                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); }),
-                             std::accumulate(t.blend_states.begin(), t.blend_states.begin() + t.count, 0ull,
-                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); })));
-ENG_DEFINE_STD_HASH(eng::gfx::Descriptor, eng::hash::combine_fnv1a(t.type, t.slot, t.size, t.stages, t.immutable_samplers));
-ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout,
-                    eng::hash::combine_fnv1a(std::accumulate(t.layout.begin(), t.layout.end(), 0ull, [](auto hash, const auto& val) {
-                        return eng::hash::combine_fnv1a(hash, val);
-                    })));
-ENG_DEFINE_STD_HASH(
-    eng::gfx::PipelineCreateInfo,
-    eng::hash::combine_fnv1a(t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
-                             t.stencil_front, t.stencil_back, t.topology, t.polygon_mode, t.culling, t.front_is_ccw, t.line_width,
-                             std::accumulate(t.shaders.begin(), t.shaders.end(), 0ull,
-                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); }),
-                             std::accumulate(t.bindings.begin(), t.bindings.end(), 0ull,
-                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); }),
-                             std::accumulate(t.attributes.begin(), t.attributes.end(), 0ull,
-                                             [](auto acc, const auto& e) { return eng::hash::combine_fnv1a(acc, e); })));
+                    ENG_HASH(t.enable, t.src_color_factor, t.dst_color_factor, t.color_op, t.src_alpha_factor,
+                             t.dst_alpha_factor, t.alpha_op, t.r > 0 ? true : false, t.g > 0 ? true : false,
+                             t.b > 0 ? true : false, t.a > 0 ? true : false));
+ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::AttachmentState,
+                    ENG_HASH(t.count, t.depth_format, t.stencil_format, ENG_HASH_SPAN(t.color_formats.begin(), t.count),
+                             ENG_HASH_SPAN(t.blend_states.begin(), t.count)));
+ENG_DEFINE_STD_HASH(eng::gfx::Descriptor, ENG_HASH(t.type, t.slot, t.size, t.stages, t.immutable_samplers));
+ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout, ENG_HASH(ENG_HASH_SPAN(t.layout.begin(), t.layout.size())));
+
+ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo,
+                    ENG_HASH(t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
+                             t.stencil_front, t.stencil_back, t.topology, t.polygon_mode, t.culling, t.front_is_ccw,
+                             t.line_width, ENG_HASH_SPAN(t.shaders.begin(), t.shaders.size()),
+                             ENG_HASH_SPAN(t.bindings.begin(), t.bindings.size()),
+                             ENG_HASH_SPAN(t.attributes.begin(), t.attributes.size())));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout,
-                    eng::hash::combine_fnv1a(t.push_range.stages, t.push_range.size,
-                                             std::accumulate(t.layout.begin(), t.layout.end(), 0ull, [](auto hash, const auto& val) {
-                                                 return eng::hash::combine_fnv1a(hash, val);
-                                             })));
-ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, eng::hash::combine_fnv1a(t.info));
-ENG_DEFINE_STD_HASH(eng::gfx::Shader, eng::hash::combine_fnv1a(t.path));
-ENG_DEFINE_STD_HASH(eng::gfx::Geometry, eng::hash::combine_fnv1a(t.meshlet_range));
-ENG_DEFINE_STD_HASH(eng::gfx::Material, eng::hash::combine_fnv1a(t.mesh_pass, t.base_color_texture));
-ENG_DEFINE_STD_HASH(eng::gfx::Mesh, eng::hash::combine_fnv1a(t.geometry, t.material));
-ENG_DEFINE_STD_HASH(eng::gfx::MeshPass, eng::hash::combine_fnv1a(t.name));
-ENG_DEFINE_STD_HASH(eng::gfx::ShaderEffect, eng::hash::combine_fnv1a(t.pipeline));
+                    ENG_HASH(t.push_range.stages, t.push_range.size, ENG_HASH_SPAN(t.layout.begin(), t.layout.size())));
+ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
+ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
+ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));
+ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.base_color_texture));
+ENG_DEFINE_STD_HASH(eng::gfx::Mesh, ENG_HASH(t.geometry, t.material));
+ENG_DEFINE_STD_HASH(eng::gfx::MeshPass, ENG_HASH(t.name));
+ENG_DEFINE_STD_HASH(eng::gfx::ShaderEffect, ENG_HASH(t.pipeline));
 // ENG_DEFINE_STD_HASH(eng::gfx::SamplerDescriptor,
 //                     eng::hash::combine_fnv1a(t.filtering[0], t.filtering[1], t.addressing[0], t.addressing[1], t.addressing[2],
 //                                              t.mip_lod[0], t.mip_lod[1], t.mip_lod[2], t.mipmap_mode, t.reduction_mode));
-ENG_DEFINE_STD_HASH(eng::gfx::Sampler, eng::hash::combine_fnv1a(t.filtering.min, t.filtering.mag, t.addressing.u,
-                                                                t.addressing.v, t.addressing.w, t.mip_blending,
-                                                                t.reduction_mode, t.lod.min, t.lod.max, t.lod.bias));
+ENG_DEFINE_STD_HASH(eng::gfx::Sampler,
+                    ENG_HASH(t.filtering.min, t.filtering.mag, t.addressing.u, t.addressing.v, t.addressing.w,
+                             t.mip_blending, t.reduction_mode, t.lod.min, t.lod.max, t.lod.bias));
 //  ENG_DEFINE_STD_HASH(eng::gfx::Texture, eng::hash::combine_fnv1a(t.view, t.layout, t.is_storage));
-ENG_DEFINE_STD_HASH(eng::gfx::RendererMemoryRequirements, eng::hash::combine_fnv1a(t.size, t.alignment, t.backend_data));
+ENG_DEFINE_STD_HASH(eng::gfx::RendererMemoryRequirements, ENG_HASH(t.size, t.alignment, t.backend_data));
 
 namespace eng
 {
@@ -804,6 +768,8 @@ class Renderer
         Flags<VertexComponent> vertex_layout;
         std::vector<float> vertices;
         std::vector<uint32_t> indices;
+        std::vector<Meshlet> meshlets;
+        ParsedGeometryReadySignal* geom_ready_signal{};
     };
 
     void init(IRendererBackend* backend);
@@ -818,12 +784,12 @@ class Renderer
 
     // Creates buffer with optional gpu memory allocation. Thread-safe.
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
-    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool.
+    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
     void queue_destroy(Handle<Buffer>& handle);
     // Creates image with optional gpu memory allocation. Thread-safe.
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
-    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool.
+    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
     void queue_destroy(Handle<Image>& image, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const std::filesystem::path& path);

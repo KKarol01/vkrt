@@ -32,8 +32,8 @@
 #define ENG_ASSERT(expr, ...)                                                                                          \
     if((bool)(expr) == false)                                                                                          \
     {                                                                                                                  \
-        ENG_BREAKPOINT();                                                                                              \
         ENG_LOG(__VA_ARGS__);                                                                                          \
+        ENG_BREAKPOINT();                                                                                              \
     }
 #endif
 
@@ -68,14 +68,15 @@ struct ScopedTimer
     ~ScopedTimer();
     StackString<64> label;
     double start_secs{};
+    uint32_t nest_level{};
 };
 
-thread_local inline std::deque<ScopedTimer> scoped_timers;
+thread_local inline std::deque<ScopedTimer> g_scoped_timers;
 
 } // namespace eng
 
-#define ENG_TIMER_START(msg, ...) ::eng::scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
-#define ENG_TIMER_END() ::eng::scoped_timers.pop_back();
+#define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
+#define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();
 
 #else
 #ifdef ENG_PLATFORM_WIN32
