@@ -1065,7 +1065,11 @@ void Renderer::build_pending_geometries()
         new_geometries.erase(it, new_geometries.end());
     }
 
-    if(new_geometries.empty()) { return; }
+    if(new_geometries.empty())
+    {
+        ENG_TIMER_END();
+        return;
+    }
 
     const auto num_batches = new_geometries.size();
 
