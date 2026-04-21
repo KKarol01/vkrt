@@ -761,25 +761,138 @@ class Renderer
         std::array<std::shared_ptr<pass::Pass>, (int)RenderPassType::LAST_ENUM> mesh_passes{};
     };
 
+    // todo: move this to some other file.
+    // allocates floor(PAGE_SIZE_BYTES / sizeof(T)) pages of memory
+    // and pushes element ranges into it. if range is bigger than the page,
+    // it is split.
+    // intention is to use it as a paginated linear temp allocator for batching big chunks of memory
+    template <typename T, size_t PAGE_SIZE_BYTES> struct PageAllocator
+    {
+        static_assert(std::is_trivially_copyable_v<T>);
+        static_assert(sizeof(T) <= PAGE_SIZE_BYTES, "Page cannot be smaller than the size of the element");
+        inline static constexpr size_t PAGE_NUM_ELEMS = PAGE_SIZE_BYTES / sizeof(T);
+        inline static constexpr size_t MAX_PAGES = ~uint32_t{}; // from all zeros to all_bits-1
+        using Page = T*;
+        struct PageMetadata
+        {
+            // returns free_space in free elems till the end
+            size_t get_free_space() const { return PAGE_NUM_ELEMS - start; }
+            size_t start{}; // in elems
+        };
+        struct Allocation
+        {
+            size_t page{ ~0ull };
+            size_t start{ ~0ull };
+            size_t elems{};
+        };
+
+        ~PageAllocator()
+        {
+            current_page_md = {};
+            std::allocator<T> alloc;
+            for(auto* page : pages)
+            {
+                alloc.deallocate(page, PAGE_NUM_ELEMS);
+            }
+            pages = {};
+            allocations = {};
+        }
+
+        static const Allocation* get_alloc(uintptr_t ptr) { return (const Allocation*)ptr; }
+
+        void iterate_data_ranges(uintptr_t ptr, const auto& callback)
+        {
+            const auto* alloc = get_alloc(ptr);
+            if(!alloc || alloc->page == ~0ull) { return; }
+            size_t elems_left = alloc->elems;
+            size_t page = alloc->page;
+            size_t elems_start = alloc->start;
+            while(elems_left > 0 && page < pages.size())
+            {
+                size_t elems_till_end = PAGE_NUM_ELEMS - elems_start;
+                size_t elems_to_process = std::min(elems_left, elems_till_end);
+                T* data_ptr = pages[page] + elems_start;
+                callback(std::span<T>(data_ptr, elems_to_process));
+                elems_left -= elems_to_process;
+                ++page;
+                elems_start = 0;
+            }
+        }
+
+        uintptr_t insert(std::span<const T> src_data)
+        {
+            if(src_data.empty()) { return 0; }
+
+            if(pages.empty() && !allocate_page()) { return 0; }
+
+            size_t elems_left = src_data.size();
+            auto free_space = current_page_md.get_free_space();
+
+            auto& alloc = allocations.emplace_back();
+            alloc.page = (uint32_t)(free_space > 0 ? pages.size() - 1 : pages.size());
+            alloc.start = free_space > 0 ? current_page_md.start : 0;
+            alloc.elems = src_data.size();
+
+            while(elems_left > 0)
+            {
+                free_space = current_page_md.get_free_space();
+                if(free_space == 0)
+                {
+                    if(!allocate_page())
+                    {
+                        allocations.pop_back();
+                        return 0;
+                    }
+                    continue;
+                }
+
+                const auto elems_to_copy = std::min(elems_left, free_space);
+                memcpy(pages.back() + current_page_md.start, src_data.data() + (src_data.size() - elems_left),
+                       elems_to_copy * sizeof(T));
+                current_page_md.start += elems_to_copy;
+                elems_left -= elems_to_copy;
+            }
+
+            return (uintptr_t)&alloc;
+        }
+
+        bool allocate_page()
+        {
+            current_page_md = { ~0ull };
+            if(pages.size() == MAX_PAGES) { return false; }
+            std::allocator<T> alloc;
+            auto* ptr = alloc.allocate(PAGE_NUM_ELEMS);
+            if(!ptr) { return false; }
+            pages.push_back(ptr);
+            current_page_md = { 0ull };
+            return true;
+        }
+
+        PageMetadata current_page_md{};
+        std::vector<Page> pages;
+        std::deque<Allocation> allocations;
+    };
+
     struct BuildGeometryBatch
     {
         Handle<Geometry> geom;
         Flags<GeometryFlags> flags;
         Flags<VertexComponent> vertex_layout;
         IndexFormat index_format{};
-        Range64u vertex_range{};  // range, in floats, for both positions and attributes in the context
-        Range64u index_range{};   // range, in bytes, for indices in the context
-        Range64u meshlet_range{}; // range for meshlets in the context
+        uintptr_t vertex_range{};    // range, in floats, for positions in the context
+        uintptr_t attribute_range{}; // range, in floats, for attributes in the context
+        uintptr_t index_range{};     // range, in bytes, for indices in the context
+        uintptr_t meshlet_range{};   // range for meshlets in the context
         ParsedGeometryReadySignal* geom_ready_signal{};
     };
 
     struct BuildGeometryContext
     {
-        void add_descriptor(const GeometryDescriptor& desc);
-        std::vector<float> positions;
-        std::vector<float> attributes;
-        std::vector<std::byte> indices;
-        std::vector<Meshlet> meshlets;
+        void add_descriptor(Handle<Geometry> geometry, const GeometryDescriptor& desc);
+        PageAllocator<float, 16 * 1024 * 1024> positions;
+        PageAllocator<float, 16 * 1024 * 1024> attributes;
+        PageAllocator<std::byte, 16 * 1024 * 1024> indices;
+        PageAllocator<Meshlet, 16 * 1024 * 1024> meshlets;
         std::vector<BuildGeometryBatch> batches;
     };
 
@@ -813,8 +926,8 @@ class Renderer
     Handle<Material> make_material(const Material& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
     void build_pending_geometries();
-    static void meshletize_geometry(const BuildGeometryBatch& info, std::vector<float>& out_vertices,
-                                    std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
+    void meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
+                             std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     void make_blas(Handle<Geometry> geom);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);

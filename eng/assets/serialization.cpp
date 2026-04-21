@@ -277,11 +277,13 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
         deserialize_read_bytes_safe(geom.meshlet.data(), bytes, out_bytes_read, bytes_size,
                                     meshlet_count * sizeof(geom.meshlet[0]));
 
-        const auto indices_u32 = geom.indices | std::views::transform([](auto idx16) { return (uint32_t)idx16; }) |
-                                 std::ranges::to<std::vector<uint32_t>>();
-
-        t.geometries[i] = gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{
-            .flags = {}, .vertex_layout = geom.vertex_layout, .vertices = geom.vertices, .indices = indices_u32, .meshlets = geom.meshlet });
+        t.geometries[i] =
+            gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
+                                                                       .vertex_layout = geom.vertex_layout,
+                                                                       .index_format = gfx::IndexFormat::U16,
+                                                                       .vertices = geom.vertices,
+                                                                       .indices = std::as_bytes(std::span{ geom.indices }),
+                                                                       .meshlets = geom.meshlet });
     }
 
     uint64_t material_count = 0;

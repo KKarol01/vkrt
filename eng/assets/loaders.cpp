@@ -129,8 +129,9 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
         asset.geometries.push_back(get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
             .flags = {},
             .vertex_layout = vertex_layout,
+            .index_format = gfx::IndexFormat::U32,
             .vertices = vertices,
-            .indices = std::span{ indices },
+            .indices = std::as_bytes(std::span{ indices }),
             .signal = ctx.import_settings.test(ImportSettings::KEEP_DATA_BIT)
                           ? &asset.geometry_data.emplace_back(gfx::ParsedGeometryReadySignal{})
                           : (gfx::ParsedGeometryReadySignal*)nullptr,

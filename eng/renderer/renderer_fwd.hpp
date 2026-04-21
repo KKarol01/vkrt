@@ -136,6 +136,7 @@ enum class VertexComponent : uint32_t
     NORMAL_BIT = 0x2,
     TANGENT_BIT = 0x4,
     UV0_BIT = 0x8,
+    LAST,
 };
 ENG_ENABLE_FLAGS_OPERATORS(VertexComponent);
 
@@ -499,14 +500,14 @@ inline size_t get_vertex_component_size(VertexComponent comp)
 
 inline size_t get_vertex_layout_size(Flags<VertexComponent> layout)
 {
+    static_assert((int)VertexComponent::LAST == 9);
     static constexpr VertexComponent comps[]{ VertexComponent::POSITION_BIT, VertexComponent::NORMAL_BIT,
                                               VertexComponent::TANGENT_BIT, VertexComponent::UV0_BIT };
     size_t sum = 0;
     for(auto e : std::span{ comps })
     {
-        if(layout.test_clear(e)) { sum += get_vertex_component_size(e); }
+        if(layout.test(e)) { sum += get_vertex_component_size(e); }
     }
-    assert(layout.empty());
     return sum;
 }
 
@@ -543,7 +544,7 @@ inline size_t get_index_count(std::span<const std::byte> indices, IndexFormat fo
 // Copies indices between formats. Dstformat must be greater or equal to srcf in byte size.
 // If dst is empty, only returns number of indices in the source span, so that it can be resized
 // and this function be called again.
-// Returns number of indices.
+// Returns number of copied indices.
 inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> src, IndexFormat dstf, IndexFormat srcf)
 {
     if(src.empty()) { return 0; }
@@ -652,10 +653,7 @@ struct Meshlet
 struct GeometryDescriptor
 {
     // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
-    size_t get_num_vertices() const
-    {
-        return vertices.size() * sizeof(vertices[0]) / get_vertex_layout_size(vertex_layout);
-    }
+    size_t get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
     Flags<GeometryFlags> flags;
     Flags<VertexComponent> vertex_layout;
     IndexFormat index_format{};
