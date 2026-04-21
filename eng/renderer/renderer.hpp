@@ -763,13 +763,24 @@ class Renderer
 
     struct BuildGeometryBatch
     {
-        Handle<Geometry> goem;
+        Handle<Geometry> geom;
         Flags<GeometryFlags> flags;
         Flags<VertexComponent> vertex_layout;
-        std::vector<float> vertices;
-        std::vector<uint32_t> indices;
-        std::vector<Meshlet> meshlets;
+        IndexFormat index_format{};
+        Range64u vertex_range{};  // range, in floats, for both positions and attributes in the context
+        Range64u index_range{};   // range, in bytes, for indices in the context
+        Range64u meshlet_range{}; // range for meshlets in the context
         ParsedGeometryReadySignal* geom_ready_signal{};
+    };
+
+    struct BuildGeometryContext
+    {
+        void add_descriptor(const GeometryDescriptor& desc);
+        std::vector<float> positions;
+        std::vector<float> attributes;
+        std::vector<std::byte> indices;
+        std::vector<Meshlet> meshlets;
+        std::vector<BuildGeometryBatch> batches;
     };
 
     void init(IRendererBackend* backend);
@@ -845,7 +856,7 @@ class Renderer
     HandleFlatSet<MeshPass> mesh_passes;
     std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
 
-    std::vector<BuildGeometryBatch> new_geometries;
+    BuildGeometryContext new_geometries;
     std::vector<Handle<Geometry>> new_blases;
     std::vector<Handle<Shader>> new_shaders;
     std::vector<Handle<Pipeline>> new_pipelines;

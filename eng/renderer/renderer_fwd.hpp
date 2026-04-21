@@ -123,6 +123,7 @@ enum class GeometryFlags
 
 enum class IndexFormat
 {
+    INVALID,
     U8,
     U16,
     U32,
@@ -657,8 +658,9 @@ struct GeometryDescriptor
     }
     Flags<GeometryFlags> flags;
     Flags<VertexComponent> vertex_layout;
+    IndexFormat index_format{};
     std::span<const float> vertices;
-    std::span<const uint32_t> indices;
+    std::span<const std::byte> indices;
     std::span<const Meshlet> meshlets; // optional
     ParsedGeometryReadySignal* signal{};
 };

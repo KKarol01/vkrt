@@ -46,6 +46,12 @@ ImageBlockData get_block_data(ImageFormat format)
     }
 }
 
+void Renderer::BuildGeometryContext::add_descriptor(const GeometryDescriptor& desc) 
+{ BuildGeometryBatch batch{};
+    batch.flags = desc.flags;
+    batch.index_format = desc.indices
+}
+
 void Renderer::init(IRendererBackend* backend)
 {
     this->backend = backend;
@@ -558,7 +564,7 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
         //  new_lights.clear();
     }
-    if(new_geometries.size()) { build_pending_geometries(); }
+    if(new_geometries.batches.size()) { build_pending_geometries(); }
     if(new_blases.size())
     {
         staging->get_wait_sem()->wait_cpu(~0ull);
@@ -1005,7 +1011,6 @@ void Renderer::build_pending_geometries()
         size_t global_pos_offset = 0;
         size_t global_attr_offset = 0;
         size_t global_bsph_offset = 0;
-
         for(auto bit = it; bit != new_geometries.end(); ++bit)
         {
             auto& b = *bit;
