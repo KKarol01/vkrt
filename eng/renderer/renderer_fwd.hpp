@@ -627,7 +627,8 @@ inline ImageViewType get_view_type_from_image(ImageType type)
 struct ParsedGeometryData
 {
     Flags<gfx::VertexComponent> vertex_layout;
-    std::vector<float> vertices{};
+    std::vector<float> positions{};
+    std::vector<float> attributes{};
     std::vector<uint16_t> indices{};
     std::vector<gfx::Meshlet> meshlet{};
 };
@@ -657,7 +658,8 @@ struct GeometryDescriptor
     Flags<GeometryFlags> flags;
     Flags<VertexComponent> vertex_layout;
     IndexFormat index_format{};
-    std::span<const float> vertices;
+    std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
+    std::span<const float> attributes;
     std::span<const std::byte> indices;
     std::span<const Meshlet> meshlets; // optional
     ParsedGeometryReadySignal* signal{};

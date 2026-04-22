@@ -129,11 +129,15 @@ void Serializer::serialize<assets::Asset>(const assets::Asset& t, size_t& out_by
         serialize_write_bytes_safe(out_bytes, geom.indices.data(), out_bytes_written, out_bytes_size,
                                    geom.indices.size() * sizeof(uint16_t));
 
-        const uint64_t vertex_count = geom.vertices.size();
-        serialize_write_bytes_safe(out_bytes, &vertex_count, out_bytes_written, out_bytes_size, sizeof(vertex_count));
         serialize_write_bytes_safe(out_bytes, &geom.vertex_layout, out_bytes_written, out_bytes_size, sizeof(geom.vertex_layout));
-        serialize_write_bytes_safe(out_bytes, geom.vertices.data(), out_bytes_written, out_bytes_size,
-                                   geom.vertices.size() * sizeof(float));
+        const uint64_t position_count = geom.positions.size();
+        serialize_write_bytes_safe(out_bytes, &position_count, out_bytes_written, out_bytes_size, sizeof(position_count));
+        serialize_write_bytes_safe(out_bytes, geom.positions.data(), out_bytes_written, out_bytes_size,
+                                   geom.positions.size() * sizeof(float));
+        const uint64_t attribute_count = geom.attributes.size();
+        serialize_write_bytes_safe(out_bytes, &attribute_count, out_bytes_written, out_bytes_size, sizeof(attribute_count));
+        serialize_write_bytes_safe(out_bytes, geom.attributes.data(), out_bytes_written, out_bytes_size,
+                                   geom.attributes.size() * sizeof(float));
 
         const uint64_t meshlet_count = geom.meshlet.size();
         serialize_write_bytes_safe(out_bytes, &meshlet_count, out_bytes_written, out_bytes_size, sizeof(meshlet_count));
@@ -265,11 +269,15 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
         geom.indices.resize(index_count);
         deserialize_read_bytes_safe(geom.indices.data(), bytes, out_bytes_read, bytes_size, index_count * sizeof(uint16_t));
 
-        uint64_t vertex_count = 0;
-        deserialize_read_bytes_safe(&vertex_count, bytes, out_bytes_read, bytes_size, sizeof(vertex_count));
         deserialize_read_bytes_safe(&geom.vertex_layout, bytes, out_bytes_read, bytes_size, sizeof(geom.vertex_layout));
-        geom.vertices.resize(vertex_count);
-        deserialize_read_bytes_safe(geom.vertices.data(), bytes, out_bytes_read, bytes_size, vertex_count * sizeof(float));
+        uint64_t position_count = 0;
+        deserialize_read_bytes_safe(&position_count, bytes, out_bytes_read, bytes_size, sizeof(position_count));
+        geom.positions.resize(position_count);
+        deserialize_read_bytes_safe(geom.positions.data(), bytes, out_bytes_read, bytes_size, position_count * sizeof(float));
+        uint64_t attribute_count = 0;
+        deserialize_read_bytes_safe(&attribute_count, bytes, out_bytes_read, bytes_size, sizeof(attribute_count));
+        geom.attributes.resize(attribute_count);
+        deserialize_read_bytes_safe(geom.attributes.data(), bytes, out_bytes_read, bytes_size, attribute_count * sizeof(float));
 
         uint64_t meshlet_count = 0;
         deserialize_read_bytes_safe(&meshlet_count, bytes, out_bytes_read, bytes_size, sizeof(meshlet_count));
@@ -281,7 +289,8 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
             gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
                                                                        .vertex_layout = geom.vertex_layout,
                                                                        .index_format = gfx::IndexFormat::U16,
-                                                                       .vertices = geom.vertices,
+                                                                       .vertices = geom.positions,
+                                                                       .attributes = geom.attributes,
                                                                        .indices = std::as_bytes(std::span{ geom.indices }),
                                                                        .meshlets = geom.meshlet });
     }

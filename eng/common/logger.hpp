@@ -68,7 +68,6 @@ struct ScopedTimer
     ~ScopedTimer();
     StackString<64> label;
     double start_secs{};
-    uint32_t nest_level{};
 };
 
 thread_local inline std::deque<ScopedTimer> g_scoped_timers;

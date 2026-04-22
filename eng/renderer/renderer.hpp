@@ -761,6 +761,13 @@ class Renderer
         std::array<std::shared_ptr<pass::Pass>, (int)RenderPassType::LAST_ENUM> mesh_passes{};
     };
 
+    struct PagedAllocation
+    {
+        size_t page{ ~0ull };
+        size_t start{ ~0ull };
+        size_t elems{};
+    };
+
     // todo: move this to some other file.
     // allocates floor(PAGE_SIZE_BYTES / sizeof(T)) pages of memory
     // and pushes element ranges into it. if range is bigger than the page,
@@ -779,12 +786,6 @@ class Renderer
             size_t get_free_space() const { return PAGE_NUM_ELEMS - start; }
             size_t start{}; // in elems
         };
-        struct Allocation
-        {
-            size_t page{ ~0ull };
-            size_t start{ ~0ull };
-            size_t elems{};
-        };
 
         ~PageAllocator()
         {
@@ -798,11 +799,8 @@ class Renderer
             allocations = {};
         }
 
-        static const Allocation* get_alloc(uintptr_t ptr) { return (const Allocation*)ptr; }
-
-        void iterate_data_ranges(uintptr_t ptr, const auto& callback)
+        void iterate_data_ranges(PagedAllocation* alloc, const auto& callback)
         {
-            const auto* alloc = get_alloc(ptr);
             if(!alloc || alloc->page == ~0ull) { return; }
             size_t elems_left = alloc->elems;
             size_t page = alloc->page;
@@ -819,11 +817,31 @@ class Renderer
             }
         }
 
-        uintptr_t insert(std::span<const T> src_data)
+        void copy_to_linear_storage(PagedAllocation* alloc, std::span<std::byte> dst)
         {
-            if(src_data.empty()) { return 0; }
+            if(!alloc || alloc->page == ~0ull) { return; }
+            size_t elems_left = std::min(alloc->elems, dst.size() / sizeof(T));
+            size_t elems_processed = 0;
+            size_t page = alloc->page;
+            size_t elems_start = alloc->start;
+            while(elems_left > 0 && page < pages.size())
+            {
+                const auto elems_till_end = PAGE_NUM_ELEMS - elems_start;
+                const auto elems_to_process = std::min(elems_left, elems_till_end);
+                T* const data_ptr = pages[page] + elems_start;
+                memcpy(dst.data() + elems_processed * sizeof(T), data_ptr, elems_to_process * sizeof(T));
+                elems_left -= elems_to_process;
+                elems_processed += elems_to_process;
+                ++page;
+                elems_start = 0;
+            }
+        }
 
-            if(pages.empty() && !allocate_page()) { return 0; }
+        PagedAllocation* insert(std::span<const T> src_data)
+        {
+            if(src_data.empty()) { return nullptr; }
+
+            if(pages.empty() && !allocate_page()) { return nullptr; }
 
             size_t elems_left = src_data.size();
             auto free_space = current_page_md.get_free_space();
@@ -853,7 +871,7 @@ class Renderer
                 elems_left -= elems_to_copy;
             }
 
-            return (uintptr_t)&alloc;
+            return &alloc;
         }
 
         bool allocate_page()
@@ -870,7 +888,7 @@ class Renderer
 
         PageMetadata current_page_md{};
         std::vector<Page> pages;
-        std::deque<Allocation> allocations;
+        std::deque<PagedAllocation> allocations;
     };
 
     struct BuildGeometryBatch
@@ -879,10 +897,10 @@ class Renderer
         Flags<GeometryFlags> flags;
         Flags<VertexComponent> vertex_layout;
         IndexFormat index_format{};
-        uintptr_t vertex_range{};    // range, in floats, for positions in the context
-        uintptr_t attribute_range{}; // range, in floats, for attributes in the context
-        uintptr_t index_range{};     // range, in bytes, for indices in the context
-        uintptr_t meshlet_range{};   // range for meshlets in the context
+        PagedAllocation* position_range{};  // range, in floats, for positions in the context
+        PagedAllocation* attribute_range{}; // range, in floats, for attributes in the context
+        PagedAllocation* index_range{};     // range, in bytes, for indices in the context
+        PagedAllocation* meshlet_range{};   // range for meshlets in the context
         ParsedGeometryReadySignal* geom_ready_signal{};
     };
 
