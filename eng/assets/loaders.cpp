@@ -103,7 +103,7 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             auto it = gltfprim.findAttribute(FAST_COMPS[i]);
             auto& acc = gltfasset.accessors.at(it->accessorIndex);
             if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
-            ENG_TIMER_START("Iterating");
+            ENG_TIMER_START("Iterating {}", i);
             fast_iterate(i, acc, GFX_COMPS[i]);
             ENG_TIMER_END();
         }

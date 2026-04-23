@@ -60,7 +60,7 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 namespace eng
 {
 
-ScopedTimer::ScopedTimer(std::string_view label) : label(label)
+ScopedTimer::ScopedTimer(std::string_view label, uint32_t nest_level) : label(label), nest_level(nest_level)
 {
 #ifdef ENG_DEBUG_BUILD
     start_secs = glfwGetTime();
@@ -70,8 +70,53 @@ ScopedTimer::ScopedTimer(std::string_view label) : label(label)
 ScopedTimer::~ScopedTimer()
 {
 #ifdef ENG_DEBUG_BUILD
-    const auto delta = glfwGetTime() - start_secs;
-    ENG_LOG("ScopedTimer {}: {:.2f}ms", label.as_view(), delta * 1000.0);
+    const auto delta_secs = glfwGetTime() - start_secs;
+    char msg[256];
+    const auto msg_len = ENG_FMT_TO_N(msg, 255, "{}: {:.2f}ms", label.as_view(), delta_secs * 1000.0);
+    msg[msg_len] = '\0';
+    static constexpr const char* MESSAGE_PREFIX = "Timing Results: ";
+    static const auto print_msg = [](std::string_view msg, bool add_new_line = false) {
+        ENG_LOG("{}{}{}", MESSAGE_PREFIX, add_new_line ? '\n' : '\0', msg);
+    };
+    if(nest_level == ~0u) { print_msg(msg); }
+    else
+    {
+        struct ScopedTimerMessage
+        {
+            void add_message(uint32_t nest_level, std::string_view msg)
+            {
+                static constexpr std::string_view TABS =
+                    "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+                ENG_ASSERT(nest_level < std::size(TABS));
+                if(nested_messages.size() <= nest_level) { nested_messages.resize(nest_level + 1); }
+                nested_messages[nest_level].reserve(nested_messages[nest_level].size() + 1 + nest_level + msg.size());
+                nested_messages[nest_level] += TABS.substr(0, nest_level);
+                nested_messages[nest_level] += msg;
+                nested_messages[nest_level] += '\n';
+                if(nest_level > 1 && nest_level < nested_messages.size() - 1)
+                {
+                    nested_messages[nest_level] += nested_messages[nest_level + 1];
+                    nested_messages[nest_level + 1].clear();
+                }
+            }
+            std::string compose()
+            {
+                std::string msg;
+                msg.reserve(std::reduce(nested_messages.begin(), nested_messages.end(), 0ull,
+                                        [](uint64_t acc, const std::string& str) { return acc + str.size(); }));
+                for(const auto& nmsg : nested_messages)
+                {
+                    msg += nmsg;
+                }
+                nested_messages.clear();
+                return msg;
+            }
+            std::vector<std::string> nested_messages;
+        };
+        thread_local ScopedTimerMessage scoped_message{};
+        scoped_message.add_message(nest_level, msg);
+        if(nest_level == 0) { print_msg(scoped_message.compose(), true); }
+    }
 #endif
 }
 

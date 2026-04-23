@@ -6,6 +6,7 @@
 
 #define ENG_FMT(str, ...) fmt::format(str, __VA_ARGS__)
 #define ENG_FMT_STR(str, ...) ENG_FMT(fmt::runtime(str), __VA_ARGS__)
+#define ENG_FMT_TO_N(output, max_count, str, ...) fmt::format_to_n(output, max_count, str, __VA_ARGS__).size
 
 #ifdef ENG_DEBUG_BUILD
 #include <iostream>
@@ -64,17 +65,19 @@ namespace eng
 
 struct ScopedTimer
 {
-    ScopedTimer(std::string_view label);
+    ScopedTimer(std::string_view label, uint32_t nest_level = ~0u);
     ~ScopedTimer();
     StackString<64> label;
     double start_secs{};
+    uint32_t nest_level{ ~0u };
 };
 
 thread_local inline std::deque<ScopedTimer> g_scoped_timers;
 
 } // namespace eng
 
-#define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
+#define ENG_TIMER_START(msg, ...)                                                                                      \
+    ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__), (uint32_t)g_scoped_timers.size());
 #define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();
 
 #else
