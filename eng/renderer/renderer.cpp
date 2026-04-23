@@ -1000,7 +1000,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
 void Renderer::build_pending_geometries()
 {
-    ScopedTimer build_pending_timer{ "Build pending geometries" };
+    ENG_TIMER_SCOPED("Build pending geometries");
 
     // take out any batch that has meshlets. it means the geometry has been preprocessed and was deserialized.
     auto pre_meshletized_it =

@@ -39,6 +39,8 @@ class File
     size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
     std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
     size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull);
+    void delete_from_disk();
+    bool eof() const;
     uint64_t get_hash();
 
     FileSystem* fs{};

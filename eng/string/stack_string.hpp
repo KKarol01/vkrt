@@ -10,10 +10,11 @@
 namespace eng
 {
 
-template <size_t size> struct StackString
+template <size_t MAX_SIZE> struct StackString
 {
-    static_assert(size > 0);
+    static_assert(MAX_SIZE > 0);
     StackString() = default;
+    ~StackString() { length = 0; }
 
     StackString(const StackString& a) noexcept = default;
     StackString& operator=(const StackString& a) noexcept = default;
@@ -31,7 +32,7 @@ template <size_t size> struct StackString
     StackString& operator=(const std::string& str) { return (*this = std::string_view{ str.begin(), str.end() }); }
     StackString& operator=(std::string_view str)
     {
-        const auto length = std::min(str.length(), size - 1);
+        length = std::min(str.length(), MAX_SIZE - 1);
         memcpy(string.data(), str.data(), length);
         string[length] = '\0';
         return *this;
@@ -53,12 +54,15 @@ template <size_t size> struct StackString
     std::string_view as_view() const { return std::string_view{ string.data() }; }
     std::string to_string() const { return std::string{ string.data() }; }
     const char* c_str() const { return string.data(); }
+    bool empty() const { return length == 0; }
+    size_t size() const { return length; }
 
     constexpr uint64_t hash() const { return ENG_HASH(as_view()); }
 #ifdef ENG_DEBUG_BUILD1
     std::string string;
 #else
-    std::array<char, size> string{};
+    std::array<char, MAX_SIZE> string{};
+    size_t length{};
 #endif
 };
 

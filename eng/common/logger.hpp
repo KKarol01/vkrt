@@ -65,7 +65,7 @@ namespace eng
 
 struct ScopedTimer
 {
-    ScopedTimer(std::string_view label, uint32_t nest_level = ~0u);
+    ScopedTimer(std::string_view label);
     ~ScopedTimer();
     StackString<64> label;
     double start_secs{};
@@ -74,10 +74,19 @@ struct ScopedTimer
 
 thread_local inline std::deque<ScopedTimer> g_scoped_timers;
 
+struct ScopedTimerProxy
+{
+    ScopedTimerProxy(std::string_view label) { g_scoped_timers.emplace_back(label); }
+    ~ScopedTimerProxy() { g_scoped_timers.pop_back(); }
+};
+
 } // namespace eng
 
-#define ENG_TIMER_START(msg, ...)                                                                                      \
-    ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__), (uint32_t)g_scoped_timers.size());
+#define ENG_TIMER_EXPAND(a, b) a##b
+#define ENG_TIMER_CONCAT_LINE(a, b) ENG_TIMER_EXPAND(a, b)
+#define ENG_TIMER_SCOPED(msg, ...)                                                                                     \
+    ::eng::ScopedTimerProxy ENG_TIMER_CONCAT_LINE(eng_scoped_timer_proxy_, ENG_TIMER_EXPAND(__LINE__)){ ENG_FMT(msg, __VA_ARGS__) };
+#define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
 #define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();
 
 #else

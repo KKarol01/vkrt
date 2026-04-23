@@ -185,6 +185,18 @@ size_t File::write(const std::byte* bytes, size_t size, size_t offset)
     return writechars;
 }
 
+void File::delete_from_disk()
+{
+    close();
+    fs->delete_file(path);
+}
+
+bool File::eof() const
+{
+    if(!file) { return false; }
+    feof((FILE*)file);
+}
+
 uint64_t File::get_hash()
 {
     if(content_hash != 0) { return content_hash; }

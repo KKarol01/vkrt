@@ -60,7 +60,7 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 namespace eng
 {
 
-ScopedTimer::ScopedTimer(std::string_view label, uint32_t nest_level) : label(label), nest_level(nest_level)
+ScopedTimer::ScopedTimer(std::string_view label) : label(label), nest_level((uint32_t)g_scoped_timers.size())
 {
 #ifdef ENG_DEBUG_BUILD
     start_secs = glfwGetTime();

@@ -377,7 +377,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, 
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     fastgltf::Parser gltfparser;
     const auto gltfasset = [&file_path, &gltfparser, &fastdatabuf] {
-        ScopedTimer timer{ ENG_FMT("GLTF file parsing {}", file_path.string()) };
+        ENG_TIMER_SCOPED("GLTF file parsing {}", file_path.string());
         if(file_path.extension() == ".glb")
         {
             return gltfparser.loadGltfBinary(fastdatabuf.get(), file_path.parent_path(), gltfOptions);
@@ -393,7 +393,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, 
 
     auto& gltfscene = gltfasset->scenes.at(0);
 
-    ScopedTimer timer{ ENG_FMT("GLTF loading asset {}", file_path.string()) };
+    ENG_TIMER_SCOPED("GLTF loading asset {}", file_path.string());
     Asset asset{};
     gltf::Context context{};
     context.import_settings = import_settings;

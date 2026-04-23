@@ -145,6 +145,7 @@ target_include_directories(eng
 	${CMAKE_SOURCE_DIR}/third_party/fastgltf/include 
 	${CMAKE_SOURCE_DIR}/third_party/fmt/include
 	${CMAKE_SOURCE_DIR}/third_party/reproc/reproc++/include
+	${CMAKE_SOURCE_DIR}/third_party/zlib/include/
 )
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS}/../Lib)
@@ -175,7 +176,7 @@ target_link_libraries(eng
         fastgltf
         meshoptimizer
 		reproc++
-		zlib/lib/zs
+		zlib/lib/z
 )
 target_compile_definitions(eng
     PUBLIC
@@ -241,4 +242,11 @@ target_precompile_headers(eng
 
         <eng/renderer/renderer_fwd.hpp>
         <eng/renderer/vulkan/to_vk.hpp>
+)
+
+add_custom_command(TARGET eng POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/zlib/lib/z.dll"
+        "${CMAKE_SOURCE_DIR}/third_party/zlib/lib/z.exp"
+        $<TARGET_FILE_DIR:eng>
 )
