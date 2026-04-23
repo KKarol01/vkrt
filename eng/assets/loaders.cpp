@@ -103,9 +103,7 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             auto it = gltfprim.findAttribute(FAST_COMPS[i]);
             auto& acc = gltfasset.accessors.at(it->accessorIndex);
             if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
-            ENG_TIMER_START("Iterating {}", i);
             fast_iterate(i, acc, GFX_COMPS[i]);
-            ENG_TIMER_END();
         }
 
         if(gltfprim.indicesAccessor)
@@ -125,7 +123,6 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             continue;
         }
 
-        ENG_TIMER_START("Making geometry");
         asset.geometries.push_back(get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
             .flags = {},
             .vertex_layout = vertex_layout,
@@ -140,7 +137,6 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
         {
             asset.geometry_data_futures.push_back(asset.geometry_data.back().get_future().share());
         }
-        ENG_TIMER_END();
         ++geoms.size;
     }
 
@@ -381,6 +377,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, 
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     fastgltf::Parser gltfparser;
     const auto gltfasset = [&file_path, &gltfparser, &fastdatabuf] {
+        ScopedTimer timer{ ENG_FMT("GLTF file parsing {}", file_path.string()) };
         if(file_path.extension() == ".glb")
         {
             return gltfparser.loadGltfBinary(fastdatabuf.get(), file_path.parent_path(), gltfOptions);
@@ -396,6 +393,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, 
 
     auto& gltfscene = gltfasset->scenes.at(0);
 
+    ScopedTimer timer{ ENG_FMT("GLTF loading asset {}", file_path.string()) };
     Asset asset{};
     gltf::Context context{};
     context.import_settings = import_settings;

@@ -72,11 +72,11 @@ ScopedTimer::~ScopedTimer()
 #ifdef ENG_DEBUG_BUILD
     const auto delta_secs = glfwGetTime() - start_secs;
     char msg[256];
-    const auto msg_len = ENG_FMT_TO_N(msg, 255, "{}: {:.2f}ms", label.as_view(), delta_secs * 1000.0);
+    const auto msg_len = ENG_FMT_TO_N(msg, 255, "[{: >6.2f}ms] : {}", delta_secs * 1000.0, label.as_view());
     msg[msg_len] = '\0';
-    static constexpr const char* MESSAGE_PREFIX = "Timing Results: ";
-    static const auto print_msg = [](std::string_view msg, bool add_new_line = false) {
-        ENG_LOG("{}{}{}", MESSAGE_PREFIX, add_new_line ? '\n' : '\0', msg);
+    static const auto print_msg = [](std::string_view msg) {
+        if(msg.ends_with('\n')) { msg = msg.substr(0, msg.size() - 1); }
+        ENG_LOG("{}", msg);
     };
     if(nest_level == ~0u) { print_msg(msg); }
     else
@@ -115,7 +115,7 @@ ScopedTimer::~ScopedTimer()
         };
         thread_local ScopedTimerMessage scoped_message{};
         scoped_message.add_message(nest_level, msg);
-        if(nest_level == 0) { print_msg(scoped_message.compose(), true); }
+        if(nest_level == 0) { print_msg(scoped_message.compose()); }
     }
 #endif
 }

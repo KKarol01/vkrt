@@ -51,6 +51,8 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                 signal.wait();
             }
 
+            ScopedTimer timer{ ENG_FMT("Serializing {}", asset.path.string()) };
+
             size_t size = 0;
             Serializer::serialize(asset, size);
             if(size > 0)
