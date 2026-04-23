@@ -23,36 +23,12 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         auto engb_file = get_engine().fs->get_asset(engb_path, fs::OpenMode::RB);
         if(engb_file)
         {
-            ENG_TIMER_START("Engb deserialization");
+            ScopedTimer timer{ ENG_FMT("Deserializing {}", engb_path.string()) };
             Asset asset{};
-
-            ENG_TIMER_START("file reading");
             auto bytes = engb_file->read();
-            ENG_TIMER_END();
             size_t bytes_read = 0;
-            {
-                ENG_TIMER_START("desrializing");
-                {
-                    ENG_TIMER_START("desrializing_1");
-                    {
-                        ENG_TIMER_START("desrializing_1_1");
-                        ENG_TIMER_END();
-                    }
-                    {
-                        ENG_TIMER_START("desrializing_1_2");
-                        ENG_TIMER_END();
-                    }
-                    ENG_TIMER_END();
-                }
-                {
-                    ENG_TIMER_START("reading");
-                    Serializer::deserialize((const std::byte*)bytes.data(), bytes_read, bytes.size(), asset);
-                    ENG_TIMER_END();
-                }
-                ENG_TIMER_END();
-            }
+            Serializer::deserialize((const std::byte*)bytes.data(), bytes_read, bytes.size(), asset);
             auto it = loaded_assets_map.emplace(file_path, std::move(asset));
-            ENG_TIMER_END();
             return it.first->second;
         }
     }

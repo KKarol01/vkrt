@@ -147,7 +147,7 @@ target_include_directories(eng
 	${CMAKE_SOURCE_DIR}/third_party/reproc/reproc++/include
 )
 target_compile_features(eng PRIVATE cxx_std_23)
-target_link_directories(eng PRIVATE ${Vulkan_INCLUDE_DIRS}/../Lib)
+target_link_directories(eng PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS}/../Lib)
 if(MSVC)
     target_compile_options(eng PRIVATE 
         /W4    
@@ -175,6 +175,7 @@ target_link_libraries(eng
         fastgltf
         meshoptimizer
 		reproc++
+		zlib/lib/zs
 )
 target_compile_definitions(eng
     PUBLIC
