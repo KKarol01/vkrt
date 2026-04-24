@@ -27,13 +27,13 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         Asset asset{};
         std::vector<std::byte> decompressed_asset;
         bool failure = false;
-        unsigned char file_buf[compression::ZLIB_SCRATCH_SIZE];
+        std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
         auto success = compression::zlib_inflate(
             [&](size_t size) {
                 if(failure) { return std::span<const std::byte>{}; }
-                const auto file_read = engb_file->read((std::byte*)file_buf, size);
+                const auto file_read = engb_file->read(file_buf.data(), size);
                 const auto bytes_to_process = std::min(file_read, size);
-                auto span = std::as_bytes(std::span{ file_buf, bytes_to_process });
+                auto span = std::span<const std::byte>{ file_buf.data(), bytes_to_process };
                 return span;
             },
             [&](std::span<const std::byte> data) {
@@ -95,7 +95,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                     [&](size_t size) {
                         if(failure) { return std::span<const std::byte>{}; }
                         const auto bytes_to_process = std::min(bytes_left, size);
-                        auto span = std::as_bytes(std::span{ asset_bytes.data() + bytes_read, bytes_to_process });
+                        auto span = std::span<const std::byte>{ asset_bytes.data() + bytes_read, bytes_to_process };
                         bytes_read += bytes_to_process;
                         bytes_left -= bytes_to_process;
                         return span;
