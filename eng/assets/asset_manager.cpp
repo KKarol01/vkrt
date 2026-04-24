@@ -1,9 +1,9 @@
 #include "asset_manager.hpp"
 #include <ranges>
-#include <zlib/zlib.h>
 #include <eng/engine.hpp>
 #include <eng/assets/loaders.hpp>
 #include <eng/assets/serialization.hpp>
+#include <eng/assets/compression.hpp>
 
 namespace eng
 {
@@ -11,10 +11,6 @@ namespace assets
 {
 
 Asset null_asset{};
-
-inline constexpr size_t INPUT_SIZE = 256 * 1024;
-
-#define ZLIB_CHECK(error) ENG_ASSERT(error == Z_OK || error != Z_STREAM_ERROR, "Zlib failed with error {}", error)
 
 const Asset& AssetManager::get_asset(const fs::Path& file_path)
 {
@@ -29,36 +25,27 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         if(!engb_file) { return nullptr; }
         ENG_TIMER_SCOPED("Deserializing {}", engb_path.string());
         Asset asset{};
-        z_stream strm{};
-        inflateInit(&strm);
-        unsigned char strm_buf[INPUT_SIZE];
         std::vector<std::byte> decompressed_asset;
-        std::vector<std::byte> out_buf(INPUT_SIZE);
-        int ret;
-        do
+        bool failure = false;
+        unsigned char file_buf[compression::ZLIB_SCRATCH_SIZE];
+        auto success = compression::zlib_inflate(
+            [&](size_t size) {
+                if(failure) { return std::span<const std::byte>{}; }
+                const auto file_read = engb_file->read((std::byte*)file_buf, size);
+                const auto bytes_to_process = std::min(file_read, size);
+                auto span = std::as_bytes(std::span{ file_buf, bytes_to_process });
+                return span;
+            },
+            [&](std::span<const std::byte> data) {
+                if(failure) { return; }
+                decompressed_asset.insert(decompressed_asset.end(), data.begin(), data.end());
+            });
+        if(!success)
         {
-            const auto bytes_read = engb_file->read((std::byte*)strm_buf, INPUT_SIZE);
-            if(bytes_read == 0) { break; }
-            strm.next_in = strm_buf;
-            strm.avail_in = bytes_read;
-            do
-            {
-                strm.next_out = (Bytef*)out_buf.data();
-                strm.avail_out = INPUT_SIZE;
-                ret = inflate(&strm, Z_NO_FLUSH);
-                if(ret != Z_OK && ret != Z_STREAM_END)
-                {
-                    ENG_WARN("Failed deserializing {} file", file_path.string());
-                    inflateEnd(&strm);
-                    return nullptr;
-                }
-                const auto have = INPUT_SIZE - strm.avail_out;
-                decompressed_asset.insert(decompressed_asset.end(), out_buf.begin(), out_buf.begin() + have);
-            }
-            while(strm.avail_out == 0);
+            ENG_WARN("Failed to decompress serialized data {}", file_path.string());
+            return nullptr;
         }
-        while(ret != Z_STREAM_END);
-        inflateEnd(&strm);
+
         size_t read_bytes = 0;
         Serializer::deserialize((const std::byte*)decompressed_asset.data(), read_bytes, decompressed_asset.size(), asset);
         auto it = loaded_assets_map.emplace(file_path, std::move(asset));
@@ -95,54 +82,32 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                 auto serialized_path = asset.path;
                 serialized_path.replace_extension(".engb");
 
-                z_stream strm{};
-                auto err = deflateInit(&strm, Z_DEFAULT_COMPRESSION);
-                ZLIB_CHECK(err);
-
-                size_t bytes_read = 0;
-                size_t bytes_left = asset_bytes.size();
-                unsigned char deflate_buffer[INPUT_SIZE];
-
                 auto file = get_engine().fs->get_asset(serialized_path, fs::OpenMode::WB);
                 if(!file)
                 {
                     ENG_WARN("Could not open file {} for serializing", serialized_path.string());
                     return;
                 }
-
-                while(true)
-                {
-                    const size_t bytes_to_compress = std::min(INPUT_SIZE, bytes_left);
-                    strm.avail_in = bytes_to_compress;
-                    strm.next_in = (Bytef*)asset_bytes.data() + bytes_read;
-                    bytes_read += bytes_to_compress;
-                    bytes_left -= bytes_to_compress;
-                    const auto flush = bytes_left == 0 ? Z_FINISH : Z_NO_FLUSH;
-                    int ret;
-                    do
-                    {
-                        strm.avail_out = INPUT_SIZE;
-                        strm.next_out = deflate_buffer;
-
-                        ret = deflate(&strm, flush);
-                        ZLIB_CHECK(err);
-                        const auto out_size = INPUT_SIZE - strm.avail_out;
-                        if(out_size > 0)
+                size_t bytes_read = 0;
+                size_t bytes_left = asset_bytes.size();
+                bool failure = false;
+                compression::zlib_deflate(
+                    [&](size_t size) {
+                        if(failure) { return std::span<const std::byte>{}; }
+                        const auto bytes_to_process = std::min(bytes_left, size);
+                        auto span = std::as_bytes(std::span{ asset_bytes.data() + bytes_read, bytes_to_process });
+                        bytes_read += bytes_to_process;
+                        bytes_left -= bytes_to_process;
+                        return span;
+                    },
+                    [&](std::span<const std::byte> data) {
+                        if(failure) { return; }
+                        if(file->write(data.data(), data.size()) != data.size())
                         {
-                            if(file->write((const std::byte*)deflate_buffer, out_size) != out_size)
-                            {
-                                ENG_WARN("Could not write {} bytes to file {} during compression", out_size,
-                                         serialized_path.string());
-                                deflateEnd(&strm);
-                                file->delete_from_disk();
-                                return;
-                            }
+                            ENG_WARN("Failed to serialized data to the file {}", serialized_path.string());
+                            failure = true;
                         }
-                    }
-                    while(strm.avail_out == 0);
-                    if(flush == Z_FINISH && ret == Z_STREAM_END) { break; }
-                }
-                deflateEnd(&strm);
+                    });
             }
 
             asset.geometry_data.resize(0);
