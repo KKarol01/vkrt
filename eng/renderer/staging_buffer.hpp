@@ -55,13 +55,14 @@ class StagingBuffer
     {
         ICommandPool* pool{};
         ICommandBuffer* cmd{};
-        Sync* semaphore{};
     };
 
   public:
     void init(SubmitQueue* queue);
-    // Flushes pending transactions.
-    void flush();
+    // Flushes pending transactions. Optionally returns signal sync.
+    Sync* flush(bool signal_sync);
+    // Flushes and waits on the cpu until completion.
+    void flush_wait();
     // Flushes pending transactions and waits for completions of all submissions.
     // void reset();
 
@@ -96,20 +97,16 @@ class StagingBuffer
     // Inserts image layout barrier with optional range.
     void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range = {});
 
-    // Gets the semaphore to wait on until all issued transactions have happened.
-     Sync* get_wait_sem(bool flush = true);
-
   private:
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
     void scan_for_finished_allocations();
     void merge_free_allocations();
-	void insert_free_alloc(const FreeAllocation& alloc);
+    void insert_free_alloc(const FreeAllocation& alloc);
     // Get frame dependent context
     Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
-    Sync* get_sem();
 
     void* get_alloc_mem(const Allocation& alloc) const;
 
@@ -121,11 +118,9 @@ class StagingBuffer
     SubmitQueue* queue{};
     Buffer buffer;
     std::vector<Context> contexts;
-    std::vector<Sync*> semaphores;
     std::deque<Allocation> allocations;
     std::vector<FreeAllocation> free_list; // key is floor(log2) of alloc size. min key is log2(alignment), max key is log2(capacity)
     uint64_t last_frame{};
-	Sync* common_sem{};
 };
 } // namespace gfx
 } // namespace eng

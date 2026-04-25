@@ -106,7 +106,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
         [this](RGBuilder& builder, const ImPassData& data) {
             auto& r = get_renderer();
             auto* cmd = builder.open_cmd_buf();
-            cmd->wait_sync(r.staging->get_wait_sem());
+            cmd->wait_sync(r.staging->flush(true));
             ImDrawData* draw_data = ImGui::GetDrawData();
 
             const auto& img = builder.graph->get_img(data.output).get();

@@ -267,7 +267,7 @@ ICommandBuffer* RGBuilder::open_cmd_buf()
     ENG_ASSERT(pass->cmd == nullptr);
     pass->cmd = graph->cmd_pools[0]->begin();
     pass->cmd->begin_label(pass->name.c_str());
-    pass->query = &get_renderer().current_data->timestamp_queries.emplace_back();
+    pass->query = &get_renderer().current_data->tstamp_queries.emplace_back();
     pass->query->pool = get_renderer().current_data->timestamp_pool;
     pass->query->label = pass->name;
     pass->query->index = get_renderer().current_data->timestamp_pool->allocate_queries(2);

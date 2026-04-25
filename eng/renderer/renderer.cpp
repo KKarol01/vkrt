@@ -634,20 +634,24 @@ void Renderer::update()
         auto blas_scratch = Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
         backend->allocate_buffer(blas_scratch);
 
+        auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
+        queue_destroy(blas_scratch); // destroy later in frame_delay frames
+
         auto* cmd = current_data->cmdpool->begin();
+        cmd->wait_sync(staging->flush(true), PipelineStage::AS_BUILD_BIT);
+
         total_reqs = {};
         for(auto i = 0u; i < reqs_vec.size(); ++i)
         {
             ASRequirements reqs = reqs_vec[i];
             ASRequirements _reqs;
             backend->make_blas(new_blases[i].get(), _reqs, cmd, &bufs.geom_blas.get(),
-                               total_reqs.acceleration_structure_size, &blas_scratch, total_reqs.build_scratch_size);
+                               total_reqs.acceleration_structure_size, &blas_scratch.get(), total_reqs.build_scratch_size);
             total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
             total_reqs.build_scratch_size += reqs.build_scratch_size;
         }
-        current_data->cmdpool->end(cmd);
-        gq->with_cmd_buf(cmd).submit_wait(~0ull);
-        backend->destroy_buffer(blas_scratch);
+        cmd->barrier(PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_WRITE_BIT, PipelineStage::AS_BUILD_BIT,
+                     PipelineAccess::AS_READ_BIT);
 
         std::vector<uint32_t> instance_ids;
         std::vector<const Geometry*> tlas_geoms;
@@ -667,22 +671,24 @@ void Renderer::update()
         backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
                            std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
         {
-            auto scratch = Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
+            auto tlas_scratch = make_buffer("tlas scratch", Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
+            queue_destroy(tlas_scratch); // destroy later in frame_delay frames
             bufs.geom_tlas_buffer =
                 make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
-            auto instances = Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT);
-            backend->allocate_buffer(scratch);
-            backend->allocate_buffer(instances);
-            auto* cmd = current_data->cmdpool->begin();
+            auto instances = make_buffer("Tlas blas instances",
+                                         Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT));
+            queue_destroy(instances);
             bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
                                                 std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
-                                                &bufs.geom_tlas_buffer.get(), 0, &scratch, 0, &instances, 0);
-            current_data->cmdpool->end(cmd);
-            gq->with_cmd_buf(cmd).submit_wait(~0ull);
-            backend->destroy_buffer(scratch);
-            backend->destroy_buffer(instances);
+                                                &bufs.geom_tlas_buffer.get(), 0, &tlas_scratch.get(), 0, &instances.get(), 0);
         }
 
+        auto* tlas_done_sync = current_data->get_sync();
+        cmd->signal_sync(tlas_done_sync, PipelineStage::AS_BUILD_BIT);
+        current_data->cmdpool->end(cmd);
+        gq->wait_sync(tlas_done_sync, PipelineStage::RAY_TRACING_BIT);
+        gq->with_cmd_buf(cmd);
+        gq->submit();
         new_blases.clear();
     }
 
@@ -690,7 +696,7 @@ void Renderer::update()
 
     compile_rendergraph();
 
-    Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->get_wait_sem() };
+    Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->flush(true) };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
     auto* cmd = current_data->cmdpool->begin();
     current_data->cmdpool->end(cmd);
@@ -732,7 +738,7 @@ void Renderer::compile_rendergraph()
             auto* cmd = b.open_cmd_buf();
             get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)).get(),
                                          &constants_buffer, 0ull, sizeof(constants_buffer), false);
-            cmd->wait_sync(get_renderer().staging->get_wait_sem());
+            cmd->wait_sync(get_renderer().staging->flush(true));
         });
 
     passes.mesh_passes[(int)RenderPassType::Z_PREPASS]->init(rgraph);

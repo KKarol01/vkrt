@@ -23,6 +23,7 @@ template<> struct VkObject<VkFence> { inline static constexpr VkObjectType type 
 
 template <typename VkStruct> inline void set_debug_name(VkStruct object, std::string_view name)
 {
+    if(!object) { return; }
 #ifdef ENG_DEBUG_BUILD
     VkDebugUtilsObjectNameInfoEXT obj_name{
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
