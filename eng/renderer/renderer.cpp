@@ -607,7 +607,6 @@ void Renderer::update()
     if(new_geometries.batches.size()) { build_pending_geometries(); }
     if(new_blases.size())
     {
-        staging->get_wait_sem()->wait_cpu(~0ull);
         std::vector<ASRequirements> reqs_vec;
         ASRequirements total_reqs{};
         for(auto gh : new_blases)
@@ -631,8 +630,6 @@ void Renderer::update()
             bufs.geom_blas->capacity = total_reqs.acceleration_structure_size;
             backend->allocate_buffer(bufs.geom_blas.get());
         }
-        auto blas_scratch = Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
-        backend->allocate_buffer(blas_scratch);
 
         auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
         queue_destroy(blas_scratch); // destroy later in frame_delay frames
@@ -865,7 +862,6 @@ void Renderer::queue_destroy(Handle<Buffer>& buffer)
     ENG_ASSERT(buffer);
     std::scoped_lock lock{ current_data->retired_mutex };
     current_data->retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
-    buffer = {};
 }
 
 Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
@@ -894,7 +890,6 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
         std::scoped_lock lock{ current_data->retired_mutex };
         current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
     }
-    image = {};
 }
 
 Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
