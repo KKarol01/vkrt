@@ -5,6 +5,7 @@
 #include <utility>
 #include <chrono>
 #include <cstring>
+#include <eng/math/align.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/renderer/set_debug_name.hpp>
@@ -578,7 +579,7 @@ void RendererBackendVk::init()
     });
 
     caps.supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
-                          phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+                               phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     // caps.supports_raytracing = false;
 
     auto synch2_features = vk::VkPhysicalDeviceSynchronization2Features{};
@@ -1629,6 +1630,8 @@ void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommand
 
     vk_build_info.dstAccelerationStructure = md->blas;
     vk_build_info.scratchData.deviceAddress = scratch_buffer->md.vk()->device_address + scratch_offset;
+    vk_build_info.scratchData.deviceAddress =
+        align_up2(vk_build_info.scratchData.deviceAddress, props.min_acceleration_structure_scratch_offset_alignment);
     ENG_ASSERT(vk_build_info.scratchData.deviceAddress % props.min_acceleration_structure_scratch_offset_alignment == 0);
 
     auto vkcmd = ((CommandBufferVk*)cmd)->cmd;
@@ -1692,7 +1695,7 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
 
     get_renderer().staging->copy(*instances_buffer, vk_instances.data(), instances_offset,
                                  vk_instances.size() * sizeof(vk_instances[0]));
-    cmd->wait_sync(get_renderer().staging->get_wait_sem(), PipelineStage::AS_BUILD_BIT);
+    cmd->wait_sync(get_renderer().staging->flush(true), PipelineStage::AS_BUILD_BIT);
 
     vk::VkAccelerationStructureCreateInfoKHR vk_tlas_info;
     vk_tlas_info.buffer = tlas_buffer->md.vk()->buffer;
