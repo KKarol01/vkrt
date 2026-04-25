@@ -48,17 +48,44 @@
 
 #define ENG_WARN(msg, ...) ENG_PRTLN("[WARN][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__)
 
-#define ENG_LOG(msg, ...)                                                                                              \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        const std::string format = ENG_FMT("[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                   \
-        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                               \
-        ENG_PRTLN("{}", format);                                                                                       \
-        /*get_engine().msg_log.push_front(format); */                                                                  \
-    }                                                                                                                  \
+namespace logger
+{
+inline thread_local char msg_buf[1024]{};
+}
+
+#define ENG_LOG(msg, ...)                                                                                                        \
+    do                                                                                                                           \
+    {                                                                                                                            \
+        const auto chars_written = ENG_FMT_TO_N(logger::msg_buf, 1023, "[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__); \
+        logger::msg_buf[chars_written] = '\0';                                                                                   \
+        ENG_PRTLN("{}", logger::msg_buf);                                                                                        \
+        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                                         \
+        /*get_engine().msg_log.push_front(format); */                                                                            \
+    }                                                                                                                            \
     while(0)
 
 #define ENG_TODO(msg, ...) ENG_PRTLN("[TODO][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__)
+
+#else
+#ifdef ENG_PLATFORM_WIN32
+#include <WinUser.h>
+#define ENG_ERROR(msg, ...)                                                                                            \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        MessageBoxA(NULL, ENG_FMT("[ERROR][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__).c_str(), NULL, MB_OK);    \
+        std::terminate();                                                                                              \
+    }                                                                                                                  \
+    while(0)
+#endif
+#define ENG_WARN(msg, ...)
+#define ENG_LOG(msg, ...)
+#define ENG_TODO(...)
+#define ENG_ASSERT(expr, ...)                                                                                          \
+    if((bool)(expr) == false) { ENG_ERROR(__VA_ARGS__); }
+#define ENG_TIMER_START(label)
+#define ENG_TIMER_END()
+
+#endif
 
 namespace eng
 {
@@ -88,24 +115,3 @@ struct ScopedTimerProxy
     ::eng::ScopedTimerProxy ENG_TIMER_CONCAT_LINE(eng_scoped_timer_proxy_, ENG_TIMER_EXPAND(__LINE__)){ ENG_FMT(msg, __VA_ARGS__) };
 #define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
 #define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();
-
-#else
-#ifdef ENG_PLATFORM_WIN32
-#include <WinUser.h>
-#define ENG_ERROR(msg, ...)                                                                                            \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        MessageBoxA(NULL, ENG_FMT("[ERROR][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__).c_str(), NULL, MB_OK);    \
-        std::terminate();                                                                                              \
-    }                                                                                                                  \
-    while(0)
-#endif
-#define ENG_WARN(msg, ...)
-#define ENG_LOG(msg, ...)
-#define ENG_TODO(...)
-#define ENG_ASSERT(expr, ...)                                                                                          \
-    if((bool)(expr) == false) { ENG_ERROR(__VA_ARGS__); }
-#define ENG_TIMER_START(label)
-#define ENG_TIMER_END()
-
-#endif
