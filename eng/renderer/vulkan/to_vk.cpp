@@ -296,8 +296,6 @@ VkBufferUsageFlags to_vk(const Flags<BufferUsage>& a)
 VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
 {
     VkPipelineStageFlags2 flags{};
-    if(a == gfx::PipelineStage::NONE)               { flags |= VK_PIPELINE_STAGE_2_NONE; }
-    if(a == gfx::PipelineStage::ALL)                { flags |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
     if(a.test(gfx::PipelineStage::TRANSFER_BIT))    { flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT; }
     if(a.test(gfx::PipelineStage::VERTEX_BIT))      { flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT; }
     if(a.test(gfx::PipelineStage::FRAGMENT))        { flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; }
@@ -307,13 +305,18 @@ VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
     if(a.test(gfx::PipelineStage::COMPUTE_BIT))     { flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; }
     if(a.test(gfx::PipelineStage::INDIRECT_BIT))    { flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT; }
 
-    if(a.test(gfx::PipelineStage::AS_BUILD_BIT))    { flags |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR; }
-    if(a.test(gfx::PipelineStage::RAY_TRACING_BIT))    { flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR; }
+    if(a.test(gfx::PipelineStage::AS_BUILD_BIT))	{ flags |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR; }
+    if(a.test(gfx::PipelineStage::RAY_TRACING_BIT)) { flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR; }
+
+    if(a == gfx::PipelineStage::NONE)               { flags  = VK_PIPELINE_STAGE_2_NONE; }
+    if(a == gfx::PipelineStage::ALL)                { flags  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
+
     return flags;
 }
 
 VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a)
 {
+	static_assert((int)PipelineAccess::LAST_ENUM == 1195);
     VkAccessFlags2 flags{};
     if(a == gfx::PipelineAccess::NONE)                  { flags |= VK_ACCESS_2_NONE; }
     if(a.test(gfx::PipelineAccess::SHADER_READ_BIT))    { flags |= VK_ACCESS_2_SHADER_READ_BIT; }
@@ -327,6 +330,8 @@ VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a)
     if(a.test(gfx::PipelineAccess::INDIRECT_READ_BIT))  { flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT; }
     if(a.test(gfx::PipelineAccess::TRANSFER_READ_BIT))  { flags |= VK_ACCESS_2_TRANSFER_READ_BIT; }
     if(a.test(gfx::PipelineAccess::TRANSFER_WRITE_BIT)) { flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT; }
+    if(a.test(gfx::PipelineAccess::AS_READ_BIT))		{ flags |= VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR; }
+    if(a.test(gfx::PipelineAccess::AS_WRITE_BIT))		{ flags |= VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR; }
     return flags;
 }
 
