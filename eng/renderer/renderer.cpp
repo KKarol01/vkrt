@@ -466,7 +466,8 @@ void Renderer::update()
     current_data->ren_fen->wait_cpu(~0ull);
     current_data->ren_fen->reset();
     current_data->cmdpool->reset();
-    current_data->available_queries = std::move(current_data->timestamp_queries);
+    current_data->reset_syncs();
+    current_data->reset_queries();
     // Stupid swapchain -- cannot reset those (binary sems that need to be destroyed to reset)
     // because waiting on a ren_fen doesn't guarantee that sems are no longer in use, and which
     // get reset only when waited on in the queue submission, so acq_sem gets waited on (reset)
@@ -1434,7 +1435,7 @@ ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffe
 {
     auto& r = get_renderer();
     auto& cd = r.current_data;
-    auto& tq = cd->timestamp_queries.emplace_back();
+    auto& tq = cd->tstamp_queries.emplace_back();
     query = &tq;
     query->label = label;
     query->pool = cd->timestamp_pool;
@@ -1447,6 +1448,22 @@ ScopedTimestampQuery::~ScopedTimestampQuery()
 {
     cmd->write_timestamp(query->pool, PipelineStage::ALL, query->index + 1);
 }
+
+void Renderer::FrameData::reset_queries() { available_tstamp_queries = std::move(tstamp_queries); }
+
+Sync* Renderer::FrameData::get_sync()
+{
+    if(available_syncs.size())
+    {
+        auto* sync = available_syncs.back();
+        available_syncs.pop_back();
+        syncs.push_back(sync);
+        return sync;
+    }
+    return syncs.emplace_back(get_renderer().make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE }));
+}
+
+void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
 {

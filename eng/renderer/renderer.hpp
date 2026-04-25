@@ -670,9 +670,15 @@ class Renderer
         Sync* swp_sem{};
         Sync* ren_fen{};
 
+        void reset_queries();
         QueryPool* timestamp_pool;
-        std::deque<TimestampQuery> timestamp_queries;
-        std::deque<TimestampQuery> available_queries;
+        std::deque<TimestampQuery> tstamp_queries;
+        std::deque<TimestampQuery> available_tstamp_queries;
+
+        Sync* get_sync();
+        void reset_syncs();
+        std::vector<Sync*> syncs;
+        std::vector<Sync*> available_syncs;
 
         RenderResources render_resources;
 
