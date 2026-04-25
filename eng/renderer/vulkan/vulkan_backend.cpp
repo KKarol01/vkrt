@@ -572,13 +572,14 @@ void RendererBackendVk::init()
 
     phys_ret.enable_extensions_if_present({
         VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
         VK_KHR_RAY_QUERY_EXTENSION_NAME,
     });
 
-    supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
+    caps.supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
                           phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    // caps.supports_raytracing = false;
 
     auto synch2_features = vk::VkPhysicalDeviceSynchronization2Features{};
     synch2_features.synchronization2 = true;
@@ -587,7 +588,7 @@ void RendererBackendVk::init()
     dyn_features.dynamicRendering = true;
 
     auto dev_2_features = vk::VkPhysicalDeviceFeatures2{};
-    dev_2_features.features.geometryShader = true;
+    // dev_2_features.features.geometryShader = true;
     dev_2_features.features.multiDrawIndirect = true;
     dev_2_features.features.fillModeNonSolid = true;
     dev_2_features.features.vertexPipelineStoresAndAtomics = true;
@@ -627,11 +628,19 @@ void RendererBackendVk::init()
     rayq_features.rayQuery = true;
 
     vkb::DeviceBuilder device_builder{ phys_ret };
-    device_builder.add_pNext(&dev_2_features).add_pNext(&dyn_features).add_pNext(&synch2_features).add_pNext(&dev_vk12_features);
-    if(supports_raytracing)
+    dev_2_features.pNext = &dyn_features;
+    dyn_features.pNext = &synch2_features;
+    synch2_features.pNext = &maint5_features;
+    maint5_features.pNext = &dev_vk12_features;
+    if(caps.supports_raytracing)
     {
-        device_builder.add_pNext(&acc_features).add_pNext(&rtpp_features).add_pNext(&maint5_features).add_pNext(&rayq_features);
+        dev_vk12_features.pNext = &acc_features;
+        acc_features.pNext = &rtpp_features;
+        rtpp_features.pNext = &rayq_features;
     }
+
+    device_builder.add_pNext(&dev_2_features);
+
     auto dev_ret = device_builder.build();
     if(!dev_ret)
     {
@@ -694,9 +703,7 @@ void RendererBackendVk::init()
     allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
     VK_CHECK(vmaCreateAllocator(&allocatorCreateInfo, &vma));
 
-    caps = RendererBackendCaps{
-        .supports_bindless = true, // Should be really checked, but it's safe to assume true
-    };
+    caps.supports_bindless = true; // Should be really checked, but it's safe to assume true
 
     pdev_limits = pdev_props.properties.limits;
     limits = RendererBackendLimits{
@@ -1271,6 +1278,11 @@ void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
     }
     buffer.usage |= BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT;
 
+    if(buffer.usage & BufferUsage::AS_SCRATCH)
+    {
+        buffer.capacity += props.min_acceleration_structure_scratch_offset_alignment;
+    }
+
     auto& backend = RendererBackendVk::get_instance();
     vk::VkBufferCreateInfo vkinfo;
     vkinfo.size = buffer.capacity;
@@ -1551,6 +1563,7 @@ SubmitQueue* RendererBackendVk::get_queue(QueueType type)
 void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommandBuffer* cmd, Buffer* as_buffer,
                                   size_t as_offset, Buffer* scratch_buffer, size_t scratch_offset)
 {
+    if(!caps.supports_raytracing) { return; }
     if(!geom.md.ptr) { geom.md.ptr = new GeometryMetadataVk{}; }
     ENG_ASSERT(geom.md.ptr);
     auto* md = geom.md.vk();
@@ -1629,6 +1642,7 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
                                                       Buffer* scratch_buffer, size_t scratch_offset,
                                                       Buffer* instances_buffer, size_t instances_offset)
 {
+    if(!caps.supports_raytracing) { return TopAccelerationStructure{}; }
     ENG_ASSERT(geoms.size() == transforms.size() && geoms.size() == instance_ids.size());
 
     const auto vk_instances = std::views::zip_transform(
@@ -1692,6 +1706,8 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
 
     vk_build_info.dstAccelerationStructure = tlas;
     vk_build_info.scratchData.deviceAddress = scratch_buffer->md.vk()->device_address + scratch_offset;
+    vk_build_info.scratchData.deviceAddress =
+        align_up2(vk_build_info.scratchData.deviceAddress, props.min_acceleration_structure_scratch_offset_alignment);
 
     auto vkcmd = ((CommandBufferVk*)cmd)->cmd;
     vk::VkAccelerationStructureBuildRangeInfoKHR tlas_range_info{};

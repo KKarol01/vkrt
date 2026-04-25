@@ -261,11 +261,11 @@ class DebugPanel : public Panel
                         // Pass title with time measurement in ms
                         {
                             ImGui::Text("%s", pass.name.c_str());
-                            auto it = std::ranges::find_if(gfx::get_renderer().current_data->available_queries,
+                            auto it = std::ranges::find_if(gfx::get_renderer().current_data->available_tstamp_queries,
                                                            [&pass](const gfx::TimestampQuery& q) {
                                                                return q.label == pass.name;
                                                            });
-                            if(it != gfx::get_renderer().current_data->available_queries.end())
+                            if(it != gfx::get_renderer().current_data->available_tstamp_queries.end())
                             {
                                 auto& times = pass_times[it->label.hash()];
                                 const auto time_now_secs = get_engine().get_time_secs();
