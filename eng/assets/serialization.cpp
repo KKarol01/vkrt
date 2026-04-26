@@ -32,37 +32,41 @@ namespace engb
 namespace v0
 {
 
-void Container::add_asset(uint8_t version, uint64_t custom_hash, std::span<const std::byte> asset)
+Container::Container(fs::FilePtr container_file) {}
+
+void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset)
 {
-    lists.emplace_back(custom_hash, ENG_HASH(asset), asset_bytes.size(), version);
-    asset_bytes.insert(asset_bytes.end(), asset.begin(), asset.end());
+    m_lists.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), version);
+    m_asset_bytes.insert(m_asset_bytes.end(), asset.begin(), asset.end());
 }
 
 void Container::serialize(size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
 {
     static constexpr const char* MAGIC = "engb";
     static constexpr uint8_t VERSION = 0;
+
     serialize_write_bytes_safe(out_bytes, MAGIC, out_bytes_written, out_bytes_size, 4);
     serialize_write_bytes_safe(out_bytes, &VERSION, out_bytes_written, out_bytes_size, 1);
 
-    const uint32_t item_count = (uint32_t)lists.size();
+    const uint32_t item_count = (uint32_t)m_lists.size();
     serialize_write_bytes_safe(out_bytes, &item_count, out_bytes_written, out_bytes_size, 4);
-    for(const auto& l : lists)
+    for(const auto& l : m_lists)
     {
-        const size_t actual_start = HEADER_BYTE_SZ + (lists.size() * LIST_BYTE_SZ) + l.asset_start;
+        const size_t actual_start = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + l.asset_start;
         serialize_write_bytes_safe(out_bytes, &l.custom_hash, out_bytes_written, out_bytes_size, 8);
         serialize_write_bytes_safe(out_bytes, &l.content_hash, out_bytes_written, out_bytes_size, 8);
         serialize_write_bytes_safe(out_bytes, &actual_start, out_bytes_written, out_bytes_size, 8);
         serialize_write_bytes_safe(out_bytes, &l.version, out_bytes_written, out_bytes_size, 1);
+        serialize_write_bytes_safe(out_bytes, &l.flags, out_bytes_written, out_bytes_size, 1);
     }
 
-    serialize_write_bytes_safe(out_bytes, asset_bytes.data(), out_bytes_written, out_bytes_size, asset_bytes.size());
+    serialize_write_bytes_safe(out_bytes, m_asset_bytes.data(), out_bytes_written, out_bytes_size, m_asset_bytes.size());
 }
 
 void Container::serialize(size_t& out_bytes_written, fs::FilePtr out_file)
 {
     if(!out_file) { return; }
-    const auto total_size_bytes = HEADER_BYTE_SZ + (lists.size() * LIST_BYTE_SZ) + asset_bytes.size();
+    const auto total_size_bytes = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + m_asset_bytes.size();
     std::vector<std::byte> data(total_size_bytes);
     serialize(out_bytes_written, data.data());
     ENG_ASSERT(total_size_bytes == out_bytes_written);

@@ -1367,7 +1367,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         return false;
     }
 
-    fs::FilePtr shaderfile = get_engine().fs->get_asset(shader.path, fs::OpenMode::RB);
+    fs::FilePtr shaderfile = get_engine().fs->get_asset(shader.path, fs::OpenMode::READ_BYTES);
     if(!shaderfile)
     {
         ENG_WARN("Could not open shader file {}", shader.path.string());
@@ -1381,7 +1381,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
 
     // check if precompiled
     {
-        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::RB);
+        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::READ_BYTES);
         if(precompfile && precompfile->size > 8)
         {
             std::byte readhash8[8];
@@ -1443,7 +1443,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         };
         auto [ret, code] = reproc::run(args, opts);
 
-        fs::FilePtr compiledspvfile = get_engine().fs->get_asset(spv_path, fs::OpenMode::RB);
+        fs::FilePtr compiledspvfile = get_engine().fs->get_asset(spv_path, fs::OpenMode::READ_BYTES);
         if(!compiledspvfile)
         {
             ENG_WARN("Could not open spv output file after compilation {}", spv_path);
@@ -1455,7 +1455,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
         out_spv.resize(compiled_spv.size() / 4);
         memcpy(out_spv.data(), compiled_spv.data(), compiled_spv.size());
 
-        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::WB);
+        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::WRITE_CREATE_BYTES);
         if(precompfile)
         {
             std::byte contenthash8[8];

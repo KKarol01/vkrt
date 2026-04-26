@@ -21,7 +21,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
     const auto try_deserializing = [this, &file_path]() -> Asset* {
         auto engb_path = file_path;
         engb_path.replace_extension(".engb");
-        auto engb_file = get_engine().fs->get_asset(engb_path, fs::OpenMode::RB);
+        auto engb_file = get_engine().fs->get_asset(engb_path, fs::OpenMode::READ_BYTES);
         if(!engb_file) { return nullptr; }
         ENG_TIMER_SCOPED("Deserializing {}", engb_path.string());
         Asset asset{};
@@ -82,7 +82,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                 auto serialized_path = asset.path;
                 serialized_path.replace_extension(".engb");
 
-                auto file = get_engine().fs->get_asset(serialized_path, fs::OpenMode::WB);
+                auto file = get_engine().fs->get_asset(serialized_path, fs::OpenMode::WRITE_CREATE_BYTES);
                 if(!file)
                 {
                     ENG_WARN("Could not open file {} for serializing", serialized_path.string());
