@@ -26,7 +26,7 @@ class ICommandBuffer
                          Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access) = 0;
     virtual void barrier(const Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
                          Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
-                         ImageLayout new_layout, const ImageMipLayerRange& range = { { 0u, ~0u }, { 0u, ~0u } }) = 0;
+                         ImageLayout new_layout, const ImageMipsLayers& range = { { 0u, ~0u }, { 0u, ~0u } }) = 0;
 
     virtual void copy(const Buffer& dst, const Buffer& src, size_t dst_offset, Range64u range) = 0;
     virtual void copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count) = 0;
@@ -88,7 +88,7 @@ class CommandBufferVk : public ICommandBuffer
                  Flags<PipelineAccess> dst_access) override;
     void barrier(const Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
                  Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
-                 ImageLayout new_layout, const ImageMipLayerRange& range = { { 0u, ~0u }, { 0u, ~0u } }) override;
+                 ImageLayout new_layout, const ImageMipsLayers& range = { { 0u, ~0u }, { 0u, ~0u } }) override;
 
     void copy(const Buffer& dst, const Buffer& src, size_t dst_offset, Range64u range) override;
     void copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count) override;

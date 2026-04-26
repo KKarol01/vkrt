@@ -411,7 +411,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
 {
     std::swap(sems[0], sems[1]);
     std::swap(cmd_pools[0], cmd_pools[1]);
-    sems[0]->reset();
+    //sems[0]->reset();
     cmd_pools[0]->reset();
     for(auto i = 0u; i < wait_count; ++i)
     {

@@ -39,7 +39,7 @@ void CommandBufferVk::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAcce
 
 void CommandBufferVk::barrier(const Image& image, Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
                               Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access, ImageLayout old_layout,
-                              ImageLayout new_layout, const ImageMipLayerRange& range)
+                              ImageLayout new_layout, const ImageMipsLayers& range)
 {
     auto barr = vk::VkImageMemoryBarrier2{};
     barr.srcStageMask = to_vk(src_stage);

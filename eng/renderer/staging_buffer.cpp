@@ -108,8 +108,8 @@ void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, 
 
 void StagingBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, bool transition_back)
 {
-    const auto dstrange = ImageMipLayerRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
-    const auto srcrange = ImageMipLayerRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
+    const auto dstrange = ImageMipsLayers{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
+    const auto srcrange = ImageMipsLayers{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
     prepare_image(&dst, &src, true, false, dstrange, srcrange);
     get_cmd()->copy(dst, src, copy);
     if(transition_back) { prepare_image(&dst, &src, false, true, dstrange, srcrange); }
@@ -118,8 +118,8 @@ void StagingBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, bo
 
 void StagingBuffer::blit(Image& dst, const Image& src, const ImageBlit& blit, bool transition_back)
 {
-    const auto dstrange = ImageMipLayerRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
-    const auto srcrange = ImageMipLayerRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
+    const auto dstrange = ImageMipsLayers{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
+    const auto srcrange = ImageMipsLayers{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
     prepare_image(&dst, &src, true, false, dstrange, srcrange);
     get_cmd()->blit(dst, src, blit);
     if(transition_back) { prepare_image(&dst, &src, false, true, dstrange, srcrange); }
@@ -197,7 +197,7 @@ void StagingBuffer::barrier()
                        PipelineAccess::TRANSFER_RW);
 }
 
-void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range)
+void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipsLayers& range)
 {
     ENG_ASSERT(dst_layout != ImageLayout::UNDEFINED);
     get_cmd()->barrier(dst, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
@@ -324,7 +324,7 @@ void* StagingBuffer::get_alloc_mem(const Allocation& alloc) const
 }
 
 void StagingBuffer::prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
-                                  ImageMipLayerRange dst_range, ImageMipLayerRange src_range)
+                                  ImageMipsLayers dst_range, ImageMipsLayers src_range)
 {
     if(!finished)
     {

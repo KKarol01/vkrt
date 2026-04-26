@@ -88,7 +88,7 @@ struct ZPrepass : public Pass
                 d.constants = b.as_acc_id(cd.render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
                 // todo: add access_indirect
-                d.indirect = b.import_resource(md.draw.indirect_buf);
+                d.indirect = b.import_resource(md.render_data.indirect_buf);
                 d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
                 d.instances = b.import_resource(md.instance_buffer);
                 d.instances = b.read_buffer(d.instances);
@@ -124,11 +124,11 @@ struct ZPrepass : public Pass
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
                 cmd->bind_resources(0, shaderresources);
-                md.draw.draw([&](const IndirectDrawParams& params) {
+                md.render_data.draw([&](const IndirectDrawParams& params) {
                     cmd->bind_pipeline(params.draw->pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(md.draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     md.draw.counts_view.buffer.get(), params.count_offset_bytes,
+                    cmd->draw_indexed_indirect_count(md.render_data.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                     md.render_data.counts_view.buffer.get(), params.count_offset_bytes,
                                                      params.max_draw_count, params.stride);
                 });
                 cmd->end_rendering();
@@ -679,7 +679,7 @@ struct MeshPass : public Pass
                 d.constants = b.as_acc_id(cd.render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
                 // todo: add access_indirect
-                d.indirect = b.import_resource(md.draw.indirect_buf);
+                d.indirect = b.import_resource(md.render_data.indirect_buf);
                 d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
                 d.instances = b.import_resource(md.instance_buffer);
                 d.instances = b.read_buffer(d.instances);
@@ -687,7 +687,10 @@ struct MeshPass : public Pass
                 d.positions = b.read_buffer(d.positions);
                 d.depth = depacc;
 
-                r.current_data->render_resources.color = b.as_res_id(d.out_color);
+                if(type == RenderPassType::OPAQUE)
+                {
+                    r.current_data->render_resources.opaque = b.as_res_id(d.out_color);
+                }
             },
             [this](RGBuilder& b, const PassData& d) {
                 if(!d.out_color) { return; }
@@ -727,11 +730,11 @@ struct MeshPass : public Pass
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
                 cmd->bind_resources(0, shaderresources);
-                md.draw.draw([&](const IndirectDrawParams& params) {
+                md.render_data.draw([&](const IndirectDrawParams& params) {
                     cmd->bind_pipeline(params.draw->pipeline.get());
                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(md.draw.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     md.draw.counts_view.buffer.get(), params.count_offset_bytes,
+                    cmd->draw_indexed_indirect_count(md.render_data.cmds_view.buffer.get(), params.command_offset_bytes,
+                                                     md.render_data.counts_view.buffer.get(), params.count_offset_bytes,
                                                      params.max_draw_count, params.stride);
                 });
                 cmd->end_rendering();

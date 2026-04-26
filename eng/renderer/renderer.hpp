@@ -416,13 +416,13 @@ struct Image
     } md;
 };
 
-struct ImageMipLayerRange
+struct ImageMipsLayers
 {
     Range32u mips{};
     Range32u layers{};
 };
 
-struct ImageLayerRange
+struct ImageLayers
 {
     uint32_t mip{};
     Range32u layers{};
@@ -430,8 +430,8 @@ struct ImageLayerRange
 
 struct ImageBlit
 {
-    ImageLayerRange srclayers{};
-    ImageLayerRange dstlayers{};
+    ImageLayers srclayers{};
+    ImageLayers dstlayers{};
     Range3D32i srcrange{};
     Range3D32i dstrange{};
     ImageFilter filter{ ImageFilter::LINEAR };
@@ -439,8 +439,8 @@ struct ImageBlit
 
 struct ImageCopy
 {
-    ImageLayerRange srclayers{};
-    ImageLayerRange dstlayers{};
+    ImageLayers srclayers{};
+    ImageLayers dstlayers{};
     Vec3i32 srcoffset{};
     Vec3i32 dstoffset{};
     Vec3u32 extent{};
@@ -623,7 +623,8 @@ struct RenderResources
     RGResourceId zpdepth;
     RGResourceId normal;
     RGResourceId ao;
-    RGResourceId color;
+    RGResourceId opaque; // set by the opaque mesh pass
+    // RGResourceId final_color;
 };
 
 struct TimestampQuery
@@ -725,8 +726,6 @@ class Renderer
         // size_t light_count{};
 
         Handle<Buffer> geom_blas; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
-        // Handle<Buffer> geom_scratch; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
-
         Handle<Buffer> geom_tlas_buffer;
         TopAccelerationStructure geom_tlas;
     };
@@ -738,9 +737,10 @@ class Renderer
 
     struct Settings
     {
-        ImageFormat color_format{ ImageFormat::R16FG16FB16FA16F };
+        ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
+        Vec2f override_render_resolution{ -1, -1 };
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 

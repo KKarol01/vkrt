@@ -95,7 +95,7 @@ class StagingBuffer
     // Inserts rw->rw barrier.
     void barrier();
     // Inserts image layout barrier with optional range.
-    void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range = {});
+    void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipsLayers& range = {});
 
   private:
     // Always succeeds, but may not allocate entire size due to lack of space.
@@ -111,8 +111,8 @@ class StagingBuffer
     void* get_alloc_mem(const Allocation& alloc) const;
 
     void prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
-                       ImageMipLayerRange dst_range = { { 0u, ~0u }, { 0u, ~0u } },
-                       ImageMipLayerRange src_range = { { 0u, ~0u }, { 0u, ~0u } });
+                       ImageMipsLayers dst_range = { { 0u, ~0u }, { 0u, ~0u } },
+                       ImageMipsLayers src_range = { { 0u, ~0u }, { 0u, ~0u } });
     bool translate_dst_offset(const Buffer& dst, size_t& offset, size_t size);
 
     SubmitQueue* queue{};

@@ -102,6 +102,7 @@ VkImageAspectFlags to_vk(const Flags<ImageAspect>& a)
 
 VkImageLayout to_vk(const ImageLayout& a)
 {
+	static_assert((int)ImageLayout::LAST_ENUM == 7);
     switch(a)
     {
         case gfx::ImageLayout::UNDEFINED:       { return VK_IMAGE_LAYOUT_UNDEFINED; }
@@ -316,7 +317,7 @@ VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
 
 VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a)
 {
-	static_assert((int)PipelineAccess::LAST_ENUM == 1195);
+	static_assert((int)PipelineAccess::LAST_ENUM == 5291);
     VkAccessFlags2 flags{};
     if(a == gfx::PipelineAccess::NONE)                  { flags |= VK_ACCESS_2_NONE; }
     if(a.test(gfx::PipelineAccess::SHADER_READ_BIT))    { flags |= VK_ACCESS_2_SHADER_READ_BIT; }
@@ -332,6 +333,7 @@ VkAccessFlags2 to_vk(const Flags<PipelineAccess>& a)
     if(a.test(gfx::PipelineAccess::TRANSFER_WRITE_BIT)) { flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT; }
     if(a.test(gfx::PipelineAccess::AS_READ_BIT))		{ flags |= VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR; }
     if(a.test(gfx::PipelineAccess::AS_WRITE_BIT))		{ flags |= VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR; }
+    if(a.test(gfx::PipelineAccess::PRESENT_BIT))		{ flags |= VK_ACCESS_2_NONE; }
     return flags;
 }
 

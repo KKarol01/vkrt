@@ -212,6 +212,8 @@ enum class ImageLayout : uint8_t
     TRANSFER_SRC,
     TRANSFER_DST,
     PRESENT,
+
+    LAST_ENUM,
 };
 
 enum class ImageType : uint8_t
@@ -289,9 +291,11 @@ enum class PipelineAccess : uint32_t
     AS_READ_BIT = 0x800,
     AS_WRITE_BIT = 0x1000,
     AS_RW = AS_READ_BIT | AS_WRITE_BIT,
+    PRESENT_BIT = 0x2000,
 
-    READS = SHADER_READ_BIT | COLOR_READ_BIT | DS_READ_BIT | STORAGE_READ_BIT | INDIRECT_READ_BIT | TRANSFER_READ_BIT,
-    WRITES = SHADER_WRITE_BIT | COLOR_WRITE_BIT | DS_WRITE_BIT | STORAGE_WRITE_BIT | TRANSFER_WRITE_BIT,
+    READS = SHADER_READ_BIT | COLOR_READ_BIT | DS_READ_BIT | STORAGE_READ_BIT | INDIRECT_READ_BIT | TRANSFER_READ_BIT |
+            AS_READ_BIT | PRESENT_BIT,
+    WRITES = SHADER_WRITE_BIT | COLOR_WRITE_BIT | DS_WRITE_BIT | STORAGE_WRITE_BIT | TRANSFER_WRITE_BIT | AS_WRITE_BIT,
 
     LAST_ENUM,
 };
@@ -398,8 +402,8 @@ struct Buffer;
 struct BufferView;
 struct Image;
 struct ImageView;
-struct ImageMipLayerRange;
-struct ImageLayerRange;
+struct ImageMipsLayers;
+struct ImageLayers;
 struct ImageBlit;
 struct ImageCopy;
 struct Sampler;

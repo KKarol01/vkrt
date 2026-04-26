@@ -198,7 +198,7 @@ void Engine::init(int argc, char* argv[])
     const GLFWvidmode* monitor_videomode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     if(monitor_videomode) { refresh_rate = 1.0f / static_cast<float>(monitor_videomode->refreshRate); }
 
-    camera = new Camera{ glm::radians(90.0f), 0.1f, 15.0f };
+    camera = new Camera{ glm::radians(90.0f), 0.1f };
     renderer->init(new gfx::RendererBackendVk{});
     ui->init();
 }

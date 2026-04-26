@@ -446,6 +446,12 @@ void Renderer::init_bufs()
 void Renderer::update()
 {
     settings.render_resolution = settings.new_render_resolution;
+    if(settings.override_render_resolution.x == -1 && settings.override_render_resolution.y == -1)
+    {
+        get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.present_resolution.x,
+                                               settings.present_resolution.y);
+        settings.render_resolution = settings.present_resolution;
+    }
 
     if(settings.regenerate_swapchain)
     {
@@ -468,12 +474,6 @@ void Renderer::update()
     current_data->cmdpool->reset();
     current_data->reset_syncs();
     current_data->reset_queries();
-    // Stupid swapchain -- cannot reset those (binary sems that need to be destroyed to reset)
-    // because waiting on a ren_fen doesn't guarantee that sems are no longer in use, and which
-    // get reset only when waited on in the queue submission, so acq_sem gets waited on (reset)
-    // during (but before) ren_fen signal operation, and swp_sem during present.
-    // current_data->acq_sem->reset();
-    // current_data->swp_sem->reset();
 
     if(auto lock = std::scoped_lock{ current_data->retired_mutex }; current_data->retired_resources.size() > 0)
     {
@@ -693,14 +693,8 @@ void Renderer::update()
 
     compile_rendergraph();
 
-    Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->flush(true) };
+    Sync* rg_wait_syncs[]{ staging->flush(true) };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
-    auto* cmd = current_data->cmdpool->begin();
-    current_data->cmdpool->end(cmd);
-    cmd->wait_sync(rgsync);
-    cmd->signal_sync(current_data->swp_sem);
-    cmd->signal_sync(current_data->ren_fen);
-    gq->with_cmd_buf(cmd).submit();
     gq->wait_sync(current_data->swp_sem).present(swapchain);
 
     ++current_frame;
@@ -739,34 +733,63 @@ void Renderer::compile_rendergraph()
         });
 
     passes.mesh_passes[(int)RenderPassType::Z_PREPASS]->init(rgraph);
-    passes.reconstruct_normals->init(rgraph);
-    passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
+    // passes.reconstruct_normals->init(rgraph);
+    // passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
     passes.mesh_passes[(int)RenderPassType::OPAQUE]->init(rgraph);
 
-    struct ApplyAOData
-    {
-        RGAccessId in_out_color;
-        RGAccessId in_ao;
-    };
-    rgraph->add_graphics_pass<ApplyAOData>(
-        "APPLY_AO", RenderOrder::MESH_RENDER,
-        [this](RGBuilder& b, ApplyAOData& d) {
-            d.in_out_color = b.read_write_image(b.as_acc_id(current_data->render_resources.color));
-            d.in_ao = b.read_image(b.as_acc_id(current_data->render_resources.ao));
-        },
-        [this](RGBuilder& b, const ApplyAOData& d) {
-            auto* cmd = b.open_cmd_buf();
-            cmd->bind_pipeline(settings.apply_ao_pipeline.get());
-            DescriptorResource resources[]{
-                DescriptorResource::storage_image(b.graph->get_acc(d.in_out_color).image_view),
-                DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
-            };
-            const auto& img = b.graph->get_img(d.in_ao).get();
-            cmd->bind_resources(1, resources);
-            cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
-        });
+    // struct ApplyAOData
+    //{
+    //     RGAccessId in_out_color;
+    //     RGAccessId in_ao;
+    // };
+    // rgraph->add_graphics_pass<ApplyAOData>(
+    //     "APPLY_AO", RenderOrder::MESH_RENDER,
+    //     [this](RGBuilder& b, ApplyAOData& d) {
+    //         d.in_out_color = b.read_write_image(b.as_acc_id(current_data->render_resources.color));
+    //         d.in_ao = b.read_image(b.as_acc_id(current_data->render_resources.ao));
+    //     },
+    //     [this](RGBuilder& b, const ApplyAOData& d) {
+    //         auto* cmd = b.open_cmd_buf();
+    //         cmd->bind_pipeline(settings.apply_ao_pipeline.get());
+    //         DescriptorResource resources[]{
+    //             DescriptorResource::storage_image(b.graph->get_acc(d.in_out_color).image_view),
+    //             DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+    //         };
+    //         const auto& img = b.graph->get_img(d.in_ao).get();
+    //         cmd->bind_resources(1, resources);
+    //         cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
+    //     });
 
-    const auto imdata = imgui_renderer->update(rgraph);
+    // const auto imdata = imgui_renderer->update(rgraph);
+
+    struct CompositeFinalColorData
+    {
+        RGAccessId in_color;
+        RGAccessId out_final_color;
+    };
+    const auto compositefinalcolor = rgraph->add_graphics_pass<CompositeFinalColorData>(
+        "CompositeFinalColor", RenderOrder::PRESENT,
+        [this](RGBuilder& b, CompositeFinalColorData& data) {
+            if(!current_data->render_resources.opaque) { return; }
+            data.in_color = b.copy_source(b.as_acc_id(current_data->render_resources.opaque));
+            data.out_final_color =
+                b.create_resource("FinalColorComposite",
+                                  Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
+                                              ImageUsage::TRANSFER_DST_BIT | ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
+                                  RGClear::color(), true);
+            data.out_final_color = b.copy_dest(data.out_final_color);
+        },
+        [this](RGBuilder& pb, const CompositeFinalColorData& data) {
+            auto* cmd = pb.open_cmd_buf();
+            auto& dsti = pb.graph->get_img(data.out_final_color).get();
+            const auto& srci = pb.graph->get_img(data.in_color).get();
+            cmd->blit(dsti, srci,
+                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
+                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
+                                 .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
+                                 .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
+                                 .filter = ImageFilter::LINEAR });
+        });
 
     struct CopySwapchainData
     {
@@ -774,25 +797,35 @@ void Renderer::compile_rendergraph()
         RGAccessId output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
-        "copy to swapchain", RenderOrder::PRESENT,
-        [this, imdata](RGBuilder& pb, CopySwapchainData& data) {
-            data.input = pb.access_resource(imdata.output, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
-                                            PipelineAccess::TRANSFER_READ_BIT);
-            data.output = pb.import_resource(swapchain->get_image());
-            data.output = pb.access_resource(data.output, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
-                                             PipelineAccess::TRANSFER_WRITE_BIT);
+        "CopyToSwapchain", RenderOrder::PRESENT,
+        [=, this](RGBuilder& b, CopySwapchainData& data) {
+            auto final_color_acc = b.copy_source(compositefinalcolor.out_final_color);
+            data.input = final_color_acc;
+            data.output = b.import_resource(swapchain->get_image());
+            data.output = b.copy_dest(data.output);
         },
-        [](RGBuilder& pb, const CopySwapchainData& data) {
+        [this](RGBuilder& pb, const CopySwapchainData& data) {
             auto* cmd = pb.open_cmd_buf();
-            cmd->copy(pb.graph->get_img(data.output).get(), pb.graph->get_img(data.input).get());
+            auto& dsti = pb.graph->get_img(data.output).get();
+            const auto& srci = pb.graph->get_img(data.input).get();
+            cmd->wait_sync(current_data->acq_sem, PipelineStage::TRANSFER_BIT);
+            cmd->blit(dsti, srci,
+                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
+                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
+                                 .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
+                                 .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
+                                 .filter = ImageFilter::LINEAR });
         });
     rgraph->add_graphics_pass<RGAccessId>(
-        "present swapchain", RenderOrder::PRESENT,
-        [copyswapchaindata](RGBuilder& pb, RGAccessId& output) {
-            output = pb.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL,
-                                        PipelineAccess::TRANSFER_WRITE_BIT);
+        "PresentSwapchain", RenderOrder::PRESENT,
+        [copyswapchaindata](RGBuilder& b, RGAccessId& output) {
+            output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
-        [](RGBuilder& pb, auto& data) {});
+        [this](RGBuilder& b, auto& data) {
+            auto* cmd = b.open_cmd_buf();
+            cmd->signal_sync(current_data->ren_fen, PipelineStage::ALL);
+            cmd->signal_sync(current_data->swp_sem, PipelineStage::ALL);
+        });
 
     rgraph->compile();
 }
