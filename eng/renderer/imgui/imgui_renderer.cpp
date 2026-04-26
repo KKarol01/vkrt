@@ -62,10 +62,10 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
     const auto& impassdata = graph->add_graphics_pass<ImPassData>(
         "imgui", RenderOrder::UI,
-        [this](RGBuilder& builder, ImPassData& data) {
+        [this](RGBuilder& b, ImPassData& data) {
             auto& r = get_renderer();
 
-            ui_callbacks.signal(builder);
+            ui_callbacks.signal(b);
 
             ImGui::Render();
 
@@ -97,11 +97,11 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
             const auto out_res =
                 Vec2f{ get_renderer().settings.present_resolution.x, get_renderer().settings.present_resolution.y };
-            data.output = builder.create_resource("imgui output",
-                                                  Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB,
-                                                              ImageUsage::COLOR_ATTACHMENT_BIT),
-                                                  RGClear::color());
-            data.output = builder.access_color(data.output);
+            data.output = b.create_resource("imgui output",
+                                            Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT),
+                                            RGClear::color());
+            data.output = b.access_color(data.output);
+            get_renderer().current_data->render_resources.final_color = b.as_res_id(data.output);
         },
         [this](RGBuilder& builder, const ImPassData& data) {
             auto& r = get_renderer();

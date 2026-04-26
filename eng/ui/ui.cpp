@@ -55,7 +55,7 @@ class GamePanel : public Panel
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().current_data->render_resources;
-            auto color = b.sample_texture(b.as_acc_id(rt.ao));
+            auto color = b.sample_texture(b.as_acc_id(rt.final_color));
             ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height });
         }
         ImGui::End();

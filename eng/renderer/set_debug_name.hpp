@@ -19,6 +19,7 @@ template<> struct VkObject<VkBuffer> { inline static constexpr VkObjectType type
 template<> struct VkObject<VkPipeline> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_PIPELINE; };
 template<> struct VkObject<VkSemaphore> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_SEMAPHORE; };
 template<> struct VkObject<VkFence> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_FENCE; };
+template<> struct VkObject<VkCommandBuffer> { inline static constexpr VkObjectType type = VK_OBJECT_TYPE_COMMAND_BUFFER; };
 // clang-format on
 
 template <typename VkStruct> inline void set_debug_name(VkStruct object, std::string_view name)

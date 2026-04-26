@@ -214,12 +214,14 @@ void Renderer::init_helper_geom()
 void Renderer::init_pipelines()
 {
     auto linear_sampler = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageAddressing::REPEAT));
+    auto linear_sampler_clamp = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageAddressing::CLAMP_EDGE));
     auto nearest_sampler = make_sampler(Sampler::init(ImageFilter::NEAREST, ImageAddressing::REPEAT));
     auto hiz_sampler = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageFilter::LINEAR, ImageAddressing::CLAMP_EDGE,
                                                   ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
                                                   SamplerMipmapMode::NEAREST, 0.0f, 1000.0f, 0.0f, SamplerReductionMode::MIN));
-    Handle<Sampler> imsamplers[3]{};
+    Handle<Sampler> imsamplers[ENG_SAMPLER_COUNT]{};
     imsamplers[ENG_SAMPLER_LINEAR] = linear_sampler;
+    imsamplers[ENG_SAMPLER_LINEAR_CLAMP] = linear_sampler_clamp;
     imsamplers[ENG_SAMPLER_NEAREST] = nearest_sampler;
     imsamplers[ENG_SAMPLER_HIZ] = hiz_sampler;
 
@@ -760,24 +762,24 @@ void Renderer::compile_rendergraph()
     //         cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
     //     });
 
-    // const auto imdata = imgui_renderer->update(rgraph);
-
     struct CompositeFinalColorData
     {
         RGAccessId in_color;
         RGAccessId out_final_color;
     };
     const auto compositefinalcolor = rgraph->add_graphics_pass<CompositeFinalColorData>(
-        "CompositeFinalColor", RenderOrder::PRESENT,
+        "CompositeFinalColor", RenderOrder::POST,
         [this](RGBuilder& b, CompositeFinalColorData& data) {
             if(!current_data->render_resources.opaque) { return; }
             data.in_color = b.copy_source(b.as_acc_id(current_data->render_resources.opaque));
+            // todo: make this persistent and double-buffered
             data.out_final_color =
                 b.create_resource("FinalColorComposite",
                                   Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                               ImageUsage::TRANSFER_DST_BIT | ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
-                                  RGClear::color(), true);
+                                  RGClear::color());
             data.out_final_color = b.copy_dest(data.out_final_color);
+            current_data->render_resources.final_color = b.as_res_id(data.out_final_color);
         },
         [this](RGBuilder& pb, const CompositeFinalColorData& data) {
             auto* cmd = pb.open_cmd_buf();
@@ -791,6 +793,8 @@ void Renderer::compile_rendergraph()
                                  .filter = ImageFilter::LINEAR });
         });
 
+    const auto imdata = imgui_renderer->update(rgraph);
+
     struct CopySwapchainData
     {
         RGAccessId input;
@@ -799,7 +803,7 @@ void Renderer::compile_rendergraph()
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
         "CopyToSwapchain", RenderOrder::PRESENT,
         [=, this](RGBuilder& b, CopySwapchainData& data) {
-            auto final_color_acc = b.copy_source(compositefinalcolor.out_final_color);
+            auto final_color_acc = b.copy_source(b.as_acc_id(get_renderer().current_data->render_resources.final_color));
             data.input = final_color_acc;
             data.output = b.import_resource(swapchain->get_image());
             data.output = b.copy_dest(data.output);
