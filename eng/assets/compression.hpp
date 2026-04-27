@@ -69,9 +69,9 @@ inline bool zlib_inflate(const InputCallback& input_callback, const OutputCallba
     while(ret != Z_STREAM_END)
     {
         std::span<const std::byte> in_data = input_callback(ZLIB_SCRATCH_SIZE);
-        if(in_data.empty()) { break; }
         strm.next_in = (Bytef*)in_data.data();
         strm.avail_in = in_data.size();
+        if(in_data.empty()) { break; }
         do
         {
             strm.next_out = scratch;

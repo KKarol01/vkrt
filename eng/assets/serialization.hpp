@@ -56,7 +56,7 @@ The format for this is as follows:
 		8B custom hash for lookup	- usually from virtual path like '/assets/models/model/scene.gltf'
 		8B content hash				- hash of the contents
 		8B asset start				- offset from the beginning of the container to the start of the asset
-		8B asset byte size			- asset byte size (includes all the dynamic data induced by flags)
+		8B asset byte size			- asset byte size (excludes all metadata from flags, offset from it to get them)
 		1B version number			- version of the byte representation of the contents in the container
 		1B flags					- flags describing the properties of the content
 	} : LIST_ITEM, ...] : LIST,
@@ -103,16 +103,18 @@ struct Container
 
     void read_list_section();
 
-    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset,
-                   AssetMetadata metadata = {});
+    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset);
     // for streaming compressed data later for the currently added asset, see asset_manager.cpp. set finished on last append to recalc hash.
     void append_asset_bytes(std::span<const std::byte> bytes, bool finished);
 
     void serialize(size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0);
     size_t serialize();
 
+    std::optional<List> get_asset_list(uint64_t custom_hash) const;
+    size_t get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset) const;
+
     fs::FilePtr m_file;
-    std::vector<List> m_lists;
+    std::vector<List> m_lists_vec;
     std::vector<std::byte> m_asset_bytes;
 };
 

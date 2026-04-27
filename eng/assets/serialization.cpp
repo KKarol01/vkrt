@@ -24,7 +24,6 @@ Container::Container(fs::FilePtr file) : m_file(file)
         return;
     }
     read_list_section();
-    m_file->close();
 }
 
 void Container::read_list_section()
@@ -32,7 +31,7 @@ void Container::read_list_section()
     if(!m_file || !m_file->is_open())
     {
         ENG_WARN("Couldn't open engb file {} for read", m_file ? m_file->path.string() : "<empty path>");
-        m_lists.clear();
+        m_lists_vec.clear();
         return;
     }
 
@@ -60,7 +59,7 @@ void Container::read_list_section()
 
     uint32_t num_lists;
     memcpy(&num_lists, &buf[5], sizeof(uint32_t));
-    m_lists.reserve(num_lists);
+    m_lists_vec.reserve(num_lists);
     uint32_t remaining = num_lists;
     constexpr size_t lists_per_buf = std::size(buf) / LIST_BYTE_SZ;
     while(remaining > 0)
@@ -76,39 +75,41 @@ void Container::read_list_section()
         size_t bytes_processed = 0;
         for(size_t i = 0; i < lists_to_read; ++i)
         {
-            auto& list = m_lists.emplace_back();
+            auto& list = m_lists_vec.emplace_back();
             Serializer::deserialize(buf, bytes_processed, bytes_to_read, list);
         }
         remaining -= lists_to_read;
     }
 }
 
-void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags,
-                          std::span<const std::byte> asset, AssetMetadata metadata)
+void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset)
 {
-    m_lists.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), asset.size(), version, flags);
+    m_lists_vec.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), 0, version, flags);
 
-    std::byte buf[64];
-    size_t metadata_bytes = 0;
-    if(flags & ListFlags::CONTENT_COMPRESSED_BIT)
-    {
-        ENG_ASSERT(metadata.uncompressed_size > 0);
-        memcpy(buf, &metadata.uncompressed_size, sizeof(metadata.uncompressed_size));
-    }
+    // std::byte buf[64];
+    // size_t metadata_bytes = 0;
+    //  if(flags & ListFlags::CONTENT_COMPRESSED_BIT)
+    //{
+    //      ENG_ASSERT(metadata.uncompressed_size > 0);
+    //      memcpy(buf, &metadata.uncompressed_size, sizeof(metadata.uncompressed_size));
+    //      metadata_bytes += sizeof(metadata.uncompressed_size);
+    //  }
 
-    ENG_ASSERT(metadata_bytes <= std::size(buf));
-    m_asset_bytes.insert(m_asset_bytes.end(), buf, buf + metadata_bytes);
+    // ENG_ASSERT(metadata_bytes <= std::size(buf));
+    // m_asset_bytes.insert(m_asset_bytes.end(), buf, buf + metadata_bytes);
     m_asset_bytes.insert(m_asset_bytes.end(), asset.begin(), asset.end());
+    // m_lists_vec.back().asset_start += metadata_bytes;
+    m_lists_vec.back().asset_size = asset.size();
 }
 
 void Container::append_asset_bytes(std::span<const std::byte> bytes, bool finished)
 {
     m_asset_bytes.insert(m_asset_bytes.end(), bytes.begin(), bytes.end());
-    m_lists.back().asset_size += bytes.size();
+    m_lists_vec.back().asset_size += bytes.size();
     if(finished)
     {
-        m_lists.back().content_hash =
-            ENG_HASH(ENG_HASH_AS_SPAN(m_asset_bytes.begin() + m_lists.back().asset_start, m_lists.back().asset_size));
+        m_lists_vec.back().content_hash =
+            ENG_HASH(ENG_HASH_AS_SPAN(m_asset_bytes.begin() + m_lists_vec.back().asset_start, m_lists_vec.back().asset_size));
     }
 }
 
@@ -120,11 +121,11 @@ void Container::serialize(size_t& out_bytes_written, std::byte* out_bytes, size_
     serialize_write_bytes_safe(out_bytes, MAGIC, out_bytes_written, out_bytes_size, 4);
     serialize_write_bytes_safe(out_bytes, &VERSION, out_bytes_written, out_bytes_size, 1);
 
-    const uint32_t item_count = (uint32_t)m_lists.size();
+    const uint32_t item_count = (uint32_t)m_lists_vec.size();
     serialize_write_bytes_safe(out_bytes, &item_count, out_bytes_written, out_bytes_size, 4);
-    for(auto& l : m_lists)
+    for(auto& l : m_lists_vec)
     {
-        l.asset_start = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + l.asset_start;
+        l.asset_start = HEADER_BYTE_SZ + (m_lists_vec.size() * LIST_BYTE_SZ) + l.asset_start;
         Serializer::serialize(l, out_bytes_written, out_bytes, out_bytes_size);
     }
 
@@ -139,15 +140,33 @@ size_t Container::serialize()
         ENG_WARN("Cannot serialize engb container: file mode is not permitting writes");
         return out_bytes_written;
     }
-    m_file->open();
-    const auto total_size_bytes = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + m_asset_bytes.size();
+    const auto total_size_bytes = HEADER_BYTE_SZ + (m_lists_vec.size() * LIST_BYTE_SZ) + m_asset_bytes.size();
     std::vector<std::byte> data(total_size_bytes);
     serialize(out_bytes_written, data.data(), total_size_bytes);
     ENG_ASSERT(total_size_bytes == out_bytes_written);
     const auto file_bytes_writen = m_file->write(data.data(), out_bytes_written);
     ENG_ASSERT(file_bytes_writen == total_size_bytes);
-    m_file->close();
+    m_file->file.flush();
     return out_bytes_written;
+}
+
+std::optional<List> Container::get_asset_list(uint64_t custom_hash) const
+{
+    for(const auto& l : m_lists_vec)
+    {
+        if(l.custom_hash == custom_hash) { return l; }
+    }
+    return std::nullopt;
+}
+
+size_t Container::get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset) const
+{
+    if(!m_file || !m_file->is_read()) { return 0; }
+    if(src_offset >= list.asset_size) { return 0; }
+    const size_t remaining_in_asset = list.asset_size - src_offset;
+    const size_t bytes_to_read = std::min(out_data.size(), remaining_in_asset);
+    const auto file_bytes = m_file->read(out_data.data(), bytes_to_read, list.asset_start + src_offset);
+    return file_bytes;
 }
 
 } // namespace v0
@@ -242,6 +261,7 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
 
     uint64_t image_count;
     deserialize_read_bytes_safe2(&image_count, bytes, sizeof(image_count), out_bytes_read, out_bytes_size);
+    t.images.resize(image_count);
     gfx::ParsedImageData imgd{};
     for(auto i = 0u; i < image_count; ++i)
     {
@@ -285,7 +305,7 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
     for(uint64_t i = 0; i < geom_count; ++i)
     {
         gfx::ParsedGeometryData geom;
-        deserialize(bytes, out_bytes_read, out_bytes_read, geom);
+        deserialize(bytes, out_bytes_read, out_bytes_size, geom);
         t.geometries[i] =
             gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
                                                                        .vertex_layout = geom.vertex_layout,
@@ -303,12 +323,12 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
     {
         gfx::Material mat;
         deserialize(bytes, out_bytes_read, out_bytes_size, mat);
-        if(mat.base_color_texture) { mat.base_color_texture.image = t.images[*mat.base_color_texture.image]; }
-        if(mat.normal_texture) { mat.normal_texture.image = t.images[*mat.normal_texture.image]; }
-        if(mat.metallic_roughness_texture)
-        {
-            mat.metallic_roughness_texture.image = t.images[*mat.metallic_roughness_texture.image];
-        }
+        //if(mat.base_color_texture) { mat.base_color_texture.image = t.images[*mat.base_color_texture.image]; }
+        //if(mat.normal_texture) { mat.normal_texture.image = t.images[*mat.normal_texture.image]; }
+        //if(mat.metallic_roughness_texture)
+        //{
+        //    mat.metallic_roughness_texture.image = t.images[*mat.metallic_roughness_texture.image];
+        //}
         t.materials[i] = gfx::get_renderer().make_material(mat);
     }
 

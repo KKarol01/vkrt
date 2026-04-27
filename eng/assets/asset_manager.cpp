@@ -43,19 +43,22 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
     const auto ext = file_path.extension();
 
     const auto try_deserializing = [this, &file_path]() -> Asset* {
-        auto engb_path = file_path;
-        engb_path.replace_extension(".engb");
-        auto engb_file = get_engine().fs->get_asset(engb_path, fs::OpenMode::READ_BYTES);
-        if(!engb_file) { return nullptr; }
-        ENG_TIMER_SCOPED("Deserializing {}", engb_path.string());
+        ENG_TIMER_SCOPED("Deserializing {}", file_path.string());
+        std::scoped_lock lock{ m_engbc_vec_mutex };
+        const auto& engbc = get_latest_container();
+        const auto assetlist = engbc.get_asset_list(ENG_HASH(file_path.string()));
+        if(!assetlist) { return nullptr; }
+
         Asset asset{};
-        std::vector<std::byte> decompressed_asset;
         bool failure = false;
+        std::vector<std::byte> decompressed_asset;
         std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
+        size_t asset_read_offset = 0; // skip decompressed size
         auto success = compression::zlib_inflate(
             [&](size_t size) {
                 if(failure) { return std::span<const std::byte>{}; }
-                const auto file_read = engb_file->read(file_buf.data(), size);
+                const auto file_read = engbc.get_asset_data(*assetlist, std::span{ file_buf.data(), size }, asset_read_offset);
+                asset_read_offset += file_read;
                 const auto bytes_to_process = std::min(file_read, size);
                 auto span = std::span<const std::byte>{ file_buf.data(), bytes_to_process };
                 return span;
@@ -109,8 +112,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
 
                 std::scoped_lock lock{ m_engbc_vec_mutex };
                 auto& engbc = get_latest_container();
-                engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {},
-                                engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
+                engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {});
                 size_t bytes_compressed = 0;
                 const auto res = compression::zlib_deflate(
                     [&](size_t size) {
