@@ -24,13 +24,15 @@ template <class... Ts> struct Visitor : Ts...
 template <typename T, std::integral Storage> struct TypedId
 {
     using StorageType = Storage;
+    inline static constexpr StorageType INVALID_VALUE = ~StorageType{};
     constexpr TypedId() = default;
     constexpr explicit TypedId(StorageType handle) : handle{ handle } {}
-    constexpr StorageType operator*() const { return handle; }
+    constexpr StorageType& operator*() { return handle; }
+    constexpr const StorageType& operator*() const { return handle; }
     constexpr bool operator==(const TypedId& a) const { return (bool)*this && a && handle == a.handle; }
     constexpr auto operator<=>(const TypedId& a) const { return handle <=> a.handle; }
-    constexpr explicit operator bool() const { return handle != ~StorageType{}; }
-    StorageType handle{ ~StorageType{} };
+    constexpr explicit operator bool() const { return handle != INVALID_VALUE; }
+    StorageType handle{ INVALID_VALUE };
 };
 
 template <typename Storage = size_t> struct Range_T

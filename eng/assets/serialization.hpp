@@ -12,8 +12,9 @@ namespace eng
 {
 namespace assets
 {
+struct Node;
 struct Asset;
-}
+} // namespace assets
 namespace ecs
 {
 struct Transform;
@@ -21,6 +22,23 @@ struct Transform;
 
 namespace assets
 {
+
+// Tries to write bytes. Always increments dst_offset so that it can be used to calculate how many bytes a thing would take, preallocate storage, and be run again.
+inline void serialize_write_bytes_safe(void* dst, const void* src, size_t& dst_offset, size_t dst_size, size_t src_size)
+{
+    if(dst && src && dst_offset + src_size <= dst_size) { std::memcpy((std::byte*)dst + dst_offset, src, src_size); }
+    dst_offset += src_size;
+}
+
+// Tries to read bytes. Increments src_offset only on success, so number of deserialized bytes can be compared against reference.
+inline void deserialize_read_bytes_safe2(void* dst, const void* src, size_t dst_size, size_t& src_offset, size_t src_size)
+{
+    if(dst && src && src_offset + dst_size <= src_size)
+    {
+        std::memcpy(dst, (const std::byte*)src + src_offset, dst_size);
+        src_offset += dst_size;
+    }
+};
 
 // clang-format off
 /*
@@ -110,15 +128,74 @@ class Serializer
     static void serialize(const T& t, size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0)
     {
         static_assert(false, "Add explicit template specialization and provide type serialization routine.");
-        return {};
     }
 
     template <typename T>
     static void deserialize(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, T& t)
     {
         static_assert(false, "Add explicit template specialization and provide type deserialization routine.");
-        return {};
     }
+
+    template <typename T>
+    static void serialize(std::span<const T> t, size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0)
+    {
+        const uint64_t count = t.size();
+        serialize_write_bytes_safe(out_bytes, &count, out_bytes_written, out_bytes_size, sizeof(count));
+        for(const auto& e : t)
+        {
+            serialize(e, out_bytes_written, out_bytes, out_bytes_size);
+        }
+    }
+
+    template <typename T>
+        requires(std::is_arithmetic_v<T>)
+    static void serialize(std::span<const T> t, size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0)
+    {
+        const uint64_t count = t.size();
+        serialize_write_bytes_safe(out_bytes, &count, out_bytes_written, out_bytes_size, sizeof(count));
+        serialize_write_bytes_safe(out_bytes, t.data(), out_bytes_written, out_bytes_size, count * sizeof(t[0]));
+    }
+
+    static void serialize(std::string_view t, size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0)
+    {
+        const uint64_t count = t.size();
+        serialize_write_bytes_safe(out_bytes, &count, out_bytes_written, out_bytes_size, sizeof(count));
+        serialize_write_bytes_safe(out_bytes, t.data(), out_bytes_written, out_bytes_size, count);
+    }
+
+    template <typename T>
+    static void deserialize(const std::byte* out_bytes, size_t& out_bytes_read, size_t out_bytes_size, std::span<T> t)
+    {
+        const auto elemes_to_read = std::min((out_bytes_size - out_bytes_read) / sizeof(t[0]), t.size());
+        for(auto i = 0u; i < elemes_to_read; ++i)
+        {
+            deserialize(out_bytes, out_bytes_read, out_bytes_size, t[i]);
+        }
+    }
+
+    template <typename T>
+        requires(std::is_arithmetic_v<T>)
+    static void deserialize(const std::byte* out_bytes, size_t& out_bytes_read, size_t out_bytes_size, std::span<T> t)
+    {
+        const auto elemes_to_read = std::min((out_bytes_size - out_bytes_read) / sizeof(t[0]), t.size());
+        deserialize_read_bytes_safe2(t.data(), out_bytes, elemes_to_read * sizeof(t[0]), out_bytes_read, out_bytes_size);
+    }
+
+    static void deserialize(const std::byte* out_bytes, size_t& out_bytes_read, size_t out_bytes_size, std::string& t)
+    {
+        uint64_t count;
+        deserialize_read_bytes_safe2(&count, out_bytes, sizeof(count), out_bytes_read, out_bytes_size);
+        t.resize(count);
+        deserialize_read_bytes_safe2(t.data(), out_bytes, count, out_bytes_read, out_bytes_size);
+    }
+
+    static void deserialize_resize_vec(auto& vec, const std::byte* out_bytes, size_t& out_bytes_read, size_t out_bytes_size)
+    {
+        uint64_t count = 0;
+        deserialize_read_bytes_safe2(&count, out_bytes, sizeof(count), out_bytes_read, out_bytes_size);
+        vec.resize(count);
+        deserialize(out_bytes, out_bytes_read, out_bytes_size, std::span{ vec });
+    };
 };
 
 #define ENG_SERIALIZER_DECLARE(type)                                                                                         \
@@ -128,7 +205,13 @@ class Serializer
     void Serializer::deserialize<type>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, type& t);
 
 ENG_SERIALIZER_DECLARE(assets::Asset);
+ENG_SERIALIZER_DECLARE(assets::Node);
 ENG_SERIALIZER_DECLARE(gfx::ImageView);
+ENG_SERIALIZER_DECLARE(gfx::ParsedImageData);
+ENG_SERIALIZER_DECLARE(gfx::ParsedGeometryData);
+ENG_SERIALIZER_DECLARE(gfx::Material);
+ENG_SERIALIZER_DECLARE(gfx::Mesh);
+ENG_SERIALIZER_DECLARE(gfx::Meshlet);
 ENG_SERIALIZER_DECLARE(ecs::Transform);
 ENG_SERIALIZER_DECLARE(assets::engb::List);
 

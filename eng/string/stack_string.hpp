@@ -56,6 +56,11 @@ template <size_t MAX_SIZE> struct StackString
     const char* c_str() const { return string.data(); }
     bool empty() const { return length == 0; }
     size_t size() const { return length; }
+    void resize(size_t new_length)
+    {
+        length = std::min(new_length, MAX_SIZE);
+        string[length - 1] = '\0';
+    }
 
     constexpr uint64_t hash() const { return ENG_HASH(as_view()); }
 #ifdef ENG_DEBUG_BUILD1

@@ -107,7 +107,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                 size_t bytes_read = 0;
                 size_t bytes_left = asset_bytes.size();
 
-                // todo: make this thread-safe
+                std::scoped_lock lock{ m_engbc_vec_mutex };
                 auto& engbc = get_latest_container();
                 engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {},
                                 engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });

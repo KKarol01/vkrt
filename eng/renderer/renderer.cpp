@@ -1166,7 +1166,7 @@ void Renderer::build_pending_geometries()
                                                                            .positions = temp_results[bi].vtx,
                                                                            .attributes = temp_results[bi].att,
                                                                            .indices = temp_results[bi].idx,
-                                                                           .meshlet = temp_results[bi].mlt });
+                                                                           .meshlets = temp_results[bi].mlt });
                 }
             }
         });

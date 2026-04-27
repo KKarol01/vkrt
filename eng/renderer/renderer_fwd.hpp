@@ -639,7 +639,7 @@ struct ParsedGeometryData
     std::vector<float> positions{};
     std::vector<float> attributes{};
     std::vector<uint16_t> indices{};
-    std::vector<gfx::Meshlet> meshlet{};
+    std::vector<gfx::Meshlet> meshlets{};
 };
 using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
 

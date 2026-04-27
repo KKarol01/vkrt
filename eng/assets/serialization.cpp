@@ -11,24 +11,6 @@ namespace eng
 {
 namespace assets
 {
-
-// Tries to write bytes. Always increments dst_offset so that it can be used to calculate how many bytes a thing would take, preallocate storage, and be run again.
-static void serialize_write_bytes_safe(void* dst, const void* src, size_t& dst_offset, size_t dst_size, size_t src_size)
-{
-    if(dst && src && dst_offset + src_size <= dst_size) { std::memcpy((std::byte*)dst + dst_offset, src, src_size); }
-    dst_offset += src_size;
-}
-
-// Tries to read bytes. Increments src_offset only on success, so number of deserialized bytes can be compared against reference.
-static void deserialize_read_bytes_safe(void* dst, const void* src, size_t& src_offset, size_t dst_size, size_t src_size)
-{
-    if(src_offset + src_size <= dst_size)
-    {
-        std::memcpy(dst, (const std::byte*)src + src_offset, src_size);
-        src_offset += src_size;
-    }
-};
-
 namespace engb
 {
 namespace v0
@@ -78,25 +60,26 @@ void Container::read_list_section()
 
     uint32_t num_lists;
     memcpy(&num_lists, &buf[5], sizeof(uint32_t));
-    const size_t lists_bytes = num_lists * LIST_BYTE_SZ;
-    constexpr size_t lists_per_buf = std::size(buf) / LIST_BYTE_SZ;
     m_lists.reserve(num_lists);
-    while(num_lists > 0)
+    uint32_t remaining = num_lists;
+    constexpr size_t lists_per_buf = std::size(buf) / LIST_BYTE_SZ;
+    while(remaining > 0)
     {
-        const auto lists_left = std::min((size_t)num_lists, lists_per_buf);
-        const auto file_read = m_file->read(buf, lists_left * LIST_BYTE_SZ);
-        if(file_read != lists_left * LIST_BYTE_SZ)
+        const size_t lists_to_read = std::min((size_t)remaining, lists_per_buf);
+        const size_t bytes_to_read = lists_to_read * LIST_BYTE_SZ;
+        const auto file_read = m_file->read(buf, bytes_to_read);
+        if(file_read != bytes_to_read)
         {
             ENG_WARN("Failed to read engb container {} list section", m_file->path.string());
             return;
         }
-
-        size_t bytes_read{};
-        for(auto i = 0u; i < lists_per_buf; ++i)
+        size_t bytes_processed = 0;
+        for(size_t i = 0; i < lists_to_read; ++i)
         {
             auto& list = m_lists.emplace_back();
-            Serializer::deserialize(buf, bytes_read, lists_bytes, list);
+            Serializer::deserialize(buf, bytes_processed, bytes_to_read, list);
         }
+        remaining -= lists_to_read;
     }
 }
 
@@ -173,8 +156,6 @@ size_t Container::serialize()
 template <>
 void Serializer::serialize<assets::Asset>(const assets::Asset& t, size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
 {
-    out_bytes_written = 0;
-
     if(t.geometry_data.empty())
     {
         ENG_ASSERT(false,
@@ -185,155 +166,98 @@ void Serializer::serialize<assets::Asset>(const assets::Asset& t, size_t& out_by
     }
 
     const auto pathstr = t.path.string();
-    const uint64_t path_length = pathstr.size();
-    serialize_write_bytes_safe(out_bytes, &path_length, out_bytes_written, out_bytes_size, sizeof(path_length));
-    serialize_write_bytes_safe(out_bytes, pathstr.c_str(), out_bytes_written, out_bytes_size, pathstr.size());
+    serialize(std::string_view{ pathstr }, out_bytes_written, out_bytes, out_bytes_size);
 
     ENG_ASSERT(t.images.size() == t.image_data.size());
-    const uint64_t image_count = t.images.size();
-    serialize_write_bytes_safe(out_bytes, &image_count, out_bytes_written, out_bytes_size, sizeof(image_count));
-    for(const auto& imgd : t.image_data)
-    {
-        serialize_write_bytes_safe(out_bytes, &imgd.width, out_bytes_written, out_bytes_size, sizeof(imgd.width));
-        serialize_write_bytes_safe(out_bytes, &imgd.height, out_bytes_written, out_bytes_size, sizeof(imgd.height));
-        serialize_write_bytes_safe(out_bytes, &imgd.format, out_bytes_written, out_bytes_size, sizeof(imgd.format));
-        const uint64_t byte_size = imgd.data.size();
-        serialize_write_bytes_safe(out_bytes, &byte_size, out_bytes_written, out_bytes_size, sizeof(byte_size));
-        serialize_write_bytes_safe(out_bytes, imgd.data.data(), out_bytes_written, out_bytes_size, byte_size);
-    }
+    serialize(std::span{ t.image_data }, out_bytes_written, out_bytes, out_bytes_size);
 
-    // transform imageviews handles to store indices into asset's image array, and not actual renderer-generated image handles
-    auto textures =
-        t.textures | std::views::transform([&t](const gfx::ImageView& v) {
-            auto view = v;
-            view.image = Handle<gfx::Image>{ (uint32_t)std::distance(t.images.begin(), std::ranges::find(t.images, v.image)) };
-            return view;
-        });
-    const uint64_t texture_count = textures.size();
+    const uint64_t texture_count = t.textures.size();
     serialize_write_bytes_safe(out_bytes, &texture_count, out_bytes_written, out_bytes_size, sizeof(texture_count));
-    for(const auto& txt : textures)
+    for(auto txt : t.textures)
     {
+        // store index to image array so it can later be deserialized
+        *txt.image = (uint32_t)std::distance(t.images.begin(), std::ranges::find(t.images, txt.image));
         serialize(txt, out_bytes_written, out_bytes, out_bytes_size);
     }
 
     ENG_ASSERT(t.geometries.size() == t.geometry_data.size());
-    const uint64_t geom_count = t.geometries.size();
-    serialize_write_bytes_safe(out_bytes, &geom_count, out_bytes_written, out_bytes_size, sizeof(geom_count));
-    for(const auto& future : t.geometry_data_futures)
+    const uint64_t geometry_count = t.geometry_data.size();
+    serialize_write_bytes_safe(out_bytes, &geometry_count, out_bytes_written, out_bytes_size, sizeof(geometry_count));
+    for(const auto& gdf : t.geometry_data_futures)
     {
-        const auto& geom = future.get();
-        const uint64_t index_count = geom.indices.size();
-        serialize_write_bytes_safe(out_bytes, &index_count, out_bytes_written, out_bytes_size, sizeof(index_count));
-        serialize_write_bytes_safe(out_bytes, geom.indices.data(), out_bytes_written, out_bytes_size,
-                                   geom.indices.size() * sizeof(uint16_t));
-
-        serialize_write_bytes_safe(out_bytes, &geom.vertex_layout, out_bytes_written, out_bytes_size, sizeof(geom.vertex_layout));
-        const uint64_t position_count = geom.positions.size();
-        serialize_write_bytes_safe(out_bytes, &position_count, out_bytes_written, out_bytes_size, sizeof(position_count));
-        serialize_write_bytes_safe(out_bytes, geom.positions.data(), out_bytes_written, out_bytes_size,
-                                   geom.positions.size() * sizeof(float));
-        const uint64_t attribute_count = geom.attributes.size();
-        serialize_write_bytes_safe(out_bytes, &attribute_count, out_bytes_written, out_bytes_size, sizeof(attribute_count));
-        serialize_write_bytes_safe(out_bytes, geom.attributes.data(), out_bytes_written, out_bytes_size,
-                                   geom.attributes.size() * sizeof(float));
-
-        const uint64_t meshlet_count = geom.meshlet.size();
-        serialize_write_bytes_safe(out_bytes, &meshlet_count, out_bytes_written, out_bytes_size, sizeof(meshlet_count));
-        serialize_write_bytes_safe(out_bytes, geom.meshlet.data(), out_bytes_written, out_bytes_size,
-                                   geom.meshlet.size() * sizeof(geom.meshlet[0]));
+        const auto& gd = gdf.get();
+        serialize(gd, out_bytes_written, out_bytes, out_bytes_size);
     }
 
     const uint64_t material_count = t.materials.size();
     serialize_write_bytes_safe(out_bytes, &material_count, out_bytes_written, out_bytes_size, sizeof(material_count));
-    for(const auto& mat : t.materials)
+    for(const auto& math : t.materials)
     {
-        const auto name_view = mat->name.as_view();
-        const uint64_t name_len = name_view.size();
-        serialize_write_bytes_safe(out_bytes, &name_len, out_bytes_written, out_bytes_size, sizeof(name_len));
-        serialize_write_bytes_safe(out_bytes, name_view.data(), out_bytes_written, out_bytes_size, name_len);
-        const uint64_t base_color_idx =
-            mat->base_color_texture
-                ? std::distance(t.images.begin(), std::ranges::find(t.images, mat->base_color_texture.image))
-                : ~0ull;
-        const uint64_t normal_idx =
-            mat->normal_texture ? std::distance(t.images.begin(), std::ranges::find(t.images, mat->normal_texture.image)) : ~0ull;
-        const uint64_t metallic_rough_idx =
-            mat->metallic_roughness_texture
-                ? std::distance(t.images.begin(), std::ranges::find(t.images, mat->metallic_roughness_texture.image))
-                : ~0ull;
-        const uint32_t mesh_pass = ~0u; // ignoring meshpass, as load_material uses default one
-
-        serialize_write_bytes_safe(out_bytes, &mesh_pass, out_bytes_written, out_bytes_size, sizeof(mesh_pass));
-
-        serialize_write_bytes_safe(out_bytes, &base_color_idx, out_bytes_written, out_bytes_size, sizeof(base_color_idx));
-        serialize_write_bytes_safe(out_bytes, &normal_idx, out_bytes_written, out_bytes_size, sizeof(normal_idx));
-        serialize_write_bytes_safe(out_bytes, &metallic_rough_idx, out_bytes_written, out_bytes_size, sizeof(metallic_rough_idx));
+        auto mat = math.get();
+        // remap image handles to store indices to t.images array, so they can be safely deserialized.
+        if(mat.base_color_texture)
+        {
+            *mat.base_color_texture.image =
+                (uint32_t)std::distance(t.images.begin(), std::ranges::find(t.images, mat.base_color_texture.image));
+        }
+        if(mat.normal_texture)
+        {
+            *mat.normal_texture.image =
+                (uint32_t)std::distance(t.images.begin(), std::ranges::find(t.images, mat.normal_texture.image));
+        }
+        if(mat.metallic_roughness_texture)
+        {
+            *mat.metallic_roughness_texture.image =
+                (uint32_t)std::distance(t.images.begin(), std::ranges::find(t.images, mat.metallic_roughness_texture.image));
+        }
+        mat.mesh_pass = {}; // ignoring meshpass, as load_material uses default one
+        serialize(mat, out_bytes_written, out_bytes, out_bytes_size);
     }
 
     const uint64_t mesh_count = t.meshes.size();
     serialize_write_bytes_safe(out_bytes, &mesh_count, out_bytes_written, out_bytes_size, sizeof(mesh_count));
-    for(const auto& mesh : t.meshes)
+    for(const auto& meshh : t.meshes)
     {
-        const uint64_t geomidx = std::distance(t.geometries.begin(), std::ranges::find(t.geometries, mesh->geometry));
-        const uint64_t matidx = std::distance(t.materials.begin(), std::ranges::find(t.materials, mesh->material));
-        serialize_write_bytes_safe(out_bytes, &geomidx, out_bytes_written, out_bytes_size, sizeof(geomidx));
-        serialize_write_bytes_safe(out_bytes, &matidx, out_bytes_written, out_bytes_size, sizeof(matidx));
+        auto mesh = meshh.get();
+        *mesh.geometry = (uint32_t)std::distance(t.geometries.begin(), std::ranges::find(t.geometries, mesh.geometry));
+        if(mesh.material)
+        {
+            *mesh.material = (uint32_t)std::distance(t.materials.begin(), std::ranges::find(t.materials, mesh.material));
+        }
+        serialize(mesh, out_bytes_written, out_bytes, out_bytes_size);
     }
 
-    const uint64_t node_count = t.nodes.size();
-    serialize_write_bytes_safe(out_bytes, &node_count, out_bytes_written, out_bytes_size, sizeof(node_count));
-    for(auto i = 0u; i < node_count; ++i)
-    {
-        const auto& node = t.nodes[i];
-        const auto name_len = node.name.size();
-        serialize_write_bytes_safe(out_bytes, &name_len, out_bytes_written, out_bytes_size, sizeof(name_len));
-        serialize_write_bytes_safe(out_bytes, node.name.c_str(), out_bytes_written, out_bytes_size, name_len);
-        serialize_write_bytes_safe(out_bytes, &node.meshes, out_bytes_written, out_bytes_size, sizeof(node.meshes));
-        serialize_write_bytes_safe(out_bytes, &node.transform, out_bytes_written, out_bytes_size, sizeof(node.transform));
-        serialize_write_bytes_safe(out_bytes, &node.parent, out_bytes_written, out_bytes_size, sizeof(node.parent));
-        serialize_write_bytes_safe(out_bytes, &node.children, out_bytes_written, out_bytes_size, sizeof(node.children));
-    }
-
-    const uint64_t transform_count = t.transforms.size();
-    serialize_write_bytes_safe(out_bytes, &transform_count, out_bytes_written, out_bytes_size, sizeof(transform_count));
-    for(const auto& t : t.transforms)
-    {
-        serialize(t, out_bytes_written, out_bytes, out_bytes_size);
-    }
-
-    const uint64_t root_node_count = t.root_nodes.size();
-    serialize_write_bytes_safe(out_bytes, &root_node_count, out_bytes_written, out_bytes_size, sizeof(root_node_count));
-    serialize_write_bytes_safe(out_bytes, t.root_nodes.data(), out_bytes_written, out_bytes_size,
-                               root_node_count * sizeof(t.root_nodes[0]));
+    serialize(std::span{ t.nodes }, out_bytes_written, out_bytes, out_bytes_size);
+    serialize(std::span{ t.transforms }, out_bytes_written, out_bytes, out_bytes_size);
+    serialize(std::span{ t.root_nodes }, out_bytes_written, out_bytes, out_bytes_size);
 }
 
 template <>
-void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, assets::Asset& t)
+void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, assets::Asset& t)
 {
-    uint64_t path_length = 0;
-    deserialize_read_bytes_safe(&path_length, bytes, out_bytes_read, bytes_size, sizeof(path_length));
-    std::string pathstr(path_length, '\0');
-    deserialize_read_bytes_safe(pathstr.data(), bytes, out_bytes_read, bytes_size, path_length);
+    std::string pathstr;
+    deserialize(bytes, out_bytes_read, out_bytes_size, pathstr);
     t.path = pathstr;
+    ENG_ASSERT(!t.path.empty())
 
-    uint64_t image_count = 0;
-    deserialize_read_bytes_safe(&image_count, bytes, out_bytes_read, bytes_size, sizeof(image_count));
+    uint64_t image_count;
+    deserialize_read_bytes_safe2(&image_count, bytes, sizeof(image_count), out_bytes_read, out_bytes_size);
     gfx::ParsedImageData imgd{};
-    t.images.resize(image_count);
     for(auto i = 0u; i < image_count; ++i)
     {
-        deserialize_read_bytes_safe(&imgd.width, bytes, out_bytes_read, bytes_size, sizeof(imgd.width));
-        deserialize_read_bytes_safe(&imgd.height, bytes, out_bytes_read, bytes_size, sizeof(imgd.height));
-        deserialize_read_bytes_safe(&imgd.format, bytes, out_bytes_read, bytes_size, sizeof(imgd.format));
-        uint64_t byte_size = 0;
-        deserialize_read_bytes_safe(&byte_size, bytes, out_bytes_read, bytes_size, sizeof(byte_size));
+        // don't use deserialize() here, because it would double the image data for no reason, we can read from the stream
+        uint64_t pixel_data_size = 0;
+        deserialize_read_bytes_safe2(&imgd.width, bytes, sizeof(imgd.width), out_bytes_read, out_bytes_size);
+        deserialize_read_bytes_safe2(&imgd.height, bytes, sizeof(imgd.height), out_bytes_read, out_bytes_size);
+        deserialize_read_bytes_safe2(&imgd.format, bytes, sizeof(imgd.format), out_bytes_read, out_bytes_size);
+        deserialize_read_bytes_safe2(&pixel_data_size, bytes, sizeof(pixel_data_size), out_bytes_read, out_bytes_size);
         t.images[i] = get_engine().renderer->make_image("EMPTY IMAGE NAME",
                                                         gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
                                                                          gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
                                                                              gfx::ImageUsage::TRANSFER_SRC_BIT,
                                                                          0, 1, gfx::ImageLayout::READ_ONLY));
         const auto imgdata_start = out_bytes_read;
-        out_bytes_read += byte_size;
+        out_bytes_read += pixel_data_size;
         if(!t.images[i])
         {
             ENG_WARN("Failed to create image {}", "EMPTY IMAGE NAME");
@@ -346,43 +270,22 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
         }
     }
 
-    uint64_t texture_count = 0;
-    deserialize_read_bytes_safe(&texture_count, bytes, out_bytes_read, bytes_size, sizeof(texture_count));
+    uint64_t texture_count;
+    deserialize_read_bytes_safe2(&texture_count, bytes, sizeof(texture_count), out_bytes_read, out_bytes_size);
     t.textures.resize(texture_count);
     for(auto& txt : t.textures)
     {
-        deserialize(bytes, out_bytes_read, bytes_size, txt);
+        deserialize(bytes, out_bytes_read, out_bytes_size, txt);
         txt.image = t.images[*txt.image]; // when serializing, handles are made into indices into this array
     }
 
-    uint64_t geom_count = 0;
-    deserialize_read_bytes_safe(&geom_count, bytes, out_bytes_read, bytes_size, sizeof(geom_count));
+    uint64_t geom_count;
+    deserialize_read_bytes_safe2(&geom_count, bytes, sizeof(geom_count), out_bytes_read, out_bytes_size);
     t.geometries.resize(geom_count);
     for(uint64_t i = 0; i < geom_count; ++i)
     {
         gfx::ParsedGeometryData geom;
-
-        uint64_t index_count = 0;
-        deserialize_read_bytes_safe(&index_count, bytes, out_bytes_read, bytes_size, sizeof(index_count));
-        geom.indices.resize(index_count);
-        deserialize_read_bytes_safe(geom.indices.data(), bytes, out_bytes_read, bytes_size, index_count * sizeof(uint16_t));
-
-        deserialize_read_bytes_safe(&geom.vertex_layout, bytes, out_bytes_read, bytes_size, sizeof(geom.vertex_layout));
-        uint64_t position_count = 0;
-        deserialize_read_bytes_safe(&position_count, bytes, out_bytes_read, bytes_size, sizeof(position_count));
-        geom.positions.resize(position_count);
-        deserialize_read_bytes_safe(geom.positions.data(), bytes, out_bytes_read, bytes_size, position_count * sizeof(float));
-        uint64_t attribute_count = 0;
-        deserialize_read_bytes_safe(&attribute_count, bytes, out_bytes_read, bytes_size, sizeof(attribute_count));
-        geom.attributes.resize(attribute_count);
-        deserialize_read_bytes_safe(geom.attributes.data(), bytes, out_bytes_read, bytes_size, attribute_count * sizeof(float));
-
-        uint64_t meshlet_count = 0;
-        deserialize_read_bytes_safe(&meshlet_count, bytes, out_bytes_read, bytes_size, sizeof(meshlet_count));
-        geom.meshlet.resize(meshlet_count);
-        deserialize_read_bytes_safe(geom.meshlet.data(), bytes, out_bytes_read, bytes_size,
-                                    meshlet_count * sizeof(geom.meshlet[0]));
-
+        deserialize(bytes, out_bytes_read, out_bytes_read, geom);
         t.geometries[i] =
             gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
                                                                        .vertex_layout = geom.vertex_layout,
@@ -390,69 +293,60 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
                                                                        .vertices = geom.positions,
                                                                        .attributes = geom.attributes,
                                                                        .indices = std::as_bytes(std::span{ geom.indices }),
-                                                                       .meshlets = geom.meshlet });
+                                                                       .meshlets = geom.meshlets });
     }
 
-    uint64_t material_count = 0;
-    deserialize_read_bytes_safe(&material_count, bytes, out_bytes_read, bytes_size, sizeof(material_count));
+    uint64_t material_count;
+    deserialize_read_bytes_safe2(&material_count, bytes, sizeof(material_count), out_bytes_read, out_bytes_size);
     t.materials.resize(material_count);
     for(uint64_t i = 0; i < material_count; ++i)
     {
-        uint64_t name_len = 0;
-        deserialize_read_bytes_safe(&name_len, bytes, out_bytes_read, bytes_size, sizeof(name_len));
-        std::string_view name((const char*)bytes + out_bytes_read, name_len);
-        out_bytes_read += name_len;
-        uint32_t mesh_pass;
-        deserialize_read_bytes_safe(&mesh_pass, bytes, out_bytes_read, bytes_size, sizeof(mesh_pass));
-        uint64_t bidx, nidx, mridx;
-        deserialize_read_bytes_safe(&bidx, bytes, out_bytes_read, bytes_size, sizeof(bidx));
-        deserialize_read_bytes_safe(&nidx, bytes, out_bytes_read, bytes_size, sizeof(nidx));
-        deserialize_read_bytes_safe(&mridx, bytes, out_bytes_read, bytes_size, sizeof(mridx));
-        auto mat = gfx::Material::init(name);
-        // if(bidx != ~0u) { mat.base_color_texture.init(t.images[bidx]); }
-        // if(nidx != ~0u) { mat.normal_texture.init(t.images[nidx]); }
-        // if(mridx != ~0u) { mat.metallic_roughness_texture.init(t.images[mridx]); }
+        gfx::Material mat;
+        deserialize(bytes, out_bytes_read, out_bytes_size, mat);
+        if(mat.base_color_texture) { mat.base_color_texture.image = t.images[*mat.base_color_texture.image]; }
+        if(mat.normal_texture) { mat.normal_texture.image = t.images[*mat.normal_texture.image]; }
+        if(mat.metallic_roughness_texture)
+        {
+            mat.metallic_roughness_texture.image = t.images[*mat.metallic_roughness_texture.image];
+        }
         t.materials[i] = gfx::get_renderer().make_material(mat);
     }
 
     uint64_t mesh_count = 0;
-    deserialize_read_bytes_safe(&mesh_count, bytes, out_bytes_read, bytes_size, sizeof(mesh_count));
+    deserialize_read_bytes_safe2(&mesh_count, bytes, sizeof(mesh_count), out_bytes_read, out_bytes_size);
     t.meshes.resize(mesh_count);
     for(uint64_t i = 0; i < mesh_count; ++i)
     {
-        uint64_t geomidx, matidx;
-        deserialize_read_bytes_safe(&geomidx, bytes, out_bytes_read, bytes_size, sizeof(geomidx));
-        deserialize_read_bytes_safe(&matidx, bytes, out_bytes_read, bytes_size, sizeof(matidx));
-        t.meshes[i] = gfx::get_renderer().make_mesh(gfx::MeshDescriptor{ t.geometries[geomidx], t.materials[matidx] });
+        gfx::Mesh mesh;
+        deserialize(bytes, out_bytes_read, out_bytes_size, mesh);
+        if(mesh.material) { mesh.material = t.materials[*mesh.material]; }
+        if(mesh.geometry) { mesh.geometry = t.geometries[*mesh.geometry]; }
+        t.meshes[i] = gfx::get_renderer().make_mesh(gfx::MeshDescriptor{ mesh.geometry, mesh.material });
     }
 
-    uint64_t node_count = 0;
-    deserialize_read_bytes_safe(&node_count, bytes, out_bytes_read, bytes_size, sizeof(node_count));
-    t.nodes.resize(node_count);
-    for(auto& node : t.nodes)
-    {
-        uint64_t name_len = 0;
-        deserialize_read_bytes_safe(&name_len, bytes, out_bytes_read, bytes_size, sizeof(name_len));
-        node.name.resize(name_len);
-        deserialize_read_bytes_safe(node.name.data(), bytes, out_bytes_read, bytes_size, name_len);
-        deserialize_read_bytes_safe(&node.meshes, bytes, out_bytes_read, bytes_size, sizeof(node.meshes));
-        deserialize_read_bytes_safe(&node.transform, bytes, out_bytes_read, bytes_size, sizeof(node.transform));
-        deserialize_read_bytes_safe(&node.parent, bytes, out_bytes_read, bytes_size, sizeof(node.parent));
-        deserialize_read_bytes_safe(&node.children, bytes, out_bytes_read, bytes_size, sizeof(node.children));
-    }
+    deserialize_resize_vec(t.nodes, bytes, out_bytes_read, out_bytes_size);
+    deserialize_resize_vec(t.transforms, bytes, out_bytes_read, out_bytes_size);
+    deserialize_resize_vec(t.root_nodes, bytes, out_bytes_read, out_bytes_size);
+}
 
-    uint64_t transform_count = 0;
-    deserialize_read_bytes_safe(&transform_count, bytes, out_bytes_read, bytes_size, sizeof(transform_count));
-    t.transforms.resize(transform_count);
-    for(auto& trans : t.transforms)
-    {
-        deserialize(bytes, out_bytes_read, bytes_size, trans);
-    }
+template <>
+void Serializer::serialize<assets::Node>(const assets::Node& t, size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize(std::string_view{ t.name }, out_bytes_written, out_bytes, out_bytes_size);
+    serialize_write_bytes_safe(out_bytes, &t.meshes, out_bytes_written, out_bytes_size, sizeof(t.meshes));
+    serialize_write_bytes_safe(out_bytes, &t.transform, out_bytes_written, out_bytes_size, sizeof(t.transform));
+    serialize_write_bytes_safe(out_bytes, &t.parent, out_bytes_written, out_bytes_size, sizeof(t.parent));
+    serialize_write_bytes_safe(out_bytes, &t.children, out_bytes_written, out_bytes_size, sizeof(t.children));
+}
 
-    uint64_t root_node_count = 0;
-    deserialize_read_bytes_safe(&root_node_count, bytes, out_bytes_read, bytes_size, sizeof(root_node_count));
-    t.root_nodes.resize(root_node_count);
-    deserialize_read_bytes_safe(t.root_nodes.data(), bytes, out_bytes_read, bytes_size, root_node_count * sizeof(t.root_nodes[0]));
+template <>
+void Serializer::deserialize<assets::Node>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, assets::Node& t)
+{
+    deserialize(bytes, out_bytes_read, out_bytes_size, t.name);
+    deserialize_read_bytes_safe2(&t.meshes, bytes, sizeof(t.meshes), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.transform, bytes, sizeof(t.transform), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.parent, bytes, sizeof(t.parent), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.children, bytes, sizeof(t.children), out_bytes_read, out_bytes_size);
 }
 
 template <>
@@ -466,13 +360,118 @@ void Serializer::serialize<gfx::ImageView>(const gfx::ImageView& t, size_t& out_
 }
 
 template <>
-void Serializer::deserialize<gfx::ImageView>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, gfx::ImageView& t)
+void Serializer::deserialize<gfx::ImageView>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, gfx::ImageView& t)
 {
-    deserialize_read_bytes_safe(&t.image, bytes, out_bytes_read, bytes_size, sizeof(t.image));
-    deserialize_read_bytes_safe(&t.type, bytes, out_bytes_read, bytes_size, sizeof(t.type));
-    deserialize_read_bytes_safe(&t.format, bytes, out_bytes_read, bytes_size, sizeof(t.format));
-    deserialize_read_bytes_safe(&t.src_subresource, bytes, out_bytes_read, bytes_size, sizeof(t.src_subresource));
-    deserialize_read_bytes_safe(&t.dst_subresource, bytes, out_bytes_read, bytes_size, sizeof(t.dst_subresource));
+    deserialize_read_bytes_safe2(&t.image, bytes, sizeof(t.image), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.type, bytes, sizeof(t.type), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.format, bytes, sizeof(t.format), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.src_subresource, bytes, sizeof(t.src_subresource), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.dst_subresource, bytes, sizeof(t.dst_subresource), out_bytes_read, out_bytes_size);
+}
+
+template <>
+void Serializer::serialize<gfx::ParsedImageData>(const gfx::ParsedImageData& t, size_t& out_bytes_written,
+                                                 std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize_write_bytes_safe(out_bytes, &t.width, out_bytes_written, out_bytes_size, sizeof(t.width));
+    serialize_write_bytes_safe(out_bytes, &t.height, out_bytes_written, out_bytes_size, sizeof(t.height));
+    serialize_write_bytes_safe(out_bytes, &t.format, out_bytes_written, out_bytes_size, sizeof(t.format));
+    const uint64_t byte_size = t.data.size();
+    serialize_write_bytes_safe(out_bytes, &byte_size, out_bytes_written, out_bytes_size, sizeof(byte_size));
+    serialize_write_bytes_safe(out_bytes, t.data.data(), out_bytes_written, out_bytes_size, byte_size);
+}
+
+template <>
+void Serializer::deserialize<gfx::ParsedImageData>(const std::byte* bytes, size_t& out_bytes_read,
+                                                   size_t out_bytes_size, gfx::ParsedImageData& t)
+{
+    deserialize_read_bytes_safe2(&t.width, bytes, sizeof(t.width), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.height, bytes, sizeof(t.height), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.format, bytes, sizeof(t.format), out_bytes_read, out_bytes_size);
+    uint64_t byte_size = 0;
+    deserialize_read_bytes_safe2((void*)&byte_size, bytes, sizeof(byte_size), out_bytes_read, out_bytes_size);
+    t.data.resize(byte_size);
+    deserialize_read_bytes_safe2((void*)t.data.data(), bytes, byte_size, out_bytes_read, out_bytes_size);
+}
+
+template <>
+void Serializer::serialize<gfx::ParsedGeometryData>(const gfx::ParsedGeometryData& t, size_t& out_bytes_written,
+                                                    std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize(std::span{ t.indices }, out_bytes_written, out_bytes, out_bytes_size);
+    serialize_write_bytes_safe(out_bytes, &t.vertex_layout, out_bytes_written, out_bytes_size, sizeof(t.vertex_layout));
+    serialize(std::span{ t.positions }, out_bytes_written, out_bytes, out_bytes_size);
+    serialize(std::span{ t.attributes }, out_bytes_written, out_bytes, out_bytes_size);
+    serialize(std::span{ t.meshlets }, out_bytes_written, out_bytes, out_bytes_size);
+}
+
+template <>
+void Serializer::deserialize<gfx::ParsedGeometryData>(const std::byte* bytes, size_t& out_bytes_read,
+                                                      size_t out_bytes_size, gfx::ParsedGeometryData& t)
+{
+    deserialize_resize_vec(t.indices, bytes, out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.vertex_layout, bytes, sizeof(t.vertex_layout), out_bytes_read, out_bytes_size);
+    deserialize_resize_vec(t.positions, bytes, out_bytes_read, out_bytes_size);
+    deserialize_resize_vec(t.attributes, bytes, out_bytes_read, out_bytes_size);
+    deserialize_resize_vec(t.meshlets, bytes, out_bytes_read, out_bytes_size);
+}
+
+template <>
+void Serializer::serialize<gfx::Material>(const gfx::Material& t, size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize(std::span{ t.name.as_view() }, out_bytes_written, out_bytes, out_bytes_size);
+    ENG_ASSERT(*t.mesh_pass == ~0u);
+    serialize_write_bytes_safe(out_bytes, &t.mesh_pass, out_bytes_written, out_bytes_size, sizeof(t.mesh_pass));
+    serialize(t.base_color_texture, out_bytes_written, out_bytes, out_bytes_size);
+    serialize(t.normal_texture, out_bytes_written, out_bytes, out_bytes_size);
+    serialize(t.metallic_roughness_texture, out_bytes_written, out_bytes, out_bytes_size);
+}
+
+template <>
+void Serializer::deserialize<gfx::Material>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, gfx::Material& t)
+{
+    std::string name;
+    deserialize_resize_vec(name, bytes, out_bytes_read, out_bytes_size);
+    t.name = name;
+    deserialize_read_bytes_safe2(&t.mesh_pass, bytes, sizeof(t.mesh_pass), out_bytes_read, out_bytes_size);
+    ENG_ASSERT(*t.mesh_pass == ~0u);
+    deserialize(bytes, out_bytes_read, out_bytes_size, t.base_color_texture);
+    deserialize(bytes, out_bytes_read, out_bytes_size, t.normal_texture);
+    deserialize(bytes, out_bytes_read, out_bytes_size, t.metallic_roughness_texture);
+}
+
+template <>
+void Serializer::serialize<gfx::Mesh>(const gfx::Mesh& t, size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize_write_bytes_safe(out_bytes, &t.geometry, out_bytes_written, out_bytes_size, sizeof(t.geometry));
+    serialize_write_bytes_safe(out_bytes, &t.material, out_bytes_written, out_bytes_size, sizeof(t.material));
+}
+
+template <>
+void Serializer::deserialize<gfx::Mesh>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, gfx::Mesh& t)
+{
+    deserialize_read_bytes_safe2(&t.geometry, bytes, sizeof(t.geometry), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.material, bytes, sizeof(t.material), out_bytes_read, out_bytes_size);
+}
+
+template <>
+void Serializer::serialize<gfx::Meshlet>(const gfx::Meshlet& t, size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize_write_bytes_safe(out_bytes, &t.vertex_offset, out_bytes_written, out_bytes_size, sizeof(t.vertex_offset));
+    serialize_write_bytes_safe(out_bytes, &t.vertex_count, out_bytes_written, out_bytes_size, sizeof(t.vertex_count));
+    serialize_write_bytes_safe(out_bytes, &t.index_offset, out_bytes_written, out_bytes_size, sizeof(t.index_offset));
+    serialize_write_bytes_safe(out_bytes, &t.index_count, out_bytes_written, out_bytes_size, sizeof(t.index_count));
+    serialize_write_bytes_safe(out_bytes, &t.bounding_sphere, out_bytes_written, out_bytes_size, sizeof(t.bounding_sphere));
+}
+
+template <>
+void Serializer::deserialize<gfx::Meshlet>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, gfx::Meshlet& t)
+{
+    deserialize_read_bytes_safe2(&t.vertex_offset, bytes, sizeof(t.vertex_offset), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.vertex_count, bytes, sizeof(t.vertex_count), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.index_offset, bytes, sizeof(t.index_offset), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.index_count, bytes, sizeof(t.index_count), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.bounding_sphere, bytes, sizeof(t.bounding_sphere), out_bytes_read, out_bytes_size);
 }
 
 template <>
@@ -483,10 +482,10 @@ void Serializer::serialize<ecs::Transform>(const ecs::Transform& t, size_t& out_
 }
 
 template <>
-void Serializer::deserialize<ecs::Transform>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, ecs::Transform& t)
+void Serializer::deserialize<ecs::Transform>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, ecs::Transform& t)
 {
     glm::mat4 mat;
-    deserialize_read_bytes_safe(&mat, bytes, out_bytes_read, bytes_size, sizeof(mat));
+    deserialize_read_bytes_safe2(&mat, bytes, sizeof(mat), out_bytes_read, out_bytes_size);
     t.init(mat);
 }
 
@@ -502,14 +501,14 @@ void Serializer::serialize<engb::List>(const engb::List& t, size_t& out_bytes_wr
 }
 
 template <>
-void Serializer::deserialize<engb::List>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, engb::List& t)
+void Serializer::deserialize<engb::List>(const std::byte* bytes, size_t& out_bytes_read, size_t out_bytes_size, engb::List& t)
 {
-    deserialize_read_bytes_safe(&t.custom_hash, bytes, out_bytes_read, bytes_size, sizeof(t.custom_hash));
-    deserialize_read_bytes_safe(&t.content_hash, bytes, out_bytes_read, bytes_size, sizeof(t.content_hash));
-    deserialize_read_bytes_safe(&t.asset_start, bytes, out_bytes_read, bytes_size, sizeof(t.asset_start));
-    deserialize_read_bytes_safe(&t.asset_size, bytes, out_bytes_read, bytes_size, sizeof(t.asset_size));
-    deserialize_read_bytes_safe(&t.version, bytes, out_bytes_read, bytes_size, sizeof(t.version));
-    deserialize_read_bytes_safe(&t.flags, bytes, out_bytes_read, bytes_size, sizeof(t.flags));
+    deserialize_read_bytes_safe2(&t.custom_hash, bytes, sizeof(t.custom_hash), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.content_hash, bytes, sizeof(t.content_hash), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.asset_start, bytes, sizeof(t.asset_start), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.asset_size, bytes, sizeof(t.asset_size), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.version, bytes, sizeof(t.version), out_bytes_read, out_bytes_size);
+    deserialize_read_bytes_safe2(&t.flags, bytes, sizeof(t.flags), out_bytes_read, out_bytes_size);
 }
 
 } // namespace assets

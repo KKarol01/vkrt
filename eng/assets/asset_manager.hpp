@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <mutex>
 
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
@@ -14,16 +15,17 @@ namespace eng
 namespace assets
 {
 
+struct Node
+{
+    std::string name;
+    Range32u meshes{};
+    uint32_t transform{ ~0u };
+    uint32_t parent{ ~0u };
+    Range32u children{};
+};
+
 struct Asset
 {
-    struct Node
-    {
-        std::string name;
-        Range32u meshes{};
-        uint32_t transform{ ~0u };
-        uint32_t parent{ ~0u };
-        Range32u children{};
-    };
 
     Asset() noexcept = default;
     Asset(const Asset&) = delete;
@@ -57,6 +59,7 @@ class AssetManager
 
     std::unordered_map<fs::Path, Asset> m_loaded_assets_map;
     std::vector<engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
+    std::mutex m_engbc_vec_mutex;
 };
 
 } // namespace assets

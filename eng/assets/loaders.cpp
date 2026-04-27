@@ -285,7 +285,7 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
     return mats;
 }
 
-Range32u load_mesh(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Asset::Node& node, Context& ctx)
+Range32u load_mesh(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Node& node, Context& ctx)
 {
     if(ctx.meshes.empty()) { ctx.meshes.insert(ctx.meshes.begin(), gltfasset.meshes.size(), Range32u{}); }
     if(ctx.meshes[gltfmeshidx].size != 0u) { return ctx.meshes[gltfmeshidx]; }
@@ -308,10 +308,10 @@ Range32u load_mesh(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfme
     return geoms;
 }
 
-Asset::Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::Node& gltfnode,
-                      Asset::Node* parent_node, Context& context, uint32_t* out_node_index)
+Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::Node& gltfnode, Node* parent_node,
+               Context& context, uint32_t* out_node_index)
 {
-    Asset::Node node{};
+    Node node{};
     node.name = gltfnode.name.c_str();
     node.transform = [&] {
         auto& transform = asset.transforms.emplace_back();
@@ -346,7 +346,7 @@ Asset::Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fast
         }
     }
 
-    std::vector<Asset::Node> children;
+    std::vector<Node> children;
     children.reserve(gltfnode.children.size());
     for(const auto& e : gltfnode.children)
     {

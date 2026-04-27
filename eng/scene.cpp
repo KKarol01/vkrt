@@ -22,8 +22,7 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
 {
     ENG_ASSERT(asset.root_nodes.size() > 0);
 
-    const auto recursive_instance = [&asset](const auto& self, const assets::Asset::Node& node,
-                                             ecs::EntityId parent_entity) -> ecs::EntityId {
+    const auto recursive_instance = [&asset](const auto& self, const assets::Node& node, ecs::EntityId parent_entity) -> ecs::EntityId {
         auto* ecs = get_engine().ecs;
         auto e = ecs->create();
         ecs->add_components<ecs::Node>(e, ecs::Node{ .name = node.name });
