@@ -14,24 +14,24 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
     const float h = 1.0f / glm::tan(0.5f * fov);
     const float w = h * height / width;
     glm::mat4 result = glm::zero<glm::mat4>();
+    // invert Y so it points down, because vulkan NDC has +Y down
+    // otherwise, we would have to put negative height in vkviewport
+    // and ALWAYS invert Y whenever sampling textures in shaders from ndc coords.
     result[0][0] = w;
-    result[1][1] = h;
+    result[1][1] = -h;
     result[2][2] = 0.0f;
     result[2][3] = -1.0f;
     result[3][2] = zNear;
     return result;
 };
 
-Camera::Camera(float fov_radians, float min_dist, float max_dist)
+Camera::Camera(float fov_radians, float min_dist)
 {
-    GLFWwindow* window = get_engine().window->window;
-    projection = infinitePerspectiveFovReverseZRH_ZO(fov_radians, 1280.0f, 768.0f, min_dist);
-    projection[1][1] *= -1.0f; // invert Y so it points down, because vulkan NDC has +Y down
-                               // otherwise, we would have to put negative height in vkviewport
-                               // and ALWAYS invert Y whenever sampling textures in shaders from ndc coords.
+    const auto* window = get_engine().window;
+    update_projection(fov_radians, min_dist, window->width, window->height);
 
     double pos[2];
-    glfwGetCursorPos(window, &pos[0], &pos[1]);
+    glfwGetCursorPos(window->window, &pos[0], &pos[1]);
     lpx = (float)pos[0];
     lpy = (float)pos[1];
 
@@ -72,6 +72,11 @@ void Camera::update()
 
     prev_view = view;
     view = glm::lookAt(pos, pos + forward, up);
+}
+
+void Camera::update_projection(float fov_radians, float min_dist, float width, float height)
+{
+    projection = infinitePerspectiveFovReverseZRH_ZO(fov_radians, width, height, min_dist);
 }
 
 void Camera::on_mouse_move(float px, float py)

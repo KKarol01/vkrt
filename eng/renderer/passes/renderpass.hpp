@@ -52,7 +52,7 @@ class MeshRenderData
     void add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh);
 
     RenderPassType type{ RenderPassType::LAST_ENUM };
-    IndirectBatch draw;
+    IndirectBatch render_data;
     Handle<Buffer> instance_buffer;
     BufferView instance_view;
     std::vector<MeshInstance> built_instances;

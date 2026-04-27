@@ -8,6 +8,7 @@ namespace gfx
 struct RendererBackendCaps
 {
     bool supports_bindless{};
+    bool supports_raytracing{};
 };
 
 struct RendererBackendLimits

@@ -416,13 +416,13 @@ struct Image
     } md;
 };
 
-struct ImageMipLayerRange
+struct ImageMipsLayers
 {
     Range32u mips{};
     Range32u layers{};
 };
 
-struct ImageLayerRange
+struct ImageLayers
 {
     uint32_t mip{};
     Range32u layers{};
@@ -430,8 +430,8 @@ struct ImageLayerRange
 
 struct ImageBlit
 {
-    ImageLayerRange srclayers{};
-    ImageLayerRange dstlayers{};
+    ImageLayers srclayers{};
+    ImageLayers dstlayers{};
     Range3D32i srcrange{};
     Range3D32i dstrange{};
     ImageFilter filter{ ImageFilter::LINEAR };
@@ -439,8 +439,8 @@ struct ImageBlit
 
 struct ImageCopy
 {
-    ImageLayerRange srclayers{};
-    ImageLayerRange dstlayers{};
+    ImageLayers srclayers{};
+    ImageLayers dstlayers{};
     Vec3i32 srcoffset{};
     Vec3i32 dstoffset{};
     Vec3u32 extent{};
@@ -623,7 +623,8 @@ struct RenderResources
     RGResourceId zpdepth;
     RGResourceId normal;
     RGResourceId ao;
-    RGResourceId color;
+    RGResourceId opaque;      // set by the opaque mesh pass
+    RGResourceId final_color; // set by composite final color pass
 };
 
 struct TimestampQuery
@@ -654,8 +655,9 @@ inline constexpr uint32_t SETUP_TARGETS = 0;
 inline constexpr uint32_t Z_PREPASS = 50;
 inline constexpr uint32_t POST_Z = 51;
 inline constexpr uint32_t MESH_RENDER = 100;
-inline constexpr uint32_t UI = 150;
-inline constexpr uint32_t PRESENT = 200;
+inline constexpr uint32_t POST = 150;
+inline constexpr uint32_t UI = 200;
+inline constexpr uint32_t PRESENT = 250;
 }; // namespace RenderOrder
 
 class Renderer
@@ -670,9 +672,15 @@ class Renderer
         Sync* swp_sem{};
         Sync* ren_fen{};
 
+        void reset_queries();
         QueryPool* timestamp_pool;
-        std::deque<TimestampQuery> timestamp_queries;
-        std::deque<TimestampQuery> available_queries;
+        std::deque<TimestampQuery> tstamp_queries;
+        std::deque<TimestampQuery> available_tstamp_queries;
+
+        Sync* get_sync();
+        void reset_syncs();
+        std::vector<Sync*> syncs;
+        std::vector<Sync*> available_syncs;
 
         RenderResources render_resources;
 
@@ -719,8 +727,6 @@ class Renderer
         // size_t light_count{};
 
         Handle<Buffer> geom_blas; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
-        // Handle<Buffer> geom_scratch; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
-
         Handle<Buffer> geom_tlas_buffer;
         TopAccelerationStructure geom_tlas;
     };
@@ -732,9 +738,10 @@ class Renderer
 
     struct Settings
     {
-        ImageFormat color_format{ ImageFormat::R16FG16FB16FA16F };
+        ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
+        Vec2f override_render_resolution{ -1, -1 };
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 

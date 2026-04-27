@@ -7,23 +7,51 @@
 #include <WinBase.h>
 #endif
 
-static const char* open_mode_to_posix(eng::fs::OpenMode mode)
+// static const char* open_mode_to_posix(eng::fs::OpenMode mode)
+//{
+//     switch(mode)
+//     {
+//     case eng::fs::OpenMode::READ_BYTES:
+//     {
+//         return "rb";
+//     }
+//     case eng::fs::OpenMode::WRITE_CREATE_BYTES:
+//     {
+//         return "wb";
+//     }
+//     case eng::fs::OpenMode::READ_WRITE_BYTES:
+//     {
+//         return "r+b";
+//     }
+//     case eng::fs::OpenMode::READ_WRITE_CREATE_BYTES:
+//     {
+//         return "w+b";
+//     }
+//         return "";
+//     }
+// }
+
+static int open_mode_to_ios(eng::fs::OpenMode mode)
 {
     switch(mode)
     {
-    case eng::fs::OpenMode::RB:
+    case eng::fs::OpenMode::READ_BYTES:
     {
-        return "rb";
+        return std::ios::binary | std::ios::in;
     }
-    case eng::fs::OpenMode::WB:
+    case eng::fs::OpenMode::WRITE_CREATE_BYTES:
     {
-        return "wb";
+        return std::ios::binary | std::ios::out | std::ios::trunc;
     }
-    case eng::fs::OpenMode::RWB:
+    case eng::fs::OpenMode::READ_WRITE_BYTES:
     {
-        return "r+b";
+        return std::ios::binary | std::ios::in | std::ios::out;
     }
-        return "";
+    case eng::fs::OpenMode::READ_WRITE_CREATE_BYTES:
+    {
+        return std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc;
+    }
+        return 0;
     }
 }
 
@@ -143,29 +171,57 @@ struct Win32DirChangeHandle
 namespace fs
 {
 
+bool open_mode_is_read(OpenMode mode)
+{
+    static_assert((int)OpenMode::LAST_ENUM == 5);
+    return mode == OpenMode::READ_BYTES || mode == OpenMode::READ_WRITE_BYTES || mode == OpenMode::READ_WRITE_CREATE_BYTES;
+}
+
+bool open_mode_is_write(OpenMode mode)
+{
+    return mode == OpenMode::WRITE_CREATE_BYTES || mode == OpenMode::READ_WRITE_BYTES || mode == OpenMode::READ_WRITE_CREATE_BYTES;
+}
+
+File::File(FileSystem* fs, const Path& path, OpenMode mode) : fs(fs), path(path), mode(mode)
+{
+    if(path.empty() || mode == OpenMode::NONE) { return; }
+    file = std::fstream{ path.c_str(), open_mode_to_ios(mode) };
+    if(!file.is_open()) { return; }
+    if(open_mode_is_read(mode))
+    {
+        file.seekg(0, std::ios::end);
+        size = file.tellg();
+        file.seekg(0, std::ios::beg);
+    }
+}
+
 File::~File() noexcept { close(); }
+
+bool File::is_open() const { return file && file.is_open(); }
 
 void File::close()
 {
-    if(file) { fclose((FILE*)file); }
-    file = nullptr;
+    file.close();
+    size = 0;
     content_hash = {};
 }
 
 size_t File::read(std::byte* out_bytes, size_t bytes, size_t offset)
 {
-    if(!file || !out_bytes) { return 0; }
-    if(offset != ~0ull)
-    {
-        if(fseek((FILE*)file, offset, SEEK_SET) != 0) { return 0; }
-    }
-    return fread_s(out_bytes, bytes, 1, bytes, (FILE*)file);
+    if(!file.is_open() || !out_bytes) { return 0; }
+    if(!open_mode_is_read(mode)) { return 0; }
+    if(offset != ~0ull) { file.seekg(offset, std::ios::beg); }
+    if(!file) { return 0; }
+    file.read((char*)out_bytes, bytes);
+    return file.gcount();
 }
 
 std::string File::read(size_t bytes, size_t offset)
 {
+    if(!file.is_open()) { return {}; }
+    if(!open_mode_is_read(mode)) { return {}; }
+    if(offset == ~0ull) { file.tellg(); }
     if(!file) { return {}; }
-    if(offset == ~0ull) { offset = ftell((FILE*)file); }
     offset = std::min(size, offset);
     bytes = std::min(bytes, size - offset);
     std::string str(bytes, '\0');
@@ -177,13 +233,20 @@ std::string File::read(size_t bytes, size_t offset)
 size_t File::write(const std::byte* bytes, size_t size, size_t offset)
 {
     if(!file || !bytes || size == 0) { return 0; }
-    if(offset != ~0ull)
-    {
-        if(fseek((FILE*)file, offset, SEEK_SET) != 0) { return 0; }
-    }
-    size_t writechars = fwrite(bytes, 1, size, (FILE*)file);
-    return writechars;
+    if(!open_mode_is_write(mode)) { return 0; }
+    if(offset != ~0ull) { file.seekp(offset, std::ios::beg); }
+    if(!file) { return 0; }
+    file.write((const char*)bytes, size);
+    return file ? size : 0ull;
 }
+
+void File::delete_from_disk()
+{
+    close();
+    fs->delete_file(path);
+}
+
+bool File::eof() const { return file.eof(); }
 
 uint64_t File::get_hash()
 {
@@ -225,26 +288,16 @@ FilePtr FileSystem::open_file(const Path& path, OpenMode mode)
     }
 
     const auto pathstr = path.string();
-    FILE* rawfile{};
-    const auto EACCESS_ERRNO = 13; // sometimes i get access violation and cannot open the file.
-                                   // i suspect this is because of file listening in asset_manager.
     auto tries = 0u;
-    while(fopen_s(&rawfile, pathstr.c_str(), open_mode_to_posix(mode)) == EACCESS_ERRNO && tries++ < 10)
+
+    auto sharedfile = std::make_shared<File>(this, path, mode);
+    while(!sharedfile->is_open() && tries++ < 10)
     {
+        ENG_ASSERT(false); // todo: check if this loop ever runs; it was needed because listening for file changes sometimes blocks opening of files...
         std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
+        *sharedfile = File{ this, path, mode };
     }
-
-    if(!rawfile) { return {}; }
-
-    size_t size = 0;
-    if(mode != OpenMode::WB)
-    {
-        fseek(rawfile, 0, SEEK_END);
-        size = static_cast<size_t>(ftell(rawfile));
-        fseek(rawfile, 0, SEEK_SET);
-    }
-
-    auto sharedfile = std::make_shared<File>(this, (void*)rawfile, size, path);
+    if(!sharedfile->is_open()) { return {}; }
     filemap.emplace(std::make_pair(hash, mode), sharedfile);
     return sharedfile;
 }

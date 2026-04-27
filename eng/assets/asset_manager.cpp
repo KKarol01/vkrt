@@ -3,6 +3,7 @@
 #include <eng/engine.hpp>
 #include <eng/assets/loaders.hpp>
 #include <eng/assets/serialization.hpp>
+#include <eng/assets/compression.hpp>
 
 namespace eng
 {
@@ -17,45 +18,41 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
 
     const auto ext = file_path.extension();
 
-    {
+    const auto try_deserializing = [this, &file_path]() -> Asset* {
         auto engb_path = file_path;
         engb_path.replace_extension(".engb");
-        auto engb_file = get_engine().fs->get_asset(engb_path, fs::OpenMode::RB);
-        if(engb_file)
+        auto engb_file = get_engine().fs->get_asset(engb_path, fs::OpenMode::READ_BYTES);
+        if(!engb_file) { return nullptr; }
+        ENG_TIMER_SCOPED("Deserializing {}", engb_path.string());
+        Asset asset{};
+        std::vector<std::byte> decompressed_asset;
+        bool failure = false;
+        std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
+        auto success = compression::zlib_inflate(
+            [&](size_t size) {
+                if(failure) { return std::span<const std::byte>{}; }
+                const auto file_read = engb_file->read(file_buf.data(), size);
+                const auto bytes_to_process = std::min(file_read, size);
+                auto span = std::span<const std::byte>{ file_buf.data(), bytes_to_process };
+                return span;
+            },
+            [&](std::span<const std::byte> data) {
+                if(failure) { return; }
+                decompressed_asset.insert(decompressed_asset.end(), data.begin(), data.end());
+            });
+        if(!success)
         {
-            ENG_TIMER_START("Engb deserialization");
-            Asset asset{};
-
-            ENG_TIMER_START("file reading");
-            auto bytes = engb_file->read();
-            ENG_TIMER_END();
-            size_t bytes_read = 0;
-            {
-                ENG_TIMER_START("desrializing");
-                {
-                    ENG_TIMER_START("desrializing_1");
-                    {
-                        ENG_TIMER_START("desrializing_1_1");
-                        ENG_TIMER_END();
-                    }
-                    {
-                        ENG_TIMER_START("desrializing_1_2");
-                        ENG_TIMER_END();
-                    }
-                    ENG_TIMER_END();
-                }
-                {
-                    ENG_TIMER_START("reading");
-                    Serializer::deserialize((const std::byte*)bytes.data(), bytes_read, bytes.size(), asset);
-                    ENG_TIMER_END();
-                }
-                ENG_TIMER_END();
-            }
-            auto it = loaded_assets_map.emplace(file_path, std::move(asset));
-            ENG_TIMER_END();
-            return it.first->second;
+            ENG_WARN("Failed to decompress serialized data {}", file_path.string());
+            return nullptr;
         }
-    }
+
+        size_t read_bytes = 0;
+        Serializer::deserialize((const std::byte*)decompressed_asset.data(), read_bytes, decompressed_asset.size(), asset);
+        auto it = loaded_assets_map.emplace(file_path, std::move(asset));
+        return &it.first->second;
+    };
+
+    if(auto* deserialized_asset = try_deserializing(); deserialized_asset) { return *deserialized_asset; }
 
     if(ext == ".glb" || ext == ".gltf")
     {
@@ -69,13 +66,13 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         auto it = loaded_assets_map.emplace(file_path, std::move(*asset));
 
         std::thread serialize_thread{ [&asset = it.first->second] {
-            ENG_LOG("Serializing asset {}", asset.path.string());
             for(auto& signal : asset.geometry_data_futures)
             {
                 signal.wait();
             }
 
             size_t size = 0;
+            ENG_TIMER_SCOPED("Serializing asset {}", asset.path.string());
             Serializer::serialize(asset, size);
             if(size > 0)
             {
@@ -84,8 +81,33 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                 Serializer::serialize(asset, size, asset_bytes.data(), asset_bytes.size());
                 auto serialized_path = asset.path;
                 serialized_path.replace_extension(".engb");
-                auto file = get_engine().fs->get_asset(serialized_path, fs::OpenMode::WB);
-                file->write(asset_bytes.data(), asset_bytes.size(), 0);
+
+                auto file = get_engine().fs->get_asset(serialized_path, fs::OpenMode::WRITE_CREATE_BYTES);
+                if(!file)
+                {
+                    ENG_WARN("Could not open file {} for serializing", serialized_path.string());
+                    return;
+                }
+                size_t bytes_read = 0;
+                size_t bytes_left = asset_bytes.size();
+                bool failure = false;
+                compression::zlib_deflate(
+                    [&](size_t size) {
+                        if(failure) { return std::span<const std::byte>{}; }
+                        const auto bytes_to_process = std::min(bytes_left, size);
+                        auto span = std::span<const std::byte>{ asset_bytes.data() + bytes_read, bytes_to_process };
+                        bytes_read += bytes_to_process;
+                        bytes_left -= bytes_to_process;
+                        return span;
+                    },
+                    [&](std::span<const std::byte> data) {
+                        if(failure) { return; }
+                        if(file->write(data.data(), data.size()) != data.size())
+                        {
+                            ENG_WARN("Failed to serialized data to the file {}", serialized_path.string());
+                            failure = true;
+                        }
+                    });
             }
 
             asset.geometry_data.resize(0);

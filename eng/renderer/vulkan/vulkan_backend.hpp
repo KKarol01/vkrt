@@ -276,7 +276,6 @@ class RendererBackendVk : public IRendererBackend
     VmaAllocator vma;
     VkSurfaceKHR window_surface;
     // Flags<RenderFlags> flags;
-    bool supports_raytracing{ false };
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR rt_acc_props;

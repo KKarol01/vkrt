@@ -214,12 +214,14 @@ void Renderer::init_helper_geom()
 void Renderer::init_pipelines()
 {
     auto linear_sampler = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageAddressing::REPEAT));
+    auto linear_sampler_clamp = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageAddressing::CLAMP_EDGE));
     auto nearest_sampler = make_sampler(Sampler::init(ImageFilter::NEAREST, ImageAddressing::REPEAT));
     auto hiz_sampler = make_sampler(Sampler::init(ImageFilter::LINEAR, ImageFilter::LINEAR, ImageAddressing::CLAMP_EDGE,
                                                   ImageAddressing::CLAMP_EDGE, ImageAddressing::CLAMP_EDGE,
                                                   SamplerMipmapMode::NEAREST, 0.0f, 1000.0f, 0.0f, SamplerReductionMode::MIN));
-    Handle<Sampler> imsamplers[3]{};
+    Handle<Sampler> imsamplers[ENG_SAMPLER_COUNT]{};
     imsamplers[ENG_SAMPLER_LINEAR] = linear_sampler;
+    imsamplers[ENG_SAMPLER_LINEAR_CLAMP] = linear_sampler_clamp;
     imsamplers[ENG_SAMPLER_NEAREST] = nearest_sampler;
     imsamplers[ENG_SAMPLER_HIZ] = hiz_sampler;
 
@@ -446,6 +448,12 @@ void Renderer::init_bufs()
 void Renderer::update()
 {
     settings.render_resolution = settings.new_render_resolution;
+    if(settings.override_render_resolution.x == -1 && settings.override_render_resolution.y == -1)
+    {
+        get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.present_resolution.x,
+                                               settings.present_resolution.y);
+        settings.render_resolution = settings.present_resolution;
+    }
 
     if(settings.regenerate_swapchain)
     {
@@ -466,13 +474,8 @@ void Renderer::update()
     current_data->ren_fen->wait_cpu(~0ull);
     current_data->ren_fen->reset();
     current_data->cmdpool->reset();
-    current_data->available_queries = std::move(current_data->timestamp_queries);
-    // Stupid swapchain -- cannot reset those (binary sems that need to be destroyed to reset)
-    // because waiting on a ren_fen doesn't guarantee that sems are no longer in use, and which
-    // get reset only when waited on in the queue submission, so acq_sem gets waited on (reset)
-    // during (but before) ren_fen signal operation, and swp_sem during present.
-    // current_data->acq_sem->reset();
-    // current_data->swp_sem->reset();
+    current_data->reset_syncs();
+    current_data->reset_queries();
 
     if(auto lock = std::scoped_lock{ current_data->retired_mutex }; current_data->retired_resources.size() > 0)
     {
@@ -606,7 +609,6 @@ void Renderer::update()
     if(new_geometries.batches.size()) { build_pending_geometries(); }
     if(new_blases.size())
     {
-        staging->get_wait_sem()->wait_cpu(~0ull);
         std::vector<ASRequirements> reqs_vec;
         ASRequirements total_reqs{};
         for(auto gh : new_blases)
@@ -630,23 +632,25 @@ void Renderer::update()
             bufs.geom_blas->capacity = total_reqs.acceleration_structure_size;
             backend->allocate_buffer(bufs.geom_blas.get());
         }
-        auto blas_scratch = Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
-        backend->allocate_buffer(blas_scratch);
+
+        auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
+        queue_destroy(blas_scratch); // destroy later in frame_delay frames
 
         auto* cmd = current_data->cmdpool->begin();
+        cmd->wait_sync(staging->flush(true), PipelineStage::AS_BUILD_BIT);
+
         total_reqs = {};
         for(auto i = 0u; i < reqs_vec.size(); ++i)
         {
             ASRequirements reqs = reqs_vec[i];
             ASRequirements _reqs;
             backend->make_blas(new_blases[i].get(), _reqs, cmd, &bufs.geom_blas.get(),
-                               total_reqs.acceleration_structure_size, &blas_scratch, total_reqs.build_scratch_size);
+                               total_reqs.acceleration_structure_size, &blas_scratch.get(), total_reqs.build_scratch_size);
             total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
             total_reqs.build_scratch_size += reqs.build_scratch_size;
         }
-        current_data->cmdpool->end(cmd);
-        gq->with_cmd_buf(cmd).submit_wait(~0ull);
-        backend->destroy_buffer(blas_scratch);
+        cmd->barrier(PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_WRITE_BIT, PipelineStage::AS_BUILD_BIT,
+                     PipelineAccess::AS_READ_BIT);
 
         std::vector<uint32_t> instance_ids;
         std::vector<const Geometry*> tlas_geoms;
@@ -666,22 +670,24 @@ void Renderer::update()
         backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
                            std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
         {
-            auto scratch = Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH);
+            auto tlas_scratch = make_buffer("tlas scratch", Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
+            queue_destroy(tlas_scratch); // destroy later in frame_delay frames
             bufs.geom_tlas_buffer =
                 make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
-            auto instances = Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT);
-            backend->allocate_buffer(scratch);
-            backend->allocate_buffer(instances);
-            auto* cmd = current_data->cmdpool->begin();
+            auto instances = make_buffer("Tlas blas instances",
+                                         Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT));
+            queue_destroy(instances);
             bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
                                                 std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
-                                                &bufs.geom_tlas_buffer.get(), 0, &scratch, 0, &instances, 0);
-            current_data->cmdpool->end(cmd);
-            gq->with_cmd_buf(cmd).submit_wait(~0ull);
-            backend->destroy_buffer(scratch);
-            backend->destroy_buffer(instances);
+                                                &bufs.geom_tlas_buffer.get(), 0, &tlas_scratch.get(), 0, &instances.get(), 0);
         }
 
+        auto* tlas_done_sync = current_data->get_sync();
+        cmd->signal_sync(tlas_done_sync, PipelineStage::AS_BUILD_BIT);
+        current_data->cmdpool->end(cmd);
+        gq->wait_sync(tlas_done_sync, PipelineStage::RAY_TRACING_BIT);
+        gq->with_cmd_buf(cmd);
+        gq->submit();
         new_blases.clear();
     }
 
@@ -689,14 +695,8 @@ void Renderer::update()
 
     compile_rendergraph();
 
-    Sync* rg_wait_syncs[]{ current_data->acq_sem, staging->get_wait_sem() };
+    Sync* rg_wait_syncs[]{ staging->flush(true) };
     Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
-    auto* cmd = current_data->cmdpool->begin();
-    current_data->cmdpool->end(cmd);
-    cmd->wait_sync(rgsync);
-    cmd->signal_sync(current_data->swp_sem);
-    cmd->signal_sync(current_data->ren_fen);
-    gq->with_cmd_buf(cmd).submit();
     gq->wait_sync(current_data->swp_sem).present(swapchain);
 
     ++current_frame;
@@ -731,35 +731,66 @@ void Renderer::compile_rendergraph()
             auto* cmd = b.open_cmd_buf();
             get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)).get(),
                                          &constants_buffer, 0ull, sizeof(constants_buffer), false);
-            cmd->wait_sync(get_renderer().staging->get_wait_sem());
+            cmd->wait_sync(get_renderer().staging->flush(true));
         });
 
     passes.mesh_passes[(int)RenderPassType::Z_PREPASS]->init(rgraph);
-    passes.reconstruct_normals->init(rgraph);
-    passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
+    // passes.reconstruct_normals->init(rgraph);
+    // passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
     passes.mesh_passes[(int)RenderPassType::OPAQUE]->init(rgraph);
 
-    struct ApplyAOData
+    // struct ApplyAOData
+    //{
+    //     RGAccessId in_out_color;
+    //     RGAccessId in_ao;
+    // };
+    // rgraph->add_graphics_pass<ApplyAOData>(
+    //     "APPLY_AO", RenderOrder::MESH_RENDER,
+    //     [this](RGBuilder& b, ApplyAOData& d) {
+    //         d.in_out_color = b.read_write_image(b.as_acc_id(current_data->render_resources.color));
+    //         d.in_ao = b.read_image(b.as_acc_id(current_data->render_resources.ao));
+    //     },
+    //     [this](RGBuilder& b, const ApplyAOData& d) {
+    //         auto* cmd = b.open_cmd_buf();
+    //         cmd->bind_pipeline(settings.apply_ao_pipeline.get());
+    //         DescriptorResource resources[]{
+    //             DescriptorResource::storage_image(b.graph->get_acc(d.in_out_color).image_view),
+    //             DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+    //         };
+    //         const auto& img = b.graph->get_img(d.in_ao).get();
+    //         cmd->bind_resources(1, resources);
+    //         cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
+    //     });
+
+    struct CompositeFinalColorData
     {
-        RGAccessId in_out_color;
-        RGAccessId in_ao;
+        RGAccessId in_color;
+        RGAccessId out_final_color;
     };
-    rgraph->add_graphics_pass<ApplyAOData>(
-        "APPLY_AO", RenderOrder::MESH_RENDER,
-        [this](RGBuilder& b, ApplyAOData& d) {
-            d.in_out_color = b.read_write_image(b.as_acc_id(current_data->render_resources.color));
-            d.in_ao = b.read_image(b.as_acc_id(current_data->render_resources.ao));
+    const auto compositefinalcolor = rgraph->add_graphics_pass<CompositeFinalColorData>(
+        "CompositeFinalColor", RenderOrder::POST,
+        [this](RGBuilder& b, CompositeFinalColorData& data) {
+            if(!current_data->render_resources.opaque) { return; }
+            data.in_color = b.copy_source(b.as_acc_id(current_data->render_resources.opaque));
+            // todo: make this persistent and double-buffered
+            data.out_final_color =
+                b.create_resource("FinalColorComposite",
+                                  Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
+                                              ImageUsage::TRANSFER_DST_BIT | ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
+                                  RGClear::color());
+            data.out_final_color = b.copy_dest(data.out_final_color);
+            current_data->render_resources.final_color = b.as_res_id(data.out_final_color);
         },
-        [this](RGBuilder& b, const ApplyAOData& d) {
-            auto* cmd = b.open_cmd_buf();
-            cmd->bind_pipeline(settings.apply_ao_pipeline.get());
-            DescriptorResource resources[]{
-                DescriptorResource::storage_image(b.graph->get_acc(d.in_out_color).image_view),
-                DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
-            };
-            const auto& img = b.graph->get_img(d.in_ao).get();
-            cmd->bind_resources(1, resources);
-            cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
+        [this](RGBuilder& pb, const CompositeFinalColorData& data) {
+            auto* cmd = pb.open_cmd_buf();
+            auto& dsti = pb.graph->get_img(data.out_final_color).get();
+            const auto& srci = pb.graph->get_img(data.in_color).get();
+            cmd->blit(dsti, srci,
+                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
+                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
+                                 .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
+                                 .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
+                                 .filter = ImageFilter::LINEAR });
         });
 
     const auto imdata = imgui_renderer->update(rgraph);
@@ -770,25 +801,35 @@ void Renderer::compile_rendergraph()
         RGAccessId output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
-        "copy to swapchain", RenderOrder::PRESENT,
-        [this, imdata](RGBuilder& pb, CopySwapchainData& data) {
-            data.input = pb.access_resource(imdata.output, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT,
-                                            PipelineAccess::TRANSFER_READ_BIT);
-            data.output = pb.import_resource(swapchain->get_image());
-            data.output = pb.access_resource(data.output, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT,
-                                             PipelineAccess::TRANSFER_WRITE_BIT);
+        "CopyToSwapchain", RenderOrder::PRESENT,
+        [=, this](RGBuilder& b, CopySwapchainData& data) {
+            auto final_color_acc = b.copy_source(b.as_acc_id(get_renderer().current_data->render_resources.final_color));
+            data.input = final_color_acc;
+            data.output = b.import_resource(swapchain->get_image());
+            data.output = b.copy_dest(data.output);
         },
-        [](RGBuilder& pb, const CopySwapchainData& data) {
+        [this](RGBuilder& pb, const CopySwapchainData& data) {
             auto* cmd = pb.open_cmd_buf();
-            cmd->copy(pb.graph->get_img(data.output).get(), pb.graph->get_img(data.input).get());
+            auto& dsti = pb.graph->get_img(data.output).get();
+            const auto& srci = pb.graph->get_img(data.input).get();
+            cmd->wait_sync(current_data->acq_sem, PipelineStage::TRANSFER_BIT);
+            cmd->blit(dsti, srci,
+                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
+                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
+                                 .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
+                                 .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
+                                 .filter = ImageFilter::LINEAR });
         });
     rgraph->add_graphics_pass<RGAccessId>(
-        "present swapchain", RenderOrder::PRESENT,
-        [copyswapchaindata](RGBuilder& pb, RGAccessId& output) {
-            output = pb.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL,
-                                        PipelineAccess::TRANSFER_WRITE_BIT);
+        "PresentSwapchain", RenderOrder::PRESENT,
+        [copyswapchaindata](RGBuilder& b, RGAccessId& output) {
+            output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
-        [](RGBuilder& pb, auto& data) {});
+        [this](RGBuilder& b, auto& data) {
+            auto* cmd = b.open_cmd_buf();
+            cmd->signal_sync(current_data->ren_fen, PipelineStage::ALL);
+            cmd->signal_sync(current_data->swp_sem, PipelineStage::ALL);
+        });
 
     rgraph->compile();
 }
@@ -858,7 +899,6 @@ void Renderer::queue_destroy(Handle<Buffer>& buffer)
     ENG_ASSERT(buffer);
     std::scoped_lock lock{ current_data->retired_mutex };
     current_data->retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
-    buffer = {};
 }
 
 Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
@@ -887,7 +927,6 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
         std::scoped_lock lock{ current_data->retired_mutex };
         current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
     }
-    image = {};
 }
 
 Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
@@ -1000,7 +1039,7 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
 void Renderer::build_pending_geometries()
 {
-    ScopedTimer build_pending_timer{ "Build pending geometries" };
+    ENG_TIMER_SCOPED("Build pending geometries");
 
     // take out any batch that has meshlets. it means the geometry has been preprocessed and was deserialized.
     auto pre_meshletized_it =
@@ -1434,7 +1473,7 @@ ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffe
 {
     auto& r = get_renderer();
     auto& cd = r.current_data;
-    auto& tq = cd->timestamp_queries.emplace_back();
+    auto& tq = cd->tstamp_queries.emplace_back();
     query = &tq;
     query->label = label;
     query->pool = cd->timestamp_pool;
@@ -1447,6 +1486,22 @@ ScopedTimestampQuery::~ScopedTimestampQuery()
 {
     cmd->write_timestamp(query->pool, PipelineStage::ALL, query->index + 1);
 }
+
+void Renderer::FrameData::reset_queries() { available_tstamp_queries = std::move(tstamp_queries); }
+
+Sync* Renderer::FrameData::get_sync()
+{
+    if(available_syncs.size())
+    {
+        auto* sync = available_syncs.back();
+        available_syncs.pop_back();
+        syncs.push_back(sync);
+        return sync;
+    }
+    return syncs.emplace_back(get_renderer().make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE }));
+}
+
+void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
 {

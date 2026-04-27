@@ -32,23 +32,31 @@ void StagingBuffer::init(SubmitQueue* queue)
     {
         contexts[i].pool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
     }
-    common_sem = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
 
     free_list.push_back(FreeAllocation{ .index = (uint32_t)std::log2(CAPACITY), .offset = 0, .size = CAPACITY });
 }
 
-void StagingBuffer::flush()
+Sync* StagingBuffer::flush(bool signal_sync)
 {
-    if(!get_context().cmd) { return; } // no transactions issued since previous flush
+    Sync* out_signal_sync{};
+    if(signal_sync)
+    {
+        out_signal_sync = get_renderer().current_data->get_sync();
+        queue->signal_sync(out_signal_sync, PipelineStage::TRANSFER_BIT);
+    }
+    if(!get_context().cmd)
+    {
+        if(signal_sync) { queue->submit(); }
+        return out_signal_sync;
+    }
     get_context().pool->end(get_context().cmd);
-    queue->with_cmd_buf(get_context().cmd)
-        .signal_sync(common_sem, PipelineStage::TRANSFER_BIT)
-        .signal_sync(get_context().semaphore, PipelineStage::TRANSFER_BIT);
+    queue->with_cmd_buf(get_context().cmd);
     queue->submit();
     get_context().cmd = nullptr;
-    auto* sem = get_context().semaphore;
-    get_context().semaphore = nullptr;
+    return out_signal_sync;
 }
+
+void StagingBuffer::flush_wait() { flush(true)->wait_cpu(~0ull); }
 
 // void StagingBuffer::reset()
 //{
@@ -64,6 +72,11 @@ void StagingBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Rang
 {
     if(src_range.size == 0) { return; }
     if(!translate_dst_offset(dst, dst_offset, src_range.size)) { return; }
+    if(dst.memory && src.memory)
+    {
+        memcpy((char*)dst.memory + dst_offset, (const char*)src.memory + src_range.offset, src_range.size);
+        return;
+    }
     if(insert_barrier) { barrier(); }
     get_cmd()->copy(dst, src, dst_offset, src_range);
     dst.size = std::max(dst.size, dst_offset + src_range.size);
@@ -74,6 +87,11 @@ void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, 
     if(src_size == 0) { return; }
     ENG_ASSERT(src);
     if(!translate_dst_offset(dst, dst_offset, src_size)) { return; }
+    if(dst.memory)
+    {
+        memcpy((char*)dst.memory + dst_offset, src, src_size);
+        return;
+    }
     size_t uploaded = 0;
     while(uploaded < src_size)
     {
@@ -90,8 +108,8 @@ void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, 
 
 void StagingBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, bool transition_back)
 {
-    const auto dstrange = ImageMipLayerRange{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
-    const auto srcrange = ImageMipLayerRange{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
+    const auto dstrange = ImageMipsLayers{ .mips = { copy.dstlayers.mip, 1 }, .layers = copy.dstlayers.layers };
+    const auto srcrange = ImageMipsLayers{ .mips = { copy.srclayers.mip, 1 }, .layers = copy.srclayers.layers };
     prepare_image(&dst, &src, true, false, dstrange, srcrange);
     get_cmd()->copy(dst, src, copy);
     if(transition_back) { prepare_image(&dst, &src, false, true, dstrange, srcrange); }
@@ -100,8 +118,8 @@ void StagingBuffer::copy(Image& dst, const Image& src, const ImageCopy& copy, bo
 
 void StagingBuffer::blit(Image& dst, const Image& src, const ImageBlit& blit, bool transition_back)
 {
-    const auto dstrange = ImageMipLayerRange{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
-    const auto srcrange = ImageMipLayerRange{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
+    const auto dstrange = ImageMipsLayers{ .mips = { blit.dstlayers.mip, 1 }, .layers = blit.dstlayers.layers };
+    const auto srcrange = ImageMipsLayers{ .mips = { blit.srclayers.mip, 1 }, .layers = blit.srclayers.layers };
     prepare_image(&dst, &src, true, false, dstrange, srcrange);
     get_cmd()->blit(dst, src, blit);
     if(transition_back) { prepare_image(&dst, &src, false, true, dstrange, srcrange); }
@@ -179,17 +197,11 @@ void StagingBuffer::barrier()
                        PipelineAccess::TRANSFER_RW);
 }
 
-void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipLayerRange& range)
+void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipsLayers& range)
 {
     ENG_ASSERT(dst_layout != ImageLayout::UNDEFINED);
     get_cmd()->barrier(dst, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_RW, PipelineStage::TRANSFER_BIT,
                        PipelineAccess::TRANSFER_RW, src_layout, dst_layout, range);
-}
-
-Sync* StagingBuffer::get_wait_sem(bool flush)
-{
-    if(flush) { this->flush(); }
-    return common_sem;
 }
 
 StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
@@ -211,7 +223,7 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
             }
             else
             {
-                flush();
+                flush(false);
                 scan_for_finished_allocations();
             }
         }
@@ -223,12 +235,13 @@ StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
 
     const size_t actual_take = std::min(found_block.size, aligned_size);
 
-    auto* sem = get_sem();
+    auto* sem = get_renderer().current_data->get_sync();
     const auto alloc = Allocation{ .offset = found_block.offset,
                                    .size = std::min(size, actual_take),
                                    .real_size = actual_take,
                                    .semaphore = sem,
                                    .signal_value = sem->get_next_signal_value() };
+    queue->signal_sync(sem, PipelineStage::TRANSFER_BIT);
 
     const size_t remainder = found_block.size - actual_take;
     if(remainder >= ALIGNMENT)
@@ -252,11 +265,8 @@ void StagingBuffer::scan_for_finished_allocations()
         auto& alloc = allocations.front();
         if(alloc.semaphore->wait_cpu(0ull, alloc.signal_value))
         {
-            semaphores.push_back(alloc.semaphore);
-
-            insert_free_alloc(FreeAllocation{ (uint32_t)std::log2(alloc.real_size), alloc.offset, alloc.real_size });
-
             needs_merge = true;
+            insert_free_alloc(FreeAllocation{ (uint32_t)std::log2(alloc.real_size), alloc.offset, alloc.real_size });
             allocations.pop_front();
         }
         else { break; }
@@ -297,7 +307,6 @@ StagingBuffer::Context& StagingBuffer::get_context()
     {
         last_frame = get_renderer().current_frame;
         ctx.pool->reset(); // can safely assume all the transactions during that frame must have had completed (render graph waits for the semaphore)
-        ENG_ASSERT(!ctx.semaphore);
     }
     return ctx;
 }
@@ -309,27 +318,13 @@ ICommandBuffer* StagingBuffer::get_cmd()
     return ctx.cmd;
 }
 
-Sync* StagingBuffer::get_sem()
-{
-    auto& ctx = get_context();
-    if(ctx.semaphore) { return ctx.semaphore; }
-    if(semaphores.size())
-    {
-        ctx.semaphore = semaphores.back();
-        semaphores.pop_back();
-        return ctx.semaphore;
-    }
-    ctx.semaphore = get_renderer().make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0ull, "staging sync" });
-    return ctx.semaphore;
-}
-
 void* StagingBuffer::get_alloc_mem(const Allocation& alloc) const
 {
     return (void*)((char*)buffer.memory + alloc.offset);
 }
 
 void StagingBuffer::prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
-                                  ImageMipLayerRange dst_range, ImageMipLayerRange src_range)
+                                  ImageMipsLayers dst_range, ImageMipsLayers src_range)
 {
     if(!finished)
     {

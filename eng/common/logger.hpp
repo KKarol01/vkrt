@@ -48,37 +48,23 @@
 
 #define ENG_WARN(msg, ...) ENG_PRTLN("[WARN][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__)
 
-#define ENG_LOG(msg, ...)                                                                                              \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        const std::string format = ENG_FMT("[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__);                   \
-        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                               \
-        ENG_PRTLN("{}", format);                                                                                       \
-        /*get_engine().msg_log.push_front(format); */                                                                  \
-    }                                                                                                                  \
+namespace logger
+{
+inline thread_local char msg_buf[1024]{};
+}
+
+#define ENG_LOG(msg, ...)                                                                                                        \
+    do                                                                                                                           \
+    {                                                                                                                            \
+        const auto chars_written = ENG_FMT_TO_N(logger::msg_buf, 1023, "[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__); \
+        logger::msg_buf[chars_written] = '\0';                                                                                   \
+        ENG_PRTLN("{}", logger::msg_buf);                                                                                        \
+        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                                         \
+        /*get_engine().msg_log.push_front(format); */                                                                            \
+    }                                                                                                                            \
     while(0)
 
 #define ENG_TODO(msg, ...) ENG_PRTLN("[TODO][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__)
-
-namespace eng
-{
-
-struct ScopedTimer
-{
-    ScopedTimer(std::string_view label, uint32_t nest_level = ~0u);
-    ~ScopedTimer();
-    StackString<64> label;
-    double start_secs{};
-    uint32_t nest_level{ ~0u };
-};
-
-thread_local inline std::deque<ScopedTimer> g_scoped_timers;
-
-} // namespace eng
-
-#define ENG_TIMER_START(msg, ...)                                                                                      \
-    ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__), (uint32_t)g_scoped_timers.size());
-#define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();
 
 #else
 #ifdef ENG_PLATFORM_WIN32
@@ -100,3 +86,32 @@ thread_local inline std::deque<ScopedTimer> g_scoped_timers;
 #define ENG_TIMER_END()
 
 #endif
+
+namespace eng
+{
+
+struct ScopedTimer
+{
+    ScopedTimer(std::string_view label);
+    ~ScopedTimer();
+    StackString<64> label;
+    double start_secs{};
+    uint32_t nest_level{ ~0u };
+};
+
+thread_local inline std::deque<ScopedTimer> g_scoped_timers;
+
+struct ScopedTimerProxy
+{
+    ScopedTimerProxy(std::string_view label) { g_scoped_timers.emplace_back(label); }
+    ~ScopedTimerProxy() { g_scoped_timers.pop_back(); }
+};
+
+} // namespace eng
+
+#define ENG_TIMER_EXPAND(a, b) a##b
+#define ENG_TIMER_CONCAT_LINE(a, b) ENG_TIMER_EXPAND(a, b)
+#define ENG_TIMER_SCOPED(msg, ...)                                                                                     \
+    ::eng::ScopedTimerProxy ENG_TIMER_CONCAT_LINE(eng_scoped_timer_proxy_, ENG_TIMER_EXPAND(__LINE__)){ ENG_FMT(msg, __VA_ARGS__) };
+#define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
+#define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();

@@ -8,10 +8,11 @@ namespace eng
 class Camera
 {
   public:
-    Camera(float fov_radians, float min_dist, float max_dist);
+    Camera(float fov_radians, float min_dist);
 
     void update();
     void update_projection(const glm::mat4& new_projection) { projection = new_projection; }
+    void update_projection(float fov_radians, float min_dist, float width, float height);
     glm::mat4 get_view() const { return view; }
     glm::mat4 get_projection() const { return projection; }
     void on_mouse_move(float px, float py);

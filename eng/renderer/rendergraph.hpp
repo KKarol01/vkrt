@@ -227,16 +227,21 @@ struct RGBuilder
         return access_resource(acc, stage, access, range);
     }
 
+    RGAccessId copy_source(RGAccessId acc)
+    {
+        return access_resource(acc, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+    }
+
+    RGAccessId copy_dest(RGAccessId acc)
+    {
+        return access_resource(acc, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT);
+    }
+
     RGResourceId as_res_id(RGAccessId acc) const;
 
     RGAccessId as_acc_id(RGResourceId res) const;
 
     ICommandBuffer* open_cmd_buf();
-
-    void wait_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value = ~0ull)
-    {
-        pass->wait_syncs.emplace_back(sync, stages, value);
-    }
 
     RGPass* pass{};
     RGRenderGraph* graph{};

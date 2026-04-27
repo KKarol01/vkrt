@@ -37,9 +37,10 @@ The format for this is as follows:
 	{
 		8B custom hash for lookup	- usually from virtual path like '/assets/models/model/scene.gltf'
 		8B content hash				- hash of the contents
-		8B asset byte size			- asset byte size
 		8B asset start				- offset from the beginning of the container to the start of the asset
+		8B asset byte size			- asset byte size
 		1B version number			- version of the byte representation of the contents in the container
+		1B flags					- flags describing the properties of the content
 	} : LIST_ITEM, ...] : LIST,
 	[asset_0_bytes, asset_1_bytes, ..., asset_item_count_bytes] : ASSET BYTES,
 } : .ENGB CONTAINER SPEC
@@ -51,27 +52,39 @@ namespace engb
 inline namespace v0
 {
 
+inline static constexpr size_t HEADER_BYTE_SZ = 4 + 1 + 4;
+inline static constexpr size_t LIST_BYTE_SZ = 4 * 8 + 2 * 1;
+
+enum class ListFlags : uint8_t
+{
+    CONTENT_COMPRESSED_BIT = 1 << 0, // use zlib to decompress
+};
+
+struct List
+{
+    uint64_t custom_hash{};
+    uint64_t content_hash{};
+    uint64_t asset_start{};
+    uint64_t asset_size{}; // this probably could be calculated from total file size or next_item_list_asset_start - this_item_list_asset_start
+    uint8_t version{};
+    Flags<ListFlags> flags{};
+};
+
 struct Container
 {
-    inline static constexpr size_t HEADER_BYTE_SZ = 4 + 1 + 4;
-    inline static constexpr size_t LIST_BYTE_SZ = 25;
+    Container(fs::FilePtr container_file);
 
-    struct List
-    {
-        uint64_t custom_hash{};
-        uint64_t content_hash{};
-        uint64_t asset_start{};
-        uint8_t version{};
-    };
-
-    void add_asset(uint8_t version, uint64_t custom_hash, std::span<const std::byte> asset);
+    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset);
 
     void serialize(size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0);
     void serialize(size_t& out_bytes_written, fs::FilePtr out_file);
 
-    std::vector<List> lists;
-    std::vector<std::byte> asset_bytes;
+    fs::FilePtr file;
+    std::vector<List> m_lists;
+    std::vector<std::byte> m_asset_bytes;
 };
+
+ENG_ENABLE_FLAGS_OPERATORS(ListFlags);
 
 } // namespace v0
 } // namespace engb
@@ -101,9 +114,7 @@ class Serializer
     void Serializer::deserialize<type>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, type& t);
 
 ENG_SERIALIZER_DECLARE(assets::Asset);
-
 ENG_SERIALIZER_DECLARE(gfx::ImageView);
-
 ENG_SERIALIZER_DECLARE(ecs::Transform);
 
 } // namespace assets

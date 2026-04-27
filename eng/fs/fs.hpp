@@ -20,12 +20,19 @@ namespace fs
 using Path = ::std::filesystem::path;
 using PathHash = uint64_t;
 
+// Open mode. _BYTES suffix means posix 'b' flag that disables special '\n' handling on windows.
 enum class OpenMode
 {
-    RB,
-    WB,
-    RWB,
+    NONE,
+    READ_BYTES,              // read from start, fail on no file
+    WRITE_CREATE_BYTES,      // write from start, always destroy contents, create new on no file
+    READ_WRITE_BYTES,        // read/write from start, error on no file
+    READ_WRITE_CREATE_BYTES, // read/write from start, destroy contents, create new on no file
+    LAST_ENUM,
 };
+
+inline bool open_mode_is_read(OpenMode mode);
+inline bool open_mode_is_write(OpenMode mode);
 
 class FileSystem;
 
@@ -33,18 +40,32 @@ class File
 {
   public:
     File() = default;
-    File(FileSystem* fs, void* file, size_t size, const Path& path) : fs(fs), file(file), size(size), path(path) {}
+    File(FileSystem* fs, const Path& path, OpenMode mode);
     ~File() noexcept;
+    File(File&& o) noexcept { *this = std::move(o); }
+    File& operator=(File&& o) noexcept
+    {
+        fs = std::exchange(o.fs, nullptr);
+        file = std::move(o.file);
+        size = std::exchange(o.size, 0ull);
+        path = std::move(o.path);
+        mode = std::exchange(o.mode, OpenMode::NONE);
+        return *this;
+    }
+    bool is_open() const;
     void close();
     size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
     std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
     size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull);
+    void delete_from_disk();
+    bool eof() const;
     uint64_t get_hash();
 
     FileSystem* fs{};
-    void* file{};
+    std::fstream file;
     size_t size{};
     Path path{};
+    OpenMode mode{ OpenMode::NONE };
 
   private:
     uint64_t content_hash{};

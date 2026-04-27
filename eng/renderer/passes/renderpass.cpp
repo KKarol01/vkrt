@@ -14,7 +14,7 @@ void MeshRenderData::build()
     if(!built_instances.empty()) { return; }
 
     built_instances.clear();
-    draw.batches.clear();
+    render_data.batches.clear();
 
     auto& r = get_renderer();
     const auto rpidx = (int)type;
@@ -55,7 +55,7 @@ void MeshRenderData::build()
         if(prev_pipeline != mp.pipeline)
         {
             prev_pipeline = mp.pipeline;
-            draw.batches.push_back(InstanceBatch{
+            render_data.batches.push_back(InstanceBatch{
                 .pipeline = mp.pipeline, .instance_count = 0, .first_command = (uint32_t)cmds.size(), .command_count = 0 });
             counts.push_back(0);
         }
@@ -71,22 +71,22 @@ void MeshRenderData::build()
         }
         insts.push_back(GPUInstanceId{
             .cmdi = (uint32_t)cmds.size(), .resi = (uint32_t)insts.size(), .insti = inst.instance_index, .mati = *inst.material });
-        ++draw.batches.back().instance_count;
+        ++render_data.batches.back().instance_count;
         ++cmds.back().instanceCount;
-        draw.batches.back().command_count = cmds.size() - draw.batches.back().first_command;
-        counts.back() = draw.batches.back().command_count;
+        render_data.batches.back().command_count = cmds.size() - render_data.batches.back().first_command;
+        counts.back() = render_data.batches.back().command_count;
     }
 
     const auto cnts_size = counts.size() * sizeof(counts[0]);
     const auto cmds_start = align_up2(cnts_size, 16);
     const auto cmds_size = cmds.size() * r.backend->get_indirect_indexed_command_size();
     const auto total_size = cmds_start + cmds_size;
-    if(!draw.indirect_buf)
+    if(!render_data.indirect_buf)
     {
-        draw.indirect_buf =
+        render_data.indirect_buf =
             r.make_buffer("indirect buffer", Buffer::init(total_size, BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT));
     }
-    else { r.resize_buffer(draw.indirect_buf, total_size, false); }
+    else { r.resize_buffer(render_data.indirect_buf, total_size, false); }
 
     std::vector<std::byte> backendcmds(cmds_size);
     for(auto i = 0ull; i < cmds.size(); ++i)
@@ -95,11 +95,11 @@ void MeshRenderData::build()
                                                  cmds[i].indexCount, cmds[i].instanceCount, cmds[i].firstIndex,
                                                  cmds[i].vertexOffset, cmds[i].firstInstance);
     }
-    r.staging->copy(draw.indirect_buf.get(), counts, 0ull, false);
-    r.staging->copy(draw.indirect_buf.get(), backendcmds, cmds_start, false);
+    r.staging->copy(render_data.indirect_buf.get(), counts, 0ull, false);
+    r.staging->copy(render_data.indirect_buf.get(), backendcmds, cmds_start, false);
 
-    draw.counts_view = BufferView::init(draw.indirect_buf, 0ull, cnts_size);
-    draw.cmds_view = BufferView::init(draw.indirect_buf, cmds_start, cmds_size);
+    render_data.counts_view = BufferView::init(render_data.indirect_buf, 0ull, cnts_size);
+    render_data.cmds_view = BufferView::init(render_data.indirect_buf, cmds_start, cmds_size);
 }
 
 void MeshRenderData::add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh)
