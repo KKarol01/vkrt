@@ -8,3 +8,4 @@ assets/images/*
 third_party/*
 *.precompiled
 out/*
+*.engb
