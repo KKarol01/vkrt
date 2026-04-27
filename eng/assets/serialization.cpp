@@ -323,12 +323,12 @@ void Serializer::deserialize<assets::Asset>(const std::byte* bytes, size_t& out_
     {
         gfx::Material mat;
         deserialize(bytes, out_bytes_read, out_bytes_size, mat);
-        //if(mat.base_color_texture) { mat.base_color_texture.image = t.images[*mat.base_color_texture.image]; }
-        //if(mat.normal_texture) { mat.normal_texture.image = t.images[*mat.normal_texture.image]; }
-        //if(mat.metallic_roughness_texture)
-        //{
-        //    mat.metallic_roughness_texture.image = t.images[*mat.metallic_roughness_texture.image];
-        //}
+        if(mat.base_color_texture) { mat.base_color_texture = t.textures[*mat.base_color_texture.image]; }
+        if(mat.normal_texture) { mat.normal_texture = t.textures[*mat.normal_texture.image]; }
+        if(mat.metallic_roughness_texture)
+        {
+            mat.metallic_roughness_texture = t.textures[*mat.metallic_roughness_texture.image];
+        }
         t.materials[i] = gfx::get_renderer().make_material(mat);
     }
 
