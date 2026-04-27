@@ -12,12 +12,14 @@ namespace eng
 namespace assets
 {
 
+// Tries to write bytes. Always increments dst_offset so that it can be used to calculate how many bytes a thing would take, preallocate storage, and be run again.
 static void serialize_write_bytes_safe(void* dst, const void* src, size_t& dst_offset, size_t dst_size, size_t src_size)
 {
-    if(dst && src && dst_offset + src_size <= dst_size) { memcpy((std::byte*)dst + dst_offset, src, src_size); }
+    if(dst && src && dst_offset + src_size <= dst_size) { std::memcpy((std::byte*)dst + dst_offset, src, src_size); }
     dst_offset += src_size;
 }
 
+// Tries to read bytes. Increments src_offset only on success, so number of deserialized bytes can be compared against reference.
 static void deserialize_read_bytes_safe(void* dst, const void* src, size_t& src_offset, size_t dst_size, size_t src_size)
 {
     if(src_offset + src_size <= dst_size)
@@ -32,12 +34,99 @@ namespace engb
 namespace v0
 {
 
-Container::Container(fs::FilePtr container_file) {}
-
-void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset)
+Container::Container(fs::FilePtr file) : m_file(file)
 {
-    m_lists.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), version);
+    if(!m_file || !m_file->is_read())
+    {
+        ENG_WARN("Engb container file {} is empty or cannot be read", file ? file->path.string() : "<empty path>");
+        return;
+    }
+    read_list_section();
+    m_file->close();
+}
+
+void Container::read_list_section()
+{
+    if(!m_file || !m_file->is_open())
+    {
+        ENG_WARN("Couldn't open engb file {} for read", m_file ? m_file->path.string() : "<empty path>");
+        m_lists.clear();
+        return;
+    }
+
+    // file is empty, no list to be read
+    if(m_file->size == 0) { return; }
+
+    std::byte buf[1024 * 8];
+    auto read_bytes = m_file->read(buf, HEADER_BYTE_SZ);
+    if(read_bytes != HEADER_BYTE_SZ)
+    {
+        ENG_WARN("Could read engb header ({})", m_file->path.string());
+        return;
+    }
+    if(std::string_view{ (const char*)buf, 4 } != "engb")
+    {
+        ENG_WARN("File is not valid engb file ({})", m_file->path.string());
+        return;
+    }
+
+    if((char)buf[4] != (char)0)
+    {
+        ENG_WARN("Engb container {} has invalid version {}", m_file->path.string(), (char)buf[4]);
+        return;
+    }
+
+    uint32_t num_lists;
+    memcpy(&num_lists, &buf[5], sizeof(uint32_t));
+    const size_t lists_bytes = num_lists * LIST_BYTE_SZ;
+    constexpr size_t lists_per_buf = std::size(buf) / LIST_BYTE_SZ;
+    m_lists.reserve(num_lists);
+    while(num_lists > 0)
+    {
+        const auto lists_left = std::min((size_t)num_lists, lists_per_buf);
+        const auto file_read = m_file->read(buf, lists_left * LIST_BYTE_SZ);
+        if(file_read != lists_left * LIST_BYTE_SZ)
+        {
+            ENG_WARN("Failed to read engb container {} list section", m_file->path.string());
+            return;
+        }
+
+        size_t bytes_read{};
+        for(auto i = 0u; i < lists_per_buf; ++i)
+        {
+            auto& list = m_lists.emplace_back();
+            Serializer::deserialize(buf, bytes_read, lists_bytes, list);
+        }
+    }
+}
+
+void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags,
+                          std::span<const std::byte> asset, AssetMetadata metadata)
+{
+    m_lists.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), asset.size(), version, flags);
+
+    std::byte buf[64];
+    size_t metadata_bytes = 0;
+    if(flags & ListFlags::CONTENT_COMPRESSED_BIT)
+    {
+        ENG_ASSERT(metadata.uncompressed_size > 0);
+        memcpy(buf, &metadata.uncompressed_size, sizeof(metadata.uncompressed_size));
+    }
+
+    ENG_ASSERT(metadata_bytes <= std::size(buf));
+    m_asset_bytes.insert(m_asset_bytes.end(), buf, buf + metadata_bytes);
     m_asset_bytes.insert(m_asset_bytes.end(), asset.begin(), asset.end());
+}
+
+void Container::append_asset_bytes(std::span<const std::byte> bytes, bool finished)
+{
+    m_asset_bytes.insert(m_asset_bytes.end(), bytes.begin(), bytes.end());
+    m_lists.back().asset_size += bytes.size();
+    if(finished)
+    {
+        m_lists.back().content_hash =
+            ENG_HASH(ENG_HASH_AS_SPAN(m_asset_bytes.begin() + m_lists.back().asset_start, m_lists.back().asset_size));
+    }
 }
 
 void Container::serialize(size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
@@ -50,27 +139,32 @@ void Container::serialize(size_t& out_bytes_written, std::byte* out_bytes, size_
 
     const uint32_t item_count = (uint32_t)m_lists.size();
     serialize_write_bytes_safe(out_bytes, &item_count, out_bytes_written, out_bytes_size, 4);
-    for(const auto& l : m_lists)
+    for(auto& l : m_lists)
     {
-        const size_t actual_start = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + l.asset_start;
-        serialize_write_bytes_safe(out_bytes, &l.custom_hash, out_bytes_written, out_bytes_size, 8);
-        serialize_write_bytes_safe(out_bytes, &l.content_hash, out_bytes_written, out_bytes_size, 8);
-        serialize_write_bytes_safe(out_bytes, &actual_start, out_bytes_written, out_bytes_size, 8);
-        serialize_write_bytes_safe(out_bytes, &l.version, out_bytes_written, out_bytes_size, 1);
-        serialize_write_bytes_safe(out_bytes, &l.flags, out_bytes_written, out_bytes_size, 1);
+        l.asset_start = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + l.asset_start;
+        Serializer::serialize(l, out_bytes_written, out_bytes, out_bytes_size);
     }
 
     serialize_write_bytes_safe(out_bytes, m_asset_bytes.data(), out_bytes_written, out_bytes_size, m_asset_bytes.size());
 }
 
-void Container::serialize(size_t& out_bytes_written, fs::FilePtr out_file)
+size_t Container::serialize()
 {
-    if(!out_file) { return; }
+    size_t out_bytes_written = 0;
+    if(!m_file || !m_file->is_write())
+    {
+        ENG_WARN("Cannot serialize engb container: file mode is not permitting writes");
+        return out_bytes_written;
+    }
+    m_file->open();
     const auto total_size_bytes = HEADER_BYTE_SZ + (m_lists.size() * LIST_BYTE_SZ) + m_asset_bytes.size();
     std::vector<std::byte> data(total_size_bytes);
-    serialize(out_bytes_written, data.data());
+    serialize(out_bytes_written, data.data(), total_size_bytes);
     ENG_ASSERT(total_size_bytes == out_bytes_written);
-    out_file->write(data.data(), out_bytes_written);
+    const auto file_bytes_writen = m_file->write(data.data(), out_bytes_written);
+    ENG_ASSERT(file_bytes_writen == total_size_bytes);
+    m_file->close();
+    return out_bytes_written;
 }
 
 } // namespace v0
@@ -394,6 +488,28 @@ void Serializer::deserialize<ecs::Transform>(const std::byte* bytes, size_t& out
     glm::mat4 mat;
     deserialize_read_bytes_safe(&mat, bytes, out_bytes_read, bytes_size, sizeof(mat));
     t.init(mat);
+}
+
+template <>
+void Serializer::serialize<engb::List>(const engb::List& t, size_t& out_bytes_written, std::byte* out_bytes, size_t out_bytes_size)
+{
+    serialize_write_bytes_safe(out_bytes, &t.custom_hash, out_bytes_written, out_bytes_size, sizeof(t.custom_hash));
+    serialize_write_bytes_safe(out_bytes, &t.content_hash, out_bytes_written, out_bytes_size, sizeof(t.content_hash));
+    serialize_write_bytes_safe(out_bytes, &t.asset_start, out_bytes_written, out_bytes_size, sizeof(t.asset_start));
+    serialize_write_bytes_safe(out_bytes, &t.asset_size, out_bytes_written, out_bytes_size, sizeof(t.asset_size));
+    serialize_write_bytes_safe(out_bytes, &t.version, out_bytes_written, out_bytes_size, sizeof(t.version));
+    serialize_write_bytes_safe(out_bytes, &t.flags, out_bytes_written, out_bytes_size, sizeof(t.flags));
+}
+
+template <>
+void Serializer::deserialize<engb::List>(const std::byte* bytes, size_t& out_bytes_read, size_t bytes_size, engb::List& t)
+{
+    deserialize_read_bytes_safe(&t.custom_hash, bytes, out_bytes_read, bytes_size, sizeof(t.custom_hash));
+    deserialize_read_bytes_safe(&t.content_hash, bytes, out_bytes_read, bytes_size, sizeof(t.content_hash));
+    deserialize_read_bytes_safe(&t.asset_start, bytes, out_bytes_read, bytes_size, sizeof(t.asset_start));
+    deserialize_read_bytes_safe(&t.asset_size, bytes, out_bytes_read, bytes_size, sizeof(t.asset_size));
+    deserialize_read_bytes_safe(&t.version, bytes, out_bytes_read, bytes_size, sizeof(t.version));
+    deserialize_read_bytes_safe(&t.flags, bytes, out_bytes_read, bytes_size, sizeof(t.flags));
 }
 
 } // namespace assets

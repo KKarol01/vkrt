@@ -580,7 +580,6 @@ void RendererBackendVk::init()
 
     caps.supports_raytracing = phys_ret.is_extension_present(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
                                phys_ret.is_extension_present(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-	//caps.supports_raytracing = false;
     // caps.supports_raytracing = false;
 
     auto synch2_features = vk::VkPhysicalDeviceSynchronization2Features{};

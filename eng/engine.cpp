@@ -71,14 +71,29 @@ ScopedTimer::~ScopedTimer()
 {
 #ifdef ENG_DEBUG_BUILD
     const auto delta_secs = glfwGetTime() - start_secs;
-    char msg[256];
-    const auto msg_len = ENG_FMT_TO_N(msg, 255, "[{: >6.2f}ms] : {}", delta_secs * 1000.0, label.as_view());
-    msg[msg_len] = '\0';
+    const auto ms = delta_secs * 1000.0;
+    auto label_view = label.as_view();
+    const size_t req_size = ENG_FMT_SIZE("[{: >6.2f}ms] : {}", ms, label_view);
     static const auto print_msg = [](std::string_view msg) {
         if(msg.ends_with('\n')) { msg = msg.substr(0, msg.size() - 1); }
-        ENG_LOG("{}", msg);
+        //ENG_LOG("{}", msg);
     };
-    if(nest_level == ~0u) { print_msg(msg); }
+    char short_msg[256]{};
+    std::string long_msg;
+    std::string_view msg_view;
+    if(req_size < 256)
+    {
+        ENG_FMT_TO_N(short_msg, 255, "[{: >6.2f}ms] : {}", ms, label_view);
+        short_msg[req_size] = '\0';
+        msg_view = std::string_view(short_msg, req_size);
+    }
+    else
+    {
+        long_msg = ENG_FMT("[{: >6.2f}ms] : {}", ms, label_view);
+        msg_view = std::string_view{ long_msg };
+    }
+
+    if(nest_level == ~0u) { print_msg(msg_view); }
     else
     {
         struct ScopedTimerMessage
@@ -102,8 +117,12 @@ ScopedTimer::~ScopedTimer()
             std::string compose()
             {
                 std::string msg;
-                msg.reserve(std::reduce(nested_messages.begin(), nested_messages.end(), 0ull,
-                                        [](uint64_t acc, const std::string& str) { return acc + str.size(); }));
+                size_t total_size = 0;
+                for(const auto& s : nested_messages)
+                {
+                    total_size += s.size();
+                }
+                msg.reserve(total_size);
                 for(const auto& nmsg : nested_messages)
                 {
                     msg += nmsg;
@@ -114,7 +133,7 @@ ScopedTimer::~ScopedTimer()
             std::vector<std::string> nested_messages;
         };
         thread_local ScopedTimerMessage scoped_message{};
-        scoped_message.add_message(nest_level, msg);
+        scoped_message.add_message(nest_level, msg_view);
         if(nest_level == 0) { print_msg(scoped_message.compose()); }
     }
 #endif
@@ -191,6 +210,7 @@ void Engine::init(int argc, char* argv[])
         return;
     }
 
+    assets->init();
     window->init();
     glfwSetCursorPosCallback(window->window, on_mouse_move);
     glfwSetFramebufferSizeCallback(window->window, on_window_resize);

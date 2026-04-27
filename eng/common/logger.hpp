@@ -7,6 +7,7 @@
 #define ENG_FMT(str, ...) fmt::format(str, __VA_ARGS__)
 #define ENG_FMT_STR(str, ...) ENG_FMT(fmt::runtime(str), __VA_ARGS__)
 #define ENG_FMT_TO_N(output, max_count, str, ...) fmt::format_to_n(output, max_count, str, __VA_ARGS__).size
+#define ENG_FMT_SIZE(str, ...) fmt::formatted_size(str, __VA_ARGS__)
 
 #ifdef ENG_DEBUG_BUILD
 #include <iostream>

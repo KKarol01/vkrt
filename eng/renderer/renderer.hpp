@@ -566,19 +566,19 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::BlendState,
                              t.dst_alpha_factor, t.alpha_op, t.r > 0 ? true : false, t.g > 0 ? true : false,
                              t.b > 0 ? true : false, t.a > 0 ? true : false));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::AttachmentState,
-                    ENG_HASH(t.count, t.depth_format, t.stencil_format, ENG_HASH_SPAN(t.color_formats.begin(), t.count),
-                             ENG_HASH_SPAN(t.blend_states.begin(), t.count)));
+                    ENG_HASH(t.count, t.depth_format, t.stencil_format, ENG_HASH_AS_SPAN(t.color_formats.begin(), t.count),
+                             ENG_HASH_AS_SPAN(t.blend_states.begin(), t.count)));
 ENG_DEFINE_STD_HASH(eng::gfx::Descriptor, ENG_HASH(t.type, t.slot, t.size, t.stages, t.immutable_samplers));
-ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout, ENG_HASH(ENG_HASH_SPAN(t.layout.begin(), t.layout.size())));
+ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout, ENG_HASH(ENG_HASH_AS_SPAN(t.layout.begin(), t.layout.size())));
 
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo,
                     ENG_HASH(t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
                              t.stencil_front, t.stencil_back, t.topology, t.polygon_mode, t.culling, t.front_is_ccw,
-                             t.line_width, ENG_HASH_SPAN(t.shaders.begin(), t.shaders.size()),
-                             ENG_HASH_SPAN(t.bindings.begin(), t.bindings.size()),
-                             ENG_HASH_SPAN(t.attributes.begin(), t.attributes.size())));
+                             t.line_width, ENG_HASH_AS_SPAN(t.shaders.begin(), t.shaders.size()),
+                             ENG_HASH_AS_SPAN(t.bindings.begin(), t.bindings.size()),
+                             ENG_HASH_AS_SPAN(t.attributes.begin(), t.attributes.size())));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout,
-                    ENG_HASH(t.push_range.stages, t.push_range.size, ENG_HASH_SPAN(t.layout.begin(), t.layout.size())));
+                    ENG_HASH(t.push_range.stages, t.push_range.size, ENG_HASH_AS_SPAN(t.layout.begin(), t.layout.size())));
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));

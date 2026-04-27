@@ -53,6 +53,9 @@ class File
         return *this;
     }
     bool is_open() const;
+    bool is_read() const { return open_mode_is_read(mode); }
+    bool is_write() const { return open_mode_is_write(mode); }
+    void open();
     void close();
     size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
     std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
@@ -76,7 +79,7 @@ using FilePtr = std::shared_ptr<File>;
 class DirectoryListener
 {
   public:
-    void add_paths(std::span<const fs::Path> paths)
+    void push_path(std::span<const fs::Path> paths)
     {
         std::scoped_lock lock{ mutex };
         changed_files.insert(paths.begin(), paths.end());
@@ -111,19 +114,26 @@ class FileSystem
   public:
     bool init();
 
+    // Open a file with system path (relative or absolute)
     FilePtr open_file(const Path& path, OpenMode mode);
+    // Delete file from the disk
     void delete_file(const Path& path);
 
+    // Create recursive listener for file changes
     Handle<DirectoryListener> make_listener();
+    // Append a path to listen for file changes into created listener
     void listen_for_path(const Path& virtual_path, Handle<DirectoryListener> listener);
 
-    Path make_rel_path(const Path& path);
-    FilePtr get_asset(const Path& path, OpenMode mode);
+    // From virtual path like '/assets/texture.png' make system relative path like '../../assets/texture.png'
+    Path make_rel_path(const Path& virtual_path);
+    // Open a file after transforing virtual path
+    FilePtr get_asset(const Path& virtual_path, OpenMode mode);
+    // Get relative path to the directory where assets are located
     Path get_assets_path() const { return root_dir_path; }
 
     Path root_dir_path;
-    std::map<std::pair<PathHash, OpenMode>, std::weak_ptr<File>> filemap;
-    std::deque<DirectoryListener> dir_listeners;
+    std::map<std::pair<PathHash, OpenMode>, std::weak_ptr<File>> m_files_map;
+    std::deque<DirectoryListener> m_dir_listeners_vec;
 };
 
 } // namespace fs

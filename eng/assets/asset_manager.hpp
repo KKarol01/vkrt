@@ -7,6 +7,7 @@
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/fs/fs.hpp>
+#include <eng/assets/serialization.hpp>
 
 namespace eng
 {
@@ -48,10 +49,14 @@ struct Asset
 class AssetManager
 {
   public:
+    void init();
     const Asset& get_asset(const fs::Path& file_path);
 
   private:
-    std::unordered_map<fs::Path, Asset> loaded_assets_map;
+    engb::Container& get_latest_container() { return m_engb_containers_vec.front(); }
+
+    std::unordered_map<fs::Path, Asset> m_loaded_assets_map;
+    std::vector<engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
 };
 
 } // namespace assets

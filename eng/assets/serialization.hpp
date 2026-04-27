@@ -38,11 +38,15 @@ The format for this is as follows:
 		8B custom hash for lookup	- usually from virtual path like '/assets/models/model/scene.gltf'
 		8B content hash				- hash of the contents
 		8B asset start				- offset from the beginning of the container to the start of the asset
-		8B asset byte size			- asset byte size
+		8B asset byte size			- asset byte size (includes all the dynamic data induced by flags)
 		1B version number			- version of the byte representation of the contents in the container
 		1B flags					- flags describing the properties of the content
 	} : LIST_ITEM, ...] : LIST,
-	[asset_0_bytes, asset_1_bytes, ..., asset_item_count_bytes] : ASSET BYTES,
+	[
+		{ [if compressed: 8B size before compression], asset_0_bytes }, 
+		...,
+		(n-1) asset bytes
+	] : ASSET BYTES,
 } : .ENGB CONTAINER SPEC
 */
 // clang-format on
@@ -60,6 +64,11 @@ enum class ListFlags : uint8_t
     CONTENT_COMPRESSED_BIT = 1 << 0, // use zlib to decompress
 };
 
+struct AssetMetadata
+{
+    uint64_t uncompressed_size{};
+};
+
 struct List
 {
     uint64_t custom_hash{};
@@ -72,14 +81,19 @@ struct List
 
 struct Container
 {
-    Container(fs::FilePtr container_file);
+    Container(fs::FilePtr file);
 
-    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset);
+    void read_list_section();
+
+    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset,
+                   AssetMetadata metadata = {});
+    // for streaming compressed data later for the currently added asset, see asset_manager.cpp. set finished on last append to recalc hash.
+    void append_asset_bytes(std::span<const std::byte> bytes, bool finished);
 
     void serialize(size_t& out_bytes_written, std::byte* out_bytes = nullptr, size_t out_bytes_size = 0);
-    void serialize(size_t& out_bytes_written, fs::FilePtr out_file);
+    size_t serialize();
 
-    fs::FilePtr file;
+    fs::FilePtr m_file;
     std::vector<List> m_lists;
     std::vector<std::byte> m_asset_bytes;
 };
@@ -116,6 +130,7 @@ class Serializer
 ENG_SERIALIZER_DECLARE(assets::Asset);
 ENG_SERIALIZER_DECLARE(gfx::ImageView);
 ENG_SERIALIZER_DECLARE(ecs::Transform);
+ENG_SERIALIZER_DECLARE(assets::engb::List);
 
 } // namespace assets
 
