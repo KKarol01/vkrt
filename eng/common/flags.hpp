@@ -47,6 +47,7 @@ template <typename T> struct Flags
         flags = flags ^ f.flags;
         return *this;
     }
+    constexpr U operator*() const { return flags; }
 
     constexpr explicit operator bool() const noexcept { return flags != U{}; }
     constexpr explicit operator U() const noexcept { return flags; }

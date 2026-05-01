@@ -57,9 +57,10 @@ class File
     bool is_write() const { return open_mode_is_write(mode); }
     void open();
     void close();
+    void flush();
     size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
     std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
-    size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull);
+    size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull, bool flush = false);
     void delete_from_disk();
     bool eof() const;
     uint64_t get_hash();

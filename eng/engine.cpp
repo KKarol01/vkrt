@@ -70,72 +70,35 @@ ScopedTimer::ScopedTimer(std::string_view label) : label(label), nest_level((uin
 ScopedTimer::~ScopedTimer()
 {
 #ifdef ENG_DEBUG_BUILD
-    const auto delta_secs = glfwGetTime() - start_secs;
-    const auto ms = delta_secs * 1000.0;
-    auto label_view = label.as_view();
-    const size_t req_size = ENG_FMT_SIZE("[{: >6.2f}ms] : {}", ms, label_view);
-    static const auto print_msg = [](std::string_view msg) {
-        if(msg.ends_with('\n')) { msg = msg.substr(0, msg.size() - 1); }
-        //ENG_LOG("{}", msg);
-    };
-    char short_msg[256]{};
-    std::string long_msg;
-    std::string_view msg_view;
-    if(req_size < 256)
+    const double ms = (glfwGetTime() - start_secs) * 1000.0;
+    std::string msg = ENG_FMT("[{: >6.2f}ms] : {}", ms, label.as_view());
+
+    if(nest_level == ~0u)
     {
-        ENG_FMT_TO_N(short_msg, 255, "[{: >6.2f}ms] : {}", ms, label_view);
-        short_msg[req_size] = '\0';
-        msg_view = std::string_view(short_msg, req_size);
-    }
-    else
-    {
-        long_msg = ENG_FMT("[{: >6.2f}ms] : {}", ms, label_view);
-        msg_view = std::string_view{ long_msg };
+        ENG_LOG("{}", msg);
+        return;
     }
 
-    if(nest_level == ~0u) { print_msg(msg_view); }
-    else
+    struct MessageStack
     {
-        struct ScopedTimerMessage
+        std::vector<std::string> lines;
+        void flush()
         {
-            void add_message(uint32_t nest_level, std::string_view msg)
+            for(const auto& line : lines)
             {
-                static constexpr std::string_view TABS =
-                    "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
-                ENG_ASSERT(nest_level < std::size(TABS));
-                if(nested_messages.size() <= nest_level) { nested_messages.resize(nest_level + 1); }
-                nested_messages[nest_level].reserve(nested_messages[nest_level].size() + 1 + nest_level + msg.size());
-                nested_messages[nest_level] += TABS.substr(0, nest_level);
-                nested_messages[nest_level] += msg;
-                nested_messages[nest_level] += '\n';
-                if(nest_level > 1 && nest_level < nested_messages.size() - 1)
-                {
-                    nested_messages[nest_level] += nested_messages[nest_level + 1];
-                    nested_messages[nest_level + 1].clear();
-                }
+                ENG_LOG("{}", line);
             }
-            std::string compose()
-            {
-                std::string msg;
-                size_t total_size = 0;
-                for(const auto& s : nested_messages)
-                {
-                    total_size += s.size();
-                }
-                msg.reserve(total_size);
-                for(const auto& nmsg : nested_messages)
-                {
-                    msg += nmsg;
-                }
-                nested_messages.clear();
-                return msg;
-            }
-            std::vector<std::string> nested_messages;
-        };
-        thread_local ScopedTimerMessage scoped_message{};
-        scoped_message.add_message(nest_level, msg_view);
-        if(nest_level == 0) { print_msg(scoped_message.compose()); }
-    }
+            lines.clear();
+        }
+    };
+    thread_local MessageStack stack;
+
+    // Add indentation and store
+    std::string indent(nest_level, '\t');
+    stack.lines.push_back(indent + msg);
+
+    // If we've returned to the root level, print everything
+    if(nest_level == 0) { stack.flush(); }
 #endif
 }
 

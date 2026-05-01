@@ -41,7 +41,7 @@ template <typename T> struct HandleDispatcher
 };
 
 template <typename T, std::integral StorageType = typename HandleStorage<T>::storage_type>
-struct Handle : TypedId<T, StorageType>
+struct Handle : public TypedId<T, StorageType>
 {
     using TypedId<T, StorageType>::TypedId;
     auto* operator->() { return HandleDispatcher<T>{}(*this); }

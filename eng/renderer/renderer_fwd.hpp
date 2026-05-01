@@ -6,6 +6,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
+#include <eng/assets/serialization.hpp>
 
 // Windows macro. Expands to '2'. Don't need it, compiles without it. Thanks MS.
 #ifdef OPAQUE
@@ -675,4 +676,47 @@ struct GeometryDescriptor
 };
 
 } // namespace gfx
+
+namespace serialization
+{
+template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, image),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, type),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, format),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, src_subresource),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource));
+}
+template <> inline constexpr auto get_struct_fields<gfx::ParsedImageData>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, width),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, height),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, format),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, data));
+}
+template <> inline constexpr auto get_struct_fields<gfx::ParsedGeometryData>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, vertex_layout),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, positions),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, attributes),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, indices),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, meshlets));
+}
+template <> inline constexpr auto get_struct_fields<gfx::Meshlet>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_offset),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_count),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_offset),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_count),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, bounding_sphere));
+}
+template <> inline constexpr auto get_struct_fields<glm::vec4>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, x),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, y),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, z),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, w));
+}
+} // namespace serialization
+
 } // namespace eng

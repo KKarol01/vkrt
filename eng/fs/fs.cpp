@@ -210,6 +210,8 @@ void File::close()
     content_hash = {};
 }
 
+void File::flush() { file.flush(); }
+
 size_t File::read(std::byte* out_bytes, size_t bytes, size_t offset)
 {
     if(!file.is_open() || !out_bytes) { return 0; }
@@ -234,13 +236,14 @@ std::string File::read(size_t bytes, size_t offset)
     return str;
 }
 
-size_t File::write(const std::byte* bytes, size_t size, size_t offset)
+size_t File::write(const std::byte* bytes, size_t size, size_t offset, bool flush)
 {
     if(!file || !bytes || size == 0) { return 0; }
     if(!is_write()) { return 0; }
     if(offset != ~0ull) { file.seekp(offset, std::ios::beg); }
     if(!file) { return 0; }
     file.write((const char*)bytes, size);
+    if(flush) { this->flush(); }
     return file ? size : 0ull;
 }
 

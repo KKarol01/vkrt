@@ -18,6 +18,7 @@
 #include <eng/common/slotallocator.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/assets/asset_manager.hpp>
+#include <eng/assets/serialization.hpp>
 #include <eng/fs/fs.hpp>
 
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
@@ -1032,6 +1033,24 @@ ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(handle); });
+
+namespace serialization 
+{
+template <> inline constexpr auto get_struct_fields<gfx::Material>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mesh_pass),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_texture),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, normal_texture),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, metallic_roughness_texture));
+}
+template <> inline constexpr auto get_struct_fields<gfx::Mesh>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, geometry),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, material));
+}
+}
+
 // clang-format on
 
 } // namespace eng

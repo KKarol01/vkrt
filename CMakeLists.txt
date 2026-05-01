@@ -232,6 +232,7 @@ target_precompile_headers(eng
         <vk-bootstrap/src/VkBootstrap.h>
         <fmt/format.h>
         
+		<eng/assets/serialization.hpp>
 		<eng/common/flags.hpp>
         <eng/common/handle.hpp>
         <eng/common/handleflatset.hpp>

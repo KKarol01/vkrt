@@ -26,7 +26,6 @@ struct Node
 
 struct Asset
 {
-
     Asset() noexcept = default;
     Asset(const Asset&) = delete;
     Asset& operator=(const Asset&) = delete;
@@ -55,12 +54,25 @@ class AssetManager
     const Asset& get_asset(const fs::Path& file_path);
 
   private:
-    engb::Container& get_latest_container() { return m_engb_containers_vec.front(); }
+    serialization::engb::Container& get_latest_container() { return m_engb_containers_vec.front(); }
 
     std::unordered_map<fs::Path, Asset> m_loaded_assets_map;
-    std::vector<engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
+    std::vector<serialization::engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
     std::mutex m_engbc_vec_mutex;
 };
 
 } // namespace assets
+
+namespace serialization
+{
+ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(assets::Asset);
+template <> inline constexpr auto get_struct_fields<assets::Node>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, name),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, meshes),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, transform),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, parent),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, children));
+}
+} // namespace serialization
 } // namespace eng

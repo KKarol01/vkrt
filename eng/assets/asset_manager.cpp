@@ -7,6 +7,9 @@
 
 namespace eng
 {
+
+using namespace serialization;
+
 namespace assets
 {
 
@@ -50,13 +53,11 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         if(!assetlist) { return nullptr; }
 
         Asset asset{};
-        bool failure = false;
         std::vector<std::byte> decompressed_asset;
         std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
-        size_t asset_read_offset = 0; // skip decompressed size
+        size_t asset_read_offset = 0; // skip flags
         auto success = compression::zlib_inflate(
             [&](size_t size) {
-                if(failure) { return std::span<const std::byte>{}; }
                 const auto file_read = engbc.get_asset_data(*assetlist, std::span{ file_buf.data(), size }, asset_read_offset);
                 asset_read_offset += file_read;
                 const auto bytes_to_process = std::min(file_read, size);
@@ -64,7 +65,6 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                 return span;
             },
             [&](std::span<const std::byte> data) {
-                if(failure) { return; }
                 decompressed_asset.insert(decompressed_asset.end(), data.begin(), data.end());
             });
         if(!success)
@@ -74,7 +74,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         }
 
         size_t read_bytes = 0;
-        Serializer::deserialize((const std::byte*)decompressed_asset.data(), read_bytes, decompressed_asset.size(), asset);
+        deserialize(asset, std::span{ decompressed_asset }, read_bytes);
         auto it = m_loaded_assets_map.emplace(file_path, std::move(asset));
         return &it.first->second;
     };
@@ -100,12 +100,13 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
 
             size_t size = 0;
             ENG_TIMER_SCOPED("Serializing asset {}", asset.path.string());
-            Serializer::serialize(asset, size);
+            std::vector<std::byte> asset_bytes;
+            serialize(std::span{ asset_bytes }, asset, size);
             if(size > 0)
             {
-                std::vector<std::byte> asset_bytes(size);
+                asset_bytes.resize(size);
                 size = 0;
-                Serializer::serialize(asset, size, asset_bytes.data(), asset_bytes.size());
+                serialize(std::span{ asset_bytes }, asset, size);
 
                 size_t bytes_read = 0;
                 size_t bytes_left = asset_bytes.size();
@@ -128,7 +129,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
                     });
                 ENG_ASSERT(res, "Zlib compression failed {}", asset.path.string());
                 engbc.append_asset_bytes({}, true);
-                const auto out_bytes_written = engbc.serialize();
+                engbc.serialize();
             }
 
             asset.geometry_data.resize(0);

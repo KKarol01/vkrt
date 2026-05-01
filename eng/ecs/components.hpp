@@ -10,6 +10,7 @@
 #include <eng/common/logger.hpp>
 #include <eng/string/stack_string.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
+#include <eng/assets/serialization.hpp>
 #include <assets/shaders/common.hlsli>
 
 namespace eng
@@ -82,5 +83,10 @@ inline std::string to_string(const ecs::Light::Type& a)
     }
 }
 // clang-format on
+
+namespace serialization
+{
+ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(ecs::Transform);
+}
 
 } // namespace eng
