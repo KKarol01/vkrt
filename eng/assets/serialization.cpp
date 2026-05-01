@@ -65,26 +65,28 @@ void Container::read_list_section()
         }
         size_t out_bytes_written = 0;
         serialization::deserialize(l, std::span{ buf }, out_bytes_written);
+        ENG_ASSERT(l.version == 0);
     }
 }
 
-void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset)
+void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags,
+                          std::span<const std::byte> asset, const AssetMetadata& metadata)
 {
     m_lists_vec.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), 0, version, flags);
 
-    // std::byte buf[64];
-    // size_t metadata_bytes = 0;
-    //  if(flags & ListFlags::CONTENT_COMPRESSED_BIT)
-    //{
-    //      ENG_ASSERT(metadata.uncompressed_size > 0);
-    //      memcpy(buf, &metadata.uncompressed_size, sizeof(metadata.uncompressed_size));
-    //      metadata_bytes += sizeof(metadata.uncompressed_size);
-    //  }
+    std::byte buf[64];
+    size_t metadata_bytes = 0;
+    if(flags & ListFlags::CONTENT_COMPRESSED_BIT)
+    {
+        ENG_ASSERT(metadata.uncompressed_size > 0);
+        memcpy(buf, &metadata.uncompressed_size, sizeof(metadata.uncompressed_size));
+        metadata_bytes += sizeof(metadata.uncompressed_size);
+    }
+    ENG_ASSERT(metadata_bytes <= std::size(buf));
 
-    // ENG_ASSERT(metadata_bytes <= std::size(buf));
-    // m_asset_bytes.insert(m_asset_bytes.end(), buf, buf + metadata_bytes);
+    m_asset_bytes.insert(m_asset_bytes.end(), buf, buf + metadata_bytes);
     m_asset_bytes.insert(m_asset_bytes.end(), asset.begin(), asset.end());
-    // m_lists_vec.back().asset_start += metadata_bytes;
+    m_lists_vec.back().asset_start += metadata_bytes;
     m_lists_vec.back().asset_size = asset.size();
 }
 

@@ -55,7 +55,10 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         Asset asset{};
         std::vector<std::byte> decompressed_asset;
         std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
-        size_t asset_read_offset = 0; // skip flags
+        size_t asset_read_offset = 0;
+        uint64_t uncompressed_size = 0;
+        engbc.m_file->read((std::byte*)&uncompressed_size, 8, assetlist->asset_start - 8);
+        decompressed_asset.reserve(uncompressed_size);
         auto success = compression::zlib_inflate(
             [&](size_t size) {
                 const auto file_read = engbc.get_asset_data(*assetlist, std::span{ file_buf.data(), size }, asset_read_offset);
@@ -113,7 +116,8 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
 
                 std::scoped_lock lock{ m_engbc_vec_mutex };
                 auto& engbc = get_latest_container();
-                engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {});
+                engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {},
+                                engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
                 size_t bytes_compressed = 0;
                 const auto res = compression::zlib_deflate(
                     [&](size_t size) {

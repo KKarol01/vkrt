@@ -285,6 +285,7 @@ enum class ListFlags : uint8_t
     CONTENT_COMPRESSED_BIT = 1 << 0, // use zlib to decompress
 };
 
+// Uncompressed header just before actual asset bytes
 struct AssetMetadata
 {
     uint64_t uncompressed_size{};
@@ -294,7 +295,7 @@ struct List
 {
     uint64_t custom_hash{};
     uint64_t content_hash{};
-    uint64_t asset_start{};
+    uint64_t asset_start{}; // start of asset bytes, skipping metadata from flags, which is left uncompressed
     uint64_t asset_size{}; // this probably could be calculated from total file size or next_item_list_asset_start - this_item_list_asset_start
     uint8_t version{};
     Flags<ListFlags> flags{};
@@ -306,7 +307,8 @@ struct Container
 
     void read_list_section();
 
-    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset);
+    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset,
+                   const AssetMetadata& metadata = {});
     // for streaming compressed data later for the currently added asset, see asset_manager.cpp. set finished on last append to recalc hash.
     void append_asset_bytes(std::span<const std::byte> bytes, bool finished);
 
