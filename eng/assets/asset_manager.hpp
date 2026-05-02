@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <mutex>
+#include <shared_mutex>
 
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
@@ -55,10 +56,15 @@ class AssetManager
 
   private:
     serialization::engb::Container& get_latest_container() { return m_engb_containers_vec.front(); }
+    std::optional<serialization::engb::List> try_find_list_by_hash(uint64_t hash,
+                                                                   serialization::engb::Container** out_container = nullptr);
+
+    std::optional<Asset> try_deserialize_asset(const fs::Path& file_path);
+    void try_serialize_asset(Asset& asset);
 
     std::unordered_map<fs::Path, Asset> m_loaded_assets_map;
     std::vector<serialization::engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
-    std::mutex m_engbc_vec_mutex;
+    std::shared_mutex m_engbc_vec_mutex;
 };
 
 } // namespace assets

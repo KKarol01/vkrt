@@ -336,7 +336,7 @@ template <> inline constexpr auto get_struct_fields<engb::List>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_start),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_size),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, version),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, flags));
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, flags)); 
 }
 
 } // namespace serialization
