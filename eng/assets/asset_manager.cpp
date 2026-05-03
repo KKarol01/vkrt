@@ -13,7 +13,7 @@ using namespace serialization;
 namespace assets
 {
 
-Asset null_asset{};
+Asset s_null_asset{};
 
 void AssetManager::init()
 {
@@ -57,7 +57,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         if(!asset)
         {
             ENG_WARN("Couldn't load asset {}", file_path.string());
-            return null_asset;
+            return s_null_asset;
         }
         asset->path = file_path;
         auto it = m_loaded_assets_map.emplace(file_path, std::move(*asset));
@@ -69,7 +69,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
     }
 
     ENG_ERROR("Extension not supported {}", file_path.string());
-    return null_asset;
+    return s_null_asset;
 }
 
 std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(uint64_t hash, serialization::engb::Container** out_container)
@@ -94,6 +94,8 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     if(!listopt) { return std::nullopt; }
     ENG_ASSERT(container);
     const auto& list = *listopt;
+
+    if(list.version != 0) { ENG_WARN("Asset {} has invalid version {}", file_path.string(), list.version); }
 
     ENG_TIMER_SCOPED("Deserializing {}", file_path.string());
     std::shared_lock lock{ m_engbc_vec_mutex };
@@ -174,7 +176,6 @@ void AssetManager::try_serialize_asset(Asset& asset)
 
         ENG_ASSERT(res, "Zlib compression failed {}", asset.path.string());
         engbc.append_asset_bytes({}, true);
-        engbc.serialize();
     }
 
     asset.geometry_data.resize(0);

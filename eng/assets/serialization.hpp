@@ -304,6 +304,7 @@ struct List
 struct Container
 {
     Container(fs::FilePtr file);
+    ~Container();
 
     void read_list_section();
 
@@ -320,6 +321,7 @@ struct Container
     fs::FilePtr m_file;
     std::vector<List> m_lists_vec;
     std::vector<std::byte> m_asset_bytes;
+    bool m_modified{ false };
 };
 
 ENG_ENABLE_FLAGS_OPERATORS(ListFlags);
@@ -336,7 +338,7 @@ template <> inline constexpr auto get_struct_fields<engb::List>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_start),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_size),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, version),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, flags)); 
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, flags));
 }
 
 } // namespace serialization

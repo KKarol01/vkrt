@@ -90,23 +90,30 @@ struct ImageBlockData
 
 ImageBlockData get_block_data(ImageFormat format);
 
+struct ShaderIncludes
+{
+    struct File
+    {
+        Handle<Shader> shader;
+        std::vector<File*> includes;
+        std::unordered_set<File*> included_by;
+    };
+
+    void add_file(const fs::Path& path);
+    std::vector<ShaderIncludes::File*> parse_includes(const fs::Path& path);
+    void add_shader(Handle<Shader> shader);
+    void remove_shader(Handle<Shader> shader);
+    std::vector<const File*> get_shader_includes(Handle<Shader> shader) const;
+    std::vector<Handle<Shader>> get_all_affected_shaders(const fs::Path& path) const;
+
+    std::unordered_map<fs::Path, File> m_files_map;
+};
+
 struct Shader
 {
     auto operator==(const Shader& o) const { return path == o.path; }
-    static Shader init(const std::filesystem::path& path)
-    {
-        const auto stage = [&path] {
-            const auto ext = std::filesystem::path{ path }.replace_extension().extension();
-            ShaderStage stage{ ShaderStage::NONE };
-            if(ext == ".vs") { stage = ShaderStage::VERTEX_BIT; }
-            else if(ext == ".ps") { stage = ShaderStage::PIXEL_BIT; }
-            else if(ext == ".cs") { stage = ShaderStage::COMPUTE_BIT; }
-            else { ENG_WARN("Unrecognized shader extension: {}", ext.string()); }
-            return stage;
-        }();
-        return Shader{ path, stage, {} };
-    }
-    std::filesystem::path path;
+    static Shader init(const fs::Path& path);
+    fs::Path path;
     ShaderStage stage{ ShaderStage::NONE };
     struct Metadata
     {
@@ -942,7 +949,7 @@ class Renderer
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
     void queue_destroy(Handle<Image>& image, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
-    Handle<Shader> make_shader(const std::filesystem::path& path);
+    Handle<Shader> make_shader(const fs::Path& path);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
     Handle<PipelineLayout> make_layout(const PipelineLayout& info);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info, Compilation compilation = Compilation::DEFERRED);
@@ -980,6 +987,7 @@ class Renderer
 
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
+    ShaderIncludes shader_includes;
     std::unordered_map<Handle<Shader>, std::vector<Handle<Pipeline>>> shader_usage_pipeline_map;
     Handle<fs::DirectoryListener> new_shaders_listener;
 

@@ -186,7 +186,17 @@ void Engine::init(int argc, char* argv[])
     ui->init();
 }
 
-void Engine::destroy() { Engine::~Engine(); }
+void Engine::destroy()
+{
+    delete scene;
+    delete ui;
+    delete renderer;
+    delete ecs;
+    delete camera;
+    delete window;
+    delete assets;
+    delete fs;
+}
 
 void Engine::start()
 {

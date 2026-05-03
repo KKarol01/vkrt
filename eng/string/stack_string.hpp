@@ -13,6 +13,9 @@ namespace eng
 template <size_t MAX_SIZE> struct StackString
 {
     static_assert(MAX_SIZE > 0);
+
+    inline static constexpr auto CAPACITY = MAX_SIZE - 1;
+
     StackString() = default;
     ~StackString() { length = 0; }
 

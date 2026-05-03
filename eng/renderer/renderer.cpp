@@ -46,6 +46,105 @@ ImageBlockData get_block_data(ImageFormat format)
     }
 }
 
+void ShaderIncludes::add_file(const fs::Path& path)
+{
+    ShaderIncludes::File f{};
+    f.includes = parse_includes(path);
+    m_files_map[path] = std::move(f);
+    auto it = m_files_map.find(path);
+    for(auto* f : it->second.includes)
+    {
+        f->included_by.insert(&it->second);
+    }
+}
+
+std::vector<ShaderIncludes::File*> ShaderIncludes::parse_includes(const fs::Path& path)
+{
+    const auto shader_dir = path.parent_path().string();
+    auto file = get_engine().fs->get_asset(path, fs::OpenMode::READ_BYTES);
+    if(!file || !file->is_open()) { return {}; }
+    std::vector<ShaderIncludes::File*> includes;
+    for(std::string line; file->getline(line);)
+    {
+        if(!line.starts_with("#include")) { continue; }
+        auto start = line.find('"');
+        if(start == std::string::npos) { continue; }
+        auto end = line.find('"', start + 1);
+        if(end == std::string::npos) { continue; }
+        std::string incpath{ line.begin() + start + 1 + 1, line.begin() + end };
+        ENG_ASSERT(incpath.starts_with('/'));
+        if(!incpath.starts_with("/assets/")) { incpath = shader_dir + incpath; }
+        auto pathit = m_files_map.find(incpath);
+        if(pathit != m_files_map.end()) { includes.push_back(&pathit->second); }
+        else
+        {
+            add_file(incpath);
+            pathit = m_files_map.find(incpath);
+            includes.push_back(&pathit->second);
+        }
+    }
+    return includes;
+}
+
+void ShaderIncludes::add_shader(Handle<Shader> shader)
+{
+    auto it = m_files_map.find(shader->path);
+    if(it == m_files_map.end())
+    {
+        add_file(shader->path);
+        it = m_files_map.find(shader->path);
+    }
+    it->second.shader = shader;
+}
+
+void ShaderIncludes::remove_shader(Handle<Shader> shader)
+{
+    auto it = m_files_map.find(shader->path);
+    if(it == m_files_map.end()) { return; }
+    for(auto* f : it->second.includes)
+    {
+        f->included_by.erase(&it->second);
+    }
+    m_files_map.erase(shader->path);
+}
+
+std::vector<const ShaderIncludes::File*> ShaderIncludes::get_shader_includes(Handle<Shader> shader) const
+{
+    std::vector<const ShaderIncludes::File*> includes;
+    const auto recurse = [this, &includes](const auto& self, const ShaderIncludes::File* file) -> void {
+        includes.push_back(file);
+        for(const auto* f : file->includes)
+        {
+            self(self, f);
+        }
+    };
+    auto it = m_files_map.find(shader->path);
+    if(it == m_files_map.end()) { return {}; }
+    recurse(recurse, &it->second);
+    return includes;
+}
+
+std::vector<Handle<Shader>> ShaderIncludes::get_all_affected_shaders(const fs::Path& path) const
+{
+    std::vector<Handle<Shader>> shaders;
+    std::unordered_set<const ShaderIncludes::File*> visited_files;
+    const auto recurse = [this, &shaders, &visited_files](const auto& self, const ShaderIncludes::File* file) -> void {
+        if(visited_files.contains(file)) { return; }
+        if(file->shader) { shaders.push_back(file->shader); }
+        for(const auto* f : file->included_by)
+        {
+            self(self, f);
+        }
+    };
+    auto it = m_files_map.find(path);
+    if(it == m_files_map.end()) { return {}; }
+    recurse(recurse, &it->second);
+    std::ranges::sort(shaders);
+    auto [a, b] = std::ranges::unique(shaders);
+    shaders.erase(a, b);
+    return shaders;
+}
+
 void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, const GeometryDescriptor& desc)
 {
     auto& batch = batches.emplace_back();
@@ -143,9 +242,8 @@ void Renderer::init(IRendererBackend* backend)
         }
     });
 
-    new_shaders_listener = get_engine().fs->make_listener();
-    get_engine().fs->listen_for_path("/assets/shaders", new_shaders_listener);
-    // get_engine().assets->listen_for_path("/eng/renderer/shaders", new_shaders_listener);
+    std::string_view exts[]{ ".hlsl", ".hlsli" };
+    new_shaders_listener = get_engine().fs->make_listener("/assets/shaders", exts);
 
     for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
     {
@@ -509,9 +607,20 @@ void Renderer::update()
             ret.reserve(paths.size());
             for(const auto& p : paths)
             {
-                auto it = std::ranges::find_if(shaders, [&p](const auto& sh) { return sh.path == p; });
-                if(it != shaders.end()) { ret.emplace_back((uint32_t)std::distance(shaders.begin(), it)); }
+                if(p.extension() == ".hlsli")
+                {
+                    auto sh = shader_includes.get_all_affected_shaders(p);
+                    ret.insert(ret.end(), sh.begin(), sh.end());
+                }
+                else
+                {
+                    auto it = std::ranges::find_if(shaders, [&p](const auto& sh) { return sh.path == p; });
+                    if(it != shaders.end()) { ret.emplace_back((uint32_t)std::distance(shaders.begin(), it)); }
+                }
             }
+            std::ranges::sort(ret);
+            auto uniqret = std::ranges::unique(ret);
+            ret.erase(uniqret.begin(), uniqret.end());
             return ret;
         }();
         for(auto shaderh : to_recompile)
@@ -526,7 +635,9 @@ void Renderer::update()
             }
             backend->destroy_shader(shaderh.get());
             ENG_ASSERT(!shaderh->md.ptr && new_shader.md.ptr);
-            shaderh->md = new_shader.md;
+            shaderh.get() = std::move(new_shader);
+            shader_includes.remove_shader(shaderh);
+            shader_includes.add_shader(shaderh);
             for(auto pipelineh : shader_usage_pipeline_map[shaderh])
             {
                 backend->destroy_pipeline(pipelineh.get());
@@ -542,6 +653,7 @@ void Renderer::update()
         for(auto& e : new_shaders)
         {
             backend->compile_shader(e.get());
+            shader_includes.add_shader(e);
         }
         new_shaders.clear();
     }
@@ -1403,6 +1515,22 @@ void Renderer::compile_pipeline(Pipeline& p)
 }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
+
+Shader Shader::init(const fs::Path& path)
+{
+    const auto stage = [&path] {
+        const auto ext = fs::Path{ path }.replace_extension().extension();
+        ShaderStage stage{ ShaderStage::NONE };
+        if(ext == ".vs") { stage = ShaderStage::VERTEX_BIT; }
+        else if(ext == ".ps") { stage = ShaderStage::PIXEL_BIT; }
+        else if(ext == ".cs") { stage = ShaderStage::COMPUTE_BIT; }
+        else { ENG_WARN("Unrecognized shader extension: {}", ext.string()); }
+        return stage;
+    }();
+    if(stage == ShaderStage::NONE) { return Shader{}; }
+    Shader retshader{ path, stage, {} };
+    return retshader;
+}
 
 bool DescriptorLayout::is_compatible(const DescriptorLayout& a) const
 {

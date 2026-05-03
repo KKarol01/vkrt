@@ -9,6 +9,7 @@
 #include <deque>
 #include <string_view>
 
+#include <eng/string/stack_string.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
 
@@ -45,34 +46,38 @@ class File
     File(File&& o) noexcept { *this = std::move(o); }
     File& operator=(File&& o) noexcept
     {
-        fs = std::exchange(o.fs, nullptr);
-        file = std::move(o.file);
-        size = std::exchange(o.size, 0ull);
-        path = std::move(o.path);
-        mode = std::exchange(o.mode, OpenMode::NONE);
+        m_fs = std::exchange(o.m_fs, nullptr);
+        m_file = std::move(o.m_file);
+        m_size = std::exchange(o.m_size, 0ull);
+        m_path = std::move(o.m_path);
+        m_mode = std::exchange(o.m_mode, OpenMode::NONE);
         return *this;
     }
     bool is_open() const;
-    bool is_read() const { return open_mode_is_read(mode); }
-    bool is_write() const { return open_mode_is_write(mode); }
+    bool is_read() const { return open_mode_is_read(m_mode); }
+    bool is_write() const { return open_mode_is_write(m_mode); }
     void open();
     void close();
     void flush();
     size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
     std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
+    bool getline(std::string& str, size_t offset = ~0ull);
     size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull, bool flush = false);
+    void set_read_head(size_t pos) { m_file.seekg(pos, std::ios::beg); }
+    void set_write_head(size_t pos) { m_file.seekp(pos, std::ios::beg); }
     void delete_from_disk();
     bool eof() const;
     uint64_t get_hash();
-
-    FileSystem* fs{};
-    std::fstream file;
-    size_t size{};
-    Path path{};
-    OpenMode mode{ OpenMode::NONE };
+    auto size() const { return m_size; }
+    const Path& path() const { return m_path; }
 
   private:
-    uint64_t content_hash{};
+    FileSystem* m_fs{};
+    std::fstream m_file;
+    size_t m_size{};
+    Path m_path{};
+    OpenMode m_mode{ OpenMode::NONE };
+    uint64_t m_content_hash{};
 };
 
 using FilePtr = std::shared_ptr<File>;
@@ -80,26 +85,32 @@ using FilePtr = std::shared_ptr<File>;
 class DirectoryListener
 {
   public:
-    void push_path(std::span<const fs::Path> paths)
+    void push_paths(std::span<fs::Path> paths)
     {
-        std::scoped_lock lock{ mutex };
-        changed_files.insert(paths.begin(), paths.end());
+        std::scoped_lock lock{ m_mutex };
+        for(auto& p : paths)
+        {
+            if(!m_extension_filter_set.contains(p.extension().string())) { continue; }
+            m_changed_files_set.insert(std::move(p));
+        }
     }
 
     void consume_paths(auto&& cb)
     {
-        std::scoped_lock lock{ mutex };
-        if(changed_files.empty()) { return; }
+        std::scoped_lock lock{ m_mutex };
+        if(m_changed_files_set.empty()) { return; }
 
-        auto vec = std::vector<fs::Path>(std::make_move_iterator(changed_files.begin()),
-                                         std::make_move_iterator(changed_files.end()));
+        auto vec = std::vector<fs::Path>(std::make_move_iterator(m_changed_files_set.begin()),
+                                         std::make_move_iterator(m_changed_files_set.end()));
         cb(std::move(vec));
-        changed_files.clear();
+        m_changed_files_set.clear();
     }
 
-    std::unordered_set<fs::Path> changed_files;
-    std::unordered_map<fs::Path, std::shared_ptr<void>> listeners;
-    std::mutex mutex;
+    fs::Path m_listening_path;
+    std::shared_ptr<void> m_listener;
+    std::unordered_set<fs::Path> m_changed_files_set;
+    std::unordered_set<StackString<16>> m_extension_filter_set;
+    std::mutex m_mutex;
 };
 
 } // namespace fs
@@ -119,11 +130,11 @@ class FileSystem
     FilePtr open_file(const Path& path, OpenMode mode);
     // Delete file from the disk
     void delete_file(const Path& path);
+    // Checks if file exists
+    bool file_exists(const Path& path) const;
 
     // Create recursive listener for file changes
-    Handle<DirectoryListener> make_listener();
-    // Append a path to listen for file changes into created listener
-    void listen_for_path(const Path& virtual_path, Handle<DirectoryListener> listener);
+    Handle<DirectoryListener> make_listener(std::string_view virtual_path, std::span<std::string_view> extensions);
 
     // From virtual path like '/assets/texture.png' make system relative path like '../../assets/texture.png'
     Path make_rel_path(const Path& virtual_path);

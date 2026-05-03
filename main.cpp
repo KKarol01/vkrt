@@ -11,6 +11,7 @@ int main(int argc, char* argv[])
     app::App app;
     app.start();
     eng::get_engine().start();
+    eng::get_engine().destroy();
 
     return 0;
 }

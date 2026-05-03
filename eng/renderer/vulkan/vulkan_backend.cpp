@@ -1381,14 +1381,14 @@ bool RendererBackendVk::compile_shader(const Shader& shader)
     // check if precompiled
     {
         fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::READ_BYTES);
-        if(precompfile && precompfile->size > 8)
+        if(precompfile && precompfile->size() > 8)
         {
             std::byte readhash8[8];
             precompfile->read(readhash8, 8, 0);
             uint64_t readhash = std::bit_cast<uint64_t>(readhash8);
             if(contenthash == readhash)
             {
-                const auto spvsize = precompfile->size - 8;
+                const auto spvsize = precompfile->size() - 8;
                 out_spv.resize(spvsize / 4);
                 precompfile->read((std::byte*)out_spv.data(), spvsize, 8);
             }

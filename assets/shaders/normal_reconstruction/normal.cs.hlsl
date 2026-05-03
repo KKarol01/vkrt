@@ -1,7 +1,7 @@
 #include "./common.hlsli"
 #include "./assets/shaders/util.hlsli"
 
-static const uint LOCAL_SIZE = 8;
+static const uint LOCAL_SIZE = 8; 
 static const uint TILE_BORDER = 1;
 static const uint TILE_SIZE = LOCAL_SIZE * LOCAL_SIZE + TILE_BORDER * 2;
 
