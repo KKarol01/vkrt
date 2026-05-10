@@ -42,6 +42,7 @@ Sync* StagingBuffer::flush(bool signal_sync)
     if(signal_sync)
     {
         out_signal_sync = get_renderer().current_data->get_sync();
+        queue->wait_sync(out_signal_sync, PipelineStage::TRANSFER_BIT);
         queue->signal_sync(out_signal_sync, PipelineStage::TRANSFER_BIT);
     }
     if(!get_context().cmd)
