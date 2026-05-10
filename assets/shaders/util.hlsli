@@ -1,5 +1,5 @@
 #ifndef UTIL_COMMON_H
-#define UTIL_COMMON_H
+#define UTIL_COMMON_H 
 
 /*
 	x,y in -1..1, z is what was in zbuffer at x,y

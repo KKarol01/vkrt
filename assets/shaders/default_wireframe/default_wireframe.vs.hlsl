@@ -1,0 +1,14 @@
+#include "./common.hlsli"
+
+VS_OUT main(uint vertex_index : SV_VertexID)
+{
+    VS_OUT output;
+
+    float3 pos = gGPUVertexPosition(vertex_index).pos;
+    float4x4 projView = gGPUEngConstants.proj_view;
+
+    output.pos = mul(projView, float4(pos, 1.0));
+    output.color = float4(1.0, 1.0, 1.0, 1.0);
+    
+    return output;
+}

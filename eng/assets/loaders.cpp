@@ -320,18 +320,18 @@ Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::N
         if(gltfnode.transform.index() == 0)
         {
             const auto& gltftrs = std::get<fastgltf::TRS>(gltfnode.transform);
-            ecs::Transform trs{};
+            ecsc::Transform trs{};
             trs.position = glm::vec3{ gltftrs.translation.x(), gltftrs.translation.y(), gltftrs.translation.z() };
             trs.rotation = glm::quat{ gltftrs.rotation.w(), gltftrs.rotation.x(), gltftrs.rotation.y(), gltftrs.rotation.z() };
             trs.scale = glm::vec3{ gltftrs.scale.x(), gltftrs.scale.y(), gltftrs.scale.z() };
-            transform = ecs::Transform::init(parent_transform * trs.to_mat4());
+            transform = ecsc::Transform::init(parent_transform * trs.to_mat4());
         }
         else
         {
             const auto& fasttrs = std::get<fastgltf::math::fmat4x4>(gltfnode.transform);
             glm::mat4 trs;
             memcpy(&trs, &fasttrs, sizeof(fasttrs));
-            transform = ecs::Transform::init(parent_transform * trs);
+            transform = ecsc::Transform::init(parent_transform * trs);
         }
         return asset.transforms.size() - 1;
     }();

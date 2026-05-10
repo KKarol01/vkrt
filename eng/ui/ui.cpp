@@ -78,7 +78,7 @@ class ScenePanel : public Panel
             };
             const auto draw_node = [this, &toggle_expanded_below](const auto& self, ecs::EntityId e) {
                 auto* ecs = get_engine().ecs;
-                const auto& node = ecs->get<ecs::Node>(e);
+                const auto& node = ecs->get<ecsc::Node>(e);
                 auto& state = states[e];
                 ImGui::PushID(&node);
                 {
@@ -345,7 +345,7 @@ void UI::init()
 
     auto& gamepanel = panels.emplace_back(new GamePanel{ *this, &game });
     auto& scenepanel = panels.emplace_back(new ScenePanel{ *this, &scene });
-    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &scene });
+    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &inspector });
     auto& debugpanel = panels.emplace_back(new DebugPanel{ *this, &scene });
     auto& consolepanel = panels.emplace_back(new ConsolePanel{ *this, &console });
 }

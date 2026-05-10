@@ -38,107 +38,112 @@ struct PassSettings
     bool modified{};
 };
 
+struct PassInitData
+{
+    std::array<RGResourceId, 8> color_buffers;
+    RGResourceId depth_buffer;
+};
+
 struct Pass
 {
     Pass(std::string_view name, uint32_t order) : name(name), order(order) {}
     virtual ~Pass() = default;
-    virtual void init(RGRenderGraph* graph) = 0;
+    virtual void init(RGRenderGraph* graph, const PassInitData& data) = 0;
     std::string name;
     uint32_t order{};
     PassSettings settings;
 };
 
-struct ZPrepass : public Pass
-{
-    struct PassData
-    {
-        RGAccessId constants;
-        RGAccessId instances;
-        RGAccessId positions;
-        RGAccessId indirect;
-
-        RGResourceId out_depth;
-    };
-
-    ZPrepass(RenderPassType type) : Pass("MESH_PASS_Z_PREPASS", RenderOrder::Z_PREPASS), type(type)
-    {
-        auto& r = get_renderer();
-        pipeline = r.settings.default_z_prepass_pipeline;
-    }
-
-    ~ZPrepass() override = default;
-
-    void init(RGRenderGraph* graph) override
-    {
-        if(!graph || !pipeline) { return; }
-        graph->add_graphics_pass<PassData>(
-            name.data(), order,
-            [this](RGBuilder& b, PassData& d) {
-                const auto& r = get_renderer();
-                const auto& cd = *r.current_data;
-                const auto& settings = r.settings;
-                const auto& md = r.mesh_render_data[(int)type];
-                const auto resolution = settings.render_resolution;
-                auto depacc = b.create_resource(ENG_FMT("{}_DEPTH", name),
-                                                Image::init(resolution.x, resolution.y, settings.depth_format,
-                                                            ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                                RGClear::depth_stencil(0.0, {}));
-                depacc = b.access_depth(depacc, ImageFormat::D32_SFLOAT);
-
-                d.constants = b.as_acc_id(cd.render_resources.constants);
-                d.constants = b.read_buffer(d.constants);
-                // todo: add access_indirect
-                d.indirect = b.import_resource(md.render_data.indirect_buf);
-                d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-                d.instances = b.import_resource(md.instance_buffer);
-                d.instances = b.read_buffer(d.instances);
-                d.positions = b.import_resource(r.bufs.positions);
-                d.positions = b.read_buffer(d.positions);
-
-                d.out_depth = b.as_res_id(depacc);
-                r.current_data->render_resources.zpdepth = d.out_depth;
-            },
-            [this](RGBuilder& b, const PassData& d) {
-                const auto& r = get_renderer();
-                const auto& cd = *r.current_data;
-                const auto& settings = r.settings;
-                const auto render_res = settings.render_resolution;
-                const auto& md = r.mesh_render_data[(int)type];
-
-                auto vkdep = vk::VkRenderingAttachmentInfo{};
-                vkdep.imageView = b.graph->get_acc(d.out_depth).image_view.get_md().vk->view;
-                vkdep.imageLayout = to_vk(b.graph->get_acc(d.out_depth).layout);
-                vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-                auto vkrinfo = vk::VkRenderingInfo{};
-                vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-                vkrinfo.layerCount = 1;
-                vkrinfo.pDepthAttachment = &vkdep;
-                VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
-                VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-                DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(b.graph->get_buf(d.constants)),
-                                                      DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)) };
-                auto* cmd = b.open_cmd_buf();
-                cmd->begin_rendering(vkrinfo);
-                cmd->set_viewports(&viewport, 1);
-                cmd->set_scissors(&scissor, 1);
-                cmd->bind_resources(0, shaderresources);
-                md.render_data.draw([&](const IndirectDrawParams& params) {
-                    cmd->bind_pipeline(params.draw->pipeline.get());
-                    cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(md.render_data.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     md.render_data.counts_view.buffer.get(), params.count_offset_bytes,
-                                                     params.max_draw_count, params.stride);
-                });
-                cmd->end_rendering();
-            });
-    }
-
-    RenderPassType type{ RenderPassType::LAST_ENUM };
-    Handle<Pipeline> pipeline;
-    PassData data;
-};
+// struct ZPrepass : public Pass
+//{
+//     struct PassData
+//     {
+//         RGAccessId constants;
+//         RGAccessId instances;
+//         RGAccessId positions;
+//         RGAccessId indirect;
+//
+//         RGResourceId out_depth;
+//     };
+//
+//     ZPrepass(MeshPassType type) : Pass("MESH_PASS_Z_PREPASS", RenderOrder::Z_PREPASS), type(type)
+//     {
+//         auto& r = get_renderer();
+//     }
+//
+//     ~ZPrepass() override = default;
+//
+//     void init(RGRenderGraph* graph) override
+//     {
+//         if(!graph) { return; }
+//         graph->add_graphics_pass<PassData>(
+//             name.data(), order,
+//             [this](RGBuilder& b, PassData& d) {
+//                 const auto& r = get_renderer();
+//                 const auto& cd = *r.current_data;
+//                 const auto& settings = r.settings;
+//                 const auto& md = r.mesh_render_data[(int)type];
+//                 const auto resolution = settings.render_resolution;
+//                 auto depacc = b.create_resource(ENG_FMT("{}_DEPTH", name),
+//                                                 Image::init(resolution.x, resolution.y, settings.depth_format,
+//                                                             ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
+//                                                 RGClear::depth_stencil(0.0, {}));
+//                 depacc = b.access_depth(depacc, ImageFormat::D32_SFLOAT);
+//
+//                 d.constants = b.as_acc_id(cd.render_resources.constants);
+//                 d.constants = b.read_buffer(d.constants);
+//                 // todo: add access_indirect
+//                 d.indirect = b.import_resource(md.render_data.indirect_buf);
+//                 d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+//                 d.instances = b.import_resource(md.instance_buffer);
+//                 d.instances = b.read_buffer(d.instances);
+//                 d.positions = b.import_resource(r.bufs.positions);
+//                 d.positions = b.read_buffer(d.positions);
+//
+//                 d.out_depth = b.as_res_id(depacc);
+//                 r.current_data->render_resources.zpdepth = d.out_depth;
+//             },
+//             [this](RGBuilder& b, const PassData& d) {
+//                 const auto& r = get_renderer();
+//                 const auto& cd = *r.current_data;
+//                 const auto& settings = r.settings;
+//                 const auto render_res = settings.render_resolution;
+//                 const auto& md = r.mesh_render_data[(int)type];
+//
+//                 auto vkdep = vk::VkRenderingAttachmentInfo{};
+//                 vkdep.imageView = b.graph->get_acc(d.out_depth).image_view.get_md().vk->view;
+//                 vkdep.imageLayout = to_vk(b.graph->get_acc(d.out_depth).layout);
+//                 vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+//                 vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+//
+//                 auto vkrinfo = vk::VkRenderingInfo{};
+//                 vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
+//                 vkrinfo.layerCount = 1;
+//                 vkrinfo.pDepthAttachment = &vkdep;
+//                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
+//                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
+//                 DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(b.graph->get_buf(d.constants)),
+//                                                       DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)) };
+//                 auto* cmd = b.open_cmd_buf();
+//                 cmd->begin_rendering(vkrinfo);
+//                 cmd->set_viewports(&viewport, 1);
+//                 cmd->set_scissors(&scissor, 1);
+//                 cmd->bind_resources(0, shaderresources);
+//                 md.render_data.draw([&](const IndirectDrawParams& params) {
+//                     cmd->bind_pipeline(params.draw->pipeline.get());
+//                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
+//                     cmd->draw_indexed_indirect_count(md.render_data.cmds_view.buffer.get(), params.command_offset_bytes,
+//                                                      md.render_data.counts_view.buffer.get(), params.count_offset_bytes,
+//                                                      params.max_draw_count, params.stride);
+//                 });
+//                 cmd->end_rendering();
+//             });
+//     }
+//
+//     MeshPassType type{ MeshPassType::LAST_ENUM };
+//     Handle<Pipeline> pipeline;
+//     PassData data;
+// };
 
 struct NormalFromDepth : public Pass
 {
@@ -158,10 +163,10 @@ struct NormalFromDepth : public Pass
 
     ~NormalFromDepth() override = default;
 
-    void init(RGRenderGraph* graph) override
+    void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         if(!graph) { return; }
-        data = graph->add_compute_pass<PassData>(
+        m_data = graph->add_compute_pass<PassData>(
             name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
@@ -194,7 +199,7 @@ struct NormalFromDepth : public Pass
     }
 
     Handle<Pipeline> pipeline;
-    PassData data;
+    PassData m_data;
 };
 
 struct SSAO : public Pass
@@ -234,11 +239,11 @@ struct SSAO : public Pass
 
     ~SSAO() override = default;
 
-    void init(RGRenderGraph* graph) override
+    void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         if(!graph) { return; }
         poll_settings_change();
-        data = graph->add_compute_pass<PassData>(
+        m_data = graph->add_compute_pass<PassData>(
             name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
@@ -287,11 +292,11 @@ struct SSAO : public Pass
             [this](RGBuilder& b, BlurData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
-                d.in_ao = b.read_write_image(b.as_acc_id(data.out_ao));
+                d.in_ao = b.read_write_image(b.as_acc_id(m_data.out_ao));
                 d.out_blur = b.as_res_id(b.write_image(
                     b.create_resource("SSAO_BLUR", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
                                                                ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT))));
-                data.out_ao = d.out_blur;
+                m_data.out_ao = d.out_blur;
             },
             [this](RGBuilder& b, const BlurData& d) {
                 if(!blur_pipeline) { return; }
@@ -307,7 +312,7 @@ struct SSAO : public Pass
             });
 
         const auto& r = get_renderer();
-        r.current_data->render_resources.ao = data.out_ao;
+        r.current_data->render_resources.ao = m_data.out_ao;
     }
 
     void generate_samples()
@@ -369,7 +374,7 @@ struct SSAO : public Pass
     Handle<Buffer> sample_buffer;
     Handle<Image> noise_texture;
     Handle<Buffer> settings_buffer;
-    PassData data;
+    PassData m_data;
 };
 
 struct GTAO : public Pass
@@ -408,11 +413,11 @@ struct GTAO : public Pass
 
     ~GTAO() override = default;
 
-    void init(RGRenderGraph* graph) override
+    void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         if(!graph) { return; }
         poll_settings_change();
-        data = graph->add_compute_pass<PassData>(
+        m_data = graph->add_compute_pass<PassData>(
             name.data(), order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
@@ -459,11 +464,11 @@ struct GTAO : public Pass
             [this](RGBuilder& b, BlurData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
-                d.in_ao = b.read_write_image(b.as_acc_id(data.out_ao));
+                d.in_ao = b.read_write_image(b.as_acc_id(m_data.out_ao));
                 d.out_blur = b.as_res_id(b.write_image(
                     b.create_resource("GTAO_BLUR", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
                                                                ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT))));
-                data.out_ao = d.out_blur;
+                m_data.out_ao = d.out_blur;
             },
             [this](RGBuilder& b, const BlurData& d) {
                 if(!blur_pipeline) { return; }
@@ -479,7 +484,7 @@ struct GTAO : public Pass
             });
 
         const auto& r = get_renderer();
-        r.current_data->render_resources.ao = data.out_ao;
+        r.current_data->render_resources.ao = m_data.out_ao;
     }
 
     void generate_noise()
@@ -518,7 +523,7 @@ struct GTAO : public Pass
     Handle<Buffer> sample_buffer;
     Handle<Image> noise_texture;
     Handle<Buffer> settings_buffer;
-    PassData data;
+    PassData m_data;
 };
 
 struct RTAO : public Pass
@@ -553,12 +558,12 @@ struct RTAO : public Pass
         RGAccessId settings;
     };
 
-    void init(RGRenderGraph* graph) override
+    void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         const auto& r = get_renderer();
         const auto res = r.settings.render_resolution;
         poll_settings_change();
-        data = graph->add_compute_pass<PassData>(
+        m_data = graph->add_compute_pass<PassData>(
             name.c_str(), order,
             [=](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
@@ -599,11 +604,11 @@ struct RTAO : public Pass
             [this](RGBuilder& b, BlurData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
-                d.in_ao = b.read_write_image(b.as_acc_id(data.out_ao));
+                d.in_ao = b.read_write_image(b.as_acc_id(m_data.out_ao));
                 d.out_blur = b.as_res_id(b.write_image(
                     b.create_resource("GTAO_BLUR", Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
                                                                ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT))));
-                data.out_ao = d.out_blur;
+                m_data.out_ao = d.out_blur;
             },
             [this](RGBuilder& b, const BlurData& d) {
                 if(!blur_pipeline) { return; }
@@ -618,7 +623,7 @@ struct RTAO : public Pass
                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
             });
 
-        r.current_data->render_resources.ao = data.out_ao;
+        r.current_data->render_resources.ao = m_data.out_ao;
     }
 
     void poll_settings_change()
@@ -635,7 +640,7 @@ struct RTAO : public Pass
     Handle<Pipeline> pipeline;
     Handle<Pipeline> blur_pipeline;
     Handle<Buffer> settings_buffer;
-    PassData data;
+    PassData m_data;
 };
 
 struct MeshPass : public Pass
@@ -650,75 +655,89 @@ struct MeshPass : public Pass
         RGAccessId out_color;
     };
 
-    MeshPass(RenderPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type)), RenderOrder::MESH_RENDER), type(type)
+    MeshPass(MeshPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type)), RenderOrder::MESH_RENDER), m_type(type)
     {
     }
 
     ~MeshPass() override = default;
 
-    void init(RGRenderGraph* graph) override
+    void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         if(!graph) { return; }
-        data = graph->add_graphics_pass<PassData>(
+        m_data = graph->add_graphics_pass<PassData>(
             name.data(), order,
-            [this](RGBuilder& b, PassData& d) {
+            [=, this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
-                const auto& cd = *r.current_data;
+                auto& cd = *r.current_data;
                 const auto& settings = r.settings;
-                const auto& md = r.mesh_render_data[(int)type];
-                if(md.built_instances.empty()) { return; }
+                const auto mesh_setup = r.mesh_renderer.setup(m_type, b);
+                if(!mesh_setup.indirect) { return; }
+
                 const auto resolution = settings.render_resolution;
                 const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
-                d.out_color = b.create_resource(ENG_FMT("{}_COLOR", name),
-                                                Image::init(resolution.x, resolution.y, settings.color_format, color_usage),
-                                                RGClear::color());
-                auto depacc = b.as_acc_id(cd.render_resources.zpdepth);
-                d.out_color = b.access_color(d.out_color);
-                depacc = b.access_depth(depacc);
+
+                for(auto i = 0u; i < data.color_buffers.size(); ++i)
+                {
+                    if(data.color_buffers[i])
+                    {
+                        d.out_color = b.as_acc_id(data.color_buffers[i]);
+                        d.out_color = b.access_color(d.out_color);
+                    }
+                    if(i > 0) { ENG_ASSERT(!data.color_buffers[i]); }
+                }
+
+                if(data.depth_buffer)
+                {
+                    d.depth = b.as_acc_id(data.depth_buffer);
+                    d.depth = b.access_depth(d.depth);
+                }
 
                 d.constants = b.as_acc_id(cd.render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
-                // todo: add access_indirect
-                d.indirect = b.import_resource(md.render_data.indirect_buf);
-                d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-                d.instances = b.import_resource(md.instance_buffer);
+                d.instances = b.import_resource(r.bufs.instances);
                 d.instances = b.read_buffer(d.instances);
                 d.positions = b.import_resource(r.bufs.positions);
                 d.positions = b.read_buffer(d.positions);
-                d.depth = depacc;
-
-                if(type == RenderPassType::OPAQUE)
-                {
-                    r.current_data->render_resources.opaque = b.as_res_id(d.out_color);
-                }
             },
             [this](RGBuilder& b, const PassData& d) {
-                if(!d.out_color) { return; }
-
-                const auto& r = get_renderer();
+                auto& r = get_renderer();
                 const auto& cd = *r.current_data;
                 const auto& settings = r.settings;
                 const auto render_res = settings.render_resolution;
-                const auto& md = r.mesh_render_data[(int)type];
-
-                vk::VkRenderingAttachmentInfo vkcols[1]{};
-                vkcols[0].imageView = b.graph->get_acc(d.out_color).image_view.get_md().vk->view;
-                vkcols[0].imageLayout = to_vk(b.graph->get_acc(d.out_color).layout);
-                vkcols[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-                auto vkdep = vk::VkRenderingAttachmentInfo{};
-                vkdep.imageView = b.graph->get_acc(d.depth).image_view.get_md().vk->view;
-                vkdep.imageLayout = to_vk(b.graph->get_acc(d.depth).layout);
-                vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                vkdep.storeOp = VK_ATTACHMENT_STORE_OP_NONE;
 
                 auto vkrinfo = vk::VkRenderingInfo{};
+
+                vk::VkRenderingAttachmentInfo vkcols[1]{};
+                if(d.out_color)
+                {
+                    vkcols[0].imageView = b.graph->get_acc(d.out_color).image_view.get_md().vk->view;
+                    vkcols[0].imageLayout = to_vk(b.graph->get_acc(d.out_color).layout);
+                    vkcols[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                    vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    vkrinfo.pColorAttachments = vkcols;
+                    vkrinfo.colorAttachmentCount = 1;
+                }
+
+                auto vkdep = vk::VkRenderingAttachmentInfo{};
+                if(d.depth)
+                {
+                    vkdep.imageView = b.graph->get_acc(d.depth).image_view.get_md().vk->view;
+                    vkdep.imageLayout = to_vk(b.graph->get_acc(d.depth).layout);
+                    if(m_type == MeshPassType::Z_PREPASS)
+                    {
+                        vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                        vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    }
+                    else
+                    {
+                        vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                        vkdep.storeOp = VK_ATTACHMENT_STORE_OP_NONE;
+                    }
+                    vkrinfo.pDepthAttachment = &vkdep;
+                }
+
                 vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 vkrinfo.layerCount = 1;
-                vkrinfo.colorAttachmentCount = 1;
-                vkrinfo.pColorAttachments = vkcols;
-                vkrinfo.pDepthAttachment = &vkdep;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{
@@ -730,19 +749,13 @@ struct MeshPass : public Pass
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
                 cmd->bind_resources(0, shaderresources);
-                md.render_data.draw([&](const IndirectDrawParams& params) {
-                    cmd->bind_pipeline(params.draw->pipeline.get());
-                    cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-                    cmd->draw_indexed_indirect_count(md.render_data.cmds_view.buffer.get(), params.command_offset_bytes,
-                                                     md.render_data.counts_view.buffer.get(), params.count_offset_bytes,
-                                                     params.max_draw_count, params.stride);
-                });
+                r.mesh_renderer.draw(m_type, *cmd);
                 cmd->end_rendering();
             });
     }
 
-    RenderPassType type{ RenderPassType::LAST_ENUM };
-    PassData data;
+    MeshPassType m_type{ MeshPassType::LAST_ENUM };
+    PassData m_data;
 };
 
 namespace culling

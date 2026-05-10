@@ -244,11 +244,12 @@ enum class ImageAddressing : uint8_t
     CLAMP_EDGE
 };
 
-enum class RenderPassType : uint8_t
+enum class MeshPassType : uint8_t
 {
     Z_PREPASS,
     OPAQUE,
     DIRECTIONAL_SHADOW,
+    WIREFRAME,
     LAST_ENUM,
 };
 
@@ -263,7 +264,8 @@ enum class PipelineStage : uint16_t
     COLOR_OUT_BIT = 0x20,
     COMPUTE_BIT = 0x40,
     INDIRECT_BIT = 0x80,
-    ALL = 0x100, // vulkan uses special value; it's not all bits set to 1
+    VERTEX_INPUT_BIT = 0x100,
+    ALL = 0x200, // vulkan uses special value; it's not all bits set to 1
 
     AS_BUILD_BIT = 0x200,
     RAY_TRACING_BIT = 0x400,
@@ -293,9 +295,10 @@ enum class PipelineAccess : uint32_t
     AS_WRITE_BIT = 0x1000,
     AS_RW = AS_READ_BIT | AS_WRITE_BIT,
     PRESENT_BIT = 0x2000,
+    INDEX_READ_BIT = 0x4000,
 
     READS = SHADER_READ_BIT | COLOR_READ_BIT | DS_READ_BIT | STORAGE_READ_BIT | INDIRECT_READ_BIT | TRANSFER_READ_BIT |
-            AS_READ_BIT | PRESENT_BIT,
+            AS_READ_BIT | PRESENT_BIT | INDEX_READ_BIT,
     WRITES = SHADER_WRITE_BIT | COLOR_WRITE_BIT | DS_WRITE_BIT | STORAGE_WRITE_BIT | TRANSFER_WRITE_BIT | AS_WRITE_BIT,
 
     LAST_ENUM,

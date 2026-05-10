@@ -15,7 +15,7 @@
 
 namespace eng
 {
-namespace ecs
+namespace ecsc
 {
 
 struct Node
@@ -71,14 +71,14 @@ struct alignas(16) Light
     uint32_t gpu_index{ ~0u };
 };
 
-} // namespace ecs
+} // namespace ecsc
 
 // clang-format off
-inline std::string to_string(const ecs::Light::Type& a) 
+inline std::string to_string(const ecsc::Light::Type& a) 
 {
     switch(a) 
     {
-        case ecs::Light::Type::POINT: { return "point"; }
+        case ecsc::Light::Type::POINT: { return "point"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }
@@ -86,7 +86,7 @@ inline std::string to_string(const ecs::Light::Type& a)
 
 namespace serialization
 {
-ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(ecs::Transform);
+ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(ecsc::Transform);
 }
 
 } // namespace eng

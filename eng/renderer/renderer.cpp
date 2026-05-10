@@ -15,7 +15,6 @@
 #include <eng/fs/fs.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
-#include <eng/renderer/passes/renderpass.hpp>
 #include <eng/math/align.hpp>
 #include <assets/shaders/common.hlsli>
 
@@ -49,6 +48,7 @@ ImageBlockData get_block_data(ImageFormat format)
 void ShaderIncludes::add_file(const fs::Path& path)
 {
     ShaderIncludes::File f{};
+    f.path = path;
     f.includes = parse_includes(path);
     m_files_map[path] = std::move(f);
     auto it = m_files_map.find(path);
@@ -120,7 +120,10 @@ std::vector<const ShaderIncludes::File*> ShaderIncludes::get_shader_includes(Han
     };
     auto it = m_files_map.find(shader->path);
     if(it == m_files_map.end()) { return {}; }
-    recurse(recurse, &it->second);
+    for(const auto* f : it->second.includes)
+    {
+        recurse(recurse, f);
+    }
     return includes;
 }
 
@@ -138,7 +141,10 @@ std::vector<Handle<Shader>> ShaderIncludes::get_all_affected_shaders(const fs::P
     };
     auto it = m_files_map.find(path);
     if(it == m_files_map.end()) { return {}; }
-    recurse(recurse, &it->second);
+    for(const auto* f : it->second.included_by)
+    {
+        recurse(recurse, f);
+    }
     std::ranges::sort(shaders);
     auto [a, b] = std::ranges::unique(shaders);
     shaders.erase(a, b);
@@ -222,35 +228,8 @@ void Renderer::init(IRendererBackend* backend)
         return true;
     });
 
-    get_engine().ecs->register_callbacks<ecs::Mesh>([this](ecs::EntityId e) {
-        auto& ecs = *get_engine().ecs;
-        auto& mesh = ecs.get<ecs::Mesh>(e);
-        if(mesh.gpu_resource == ~0u)
-        {
-            mesh.gpu_resource = *gpu_resource_allocator.allocate();
-            new_transforms.push_back(e);
-        }
-        for(const auto& rm : mesh.render_meshes)
-        {
-            const auto& mat = rm->material.get();
-            const auto& mp = mat.mesh_pass.get();
-
-            for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
-            {
-                if(mp.effects[i]) { mesh_render_data[i].add_mesh(mesh.gpu_resource, rm); }
-            }
-        }
-    });
-
     std::string_view exts[]{ ".hlsl", ".hlsli" };
     new_shaders_listener = get_engine().fs->make_listener("/assets/shaders", exts);
-
-    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
-    {
-        MeshRenderData rp{};
-        rp.type = (RenderPassType)i;
-        mesh_render_data[i] = rp;
-    }
 }
 
 void Renderer::init_helper_geom()
@@ -369,8 +348,9 @@ void Renderer::init_pipelines()
     //     .layout = common_playout,
     // });
 
+    Handle<Pipeline> default_pipelines[(int)MeshPassType::LAST_ENUM]{};
     {
-        settings.default_z_prepass_pipeline =
+        default_pipelines[(int)MeshPassType::Z_PREPASS] =
             make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/default_z_prepass/z_prepass.vs.hlsl",
                                                      "/assets/shaders/default_z_prepass/z_prepass.ps.hlsl" })
                               .init_image_attachments(PipelineCreateInfo::AttachmentState{
@@ -378,7 +358,7 @@ void Renderer::init_pipelines()
                               .init_depth_test(true, true, settings.rw_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
-        settings.default_forward_pipeline =
+        default_pipelines[(int)MeshPassType::OPAQUE] =
             make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/default_unlit/default_unlit.vs.hlsl",
                                                      "/assets/shaders/default_unlit/default_unlit.ps.hlsl" })
                               .init_image_attachments(PipelineCreateInfo::AttachmentState{
@@ -394,22 +374,42 @@ void Renderer::init_pipelines()
                                   .depth_format = settings.depth_format })
                               .init_depth_test(true, false, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
+
+        default_pipelines[(int)MeshPassType::WIREFRAME] =
+            make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/default_wireframe/default_wireframe.vs.hlsl",
+                                                     "/assets/shaders/default_wireframe/default_wireframe.ps.hlsl" })
+                              .init_image_attachments(PipelineCreateInfo::AttachmentState{
+                                  .count = 1,
+                                  .color_formats = { settings.color_format },
+                                  .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
+                                                                                    .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                                    .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                                    .color_op = BlendOp::ADD,
+                                                                                    .src_alpha_factor = BlendFactor::ONE,
+                                                                                    .dst_alpha_factor = BlendFactor::ZERO,
+                                                                                    .alpha_op = BlendOp::ADD } },
+                                  .depth_format = settings.depth_format })
+                              .init_depth_test(true, false, settings.read_depth_compare)
+                              .init_topology(Topology::TRIANGLE_LIST, PolygonMode::LINE, CullFace::BACK));
         settings.apply_ao_pipeline = make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/apply.cs.hlsl" }));
     }
 
     {
-        const auto zprepass_effect = make_shader_effect(ShaderEffect{ .pipeline = settings.default_z_prepass_pipeline });
-        const auto unlit_effect = make_shader_effect(ShaderEffect{ .pipeline = settings.default_forward_pipeline });
-        MeshPass::Effects effects{};
-        effects[(int)RenderPassType::Z_PREPASS] = zprepass_effect;
-        effects[(int)RenderPassType::OPAQUE] = unlit_effect;
-
-        settings.default_meshpass = make_mesh_pass(MeshPass::init("mesh_pass_default_unlit", effects));
-        settings.default_material =
-            materials.insert(Material::init("material_default_opaque", settings.default_meshpass)).handle;
+        Handle<ShaderEffect> default_effects[(int)MeshPassType::LAST_ENUM]{};
+        for(auto i = 0; i < (int)MeshPassType::LAST_ENUM; ++i)
+        {
+            default_effects[i] = make_shader_effect(ShaderEffect{ default_pipelines[i] });
+            MeshPass pass = MeshPass::init(ENG_FMT("default meshpass {}", to_string((MeshPassType)i)), {});
+            pass.effects[i] = default_effects[i];
+            if(i == (int)MeshPassType::OPAQUE)
+            {
+                pass.effects[(int)MeshPassType::Z_PREPASS] = default_effects[(int)MeshPassType::Z_PREPASS];
+            }
+            settings.default_meshpasses[i] = make_mesh_pass(pass);
+        }
 
         settings.default_base_color =
-            make_image("ENG_default_base_color",
+            make_image("default texture",
                        Image::init(2, 2, ImageFormat::R8G8B8A8_UNORM, ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
         uint8_t data[] = {
             255, 0, 255, 255, // Pixel 1: Magenta
@@ -425,8 +425,9 @@ void Renderer::init_pipelines()
         passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
         passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
         passes.ao[(int)AOMode::RTAO] = std::make_shared<pass::RTAO>();
-        passes.mesh_passes[(int)RenderPassType::Z_PREPASS] = std::make_shared<pass::ZPrepass>(RenderPassType::Z_PREPASS);
-        passes.mesh_passes[(int)RenderPassType::OPAQUE] = std::make_shared<pass::MeshPass>(RenderPassType::OPAQUE);
+        passes.mesh_passes[(int)MeshPassType::Z_PREPASS] = std::make_shared<pass::MeshPass>(MeshPassType::Z_PREPASS);
+        passes.mesh_passes[(int)MeshPassType::OPAQUE] = std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE);
+        passes.mesh_passes[(int)MeshPassType::WIREFRAME] = std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME);
     }
 }
 
@@ -520,12 +521,12 @@ void Renderer::init_bufs()
 // void Renderer::instance_entity(ecs::EntityId e)
 //{
 // ENG_ASSERT(false);
-//  if(!get_engine().ecs->has<ecs::Transform, ecs::Mesh>(e))
+//  if(!get_engine().ecs->has<ecsc::Transform, ecsc::Mesh>(e))
 //{
 //      ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", *e);
 //      return;
 //  }
-//  auto& mesh = get_engine().ecs->get<ecs::Mesh>(e);
+//  auto& mesh = get_engine().ecs->get<ecsc::Mesh>(e);
 //  if(mesh.gpu_resource != ~0u)
 //{
 //      ENG_WARN("Entity {} with mesh {} is already instanced {}", *e, mesh.asset->name, mesh.gpu_resource);
@@ -545,6 +546,8 @@ void Renderer::init_bufs()
 
 void Renderer::update()
 {
+    ENG_TIMER_SCOPED("Renderer update");
+
     settings.render_resolution = settings.new_render_resolution;
     if(settings.override_render_resolution.x == -1 && settings.override_render_resolution.y == -1)
     {
@@ -610,6 +613,9 @@ void Renderer::update()
                 if(p.extension() == ".hlsli")
                 {
                     auto sh = shader_includes.get_all_affected_shaders(p);
+                    std::string str;
+                    std::ranges::for_each(sh, [&str](auto handle) { str += handle->path.string() + ' '; });
+                    ENG_LOG("Shader header changed, recompiling: {}", str);
                     ret.insert(ret.end(), sh.begin(), sh.end());
                 }
                 else
@@ -625,6 +631,7 @@ void Renderer::update()
         }();
         for(auto shaderh : to_recompile)
         {
+            ENG_LOG("Recompiling shader {}", shaderh->path.string());
             auto new_shader = Shader::init(shaderh->path);
             backend->make_shader(new_shader);
             const auto compilation_res = backend->compile_shader(new_shader);
@@ -637,16 +644,36 @@ void Renderer::update()
             ENG_ASSERT(!shaderh->md.ptr && new_shader.md.ptr);
             shaderh.get() = std::move(new_shader);
             shader_includes.remove_shader(shaderh);
-            shader_includes.add_shader(shaderh);
+            shader_includes.add_shader(shaderh); // add again with possibly new includes
             for(auto pipelineh : shader_usage_pipeline_map[shaderh])
             {
                 backend->destroy_pipeline(pipelineh.get());
                 backend->make_pipeline(pipelineh.get());
                 new_pipelines.push_back(pipelineh);
             }
+
+            {
+                auto incs = shader_includes.get_shader_includes(shaderh);
+                std::string str;
+                std::ranges::for_each(incs, [&str](auto* f) { str += f->path.string() + ' '; });
+                ENG_LOG("Shader {} includes: {}", shaderh->path.string(), str);
+            }
+
             shader_usage_pipeline_map[shaderh].clear();
         }
     });
+
+    {
+        ENG_TIMER_SCOPED("Itearte components");
+        get_engine().ecs->iterate_components<ecsc::Mesh>([this](ecs::EntityId e, ecsc::Mesh& mesh) {
+            if(mesh.gpu_resource == ~0u)
+            {
+                mesh.gpu_resource = *gpu_resource_allocator.allocate();
+                new_transforms.push_back(e);
+            }
+            mesh_renderer.instance_entity(e);
+        });
+    }
 
     if(new_shaders.size())
     {
@@ -693,7 +720,7 @@ void Renderer::update()
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto entity = new_transforms[i];
-            const auto [transform, mesh] = get_engine().ecs->get<ecs::Transform, ecs::Mesh>(entity);
+            const auto [transform, mesh] = get_engine().ecs->get<ecsc::Transform, ecsc::Mesh>(entity);
             const auto trsmat4x4 = transform.to_mat4();
             staging->copy(bufs.transforms[0].get(), &trsmat4x4[0][0], mesh.gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
         }
@@ -708,8 +735,8 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
         //  for(auto i = 0u; i < new_lights.size(); ++i)
         //{
-        //      auto& l = get_engine().ecs->get<ecs::Light>(new_lights[i]);
-        //      const auto& t = get_engine().ecs->get<ecs::Transform>(new_lights[i]);
+        //      auto& l = get_engine().ecs->get<ecsc::Light>(new_lights[i]);
+        //      const auto& t = get_engine().ecs->get<ecsc::Transform>(new_lights[i]);
         //      if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
         //      GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
         //      staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
@@ -718,93 +745,15 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], &bufs.light_count, offsetof(GPULightsBuffer, count), 4);
         //  new_lights.clear();
     }
-    if(new_geometries.batches.size()) { build_pending_geometries(); }
-    if(new_blases.size())
-    {
-        std::vector<ASRequirements> reqs_vec;
-        ASRequirements total_reqs{};
-        for(auto gh : new_blases)
-        {
-            auto& reqs = reqs_vec.emplace_back();
-            backend->make_blas(gh.get(), reqs, nullptr, nullptr, 0, nullptr, 0);
-            reqs.acceleration_structure_size = align_up2(reqs.acceleration_structure_size, 256);
-            ENG_ASSERT(reqs.build_scratch_size % backend->props.min_acceleration_structure_scratch_offset_alignment == 0);
-            total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
-            total_reqs.build_scratch_size += reqs.build_scratch_size;
-        }
-
-        if(!bufs.geom_blas)
-        {
-            bufs.geom_blas =
-                make_buffer("blas buffer", Buffer::init(total_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
-        }
-        if(bufs.geom_blas->capacity < total_reqs.acceleration_structure_size)
-        {
-            backend->destroy_buffer(bufs.geom_blas.get());
-            bufs.geom_blas->capacity = total_reqs.acceleration_structure_size;
-            backend->allocate_buffer(bufs.geom_blas.get());
-        }
-
-        auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
-        queue_destroy(blas_scratch); // destroy later in frame_delay frames
-
-        auto* cmd = current_data->cmdpool->begin();
-        cmd->wait_sync(staging->flush(true), PipelineStage::AS_BUILD_BIT);
-
-        total_reqs = {};
-        for(auto i = 0u; i < reqs_vec.size(); ++i)
-        {
-            ASRequirements reqs = reqs_vec[i];
-            ASRequirements _reqs;
-            backend->make_blas(new_blases[i].get(), _reqs, cmd, &bufs.geom_blas.get(),
-                               total_reqs.acceleration_structure_size, &blas_scratch.get(), total_reqs.build_scratch_size);
-            total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
-            total_reqs.build_scratch_size += reqs.build_scratch_size;
-        }
-        cmd->barrier(PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_WRITE_BIT, PipelineStage::AS_BUILD_BIT,
-                     PipelineAccess::AS_READ_BIT);
-
-        std::vector<uint32_t> instance_ids;
-        std::vector<const Geometry*> tlas_geoms;
-        std::vector<glm::mat3x4> trs;
-        get_engine().ecs->iterate_components<ecs::Mesh, ecs::Transform>([&](ecs::EntityId e, const ecs::Mesh& m,
-                                                                            const ecs::Transform& t) {
-            for(auto rmh : m.render_meshes)
-            {
-                instance_ids.push_back(m.gpu_resource);
-                tlas_geoms.push_back(&rmh->geometry.get());
-                glm::mat4x3 mat = t.to_mat4();
-                trs.push_back(glm::transpose(mat));
-            }
-        });
-
-        ASRequirements tlas_reqs;
-        backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
-                           std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
-        {
-            auto tlas_scratch = make_buffer("tlas scratch", Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
-            queue_destroy(tlas_scratch); // destroy later in frame_delay frames
-            bufs.geom_tlas_buffer =
-                make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
-            auto instances = make_buffer("Tlas blas instances",
-                                         Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT));
-            queue_destroy(instances);
-            bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
-                                                std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
-                                                &bufs.geom_tlas_buffer.get(), 0, &tlas_scratch.get(), 0, &instances.get(), 0);
-        }
-
-        auto* tlas_done_sync = current_data->get_sync();
-        cmd->signal_sync(tlas_done_sync, PipelineStage::AS_BUILD_BIT);
-        current_data->cmdpool->end(cmd);
-        gq->wait_sync(tlas_done_sync, PipelineStage::RAY_TRACING_BIT);
-        gq->with_cmd_buf(cmd);
-        gq->submit();
-        new_blases.clear();
-    }
 
     swapchain->acquire(~0ull, current_data->acq_sem);
 
+    build_pending_geometries();
+    build_pending_blases();
+    {
+        ENG_TIMER_SCOPED("Build passes");
+        mesh_renderer.build_passes();
+    }
     compile_rendergraph();
 
     Sync* rg_wait_syncs[]{ staging->flush(true) };
@@ -817,17 +766,29 @@ void Renderer::update()
 
 void Renderer::compile_rendergraph()
 {
-    for(auto i = 0u; i < (uint32_t)RenderPassType::LAST_ENUM; ++i)
-    {
-        mesh_render_data[i].build();
-    }
-
     current_data->render_resources = rgraph->add_graphics_pass<RenderResources>(
         "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
         [this](RGBuilder& b, RenderResources& d) {
             auto constsacc = b.create_resource("constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
             constsacc = b.write_buffer(constsacc);
             d.constants = b.as_res_id(constsacc);
+            auto opaque =
+                b.create_resource("opaque",
+                                  Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
+                                              ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                  RGClear::color());
+            auto depth = b.create_resource("depth",
+                                           Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                                       settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
+                                           RGClear::depth_stencil(0.0));
+            auto final_color =
+                b.create_resource("final color",
+                                  Image::init(settings.present_resolution.x, settings.present_resolution.y, settings.color_format,
+                                              ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                  RGClear::color());
+            d.opaque = b.as_res_id(opaque);
+            d.zpdepth = b.as_res_id(depth);
+            d.final_color = b.as_res_id(final_color);
         },
         [](RGBuilder& b, const RenderResources& d) {
             auto* c = get_engine().camera;
@@ -846,10 +807,14 @@ void Renderer::compile_rendergraph()
             cmd->wait_sync(get_renderer().staging->flush(true));
         });
 
-    passes.mesh_passes[(int)RenderPassType::Z_PREPASS]->init(rgraph);
+    pass::PassInitData pass_data{};
+    pass_data.depth_buffer = current_data->render_resources.zpdepth;
+
+    passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
     // passes.reconstruct_normals->init(rgraph);
     // passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
-    passes.mesh_passes[(int)RenderPassType::OPAQUE]->init(rgraph);
+    pass_data.color_buffers[0] = current_data->render_resources.opaque;
+    passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
     // struct ApplyAOData
     //{
@@ -885,13 +850,8 @@ void Renderer::compile_rendergraph()
             if(!current_data->render_resources.opaque) { return; }
             data.in_color = b.copy_source(b.as_acc_id(current_data->render_resources.opaque));
             // todo: make this persistent and double-buffered
-            data.out_final_color =
-                b.create_resource("FinalColorComposite",
-                                  Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
-                                              ImageUsage::TRANSFER_DST_BIT | ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
-                                  RGClear::color());
+            data.out_final_color = b.as_acc_id(current_data->render_resources.final_color);
             data.out_final_color = b.copy_dest(data.out_final_color);
-            current_data->render_resources.final_color = b.as_res_id(data.out_final_color);
         },
         [this](RGBuilder& pb, const CompositeFinalColorData& data) {
             auto* cmd = pb.open_cmd_buf();
@@ -1050,9 +1010,14 @@ Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
     return ret.handle;
 }
 
-Handle<Shader> Renderer::make_shader(const std::filesystem::path& path)
+Handle<Shader> Renderer::make_shader(const fs::Path& path)
 {
     auto shader = Shader::init(path);
+    if(shader.stage == ShaderStage::NONE)
+    {
+        ENG_ASSERT(false);
+        return {};
+    }
     const auto it = std::ranges::find_if(shaders, [&path](const auto& e) { return e.path == path; });
     const auto found_handle = it != shaders.end();
     if(!found_handle)
@@ -1129,12 +1094,12 @@ void Renderer::destroy_sync(Sync* sync) { backend->destory_sync(sync); }
 Handle<Material> Renderer::make_material(const Material& desc)
 {
     Material mat = desc;
-    if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpass; }
+    if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpasses[(int)MeshPassType::OPAQUE]; }
     if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.default_base_color); }
-
-    auto ret = materials.insert(std::move(mat));
-    if(ret.success) { new_materials.push_back(ret.handle); }
-    return ret.handle;
+    materials.push_back(std::move(mat));
+    const auto handle = Handle<Material>{ (uint32_t)materials.size() - 1 };
+    new_materials.push_back(handle);
+    return handle;
 }
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
@@ -1151,6 +1116,8 @@ Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 
 void Renderer::build_pending_geometries()
 {
+    if(new_geometries.batches.empty()) { return; }
+
     ENG_TIMER_SCOPED("Build pending geometries");
 
     // take out any batch that has meshlets. it means the geometry has been preprocessed and was deserialized.
@@ -1343,6 +1310,91 @@ void Renderer::build_pending_geometries()
     new_geometries = {};
 }
 
+void Renderer::build_pending_blases()
+{
+    if(new_blases.empty()) { return; }
+
+    std::vector<ASRequirements> reqs_vec;
+    ASRequirements total_reqs{};
+    for(auto gh : new_blases)
+    {
+        auto& reqs = reqs_vec.emplace_back();
+        backend->make_blas(gh.get(), reqs, nullptr, nullptr, 0, nullptr, 0);
+        reqs.acceleration_structure_size = align_up2(reqs.acceleration_structure_size, 256);
+        ENG_ASSERT(reqs.build_scratch_size % backend->props.min_acceleration_structure_scratch_offset_alignment == 0);
+        total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
+        total_reqs.build_scratch_size += reqs.build_scratch_size;
+    }
+
+    if(!bufs.geom_blas)
+    {
+        bufs.geom_blas =
+            make_buffer("blas buffer", Buffer::init(total_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
+    }
+    if(bufs.geom_blas->capacity < total_reqs.acceleration_structure_size)
+    {
+        backend->destroy_buffer(bufs.geom_blas.get());
+        bufs.geom_blas->capacity = total_reqs.acceleration_structure_size;
+        backend->allocate_buffer(bufs.geom_blas.get());
+    }
+
+    auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
+    queue_destroy(blas_scratch); // destroy later in frame_delay frames
+
+    auto* cmd = current_data->cmdpool->begin();
+    cmd->wait_sync(staging->flush(true), PipelineStage::AS_BUILD_BIT);
+
+    total_reqs = {};
+    for(auto i = 0u; i < reqs_vec.size(); ++i)
+    {
+        ASRequirements reqs = reqs_vec[i];
+        ASRequirements _reqs;
+        backend->make_blas(new_blases[i].get(), _reqs, cmd, &bufs.geom_blas.get(),
+                           total_reqs.acceleration_structure_size, &blas_scratch.get(), total_reqs.build_scratch_size);
+        total_reqs.acceleration_structure_size += reqs.acceleration_structure_size;
+        total_reqs.build_scratch_size += reqs.build_scratch_size;
+    }
+    cmd->barrier(PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_WRITE_BIT, PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_READ_BIT);
+
+    std::vector<uint32_t> instance_ids;
+    std::vector<const Geometry*> tlas_geoms;
+    std::vector<glm::mat3x4> trs;
+    get_engine().ecs->iterate_components<ecsc::Mesh, ecsc::Transform>([&](ecs::EntityId e, const ecsc::Mesh& m,
+                                                                          const ecsc::Transform& t) {
+        for(auto rmh : m.render_meshes)
+        {
+            instance_ids.push_back(m.gpu_resource);
+            tlas_geoms.push_back(&rmh->geometry.get());
+            glm::mat4x3 mat = t.to_mat4();
+            trs.push_back(glm::transpose(mat));
+        }
+    });
+
+    ASRequirements tlas_reqs;
+    backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
+                       std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
+    {
+        auto tlas_scratch = make_buffer("tlas scratch", Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
+        queue_destroy(tlas_scratch); // destroy later in frame_delay frames
+        bufs.geom_tlas_buffer =
+            make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
+        auto instances = make_buffer("Tlas blas instances",
+                                     Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT));
+        queue_destroy(instances);
+        bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
+                                            std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
+                                            &bufs.geom_tlas_buffer.get(), 0, &tlas_scratch.get(), 0, &instances.get(), 0);
+    }
+
+    auto* tlas_done_sync = current_data->get_sync();
+    cmd->signal_sync(tlas_done_sync, PipelineStage::AS_BUILD_BIT);
+    current_data->cmdpool->end(cmd);
+    gq->wait_sync(tlas_done_sync, PipelineStage::RAY_TRACING_BIT);
+    gq->with_cmd_buf(cmd);
+    gq->submit();
+    new_blases.clear();
+}
+
 void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
                                    std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets)
 {
@@ -1455,7 +1507,8 @@ void Renderer::make_blas(Handle<Geometry> geom)
 
 Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 {
-    return shader_effects.insert(info).handle;
+    shader_effects.push_back(info);
+    return Handle<ShaderEffect>{ (uint32_t)shader_effects.size() - 1 };
 }
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }

@@ -1943,8 +1943,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 
 // Handle<Mesh> RendererBackendVulkan::instance_mesh(const InstanceSettings& settings)
 //{
-//     const auto* mr = get_engine().ecs->get<eng::ecs::Mesh>(settings.entity);
-//     const auto* transform = get_engine().ecs->get<ecs::Transform>(settings.entity);
+//     const auto* mr = get_engine().ecs->get<eng::ecsc::Mesh>(settings.entity);
+//     const auto* transform = get_engine().ecs->get<ecsc::Transform>(settings.entity);
 //     if(!mr) { return {}; }
 //     if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
 //     for(const auto& e : mr->meshes)
@@ -2079,7 +2079,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     size_t off = 0;
 //     for(auto e : entities)
 //     {
-//         auto* t = get_engine().ecs->get<ecs::Transform>(e);
+//         auto* t = get_engine().ecs->get<ecsc::Transform>(e);
 //         ts.at(off++) = t->global;
 //     }
 //     std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);

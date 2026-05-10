@@ -64,26 +64,6 @@ namespace ecs
 
     Traversing calls the callback with the starting entity, and traverses depth-first.
     Looping over just calls the callback with all it's children, in-order.
-
-    The system also allows for callbacks that can be notfied
-    when a new component gets added, removed or updated.
-    register_callbacks<Components...>(on_insert, on_update, on_remove) takes optional callbacks
-    that: get called when there is a new entity that has required components --
-        for example if you care about entities that have a mesh and a position so you
-        can render them, this callback would get called once for this entity when
-        it gains at least those components;
-
-        get called when somebody modified the components and wishes to notify
-        anyone who cares about a particular component, for example when you
-        register a callback that listens on any entity that has at least
-        Transform, Mesh and Collision components, and somebody modified transform;
-
-        get called when somebody removed entity or a component and it no longer satisfies your
-        component requirements -- if someone have removed Collision component, callbacks
-        for <Transform, Mesh, Collision> would be notified with on_remove, but callbacks
-        for <Transform, Mesh> would not, because the entity still has those.
-
-    To notify about the change a component, call signal_components_update<UpdatedComponents...>(eid).
 */
 
 namespace test
@@ -106,9 +86,6 @@ struct EntityId : public TypedId<EntityId, uint64_t>
 using ComponentId = uint32_t;
 inline static constexpr uint32_t MAX_COMPONENTS = std::numeric_limits<ComponentId>::digits;
 using Signature = std::bitset<MAX_COMPONENTS>;
-using ViewEntityInsertedFunc = void(EntityId eid);
-using ViewEntityUpdatedFunc = void(EntityId eid, Signature updated);
-using ViewEntityRemovedFunc = void(EntityId eid);
 
 struct ComponentTraits
 {
@@ -202,9 +179,6 @@ class Registry
         bool accepts_signature(Signature esig) const { return (sig & esig) == sig; }
         Signature sig;
         std::vector<EntityId> entities;
-        Signal<ViewEntityInsertedFunc> on_insert_callbacks;
-        Signal<ViewEntityUpdatedFunc> on_update_callbacks;
-        Signal<ViewEntityRemovedFunc> on_remove_callbacks;
     };
 
     template <typename... Components> static Signature get_signature()
@@ -265,7 +239,7 @@ class Registry
                 static T null_component{};
                 return (null_component);
             }
-            return (get_pool<T>().get(eid.get_slot()));
+            return (T&)(get_pool<T>().get(eid.get_slot()));
         }
         else { return std::tuple<Components&...>{ get<Components>(eid)... }; }
     }
@@ -316,7 +290,7 @@ class Registry
     // Invokes a callback for every entity that has the specified components.
     template <typename... Components>
     void iterate_components(const auto& callback)
-        requires(std::is_invocable_v<decltype(callback), EntityId, Components...>)
+        requires(std::is_invocable_v<decltype(callback), EntityId, std::add_lvalue_reference_t<Components>...>)
     {
         const IComponentPool* const pool = try_find_smallest_pool<Components...>();
         const Signature sig = get_signature<Components...>();
@@ -414,26 +388,6 @@ class Registry
         traverse(eid, traverse);
     }
 
-    // Register callbacks for new/removed/updated sets of components.
-    // Will not run, if entity has only component A, and register_callbacks was ran with A and B.
-    template <typename... Components>
-    void register_callbacks(std::optional<Callback<ViewEntityInsertedFunc>> on_insert_callback = {},
-                            std::optional<Callback<ViewEntityUpdatedFunc>> on_update_callback = {},
-                            std::optional<Callback<ViewEntityRemovedFunc>> on_remove_callback = {})
-    {
-        auto& view = get_view(get_signature<Components...>(), on_insert_callback);
-        if(on_insert_callback) { view.on_insert_callbacks += *on_insert_callback; }
-        if(on_update_callback) { view.on_update_callbacks += *on_update_callback; }
-        if(on_remove_callback) { view.on_remove_callbacks += *on_remove_callback; }
-    }
-
-    // Use to notify all callbacks that had at least one of the given component types
-    // present during register_callbacks about the update of their contents.
-    template <typename... Components> void signal_components_update(EntityId eid)
-    {
-        notify_entity_views(eid, get_signature<Components...>());
-    }
-
   private:
     EntityMetadata& get_md(EntityId eid) { return metadatas[*eid.get_slot()]; }
     const EntityMetadata& get_md(EntityId eid) const { return metadatas[*eid.get_slot()]; }
@@ -470,7 +424,7 @@ class Registry
         return *static_cast<ComponentPool<Component>*>(&*pools[id]);
     }
 
-    View& get_view(Signature sig, std::optional<Callback<ViewEntityInsertedFunc>> on_insert = {})
+    View& get_view(Signature sig)
     {
         auto it = views.emplace(sig, View{});
         if(!it.second) { return it.first->second; }
@@ -480,11 +434,7 @@ class Registry
         {
             for(auto e : pool->entities)
             {
-                if(metadatas[e].has_components(sig))
-                {
-                    view.entities.push_back(entities[e]);
-                    if(on_insert) { (*on_insert)(entities[e]); }
-                }
+                if(metadatas[e].has_components(sig)) { view.entities.push_back(entities[e]); }
             }
         }
         return view;
@@ -496,31 +446,12 @@ class Registry
         {
             const auto old_sig_passed = view.accepts_signature(old_sig);
             const auto new_sig_passes = view.accepts_signature(new_sig);
-            if(!old_sig_passed && new_sig_passes)
-            {
-                view.entities.push_back(eid);
-                view.on_insert_callbacks.signal(eid);
-            }
+            if(!old_sig_passed && new_sig_passes) { view.entities.push_back(eid); }
             else if(old_sig_passed && !new_sig_passes)
             {
                 const auto rem = std::erase(view.entities, eid);
                 ENG_ASSERT(rem == 1);
-                view.on_remove_callbacks.signal(eid);
             }
-        }
-    }
-
-    void notify_entity_views(EntityId eid, Signature updated_comps)
-    {
-        if(!has(eid)) { return; }
-        if(!get_md(eid).has_components(updated_comps))
-        {
-            ENG_ERROR("The entity does not have the specified components {}", (get_md(eid).sig & updated_comps).to_string());
-            return;
-        }
-        for(auto& [viewsig, view] : views)
-        {
-            if((updated_comps & view.sig).any()) { view.on_update_callbacks.signal(eid, updated_comps); }
         }
     }
 

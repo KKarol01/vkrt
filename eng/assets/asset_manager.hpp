@@ -39,7 +39,7 @@ struct Asset
     std::vector<Handle<gfx::Geometry>> geometries;
     std::vector<Handle<gfx::Material>> materials;
     std::vector<Handle<gfx::Mesh>> meshes;
-    std::vector<ecs::Transform> transforms;
+    std::vector<ecsc::Transform> transforms;
     std::vector<Node> nodes;
     std::vector<uint32_t> root_nodes;
 

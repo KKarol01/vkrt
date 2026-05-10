@@ -348,14 +348,14 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
 }
 
 template <>
-void serialize<ecs::Transform>(std::span<std::byte> dst, const ecs::Transform& src, size_t& out_bytes_written)
+void serialize<ecsc::Transform>(std::span<std::byte> dst, const ecsc::Transform& src, size_t& out_bytes_written)
 {
     const auto mat = src.to_mat4();
     safe_write(dst.data(), &mat, out_bytes_written, dst.size_bytes(), sizeof(mat));
 }
 
 template <>
-void deserialize<ecs::Transform>(ecs::Transform& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+void deserialize<ecsc::Transform>(ecsc::Transform& dst, std::span<const std::byte> src, size_t& out_bytes_written)
 {
     glm::mat4 mat;
     safe_read(&mat, src.data(), out_bytes_written, sizeof(mat), src.size_bytes());

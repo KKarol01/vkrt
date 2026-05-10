@@ -155,7 +155,7 @@ class IndexedHierarchy
 
     const Node& get(NodeId id) const { return const_cast<IndexedHierarchy*>(this)->get(id); }
 
-    inline static Node null_object = Node{ NodeId{}, NodeId{}, NodeId{}, NodeId{} };
+    inline static Node null_object = Node{};
     SlotAllocator<uint32_t> slots;
     std::vector<Node> nodes;
 };

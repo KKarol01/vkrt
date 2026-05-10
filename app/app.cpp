@@ -29,7 +29,7 @@ namespace app
 //     // for(auto e : get_engine().scene->scene)
 //     //{
 //     //      get_engine().ecs->traverse_hierarchy(e, [](auto p, auto e) {
-//     //          if(get_engine().ecs->has<ecs::Mesh>(e))
+//     //          if(get_engine().ecs->has<ecsc::Mesh>(e))
 //     //          {
 //     //              get_engine().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
 //     //          };
@@ -87,7 +87,7 @@ void App::on_init()
     //}
 
     // auto light_aggregate = ecs->create();
-    // ecs->add_components(light_aggregate, ecs::Node{ .name = "Lights" }, ecs::Transform::from(glm::vec3{}));
+    // ecs->add_components(light_aggregate, ecsc::Node{ .name = "Lights" }, ecsc::Transform::from(glm::vec3{}));
     // for(uint32_t z = 0; z < resolution.z; ++z)
     //{
     //     for(uint32_t y = 0; y < resolution.y; ++y)
@@ -99,8 +99,8 @@ void App::on_init()
 
     //            auto light = ecs->create();
     //            ecs->make_child(light_aggregate, light); // so they look nice in the scene hierarchy
-    //            ecs->add_components(light, ecs::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecs::Transform::from(pos),
-    //                                ecs::Light{ .range = 2.0f, .type = ecs::Light::Type::POINT });
+    //            ecs->add_components(light, ecsc::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecsc::Transform::from(pos),
+    //                                ecsc::Light{ .range = 2.0f, .type = ecsc::Light::Type::POINT });
     //            // get_engine().renderer->add_light(light);
     //        }
     //    }

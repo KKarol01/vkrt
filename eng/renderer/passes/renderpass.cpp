@@ -1,3 +1,6 @@
+
+#if 0
+
 #include "renderpass.hpp"
 #include <eng/engine.hpp>
 #include <eng/renderer/renderer.hpp>
@@ -135,3 +138,5 @@ void IndirectBatch::draw(const Callback<void(const IndirectDrawParams&)>& draw_c
 
 } // namespace gfx
 } // namespace eng
+
+#endif

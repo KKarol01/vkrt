@@ -70,13 +70,14 @@ std::string to_string(const SyncType& a)
     }
 }
 
-std::string to_string(const RenderPassType& a)
+std::string to_string(const MeshPassType& a)
 {
     switch(a)
     {
-        case RenderPassType::Z_PREPASS: { return "Z_PREPASS"; }
-        case RenderPassType::OPAQUE: { return "OPAQUE"; }
-        case RenderPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
+        case MeshPassType::Z_PREPASS: { return "Z_PREPASS"; }
+        case MeshPassType::OPAQUE: { return "OPAQUE"; }
+        case MeshPassType::DIRECTIONAL_SHADOW: { return "DIRECTIONAL_SHADOW"; }
+        case MeshPassType::WIREFRAME: { return "WIREFRAME"; }
         default: { ENG_ERROR("Unhandled case"); return ""; }
     }
 }

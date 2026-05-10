@@ -137,7 +137,7 @@ add_executable(eng
 	"eng/assets/asset_manager.cpp"
 	"eng/assets/loaders.cpp" 
 	"eng/assets/serialization.cpp"
-)
+ "eng/renderer/mesh/mesh_renderer.cpp")
 
 target_include_directories(eng 
 	PRIVATE 

@@ -8,7 +8,6 @@
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
-#include <eng/renderer/passes/renderpass.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/renderer/backend.hpp>
 #include <eng/ecs/ecs.hpp>
@@ -20,6 +19,7 @@
 #include <eng/assets/asset_manager.hpp>
 #include <eng/assets/serialization.hpp>
 #include <eng/fs/fs.hpp>
+#include <eng/renderer/mesh/mesh_renderer.hpp>
 
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
 ENG_DEFINE_STD_HASH(eng::gfx::BufferView, ENG_HASH(t.buffer, t.range));
@@ -95,6 +95,7 @@ struct ShaderIncludes
     struct File
     {
         Handle<Shader> shader;
+        fs::Path path;
         std::vector<File*> includes;
         std::unordered_set<File*> included_by;
     };
@@ -320,14 +321,14 @@ struct Geometry
 struct ShaderEffect
 {
     auto operator<=>(const ShaderEffect&) const = default;
+    explicit operator bool() const { return (bool)pipeline; }
     Handle<Pipeline> pipeline;
 };
 
 struct MeshPass
 {
-    using Effects = std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM>;
-    static MeshPass init(std::string_view name,
-                         const std::array<Handle<ShaderEffect>, (uint32_t)RenderPassType::LAST_ENUM>& effects = {})
+    using Effects = std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM>;
+    static MeshPass init(std::string_view name, const Effects& effects = {})
     {
         MeshPass pass{};
         pass.name = name;
@@ -720,6 +721,7 @@ class Renderer
         Handle<Buffer> indices;    // indices
         Handle<Buffer> bspheres;   // bounding spheres
         Handle<Buffer> materials;  // materials
+        Handle<Buffer> instances;  // instances
 
         Handle<Buffer> transforms[2]; // transforms
         Handle<Buffer> lights[2];     // lights
@@ -757,11 +759,9 @@ class Renderer
         DepthCompare rw_depth_compare{ DepthCompare::GEQUAL };
 
         Handle<PipelineLayout> common_layout;
-        Handle<Pipeline> default_z_prepass_pipeline;
-        Handle<Pipeline> default_forward_pipeline;
+        Handle<MeshPass> default_meshpasses[(int)MeshPassType::LAST_ENUM];
         Handle<Pipeline> apply_ao_pipeline;
-        Handle<MeshPass> default_meshpass;
-        Handle<Material> default_material;
+
         Handle<Image> default_base_color;
 
         GraphicsSettings gfx_settings;
@@ -773,7 +773,7 @@ class Renderer
     {
         std::shared_ptr<pass::Pass> reconstruct_normals;
         std::array<std::shared_ptr<pass::Pass>, (int)AOMode::LAST_ENUM> ao{};
-        std::array<std::shared_ptr<pass::Pass>, (int)RenderPassType::LAST_ENUM> mesh_passes{};
+        std::array<std::shared_ptr<pass::Pass>, (int)MeshPassType::LAST_ENUM> mesh_passes{};
     };
 
     struct PagedAllocation
@@ -959,6 +959,7 @@ class Renderer
     Handle<Material> make_material(const Material& info);
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
     void build_pending_geometries();
+    void build_pending_blases();
     void meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
                              std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
@@ -997,11 +998,11 @@ class Renderer
 
     std::vector<Geometry> geometries;
     std::vector<Meshlet> meshlets;
-    HandleFlatSet<Material> materials;
+    std::vector<Material> materials;
     std::vector<Mesh> meshes;
-    HandleFlatSet<ShaderEffect> shader_effects;
+    std::vector<ShaderEffect> shader_effects;
     HandleFlatSet<MeshPass> mesh_passes;
-    std::array<MeshRenderData, (int)RenderPassType::LAST_ENUM> mesh_render_data;
+    MeshRenderer mesh_renderer;
 
     BuildGeometryContext new_geometries;
     std::vector<Handle<Geometry>> new_blases;
@@ -1036,11 +1037,11 @@ ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_ren
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
 //ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(handle); });
+ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(*handle); });
 
 namespace serialization 
 {

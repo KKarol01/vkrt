@@ -25,18 +25,18 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
     const auto recursive_instance = [&asset](const auto& self, const assets::Node& node, ecs::EntityId parent_entity) -> ecs::EntityId {
         auto* ecs = get_engine().ecs;
         auto e = ecs->create();
-        ecs->add_components<ecs::Node>(e, ecs::Node{ .name = node.name });
+        ecs->add_components<ecsc::Node>(e, ecsc::Node{ .name = node.name });
         if(node.transform != ~0u)
         {
-            ecs->add_components<ecs::Transform>(e, ecs::Transform{ asset.transforms[node.transform] });
+            ecs->add_components<ecsc::Transform>(e, ecsc::Transform{ asset.transforms[node.transform] });
         }
         if(node.meshes.size > 0)
         {
-            ecs::Mesh ecsmesh{};
+            ecsc::Mesh ecsmesh{};
             ecsmesh.name = "EMPTY NAME";
             ecsmesh.render_meshes = { asset.meshes.begin() + node.meshes.offset,
                                       asset.meshes.begin() + node.meshes.offset + node.meshes.size };
-            ecs->add_components<ecs::Mesh>(e, std::move(ecsmesh));
+            ecs->add_components<ecsc::Mesh>(e, std::move(ecsmesh));
         }
         if(parent_entity) { ecs->make_child(parent_entity, e); }
         for(auto i = 0u; i < node.children.size; ++i)
@@ -50,7 +50,7 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
     if(asset.root_nodes.size() > 1)
     {
         e = get_engine().ecs->create();
-        get_engine().ecs->add_components<ecs::Node>(e, ecs::Node{ .name = ENG_FMT("{}_root", asset.path.filename().string()) });
+        get_engine().ecs->add_components<ecsc::Node>(e, ecsc::Node{ .name = ENG_FMT("{}_root", asset.path.filename().string()) });
         for(auto rn : asset.root_nodes)
         {
             const auto& node = asset.nodes[rn];
@@ -61,6 +61,8 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
     {
         e = recursive_instance(recursive_instance, asset.nodes[asset.root_nodes[0]], ecs::EntityId{});
     }
+
+    scene.push_back(e);
 
     return e;
 }
@@ -73,9 +75,9 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
 //
 //     auto* ecs = get_engine().ecs;
 //     auto& entity = ui.scene.sel_entity;
-//     auto& ctransform = ecs->get<ecs::Transform>(entity);
-//     auto& cnode = ecs->get<ecs::Node>(entity);
-//     auto& cmesh = ecs->get<ecs::Mesh>(entity);
+//     auto& ctransform = ecs->get<ecsc::Transform>(entity);
+//     auto& cnode = ecs->get<ecsc::Node>(entity);
+//     auto& cmesh = ecs->get<ecsc::Mesh>(entity);
 //
 //     auto& io = ImGui::GetIO();
 //     auto& style = ImGui::GetStyle();

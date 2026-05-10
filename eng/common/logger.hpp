@@ -95,7 +95,7 @@ struct ScopedTimer
 {
     ScopedTimer(std::string_view label);
     ~ScopedTimer();
-    StackString<64> label;
+    StackString<1024> label;
     double start_secs{};
     uint32_t nest_level{ ~0u };
 };
@@ -110,9 +110,8 @@ struct ScopedTimerProxy
 
 } // namespace eng
 
-#define ENG_TIMER_EXPAND(a, b) a##b
-#define ENG_TIMER_CONCAT_LINE(a, b) ENG_TIMER_EXPAND(a, b)
+#define ENG_TIMER_CONCAT_LINE(a, b) a##b
 #define ENG_TIMER_SCOPED(msg, ...)                                                                                     \
-    ::eng::ScopedTimerProxy ENG_TIMER_CONCAT_LINE(eng_scoped_timer_proxy_, ENG_TIMER_EXPAND(__LINE__)){ ENG_FMT(msg, __VA_ARGS__) };
+    ::eng::ScopedTimerProxy ENG_TIMER_CONCAT_LINE(eng_scoped_timer_proxy_, __LINE__){ ENG_FMT(msg, __VA_ARGS__) };
 #define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
 #define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();

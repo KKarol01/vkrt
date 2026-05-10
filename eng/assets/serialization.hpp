@@ -242,7 +242,7 @@ inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src,
 // ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::Material);
 // ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::Mesh);
 // ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::Meshlet);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(ecs::Transform);
+// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(ecsc::Transform);
 // ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(assets::engb::List);
 
 // clang-format off

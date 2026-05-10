@@ -29,7 +29,7 @@ template <typename T, std::integral Storage> struct TypedId
     constexpr explicit TypedId(StorageType handle) : handle{ handle } {}
     constexpr StorageType& operator*() { return handle; }
     constexpr const StorageType& operator*() const { return handle; }
-    constexpr bool operator==(const TypedId& a) const { return (bool)*this && a && handle == a.handle; }
+    constexpr bool operator==(const TypedId& a) const { return (bool)*this && (bool)a && handle == a.handle; }
     constexpr auto operator<=>(const TypedId& a) const { return handle <=> a.handle; }
     constexpr explicit operator bool() const { return handle != INVALID_VALUE; }
     StorageType handle{ INVALID_VALUE };
@@ -38,7 +38,7 @@ template <typename T, std::integral Storage> struct TypedId
 template <typename Storage = size_t> struct Range_T
 {
     auto operator<=>(const Range_T&) const = default;
-    Storage offset{ ~Storage{} };
+    Storage offset{};
     Storage size{};
 };
 

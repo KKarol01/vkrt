@@ -237,6 +237,18 @@ struct RGBuilder
         return access_resource(acc, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT);
     }
 
+    RGAccessId read_index(RGAccessId acc)
+    {
+        ENG_ASSERT(pass->is_graphics());
+        return access_resource(acc, PipelineStage::VERTEX_INPUT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+    }
+
+    RGAccessId read_indirect(RGAccessId acc)
+    {
+        ENG_ASSERT(pass->is_graphics());
+        return access_resource(acc, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+    }
+
     RGResourceId as_res_id(RGAccessId acc) const;
 
     RGAccessId as_acc_id(RGResourceId res) const;
