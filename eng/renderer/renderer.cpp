@@ -389,7 +389,7 @@ void Renderer::init_pipelines()
                                                                                     .dst_alpha_factor = BlendFactor::ZERO,
                                                                                     .alpha_op = BlendOp::ADD } },
                                   .depth_format = settings.depth_format })
-                              .init_depth_test(true, false, settings.read_depth_compare)
+                              .init_depth_test(false, false, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::LINE, CullFace::BACK));
         settings.apply_ao_pipeline = make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/apply.cs.hlsl" }));
     }
@@ -399,11 +399,15 @@ void Renderer::init_pipelines()
         for(auto i = 0; i < (int)MeshPassType::LAST_ENUM; ++i)
         {
             default_effects[i] = make_shader_effect(ShaderEffect{ default_pipelines[i] });
+        }
+        for(auto i = 0; i < (int)MeshPassType::LAST_ENUM; ++i)
+        {
             MeshPass pass = MeshPass::init(ENG_FMT("default meshpass {}", to_string((MeshPassType)i)), {});
             pass.effects[i] = default_effects[i];
             if(i == (int)MeshPassType::OPAQUE)
             {
                 pass.effects[(int)MeshPassType::Z_PREPASS] = default_effects[(int)MeshPassType::Z_PREPASS];
+                // pass.effects[(int)MeshPassType::WIREFRAME] = default_effects[(int)MeshPassType::WIREFRAME];
             }
             settings.default_meshpasses[i] = make_mesh_pass(pass);
         }
@@ -754,11 +758,18 @@ void Renderer::update()
         ENG_TIMER_SCOPED("Build passes");
         mesh_renderer.build_passes();
     }
-    compile_rendergraph();
 
-    Sync* rg_wait_syncs[]{ staging->flush(true) };
-    Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
-    gq->wait_sync(current_data->swp_sem).present(swapchain);
+    {
+        ENG_TIMER_SCOPED("Compile rendergraph");
+        compile_rendergraph();
+    }
+
+    {
+        ENG_TIMER_SCOPED("render");
+        Sync* rg_wait_syncs[]{ staging->flush(true) };
+        Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
+        gq->wait_sync(current_data->swp_sem).present(swapchain);
+    }
 
     ++current_frame;
     current_data = &frame_datas[current_frame % frame_delay];
@@ -815,6 +826,7 @@ void Renderer::compile_rendergraph()
     // passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
     pass_data.color_buffers[0] = current_data->render_resources.opaque;
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
+    passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
     // struct ApplyAOData
     //{

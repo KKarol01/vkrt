@@ -108,11 +108,24 @@ class ScenePanel : public Panel
                         }
                     }
 
+                    static const auto set_mesh_pass = [](ecs::EntityId e, gfx::MeshPassType type) {
+                        if(e && get_engine().ecs->has<ecsc::Mesh>(e))
+                        {
+                            auto& mesh = get_engine().ecs->get<ecsc::Mesh>(e);
+                            for(auto rmh : mesh.render_meshes)
+                            {
+                                rmh->material->mesh_pass = gfx::get_renderer().settings.default_meshpasses[(int)type];
+                            }
+                        }
+                    };
+
                     bool selected = selected_node == e;
                     if(ImGui::Selectable(node.name.c_str(), &selected, 0, { 0, row_height }))
                     {
+                        set_mesh_pass(selected_node, gfx::MeshPassType::OPAQUE);
                         if(selected_node == e) { selected_node = ecs::EntityId{}; }
                         else { selected_node = e; }
+                        set_mesh_pass(selected_node, gfx::MeshPassType::WIREFRAME);
                     }
                     if(state.expanded)
                     {

@@ -700,6 +700,8 @@ struct MeshPass : public Pass
                 d.positions = b.read_buffer(d.positions);
             },
             [this](RGBuilder& b, const PassData& d) {
+                if(!d.positions) { return; }
+
                 auto& r = get_renderer();
                 const auto& cd = *r.current_data;
                 const auto& settings = r.settings;

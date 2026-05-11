@@ -90,15 +90,15 @@ MeshRenderer::SetupPassData MeshRenderer::setup(MeshPassType type, RGBuilder& b)
 
 void MeshRenderer::draw(MeshPassType type, ICommandBuffer& cmd)
 {
+    const auto& pass = m_pass_datas_arr[(int)type];
     const auto cmd_size = get_renderer().backend->get_indirect_indexed_command_size();
-    const auto& data = m_pass_datas_arr[(int)type];
     cmd.bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
     uint32_t batch_idx = 0;
-    for(const auto& batch : data.batches_vec)
+    for(const auto& batch : pass.batches_vec)
     {
         cmd.bind_pipeline(batch.pipeline.get());
-        cmd.draw_indexed_indirect_count(data.indirect_buf.get(), data.indirect_cmds_offset + batch.first_command * cmd_size,
-                                        data.indirect_buf.get(), batch_idx * sizeof(uint32_t), batch.command_count, cmd_size);
+        cmd.draw_indexed_indirect_count(pass.indirect_buf.get(), pass.indirect_cmds_offset + batch.first_command * cmd_size,
+                                        pass.indirect_buf.get(), batch_idx * sizeof(uint32_t), batch.command_count, cmd_size);
         ++batch_idx;
     }
 }
