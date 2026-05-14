@@ -183,11 +183,11 @@ class ConsolePanel : public Panel
         {
             auto& gfx_settings = r.settings.gfx_settings;
             auto& pass = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
-            if(ImGui::BeginCombo("AO_MODE", pass->name.c_str()))
+            if(ImGui::BeginCombo("AO_MODE", pass->m_name.c_str()))
             {
                 for(auto i = 0; i < (int)gfx::AOMode::LAST_ENUM; ++i)
                 {
-                    if(ImGui::Selectable(r.passes.ao[i]->name.c_str()))
+                    if(ImGui::Selectable(r.passes.ao[i]->m_name.c_str()))
                     {
                         r.settings.gfx_settings.ao_mode = (gfx::AOMode)i;
                     }
@@ -195,7 +195,7 @@ class ConsolePanel : public Panel
                 ImGui::EndCombo();
             }
             auto& ao_mode = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
-            auto& settings = ao_mode->settings;
+            auto& settings = ao_mode->m_settings;
             settings.iterate_settings([](std::string_view name, gfx::pass::PassSettings::Value& value) {
                 if(auto** s = std::get_if<float*>(&value)) { return ImGui::DragFloat(name.data(), *s); }
                 else { ENG_ASSERT(false && "Unhandled setting"); }

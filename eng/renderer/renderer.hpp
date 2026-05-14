@@ -660,12 +660,19 @@ struct ScopedTimestampQuery
 // from one segment BEFORE adding anything ordered after.
 namespace RenderOrder
 {
+// First pass, creation of main textures/targets happens here
 inline constexpr uint32_t SETUP_TARGETS = 0;
+// Zprepass of the geometry
 inline constexpr uint32_t Z_PREPASS = 50;
+// Rigth after prepass, but before any rendering to other buffers happens
 inline constexpr uint32_t POST_Z = 51;
+// Rendering of opaque/transparent/other passes happens with the use of geometry
 inline constexpr uint32_t MESH_RENDER = 100;
+// Post processes happen here
 inline constexpr uint32_t POST = 150;
+// UI happens here, after all rendering had finished
 inline constexpr uint32_t UI = 200;
+// After UI, but right before present.
 inline constexpr uint32_t PRESENT = 250;
 }; // namespace RenderOrder
 
@@ -983,8 +990,8 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer> buffers;
-    Slotmap<Image> images;
+    Slotmap<Buffer, 16, 64> buffers;
+    Slotmap<Image, 16, 64> images;
 
     HandleFlatSet<Sampler> samplers;
     std::vector<Shader> shaders;
@@ -1023,6 +1030,20 @@ class Renderer
     uint64_t current_frame{}; // monotonically increasing counter
     Passes passes;
 };
+
+// clang-format off
+inline std::string to_string(AOMode a)
+{
+    switch(a)
+    {
+    static_assert((int)AOMode::LAST_ENUM == 3);
+    case AOMode::SSAO: return "SSAO";
+    case AOMode::GTAO: return "GTAO";
+    case AOMode::RTAO: return "RTAO";
+    default: { ENG_ASSERT("Unhandled case"); return ""; }
+    }
+}
+// clang-format on
 
 } // namespace gfx
 

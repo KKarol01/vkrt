@@ -176,7 +176,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_engine().renderer->make_buffer(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource(name, native, persistent, is_aliased));
+    return add_resource(RGResource{name, native, persistent, is_aliased});
 }
 
 RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
@@ -200,7 +200,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const st
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_engine().renderer->make_image(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource(name, native, persistent, is_aliased, clear));
+    return add_resource(RGResource{ name, native, persistent, is_aliased, clear });
 }
 
 RGAccessId RGBuilder::add_access(const RGAccess& a)

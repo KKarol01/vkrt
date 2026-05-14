@@ -828,6 +828,12 @@ void Renderer::compile_rendergraph()
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
     passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
+	// todo: add enum to index this
+	if(pass_data.color_buffers[0] && pass_data.depth_buffer) 
+	{
+		
+	}
+
     // struct ApplyAOData
     //{
     //     RGAccessId in_out_color;
@@ -969,7 +975,7 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
-    auto it = buffers.insert(std::move(buffer));
+    auto it = buffers.emplace(std::move(buffer));
     if(!it)
     {
         ENG_WARN("Could not create buffer {}", name);
@@ -989,7 +995,7 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
 {
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
-    auto it = images.insert(std::move(image));
+    auto it = images.emplace(std::move(image));
     if(!it)
     {
         ENG_WARN("Could not create image {}", name);

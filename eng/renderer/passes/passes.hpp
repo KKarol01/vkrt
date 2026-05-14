@@ -38,112 +38,30 @@ struct PassSettings
     bool modified{};
 };
 
+enum class GBufferType
+{
+    DIFFUSE,
+    SPECULAR,
+    NORMAL,
+    LAST_ENUM,
+};
+
 struct PassInitData
 {
     std::array<RGResourceId, 8> color_buffers;
     RGResourceId depth_buffer;
+    std::array<RGResourceId, (int)GBufferType::LAST_ENUM> gbuffer;
 };
 
 struct Pass
 {
-    Pass(std::string_view name, uint32_t order) : name(name), order(order) {}
+    Pass(std::string_view name, uint32_t order) : m_name(name), m_order(order) {}
     virtual ~Pass() = default;
     virtual void init(RGRenderGraph* graph, const PassInitData& data) = 0;
-    std::string name;
-    uint32_t order{};
-    PassSettings settings;
+    std::string m_name;
+    uint32_t m_order{};
+    PassSettings m_settings;
 };
-
-// struct ZPrepass : public Pass
-//{
-//     struct PassData
-//     {
-//         RGAccessId constants;
-//         RGAccessId instances;
-//         RGAccessId positions;
-//         RGAccessId indirect;
-//
-//         RGResourceId out_depth;
-//     };
-//
-//     ZPrepass(MeshPassType type) : Pass("MESH_PASS_Z_PREPASS", RenderOrder::Z_PREPASS), type(type)
-//     {
-//         auto& r = get_renderer();
-//     }
-//
-//     ~ZPrepass() override = default;
-//
-//     void init(RGRenderGraph* graph) override
-//     {
-//         if(!graph) { return; }
-//         graph->add_graphics_pass<PassData>(
-//             name.data(), order,
-//             [this](RGBuilder& b, PassData& d) {
-//                 const auto& r = get_renderer();
-//                 const auto& cd = *r.current_data;
-//                 const auto& settings = r.settings;
-//                 const auto& md = r.mesh_render_data[(int)type];
-//                 const auto resolution = settings.render_resolution;
-//                 auto depacc = b.create_resource(ENG_FMT("{}_DEPTH", name),
-//                                                 Image::init(resolution.x, resolution.y, settings.depth_format,
-//                                                             ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-//                                                 RGClear::depth_stencil(0.0, {}));
-//                 depacc = b.access_depth(depacc, ImageFormat::D32_SFLOAT);
-//
-//                 d.constants = b.as_acc_id(cd.render_resources.constants);
-//                 d.constants = b.read_buffer(d.constants);
-//                 // todo: add access_indirect
-//                 d.indirect = b.import_resource(md.render_data.indirect_buf);
-//                 d.indirect = b.access_resource(d.indirect, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
-//                 d.instances = b.import_resource(md.instance_buffer);
-//                 d.instances = b.read_buffer(d.instances);
-//                 d.positions = b.import_resource(r.bufs.positions);
-//                 d.positions = b.read_buffer(d.positions);
-//
-//                 d.out_depth = b.as_res_id(depacc);
-//                 r.current_data->render_resources.zpdepth = d.out_depth;
-//             },
-//             [this](RGBuilder& b, const PassData& d) {
-//                 const auto& r = get_renderer();
-//                 const auto& cd = *r.current_data;
-//                 const auto& settings = r.settings;
-//                 const auto render_res = settings.render_resolution;
-//                 const auto& md = r.mesh_render_data[(int)type];
-//
-//                 auto vkdep = vk::VkRenderingAttachmentInfo{};
-//                 vkdep.imageView = b.graph->get_acc(d.out_depth).image_view.get_md().vk->view;
-//                 vkdep.imageLayout = to_vk(b.graph->get_acc(d.out_depth).layout);
-//                 vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-//                 vkdep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-//
-//                 auto vkrinfo = vk::VkRenderingInfo{};
-//                 vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-//                 vkrinfo.layerCount = 1;
-//                 vkrinfo.pDepthAttachment = &vkdep;
-//                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
-//                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
-//                 DescriptorResource shaderresources[]{ DescriptorResource::storage_buffer(b.graph->get_buf(d.constants)),
-//                                                       DescriptorResource::storage_buffer(b.graph->get_buf(d.positions)) };
-//                 auto* cmd = b.open_cmd_buf();
-//                 cmd->begin_rendering(vkrinfo);
-//                 cmd->set_viewports(&viewport, 1);
-//                 cmd->set_scissors(&scissor, 1);
-//                 cmd->bind_resources(0, shaderresources);
-//                 md.render_data.draw([&](const IndirectDrawParams& params) {
-//                     cmd->bind_pipeline(params.draw->pipeline.get());
-//                     cmd->bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-//                     cmd->draw_indexed_indirect_count(md.render_data.cmds_view.buffer.get(), params.command_offset_bytes,
-//                                                      md.render_data.counts_view.buffer.get(), params.count_offset_bytes,
-//                                                      params.max_draw_count, params.stride);
-//                 });
-//                 cmd->end_rendering();
-//             });
-//     }
-//
-//     MeshPassType type{ MeshPassType::LAST_ENUM };
-//     Handle<Pipeline> pipeline;
-//     PassData data;
-// };
 
 struct NormalFromDepth : public Pass
 {
@@ -167,14 +85,14 @@ struct NormalFromDepth : public Pass
     {
         if(!graph) { return; }
         m_data = graph->add_compute_pass<PassData>(
-            name.data(), order,
+            m_name.data(), m_order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
                 if(!r.current_data->render_resources.zpdepth) { return; }
                 d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
                 d.depth = b.sample_texture(b.as_acc_id(r.current_data->render_resources.zpdepth), ImageFormat::D32_SFLOAT);
-                auto out_normals = b.create_resource(ENG_FMT("{}_NORMAL", name),
+                auto out_normals = b.create_resource(ENG_FMT("{}_NORMAL", m_name),
                                                      Image::init(res.x, res.y, ImageFormat::R16FG16FB16FA16F,
                                                                  ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
                 out_normals = b.read_write_image(out_normals);
@@ -226,7 +144,7 @@ struct SSAO : public Pass
             .radius = 0.5f,
             .bias = 0.04f,
         };
-        settings = {
+        m_settings = {
             {
                 { "radius", &ao_settings.radius },
                 { "bias", &ao_settings.bias },
@@ -244,7 +162,7 @@ struct SSAO : public Pass
         if(!graph) { return; }
         poll_settings_change();
         m_data = graph->add_compute_pass<PassData>(
-            name.data(), order,
+            m_name.data(), m_order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -288,7 +206,7 @@ struct SSAO : public Pass
         };
 
         const auto blurdata = graph->add_compute_pass<BlurData>(
-            "SSAO_BLUR", order,
+            "SSAO_BLUR", m_order,
             [this](RGBuilder& b, BlurData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -360,11 +278,11 @@ struct SSAO : public Pass
 
     void poll_settings_change()
     {
-        if(settings.modified)
+        if(m_settings.modified)
         {
             auto& r = get_renderer();
             r.staging->copy(settings_buffer.get(), &ao_settings, 0ull, sizeof(ao_settings));
-            settings.modified = false;
+            m_settings.modified = false;
         }
     }
 
@@ -401,7 +319,7 @@ struct GTAO : public Pass
             .radius = 0.006f,
             .bias = 0.0f,
         };
-        settings = {
+        m_settings = {
             {
                 { "radius", &ao_settings.radius },
                 { "bias", &ao_settings.bias },
@@ -418,7 +336,7 @@ struct GTAO : public Pass
         if(!graph) { return; }
         poll_settings_change();
         m_data = graph->add_compute_pass<PassData>(
-            name.data(), order,
+            m_name.data(), m_order,
             [this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -460,7 +378,7 @@ struct GTAO : public Pass
         };
 
         const auto blurdata = graph->add_compute_pass<BlurData>(
-            "GTAO_BLUR", order,
+            "GTAO_BLUR", m_order,
             [this](RGBuilder& b, BlurData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -509,11 +427,11 @@ struct GTAO : public Pass
 
     void poll_settings_change()
     {
-        if(settings.modified)
+        if(m_settings.modified)
         {
             auto& r = get_renderer();
             r.staging->copy(settings_buffer.get(), &ao_settings, 0ull, sizeof(ao_settings));
-            settings.modified = false;
+            m_settings.modified = false;
         }
     }
 
@@ -539,7 +457,7 @@ struct RTAO : public Pass
             .radius = 0.006f,
             .bias = 0.0f,
         };
-        settings = {
+        m_settings = {
             {
                 { "radius", &ao_settings.radius },
                 { "bias", &ao_settings.bias },
@@ -564,7 +482,7 @@ struct RTAO : public Pass
         const auto res = r.settings.render_resolution;
         poll_settings_change();
         m_data = graph->add_compute_pass<PassData>(
-            name.c_str(), order,
+            m_name.c_str(), m_order,
             [=](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 if(!r.current_data->render_resources.zpdepth) { return; }
@@ -600,7 +518,7 @@ struct RTAO : public Pass
         };
 
         const auto blurdata = graph->add_compute_pass<BlurData>(
-            "GTAO_BLUR", order,
+            "GTAO_BLUR", m_order,
             [this](RGBuilder& b, BlurData& d) {
                 const auto& r = get_renderer();
                 const auto res = r.settings.render_resolution;
@@ -628,11 +546,11 @@ struct RTAO : public Pass
 
     void poll_settings_change()
     {
-        if(settings.modified)
+        if(m_settings.modified)
         {
             auto& r = get_renderer();
             r.staging->copy(settings_buffer.get(), &ao_settings, 0ull, sizeof(ao_settings));
-            settings.modified = false;
+            m_settings.modified = false;
         }
     }
 
@@ -665,7 +583,7 @@ struct MeshPass : public Pass
     {
         if(!graph) { return; }
         m_data = graph->add_graphics_pass<PassData>(
-            name.data(), order,
+            m_name.data(), m_order,
             [=, this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 auto& cd = *r.current_data;
@@ -758,6 +676,59 @@ struct MeshPass : public Pass
 
     MeshPassType m_type{ MeshPassType::LAST_ENUM };
     PassData m_data;
+};
+
+struct PassSSAO : public Pass
+{
+    PassSSAO() : Pass("<PassSSAO>", RenderOrder::POST)
+    {
+        auto& r = get_renderer();
+        m_reconstruct_normals =
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/normal_reconstruction/normal.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::SSAO] =
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::GTAO] =
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::RTAO] =
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+    }
+
+    ~PassSSAO() override = default;
+
+    void init(RGRenderGraph* graph, const PassInitData& data) override
+    {
+        if(!data.depth_buffer) { return; }
+        auto& r = get_renderer();
+        m_name = to_string(r.settings.gfx_settings.ao_mode);
+
+        struct PassSSAOOutput
+        {
+            RGAccessId depth;
+            RGAccessId constants;
+            RGAccessId settings;
+            RGAccessId out_ao;
+        };
+        graph->add_compute_pass<PassSSAOOutput>(
+            m_name.c_str(), RenderOrder::POST,
+            [](RGBuilder& b, PassSSAOOutput& d) {
+                auto& r = get_renderer();
+                d.constants = b.read_buffer(b.as_acc_id(r.current_data->render_resources.constants));
+                d.settings = {};
+                d.out_ao = b.create_resource("SSAOOutput", Image::init(r.settings.render_resolution.x,
+                                                                       r.settings.render_resolution.y, ImageFormat::R16FG16FB16FA16F,
+                                                                       ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+                d.out_ao = b.write_image(d.out_ao);
+            },
+            [this](RGBuilder& b, const PassSSAOOutput& d) {
+                auto& r = get_renderer();
+                auto* cmd = b.open_cmd_buf();
+                cmd->bind_pipeline(m_pp_arr[(int)r.settings.gfx_settings.ao_mode].get());
+				cmd->
+            });
+    }
+
+    Handle<Pipeline> m_reconstruct_normals;
+    std::array<Handle<Pipeline>, (int)AOMode::LAST_ENUM> m_pp_arr;
 };
 
 namespace culling

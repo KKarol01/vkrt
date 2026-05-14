@@ -17,6 +17,8 @@ struct PushConstants
 [[vk::push_constant]] PushConstants pc;
 #endif
 
+
+
 /*
 Generated with:
     glm::vec3 ssaopoints[64];
