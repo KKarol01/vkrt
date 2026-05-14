@@ -137,7 +137,6 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
 
 RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear)
 {
-
     const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
                                  [&resource](const auto& e) { return e.native == resource; });
     if(it != graph->resources.end()) { return it->last_access; }
@@ -176,7 +175,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_engine().renderer->make_buffer(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource{name, native, persistent, is_aliased});
+    return add_resource(RGResource{ name, native, persistent, is_aliased });
 }
 
 RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
@@ -262,6 +261,26 @@ RGAccessId RGBuilder::as_acc_id(RGResourceId res) const
     if(!res) { return {}; }
     return graph->get_res(res).last_access;
 }
+
+const RGAccess& RGBuilder::get_acc(RGAccessId acc) const
+{
+    ENG_ASSERT(acc);
+    return graph->get_acc(acc);
+}
+
+const RGAccess& RGBuilder::get_acc(RGResourceId res) const
+{
+    ENG_ASSERT(res);
+    return graph->get_acc(res);
+}
+
+const BufferView& RGBuilder::get_buf(RGAccessId acc) const { return get_acc(acc).buffer_view; }
+
+const BufferView& RGBuilder::get_buf(RGResourceId acc) const { return get_acc(acc).buffer_view; }
+
+const ImageView& RGBuilder::get_img(RGAccessId acc) const { return get_acc(acc).image_view; }
+
+const ImageView& RGBuilder::get_img(RGResourceId acc) const { return get_acc(acc).image_view; }
 
 ICommandBuffer* RGBuilder::open_cmd_buf()
 {
@@ -483,10 +502,10 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
             cmd_pools[0]->end(p->cmd);
             queue->with_cmd_buf(p->cmd);
 
-            for(const auto& [sync, stages, value] : p->wait_syncs)
-            {
-                queue->wait_sync(sync, stages, value);
-            }
+            // for(const auto& [sync, stages, value] : p->wait_syncs)
+            //{
+            //     queue->wait_sync(sync, stages, value);
+            // }
             for(const auto& ra : p->accesses)
             {
                 auto& res = get_res(ra);

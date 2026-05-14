@@ -41,7 +41,7 @@ struct RGPass
     StackString<32> name;
     Type type{ Type::NONE };
     std::vector<RGAccessId> accesses;
-    std::vector<std::tuple<Sync*, Flags<PipelineStage>, uint64_t>> wait_syncs;
+    // std::vector<std::tuple<Sync*, Flags<PipelineStage>, uint64_t>> wait_syncs;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
     TimestampQuery* query{};
@@ -94,8 +94,8 @@ struct RGResource
     Handle<Buffer> as_buffer() const { return std::get<0>(native); }
     Handle<Image> as_image() const { return std::get<1>(native); }
     StackString<64> name;
-    NativeResource native;
-    RGAccessId last_access;
+    NativeResource native{};
+    RGAccessId last_access{};
     uint32_t last_read_group{ ~0u };
     uint32_t last_write_group{ ~0u };
     bool is_persistent{};
@@ -150,6 +150,11 @@ struct RGBuilder
         const auto layout = ImageLayout::READ_ONLY;
         return access_resource(acc, layout, stage, access, format, type, mips, layers);
     }
+    RGAccessId sample_texture(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                              Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        return sample_texture(as_acc_id(res), format, type, mips, layers);
+    }
 
     RGAccessId access_depth(RGAccessId acc, std::optional<ImageFormat> format = {})
     {
@@ -158,6 +163,10 @@ struct RGBuilder
         const auto layout = ImageLayout::ATTACHMENT;
         return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
     }
+    RGAccessId access_depth(RGResourceId res, std::optional<ImageFormat> format = {})
+    {
+        return access_depth(as_acc_id(res), format);
+    }
 
     RGAccessId access_color(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
     {
@@ -165,6 +174,10 @@ struct RGBuilder
         const auto access = PipelineAccess::COLOR_RW_BIT;
         const auto layout = ImageLayout::ATTACHMENT;
         return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
+    }
+    RGAccessId access_color(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
+    {
+        return access_color(as_acc_id(res), format, type);
     }
 
     RGAccessId read_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
@@ -177,6 +190,11 @@ struct RGBuilder
         const auto layout = ImageLayout::GENERAL;
         return access_resource(acc, layout, stage, access, format, type, mips, layers);
     }
+    RGAccessId read_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                          Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        return read_image(as_acc_id(res), format, type, mips, layers);
+    }
 
     RGAccessId write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                            Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
@@ -187,6 +205,11 @@ struct RGBuilder
         const auto access = PipelineAccess::STORAGE_WRITE_BIT;
         const auto layout = ImageLayout::GENERAL;
         return access_resource(acc, layout, stage, access, format, type, mips, layers);
+    }
+    RGAccessId write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        return write_image(as_acc_id(res), format, type, mips, layers);
     }
 
     RGAccessId read_write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
@@ -199,6 +222,11 @@ struct RGBuilder
         const auto layout = ImageLayout::GENERAL;
         return access_resource(acc, layout, stage, access, format, type, mips, layers);
     }
+    RGAccessId read_write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    {
+        return read_write_image(as_acc_id(res), format, type, mips, layers);
+    }
 
     RGAccessId read_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
     {
@@ -207,6 +235,10 @@ struct RGBuilder
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_READ_BIT;
         return access_resource(acc, stage, access, range);
+    }
+    RGAccessId read_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
+    {
+        return read_buffer(as_acc_id(res), range);
     }
 
     RGAccessId write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
@@ -217,6 +249,10 @@ struct RGBuilder
         const auto access = PipelineAccess::STORAGE_RW;
         return access_resource(acc, stage, access, range);
     }
+    RGAccessId write_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
+    {
+        return write_buffer(as_acc_id(res), range);
+    }
 
     RGAccessId read_write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
     {
@@ -226,32 +262,45 @@ struct RGBuilder
         const auto access = PipelineAccess::STORAGE_RW;
         return access_resource(acc, stage, access, range);
     }
+    RGAccessId read_write_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
+    {
+        return read_write_buffer(as_acc_id(res), range);
+    }
 
     RGAccessId copy_source(RGAccessId acc)
     {
         return access_resource(acc, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
     }
+    RGAccessId copy_source(RGResourceId res) { return copy_source(as_acc_id(res)); }
 
     RGAccessId copy_dest(RGAccessId acc)
     {
         return access_resource(acc, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT);
     }
+    RGAccessId copy_dest(RGResourceId res) { return copy_dest(as_acc_id(res)); }
 
     RGAccessId read_index(RGAccessId acc)
     {
         ENG_ASSERT(pass->is_graphics());
         return access_resource(acc, PipelineStage::VERTEX_INPUT_BIT, PipelineAccess::INDIRECT_READ_BIT);
     }
+    RGAccessId read_index(RGResourceId res) { return read_index(as_acc_id(res)); }
 
     RGAccessId read_indirect(RGAccessId acc)
     {
         ENG_ASSERT(pass->is_graphics());
         return access_resource(acc, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
     }
+    RGAccessId read_indirect(RGResourceId res) { return read_indirect(as_acc_id(res)); }
 
     RGResourceId as_res_id(RGAccessId acc) const;
-
     RGAccessId as_acc_id(RGResourceId res) const;
+    const RGAccess& get_acc(RGAccessId acc) const;
+    const RGAccess& get_acc(RGResourceId res) const;
+    const BufferView& get_buf(RGAccessId acc) const;
+    const BufferView& get_buf(RGResourceId acc) const;
+    const ImageView& get_img(RGAccessId acc) const;
+    const ImageView& get_img(RGResourceId acc) const;
 
     ICommandBuffer* open_cmd_buf();
 

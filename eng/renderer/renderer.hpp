@@ -778,9 +778,9 @@ class Renderer
 
     struct Passes
     {
-        std::shared_ptr<pass::Pass> reconstruct_normals;
-        std::array<std::shared_ptr<pass::Pass>, (int)AOMode::LAST_ENUM> ao{};
+        // std::shared_ptr<pass::Pass> reconstruct_normals;
         std::array<std::shared_ptr<pass::Pass>, (int)MeshPassType::LAST_ENUM> mesh_passes{};
+        std::shared_ptr<pass::Pass> ao;
     };
 
     struct PagedAllocation

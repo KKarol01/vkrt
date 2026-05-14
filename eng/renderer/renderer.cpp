@@ -425,13 +425,14 @@ void Renderer::init_pipelines()
     }
 
     {
-        passes.reconstruct_normals = std::make_shared<pass::NormalFromDepth>();
-        passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
-        passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
-        passes.ao[(int)AOMode::RTAO] = std::make_shared<pass::RTAO>();
+        // passes.reconstruct_normals = std::make_shared<pass::NormalFromDepth>();
+        // passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
+        // passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
+        // passes.ao[(int)AOMode::RTAO] = std::make_shared<pass::RTAO>();
         passes.mesh_passes[(int)MeshPassType::Z_PREPASS] = std::make_shared<pass::MeshPass>(MeshPassType::Z_PREPASS);
         passes.mesh_passes[(int)MeshPassType::OPAQUE] = std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE);
         passes.mesh_passes[(int)MeshPassType::WIREFRAME] = std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME);
+        passes.ao = std::make_shared<pass::SSAO>();
     }
 }
 
@@ -780,23 +781,34 @@ void Renderer::compile_rendergraph()
     current_data->render_resources = rgraph->add_graphics_pass<RenderResources>(
         "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
         [this](RGBuilder& b, RenderResources& d) {
-            auto constsacc = b.create_resource("constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
+            char resname[128]{};
+            size_t resnamelen;
+            const auto make_res_name = [&resname, &resnamelen, this](const char* const name) {
+                resnamelen = ENG_FMT_TO_N(resname, 127, "{}{}", name, current_frame % frame_delay);
+                return std::string_view{ resname, resnamelen };
+            };
+
+            auto constsacc = b.create_resource(make_res_name("constants"),
+                                               Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), true);
             constsacc = b.write_buffer(constsacc);
             d.constants = b.as_res_id(constsacc);
+
             auto opaque =
-                b.create_resource("opaque",
+                b.create_resource(make_res_name("opaque"),
                                   Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                               ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                  RGClear::color());
-            auto depth = b.create_resource("depth",
+                                  RGClear::color(), true);
+
+            auto depth = b.create_resource(make_res_name("depth"),
                                            Image::init(settings.render_resolution.x, settings.render_resolution.y,
                                                        settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                           RGClear::depth_stencil(0.0));
+                                           RGClear::depth_stencil(0.0), true);
+
             auto final_color =
-                b.create_resource("final color",
+                b.create_resource(make_res_name("finalcolor"),
                                   Image::init(settings.present_resolution.x, settings.present_resolution.y, settings.color_format,
                                               ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                  RGClear::color());
+                                  RGClear::color(), true);
             d.opaque = b.as_res_id(opaque);
             d.zpdepth = b.as_res_id(depth);
             d.final_color = b.as_res_id(final_color);
@@ -813,8 +825,8 @@ void Renderer::compile_rendergraph()
             constants_buffer.cam_pos = c->pos;
 
             auto* cmd = b.open_cmd_buf();
-            get_renderer().staging->copy(get_renderer().rgraph->get_buf(b.as_acc_id(d.constants)).get(),
-                                         &constants_buffer, 0ull, sizeof(constants_buffer), false);
+            get_renderer().staging->copy(b.get_buf(d.constants).buffer.get(), &constants_buffer, 0ull,
+                                         sizeof(constants_buffer), false);
             cmd->wait_sync(get_renderer().staging->flush(true));
         });
 
@@ -828,11 +840,10 @@ void Renderer::compile_rendergraph()
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
     passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
-	// todo: add enum to index this
-	if(pass_data.color_buffers[0] && pass_data.depth_buffer) 
-	{
-		
-	}
+    // todo: add enum to index this
+    if(pass_data.color_buffers[0] && pass_data.depth_buffer) {}
+
+    passes.ao->init(rgraph, pass_data);
 
     // struct ApplyAOData
     //{

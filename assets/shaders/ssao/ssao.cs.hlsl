@@ -1,18 +1,18 @@
 #include "./common.hlsli"
-#include "./assets/shaders/util.hlsli"
+//#include "./assets/shaders/util.hlsli"
 
 static const uint LOCAL_SIZE = 8;
 
 float rand2dTo1d(float2 value, float2 dotDir = float2(12.9898, 78.233))
 {
-	float2 smallValue = sin(value);
-	float random = dot(smallValue, dotDir);
-	random = frac(sin(random) * 143758.5453);
-	return random;
+    float2 smallValue = sin(value);
+    float random = dot(smallValue, dotDir);
+    random = frac(sin(random) * 143758.5453);
+    return random;
 }
-float3 hash32(float2 value) 
+float3 hash32(float2 value)
 {
-	return float3(
+    return float3(
 		rand2dTo1d(value, float2(12.989, 78.233)),
 		rand2dTo1d(value, float2(39.346, 11.135)),
 		rand2dTo1d(value, float2(73.156, 52.235))
@@ -22,6 +22,11 @@ float3 hash32(float2 value)
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
+    uint2 dims;
+    gOutAOImage.GetDimensions(dims.x, dims.y);
+    if (any(thread_id.xy >= dims.xy)) { return; }
+    gOutAOImage[thread_id.xy] = float4(float2(thread_id.xy), 0.0, 0.0);
+#if 0
     Texture2D<float> in_depth = gTexture2Df1s[pc.DepthTextureIndex];
     RWTexture2D<float4> in_normal = gRWTexture2Df4s[pc.NormalImageIndex];
     RWTexture2D<float4> out_ao = gRWTexture2Df4s[pc.AOImageIndex];
@@ -86,4 +91,5 @@ void main(uint3 thread_id : SV_DispatchThreadID)
         if (actual_vs_pos.z >= sample_pos.z + in_ao_settings.bias) { occlusion += range_check; }
     }
     out_ao[thread_id.xy] = 1.0 - (occlusion / 64.0);
-}
+#endif
+    }
