@@ -158,14 +158,14 @@ void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, c
     batch.flags = desc.flags;
     batch.vertex_layout = desc.vertex_layout;
     batch.index_format = desc.index_format;
-    batch.index_range = indices.insert(std::as_bytes(std::span{ desc.indices }));
-    batch.meshlet_range = meshlets.insert(std::span{ desc.meshlets });
+    batch.indices.insert(batch.indices.end(), desc.indices.begin(), desc.indices.end());
+    batch.meshlets.insert(batch.meshlets.end(), desc.meshlets.begin(), desc.meshlets.end());
     batch.geom_ready_signal = desc.signal;
 
     if(desc.attributes.size())
     {
-        batch.position_range = positions.insert(desc.vertices);
-        batch.attribute_range = attributes.insert(desc.attributes);
+        batch.positions.insert(batch.positions.end(), desc.vertices.begin(), desc.vertices.end());
+        batch.attributes.insert(batch.attributes.end(), desc.attributes.begin(), desc.attributes.end());
     }
     else
     {
@@ -191,8 +191,8 @@ void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, c
                 vatt[i * att_size_flts + j] = attr_start[j];
             }
         }
-        batch.position_range = positions.insert(std::span{ vpos });
-        batch.attribute_range = attributes.insert(std::span{ vatt });
+        batch.positions = std::move(vpos);
+        batch.attributes = std::move(vatt);
     }
 }
 
@@ -1149,192 +1149,103 @@ void Renderer::build_pending_geometries()
 
     ENG_TIMER_SCOPED("Build pending geometries");
 
-    // take out any batch that has meshlets. it means the geometry has been preprocessed and was deserialized.
-    auto pre_meshletized_it =
-        std::remove_if(new_geometries.batches.begin(), new_geometries.batches.end(),
-                       [this](const BuildGeometryBatch& a) { return a.meshlet_range && a.meshlet_range->elems > 0; });
-    if(pre_meshletized_it != new_geometries.batches.end())
+    struct JobResult
     {
-        // count data to resize once
-        size_t total_pos_size = 0;
-        size_t total_attr_size = 0;
-        size_t total_idx_size = 0;
-        size_t total_bsph_size = 0;
-        for(auto bit = pre_meshletized_it; bit != new_geometries.batches.end(); ++bit)
-        {
-            total_pos_size += bit->position_range ? bit->position_range->elems * sizeof(float) : 0;
-            total_attr_size += bit->attribute_range ? bit->attribute_range->elems * sizeof(float) : 0;
-            total_idx_size += bit->index_range ? bit->index_range->elems * sizeof(uint16_t) : 0;
-            total_bsph_size += bit->meshlet_range ? bit->meshlet_range->elems * sizeof(glm::vec4) : 0;
-        }
-
-        // make sure gpu buffers are big enough
-        resize_buffer(bufs.positions, total_pos_size, STAGING_APPEND, true);
-        resize_buffer(bufs.attributes, total_attr_size, STAGING_APPEND, true);
-        resize_buffer(bufs.indices, total_idx_size, STAGING_APPEND, true);
-        resize_buffer(bufs.bspheres, total_bsph_size, STAGING_APPEND, true);
-
-        // copy data to the gpu. iterating to avoid allocating another vector just to copy
-        for(auto bit = pre_meshletized_it; bit != new_geometries.batches.end(); ++bit)
-        {
-            new_geometries.positions.iterate_data_ranges(bit->position_range, [&, this](std::span<float> data) {
-                staging->copy(bufs.positions.get(), data.data(), STAGING_APPEND, data.size_bytes());
-            });
-            new_geometries.attributes.iterate_data_ranges(bit->attribute_range, [&, this](std::span<float> data) {
-                staging->copy(bufs.attributes.get(), data.data(), STAGING_APPEND, data.size_bytes());
-            });
-            new_geometries.indices.iterate_data_ranges(bit->index_range, [&, this](std::span<std::byte> data) {
-                staging->copy(bufs.indices.get(), data.data(), STAGING_APPEND, data.size_bytes());
-            });
-
-            // fix meshlet_range (deserialized data has no offset)
-            bit->geom->meshlet_range = { .offset = (uint32_t)meshlets.size(), .size = (uint32_t)bit->meshlet_range->elems };
-            // schedule for blas building
-            make_blas(bit->geom);
-            // fix offsets, insert meshlets, send bounding spheres
-            new_geometries.meshlets.iterate_data_ranges(bit->meshlet_range, [&, this](std::span<Meshlet> data) {
-                std::vector<glm::vec4> bspheres;
-                bspheres.reserve(data.size());
-                for(auto& mlt : data)
-                {
-                    mlt.vertex_offset += bufs.vertex_count;
-                    mlt.index_offset += bufs.index_count;
-                    bspheres.push_back(mlt.bounding_sphere);
-                }
-                staging->copy(bufs.bspheres.get(), bspheres, STAGING_APPEND);
-                meshlets.insert(meshlets.end(), data.begin(), data.end());
-            });
-
-            bufs.vertex_count += bit->position_range->elems / 3;
-            bufs.index_count += bit->index_range->elems / sizeof(uint16_t);
-        }
-
-        new_geometries.batches.erase(pre_meshletized_it, new_geometries.batches.end());
-    }
-
-    // if there are no meshes that need meshletization, return
-    if(new_geometries.batches.empty())
-    {
-        new_geometries = {};
-        return;
-    }
-
-    struct GeometryOffsets
-    {
-        size_t pos;
-        size_t sphere;
-        size_t idx;
-        size_t mlt;
-        size_t vposbytes;
-        size_t vattbytes;
+        Handle<Geometry> geometry;
+        std::vector<float> positions;
+        std::vector<float> attributes;
+        std::vector<uint16_t> indices;
+        std::vector<Meshlet> meshlets;
     };
-
-    struct TempBatchData
+    std::vector<JobResult> results(new_geometries.batches.size());
     {
-        std::vector<float> vtx;
-        std::vector<float> att;
-        std::vector<uint16_t> idx;
-        std::vector<Meshlet> mlt;
-    };
-
-    const auto num_batches = new_geometries.batches.size();
-
-    GeometryOffsets geometry_stats{};                        // for summing data
-    std::vector<GeometryOffsets> batch_counts(num_batches);  // records sizes of datas for each batch
-    std::vector<GeometryOffsets> batch_offsets(num_batches); // prefix sum for offsets into shared buffers
-    std::vector<TempBatchData> temp_results(num_batches);    // per batch storage for meshletization results
-
-    const auto jobs = std::thread::hardware_concurrency();
-    const auto batches_per_job = (num_batches + jobs - 1) / jobs;
-    std::vector<std::jthread> threads(jobs);
-
-    for(auto i = 0u; i < jobs; ++i)
-    {
-        threads[i] = std::jthread([&, i, batches_per_job]() {
-            const auto start_idx = i * batches_per_job;
-            const auto end_idx = std::min(start_idx + batches_per_job, num_batches);
-            for(auto bi = start_idx; bi < end_idx; ++bi)
-            {
-                const auto& batch = new_geometries.batches[bi];
-                meshletize_geometry(batch, temp_results[bi].vtx, temp_results[bi].att, temp_results[bi].idx,
-                                    temp_results[bi].mlt);
-                const uint32_t pos_count = static_cast<uint32_t>(temp_results[bi].vtx.size() / 3);
-
-                batch_counts[bi] = GeometryOffsets{ .pos = pos_count,
-                                                    .sphere = temp_results[bi].mlt.size(),
-                                                    .idx = temp_results[bi].idx.size(),
-                                                    .mlt = temp_results[bi].mlt.size(),
-                                                    .vposbytes = pos_count * 3 * sizeof(float),
-                                                    .vattbytes = temp_results[bi].att.size() * sizeof(float) };
-
-                if(batch.geom_ready_signal)
-                {
-                    // signal serializing thread that waits on meshletization
-                    batch.geom_ready_signal->set_value(ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
-                                                                           .positions = temp_results[bi].vtx,
-                                                                           .attributes = temp_results[bi].att,
-                                                                           .indices = temp_results[bi].idx,
-                                                                           .meshlets = temp_results[bi].mlt });
-                }
-            }
-        });
-    }
-    for(auto& th : threads)
-    {
-        th.join();
-    }
-
-    // calc prefix sum offsets and geometry stats
-    for(auto i = 0u; i < num_batches; ++i)
-    {
-        batch_offsets[i] = geometry_stats;
-        geometry_stats.pos += batch_counts[i].pos;
-        geometry_stats.sphere += batch_counts[i].sphere;
-        geometry_stats.idx += batch_counts[i].idx;
-        geometry_stats.mlt += batch_counts[i].mlt;
-        geometry_stats.vposbytes += batch_counts[i].vposbytes;
-        geometry_stats.vattbytes += batch_counts[i].vattbytes;
-    }
-
-    // prepare gpu buffers
-    resize_buffer(bufs.positions, geometry_stats.vposbytes, STAGING_APPEND, true);
-    resize_buffer(bufs.attributes, geometry_stats.vattbytes, STAGING_APPEND, true);
-    resize_buffer(bufs.indices, geometry_stats.idx * sizeof(uint16_t), STAGING_APPEND, true);
-    resize_buffer(bufs.bspheres, geometry_stats.sphere * sizeof(glm::vec4), STAGING_APPEND, true);
-
-    for(auto i = 0u; i < num_batches; ++i)
-    {
-        auto& res = temp_results[i];
-        const auto& start = batch_offsets[i];
-        auto& batch_batch = new_geometries.batches[i];
-
-        // update meshlet offsets and collect bounding spheres
-        std::vector<glm::vec4> bspheres;
-        bspheres.reserve(res.mlt.size());
-        for(auto& mlt : res.mlt)
+        const auto thread_count = std::thread::hardware_concurrency();
+        std::atomic<uint64_t> batch_idx = 0;
+        std::vector<std::jthread> jobs(thread_count);
+        for(auto& j : jobs)
         {
-            mlt.vertex_offset += static_cast<uint32_t>(bufs.vertex_count + start.pos);
-            mlt.index_offset += static_cast<uint32_t>(bufs.index_count + start.idx);
+            j = std::jthread{ [&batch_idx, &results, this]() {
+                for(;;)
+                {
+                    const auto bidx = batch_idx.fetch_add(1);
+                    if(bidx >= new_geometries.batches.size()) { return; }
+                    auto& batch = new_geometries.batches[bidx];
+
+                    auto& res = results[bidx];
+                    res.geometry = batch.geom;
+                    if(batch.meshlets.empty())
+                    {
+                        meshletize_geometry(batch, res.positions, res.attributes, res.indices, res.meshlets);
+                        if(batch.geom_ready_signal)
+                        {
+                            batch.geom_ready_signal->set_value(ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
+                                                                                   .positions = res.positions,
+                                                                                   .attributes = res.attributes,
+                                                                                   .indices = res.indices,
+                                                                                   .meshlets = res.meshlets });
+                        }
+                    }
+                    else
+                    {
+                        ENG_ASSERT(batch.index_format == IndexFormat::U16);
+                        res.positions = std::move(batch.positions);
+                        res.attributes = std::move(batch.attributes);
+                        res.indices.resize(batch.indices.size() / sizeof(uint16_t));
+                        memcpy(res.indices.data(), batch.indices.data(), batch.indices.size());
+                        res.meshlets = std::move(batch.meshlets);
+                    }
+                }
+            } };
+        }
+    }
+
+    JobResult final_result{};
+    std::vector<glm::vec4> bspheres;
+    size_t total_pos{};
+    size_t total_att{};
+    size_t total_idx{};
+    size_t total_mlt{};
+    for(const auto& res : results)
+    {
+        total_pos += res.positions.size();
+        total_att += res.attributes.size();
+        total_idx += res.indices.size();
+        total_mlt += res.meshlets.size();
+    }
+    final_result.positions.reserve(total_pos);
+    final_result.attributes.reserve(total_pos);
+    final_result.indices.reserve(total_pos);
+    bspheres.reserve(total_mlt);
+    for(const auto& res : results)
+    {
+        final_result.positions.insert(final_result.positions.end(), res.positions.begin(), res.positions.end());
+        final_result.attributes.insert(final_result.attributes.end(), res.attributes.begin(), res.attributes.end());
+        final_result.indices.insert(final_result.indices.end(), res.indices.begin(), res.indices.end());
+        for(const auto& mlt : res.meshlets)
+        {
             bspheres.push_back(mlt.bounding_sphere);
         }
-        meshlets.insert(meshlets.end(), res.mlt.begin(), res.mlt.end());
-
-        // copy data to gpu buffers
-        staging->copy(bufs.positions.get(), res.vtx.data(), STAGING_APPEND, res.vtx.size() * sizeof(float));
-        staging->copy(bufs.attributes.get(), res.att.data(), STAGING_APPEND, res.att.size() * sizeof(float));
-        staging->copy(bufs.indices.get(), res.idx.data(), STAGING_APPEND, res.idx.size() * sizeof(uint16_t));
-        staging->copy(bufs.bspheres.get(), bspheres, STAGING_APPEND);
-
-        auto& g = batch_batch.geom.get();
-        g.meshlet_range = { .offset = (uint32_t)(meshlets.size() - res.mlt.size()), .size = (uint32_t)res.mlt.size() };
-
-        // schedule for gpu blas construction (todo: should be optional here and in premeshletized pass)
-        make_blas(batch_batch.geom);
     }
-
-    // Global count updates for the next frame
-    bufs.vertex_count += geometry_stats.pos;
-    bufs.index_count += geometry_stats.idx;
+    resize_buffer(bufs.positions, total_pos * sizeof(float), STAGING_APPEND, true);
+    resize_buffer(bufs.attributes, total_att * sizeof(float), STAGING_APPEND, true);
+    resize_buffer(bufs.indices, total_idx * sizeof(uint16_t), STAGING_APPEND, true);
+    resize_buffer(bufs.bspheres, total_mlt * sizeof(glm::vec4), STAGING_APPEND, true);
+    staging->copy(bufs.positions.get(), final_result.positions, STAGING_APPEND);
+    staging->copy(bufs.attributes.get(), final_result.attributes, STAGING_APPEND);
+    staging->copy(bufs.indices.get(), final_result.indices, STAGING_APPEND);
+    staging->copy(bufs.bspheres.get(), bspheres, STAGING_APPEND);
+    for(auto& res : results)
+    {
+        res.geometry->meshlet_range = { .offset = (uint32_t)meshlets.size(), .size = (uint32_t)res.meshlets.size() };
+        for(auto& mlt : res.meshlets)
+        {
+            mlt.vertex_offset += bufs.vertex_count;
+            mlt.index_offset += bufs.index_count;
+        }
+        meshlets.insert(meshlets.end(), res.meshlets.begin(), res.meshlets.end());
+        bufs.vertex_count += res.positions.size() / 3;
+        bufs.index_count += res.indices.size();
+    }
 
     new_geometries = {};
 }
@@ -1433,24 +1344,18 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
     static constexpr auto max_tris = 124u;
     static constexpr auto cone_weight = 0.0f;
 
-    if(!batch.index_range)
+    if(batch.indices.empty())
     {
         ENG_WARN("Batch has no indices");
         return;
     }
 
     // get indices to meshletize
-    std::vector<uint32_t> indices(batch.index_range->elems / sizeof(uint32_t));
-    {
-        std::vector<std::byte> src_bytes(batch.index_range->elems);
-        context.indices.copy_to_linear_storage(batch.index_range, std::as_writable_bytes(std::span{ src_bytes }));
-        copy_indices(std::as_writable_bytes(std::span{ indices }), std::as_bytes(std::span{ src_bytes }),
-                     IndexFormat::U32, batch.index_format);
-    }
+    std::vector<uint32_t> indices(batch.indices.size() / sizeof(uint32_t));
+    copy_indices(std::as_writable_bytes(std::span{ indices }), std::span{ batch.indices }, IndexFormat::U32, batch.index_format);
 
     // get positions to meshletize
-    std::vector<float> positions(batch.position_range->elems);
-    context.positions.copy_to_linear_storage(batch.position_range, std::as_writable_bytes(std::span{ positions }));
+    const std::vector<float>& positions = batch.positions;
 
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
     std::vector<meshopt_Meshlet> mlts(max_meshlets);
@@ -1485,17 +1390,15 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
     }
 
     // remap and output attributes
-    if(batch.attribute_range && batch.attribute_range->elems > 0)
+    if(batch.attributes.size() > 0)
     {
-        std::vector<float> attributes(batch.attribute_range->elems);
-        context.attributes.copy_to_linear_storage(batch.attribute_range, std::as_writable_bytes(std::span{ attributes }));
         const auto vx_size = get_vertex_layout_size(batch.vertex_layout);
         const auto attr_stride = vx_size - pos_stride;
         const auto att_size_flts = attr_stride / sizeof(float);
         out_attributes.resize(mlt_vtxs.size() * att_size_flts);
         for(size_t i = 0; i < mlt_vtxs.size(); ++i)
         {
-            memcpy(&out_attributes[i * att_size_flts], &attributes[mlt_vtxs[i] * att_size_flts], attr_stride);
+            memcpy(&out_attributes[i * att_size_flts], &batch.attributes[mlt_vtxs[i] * att_size_flts], attr_stride);
         }
     }
 
