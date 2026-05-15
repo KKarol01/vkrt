@@ -60,11 +60,12 @@ class AssetManager
                                                                    serialization::engb::Container** out_container = nullptr);
 
     std::optional<Asset> try_deserialize_asset(const fs::Path& file_path);
-    void try_serialize_asset(Asset& asset);
+    void serialize_asset_to_enbc_thread(Asset& asset);
 
     std::unordered_map<fs::Path, Asset> m_loaded_assets_map;
     std::vector<serialization::engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
     std::shared_mutex m_engbc_vec_mutex;
+    std::vector<std::unique_ptr<std::jthread>> m_serializing_threads;
 };
 
 } // namespace assets

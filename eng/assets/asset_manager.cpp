@@ -62,8 +62,8 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         asset->path = file_path;
         auto it = m_loaded_assets_map.emplace(file_path, std::move(*asset));
 
-        std::thread serialize_thread{ &AssetManager::try_serialize_asset, this, std::ref(it.first->second) };
-        serialize_thread.detach();
+        m_serializing_threads.push_back(std::make_unique<std::jthread>(std::jthread{
+            &AssetManager::serialize_asset_to_enbc_thread, this, std::ref(it.first->second) }));
 
         return it.first->second;
     }
@@ -89,6 +89,15 @@ std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(uin
 
 std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_path)
 {
+    {
+        uint32_t head{};
+        while(m_serializing_threads.size())
+        {
+            if(m_serializing_threads[head]->joinable()) { break; }
+            ++head;
+        }
+        m_serializing_threads.erase(m_serializing_threads.begin(), m_serializing_threads.begin() + head);
+    }
     serialization::engb::Container* container{};
     const auto listopt = try_find_list_by_hash(ENG_HASH(file_path.string()), &container);
     if(!listopt) { return std::nullopt; }
@@ -129,7 +138,7 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     return asset;
 }
 
-void AssetManager::try_serialize_asset(Asset& asset)
+void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
 {
     if(asset.geometry_data_futures.empty())
     {
