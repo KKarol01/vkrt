@@ -61,7 +61,7 @@
 #define ENG_DECLARE_STORAGE_BUFFER(type) struct type
 
 #endif
-
+ 
 #ifndef NO_COMMON_STRUCTS
     // put other includes/types/bindless stuff here
     

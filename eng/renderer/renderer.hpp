@@ -638,9 +638,9 @@ class ShaderManager
 
     Handle<Shader> make_shader(const fs::Path& path);
     void parse_includes(File& f, File* pf);
-    std::vector<Handle<Shader>> remove_affected_shaders(const fs::Path& path,
-                                                        std::vector<Handle<Pipeline>>* out_affected_pipelines = nullptr);
-    uint64_t get_hash(const fs::Path& path) const;
+    std::vector<Handle<Shader>> get_affected_shaders(const fs::Path& path,
+                                                     std::vector<Handle<Pipeline>>* out_affected_pipelines = nullptr);
+    uint64_t get_hash(const fs::Path& path);
     void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
     std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
@@ -849,7 +849,8 @@ class Renderer
     void queue_destroy(Handle<Image>& image, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const fs::Path& path, Compilation compilation = Compilation::DEFERRED);
-    void compile_shader(Handle<Shader> shader);
+    bool compile_shader(Handle<Shader> shader);
+    bool compile_shader(Shader& shader);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
     Handle<PipelineLayout> make_layout(const PipelineLayout& info);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info, Compilation compilation = Compilation::DEFERRED);
