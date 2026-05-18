@@ -29,6 +29,7 @@ VkSamplerAddressMode to_vk(const ImageAddressing& a)
 
 VkFormat to_vk(const ImageFormat& a) 
 { 
+	static_assert((int)ImageFormat::LAST_ENUM == 13);
 	switch(a) 
     {
         case ImageFormat::UNDEFINED: { return VK_FORMAT_UNDEFINED; }
@@ -40,6 +41,8 @@ VkFormat to_vk(const ImageFormat& a)
         case ImageFormat::D32_SFLOAT: { return VK_FORMAT_D32_SFLOAT; }
         case ImageFormat::R16F: { return VK_FORMAT_R16_SFLOAT; }
         case ImageFormat::R32F: { return VK_FORMAT_R32_SFLOAT; }
+        case ImageFormat::R16FG16F: { return VK_FORMAT_R16G16_SFLOAT; }
+        case ImageFormat::R32FG32F: { return VK_FORMAT_R32G32_SFLOAT; }
         case ImageFormat::R16FG16FB16FA16F: { return VK_FORMAT_R16G16B16A16_SFLOAT; }
         case ImageFormat::R32FG32FB32FA32F: { return VK_FORMAT_R32G32B32A32_SFLOAT; }
         default: { ENG_ERROR("Unhandled case."); return {}; }

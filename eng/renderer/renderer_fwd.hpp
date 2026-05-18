@@ -172,6 +172,8 @@ enum class ImageFormat : uint8_t
     D32_SFLOAT,
     R16F,
     R32F,
+	R16FG16F,
+	R32FG32F,
     R16FG16FB16FA16F,
     R32FG32FB32FA32F,
     LAST_ENUM,
@@ -592,13 +594,15 @@ inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> 
 
 inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
 {
-    static_assert((int)ImageFormat::LAST_ENUM == 11);
+    static_assert((int)ImageFormat::LAST_ENUM == 13);
     switch(format)
     {
     case ImageFormat::R8G8B8A8_UNORM:
     case ImageFormat::R8G8B8A8_SRGB:
     case ImageFormat::R16F:
     case ImageFormat::R32F:
+    case ImageFormat::R16FG16F:
+    case ImageFormat::R32FG32F:
     case ImageFormat::R16FG16FB16FA16F:
     case ImageFormat::R32FG32FB32FA32F:
         return ImageAspect::COLOR;

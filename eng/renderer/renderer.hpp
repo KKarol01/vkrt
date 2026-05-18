@@ -622,6 +622,32 @@ struct Swapchain
     uint32_t current_index{ 0ul };
 };
 
+class ShaderManager
+{
+    struct File
+    {
+        fs::Path path;
+        uint64_t hash{};
+        Handle<Shader> shader;
+        std::set<File*> headers_set;
+        std::set<Handle<Pipeline>> pipelines_set;
+    };
+
+  public:
+    auto& operator[](this auto& self, Handle<Shader> a) { return self.m_shader_alloc[*a]; }
+
+    Handle<Shader> make_shader(const fs::Path& path);
+    void parse_includes(File& f, File* pf);
+    std::vector<Handle<Shader>> remove_affected_shaders(const fs::Path& path,
+                                                        std::vector<Handle<Pipeline>>* out_affected_pipelines = nullptr);
+    uint64_t get_hash(const fs::Path& path) const;
+    void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
+    std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
+
+    Slotmap<Shader, 16, 8> m_shader_alloc;
+    std::unordered_map<fs::Path, File> m_files_map;
+};
+
 enum class SubmitFlags : uint32_t
 {
 };
@@ -815,17 +841,19 @@ class Renderer
     // Creates buffer with optional gpu memory allocation. Thread-safe.
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
-    void queue_destroy(Handle<Buffer>& handle);
+    void queue_destroy(Handle<Buffer> handle);
     // Creates image with optional gpu memory allocation. Thread-safe.
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
     void queue_destroy(Handle<Image>& image, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
-    Handle<Shader> make_shader(const fs::Path& path);
+    Handle<Shader> make_shader(const fs::Path& path, Compilation compilation = Compilation::DEFERRED);
+    void compile_shader(Handle<Shader> shader);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
     Handle<PipelineLayout> make_layout(const PipelineLayout& info);
     Handle<Pipeline> make_pipeline(const PipelineCreateInfo& info, Compilation compilation = Compilation::DEFERRED);
+    void compile_pipeline(Handle<Pipeline> pipeline);
     void destroy_pipeline(Handle<Pipeline> pipeline);
     Sync* make_sync(const SyncCreateInfo& info);
     void destroy_sync(Sync* sync);
@@ -843,7 +871,6 @@ class Renderer
 
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
-    void compile_pipeline(Pipeline& p);
     // void instance_blas(const BLASInstanceSettings& settingsi);
     // void update_transform(ecs::entity_id entity);
 
@@ -860,9 +887,7 @@ class Renderer
     Slotmap<Image, 16, 64> images;
 
     HandleFlatSet<Sampler> samplers;
-    std::vector<Shader> shaders;
-    ShaderIncludes shader_includes;
-    std::unordered_map<Handle<Shader>, std::vector<Handle<Pipeline>>> shader_usage_pipeline_map;
+    ShaderManager m_shaders;
     Handle<fs::DirectoryListener> new_shaders_listener;
 
     std::vector<DescriptorLayout> dlayouts;
@@ -918,7 +943,7 @@ ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_render
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(Slotmap<eng::gfx::Image, 1024>::SlotId{*handle}); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().shaders[*handle]; });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().m_shaders[handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });

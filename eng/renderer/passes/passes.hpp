@@ -596,17 +596,11 @@ struct MeshPass : public Pass
 
                 for(auto i = 0u; i < data.color_buffers.size(); ++i)
                 {
-                    if(data.color_buffers[i])
-                    {
-                        d.out_color = b.access_color(data.color_buffers[i]);
-                    }
+                    if(data.color_buffers[i]) { d.out_color = b.access_color(data.color_buffers[i]); }
                     if(i > 0) { ENG_ASSERT(!data.color_buffers[i]); }
                 }
 
-                if(data.depth_buffer)
-                {
-                    d.depth = b.access_depth(data.depth_buffer);
-                }
+                if(data.depth_buffer) { d.depth = b.access_depth(data.depth_buffer); }
 
                 d.constants = b.read_buffer(cd.render_resources.constants);
                 d.instances = b.import_resource(r.bufs.instances);
@@ -698,6 +692,54 @@ struct SSAO : public Pass
         auto& r = get_renderer();
         m_name = to_string(r.settings.gfx_settings.ao_mode);
 
+        if(!m_noise_texture)
+        {
+            m_noise_texture = r.make_image("SSAONoiseTex", Image::init(8, 8, ImageFormat::R16FG16F,
+                                                                       ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+            std::mt19937 mt{ 15 };
+            std::uniform_real_distribution<float> dist{ 0.0, 1.0 };
+
+            size_t tex_sz = 8;
+            auto buf = r.make_buffer("SSAOTempNoiseBuf", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
+                                                                      BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
+            r.queue_destroy(buf);
+            auto* bufptr = (float*)buf->memory;
+            for(auto i = 0; i < tex_sz * tex_sz * 2; ++i)
+            {
+                bufptr[i] = dist(mt);
+            }
+
+            auto copypp =
+                r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
+            struct NoiseOutput
+            {
+                RGAccessId noise_buf;
+                RGAccessId out_noise_img;
+            };
+            graph->add_compute_pass<NoiseOutput>(
+                "SSAOGenNoise", RenderOrder::SETUP_TARGETS,
+                [=, this](RGBuilder& b, NoiseOutput& d) {
+                    d.noise_buf = b.import_resource(buf);
+                    d.noise_buf = b.read_buffer(d.noise_buf);
+                    d.out_noise_img = b.import_resource(m_noise_texture);
+                    d.out_noise_img = b.write_image(d.out_noise_img);
+                },
+                [=](RGBuilder& b, const NoiseOutput& d) {
+                    auto& r = get_renderer();
+                    auto* cmd = b.open_cmd_buf();
+
+                    DescriptorResource resources[]{
+                        DescriptorResource::storage_buffer(b.get_buf(d.noise_buf)),
+                        DescriptorResource::storage_image(b.get_img(d.out_noise_img)),
+                    };
+                    cmd->bind_pipeline(copypp.get());
+                    cmd->bind_resources(1, resources);
+					ENG_ASSERT(tex_sz == 8);
+					cmd->dispatch(1, 1, 1);
+					r.destroy_pipeline(copypp);
+                });
+        }
+
         struct PassSSAOOutput
         {
             RGAccessId depth;
@@ -728,6 +770,7 @@ struct SSAO : public Pass
             });
     }
 
+    Handle<Image> m_noise_texture;
     Handle<Pipeline> m_reconstruct_normals;
     std::array<Handle<Pipeline>, (int)AOMode::LAST_ENUM> m_pp_arr;
 };

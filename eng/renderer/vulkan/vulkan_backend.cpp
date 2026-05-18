@@ -23,7 +23,6 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #endif
-#include <reproc++/run.hpp>
 
 // https://www.shadertoy.com/view/WlSSWc
 // static float halton(int i, int b)
@@ -1351,129 +1350,15 @@ void RendererBackendVk::make_shader(Shader& shader)
     shader.md.ptr = new ShaderMetadataVk{};
 }
 
-bool RendererBackendVk::compile_shader(const Shader& shader)
+bool RendererBackendVk::compile_shader(const Shader& shader, std::span<const std::byte> precompiled)
 {
+    if(!shader.md.ptr || precompiled.empty()) { return false; }
     auto* shmd = shader.md.vk();
-
-    if(!shmd)
-    {
-        ENG_WARN("Shader {} does not have metadata; cannot compile.", shader.path.string());
-        return false;
-    }
-    if(shmd->shader)
-    {
-        ENG_WARN("Shader {} was already compiled.", shader.path.string());
-        return false;
-    }
-
-    fs::FilePtr shaderfile = get_engine().fs->get_asset(shader.path, fs::OpenMode::READ_BYTES);
-    if(!shaderfile)
-    {
-        ENG_WARN("Could not open shader file {}", shader.path.string());
-        return false;
-    }
-
-    std::vector<uint32_t> out_spv;
-
-    const auto precomppath = shader.path.string() + ".precompiled";
-    const auto contenthash = shaderfile->get_hash();
-
-    // check if precompiled
-    {
-        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::READ_BYTES);
-        if(precompfile && precompfile->size() > 8)
-        {
-            std::byte readhash8[8];
-            precompfile->read(readhash8, 8, 0);
-            uint64_t readhash = std::bit_cast<uint64_t>(readhash8);
-            if(contenthash == readhash)
-            {
-                const auto spvsize = precompfile->size() - 8;
-                out_spv.resize(spvsize / 4);
-                precompfile->read((std::byte*)out_spv.data(), spvsize, 8);
-            }
-        }
-    }
-
-    // if no precompiled spv or source code had changed
-    if(out_spv.empty())
-    {
-        ENG_LOG("Compiling shader {}", shader.path.string());
-
-        reproc::options opts;
-        opts.redirect.parent = true;
-        opts.working_directory = "./";
-
-        const char* shader_target = [&shader] {
-            // clang-format off
-			switch(shader.stage) 
-			{
-                case ShaderStage::VERTEX_BIT:  { return "vs_6_7";}
-                case ShaderStage::PIXEL_BIT:   { return "ps_6_7";}
-                case ShaderStage::COMPUTE_BIT: { return "cs_6_7";}
-                default: { ENG_WARN("Unhandled case"); return (const char*)nullptr; }
-			}
-            // clang-format on
-        }();
-        if(!shader_target) { return false; }
-
-        // compilation should happen from where the folder assets/ is
-        const auto include_path = get_engine().fs->make_rel_path("/").string();
-        const auto hlsl_path = get_engine().fs->make_rel_path(shader.path).string();
-        const auto spv_path = get_engine().fs->make_rel_path(shader.path.string() + ".spv").string();
-        const char* args[]{
-            "dxc.exe",
-            "-T",
-            shader_target,
-            "-E",
-            "main",
-            "-spirv",
-            "-fvk-use-scalar-layout",
-#ifdef ENG_DEBUG_BUILD
-            "-Od",
-            "-Zi",
-#endif
-            "-I",
-            include_path.c_str(),
-            "-Fo",
-            spv_path.c_str(),
-            hlsl_path.c_str(),
-            (const char*)nullptr,
-        };
-        auto [ret, code] = reproc::run(args, opts);
-
-        fs::FilePtr compiledspvfile = get_engine().fs->get_asset(spv_path, fs::OpenMode::READ_BYTES);
-        if(!compiledspvfile)
-        {
-            ENG_WARN("Could not open spv output file after compilation {}", spv_path);
-            return false;
-        }
-
-        auto compiled_spv = compiledspvfile->read();
-        ENG_ASSERT(compiled_spv.size() > 0 && compiled_spv.size() % 4 == 0);
-        out_spv.resize(compiled_spv.size() / 4);
-        memcpy(out_spv.data(), compiled_spv.data(), compiled_spv.size());
-
-        fs::FilePtr precompfile = get_engine().fs->get_asset(precomppath, fs::OpenMode::WRITE_CREATE_BYTES);
-        if(precompfile)
-        {
-            std::byte contenthash8[8];
-            memcpy(contenthash8, &contenthash, 8);
-            precompfile->write(contenthash8, 8, 0);
-            precompfile->write((const std::byte*)compiled_spv.data(), compiled_spv.size(), 8);
-        }
-        else { ENG_WARN("Could not save precompiled shader {}", precomppath); }
-
-        get_engine().fs->delete_file(spv_path);
-    }
-
     auto vkshaderinfo = vk::VkShaderModuleCreateInfo{};
-    vkshaderinfo.codeSize = out_spv.size() * sizeof(uint32_t);
-    vkshaderinfo.pCode = out_spv.data();
-
-    if(shmd->shader) { vkDestroyShaderModule(dev, shmd->shader, nullptr); }
+    vkshaderinfo.codeSize = precompiled.size_bytes();
+    vkshaderinfo.pCode = (const uint32_t*)precompiled.data();
+    ENG_ASSERT(!shmd->shader, "Shader {} had already vk module created, destroy it first", shader.path.string());
     VK_CHECK(vkCreateShaderModule(dev, &vkshaderinfo, nullptr, &shmd->shader));
-
     return true;
 }
 

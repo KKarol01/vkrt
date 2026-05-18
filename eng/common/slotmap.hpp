@@ -48,6 +48,8 @@ template <typename UserType, size_t PAGE_SIZE = 1024, size_t NUM_PAGES = 64> cla
         return _at(*slot).data;
     }
 
+    auto& operator[](this auto& self, Storage idx) { return self.at(SlotId{ idx }); }
+
     template <typename... Args> SlotId emplace(Args&&... args)
     {
         const auto index = allocate();

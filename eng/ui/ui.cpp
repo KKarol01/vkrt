@@ -17,11 +17,11 @@ namespace ui
 class Panel
 {
   public:
-    Panel(std::string_view title, uint32_t* dock) : title(title), dock(dock) {}
+    Panel(std::string_view title, uint32_t* dock) : m_name(title), m_dockid(dock) {}
     virtual ~Panel() noexcept = default;
     virtual void draw(gfx::RGBuilder& rg) = 0;
-    std::string title;
-    uint32_t* dock{};
+    std::string m_name;
+    uint32_t* m_dockid{};
 };
 
 class GamePanel : public Panel
@@ -181,27 +181,45 @@ class ConsolePanel : public Panel
         auto& r = gfx::get_renderer();
         if(ImGui::Begin("Console Panel"))
         {
-            //auto& gfx_settings = r.settings.gfx_settings;
-            //auto& pass = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
-            //if(ImGui::BeginCombo("AO_MODE", pass->m_name.c_str()))
+            // auto& gfx_settings = r.settings.gfx_settings;
+            // auto& pass = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
+            // if(ImGui::BeginCombo("AO_MODE", pass->m_name.c_str()))
             //{
-            //    for(auto i = 0; i < (int)gfx::AOMode::LAST_ENUM; ++i)
-            //    {
-            //        if(ImGui::Selectable(r.passes.ao[i]->m_name.c_str()))
-            //        {
-            //            r.settings.gfx_settings.ao_mode = (gfx::AOMode)i;
-            //        }
-            //    }
-            //    ImGui::EndCombo();
-            //}
-            //auto& ao_mode = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
-            //auto& settings = ao_mode->m_settings;
-            //settings.iterate_settings([](std::string_view name, gfx::pass::PassSettings::Value& value) {
-            //    if(auto** s = std::get_if<float*>(&value)) { return ImGui::DragFloat(name.data(), *s); }
-            //    else { ENG_ASSERT(false && "Unhandled setting"); }
-            //    return false;
-            //});
+            //     for(auto i = 0; i < (int)gfx::AOMode::LAST_ENUM; ++i)
+            //     {
+            //         if(ImGui::Selectable(r.passes.ao[i]->m_name.c_str()))
+            //         {
+            //             r.settings.gfx_settings.ao_mode = (gfx::AOMode)i;
+            //         }
+            //     }
+            //     ImGui::EndCombo();
+            // }
+            // auto& ao_mode = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
+            // auto& settings = ao_mode->m_settings;
+            // settings.iterate_settings([](std::string_view name, gfx::pass::PassSettings::Value& value) {
+            //     if(auto** s = std::get_if<float*>(&value)) { return ImGui::DragFloat(name.data(), *s); }
+            //     else { ENG_ASSERT(false && "Unhandled setting"); }
+            //     return false;
+            // });
         }
+        ImGui::End();
+    }
+};
+
+class RGDebugPanel : public Panel
+{
+  public:
+    RGDebugPanel(UI& ui, uint32_t* dock) : Panel("RG Debug", dock) {}
+
+    ~RGDebugPanel() noexcept override = default;
+
+    void draw(gfx::RGBuilder& b) override
+    {
+        auto& r = gfx::get_renderer();
+        if(ImGui::Begin(m_name.c_str())) 
+		{
+			
+		}
         ImGui::End();
     }
 };
@@ -221,7 +239,7 @@ class DebugPanel : public Panel
 
     void draw(gfx::RGBuilder& b) override
     {
-        if(ImGui::Begin(title.c_str()))
+        if(ImGui::Begin(m_name.c_str()))
         {
             if(ImGui::CollapsingHeader("Rendergraph")) { draw_render_graph(); }
         }
@@ -381,7 +399,7 @@ void UI::draw(gfx::RGBuilder& b)
 
         for(auto& e : panels)
         {
-            ImGui::DockBuilderDockWindow(e->title.c_str(), *e->dock);
+            ImGui::DockBuilderDockWindow(e->m_name.c_str(), *e->m_dockid);
         }
         ImGui::DockBuilderFinish(dock_id);
     }

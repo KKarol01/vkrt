@@ -228,7 +228,7 @@ class RendererBackendVk : public IRendererBackend
     void allocate_view(const ImageView& view, void** out_allocation) override;
     void allocate_sampler(Sampler& sampler) override;
     void make_shader(Shader& shader) override;
-    bool compile_shader(const Shader& shader) override;
+    bool compile_shader(const Shader& shader, std::span<const std::byte> bytecode) override;
     void destroy_shader(Shader& shader) override;
     bool compile_layout(DescriptorLayout& layout) override;
     bool compile_layout(PipelineLayout& layout) override;
