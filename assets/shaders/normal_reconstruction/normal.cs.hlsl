@@ -8,12 +8,6 @@ static const uint TILE_SIZE = LOCAL_SIZE * LOCAL_SIZE + TILE_BORDER * 2;
 groupshared float tile_xy[TILE_SIZE * TILE_SIZE];
 groupshared float tile_z[TILE_SIZE * TILE_SIZE];
 
-float3 depth_to_view_pos(uint2 dtid, uint2 dims, float depth)
-{
-    float2 uv = (float2(dtid) + 0.5) / float2(dims);
-    float2 ndc_xy = uv * 2.0 - 1.0;
-	return unproject_inf_revz_depth(float3(ndc_xy.xy, depth)); 
-}
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {

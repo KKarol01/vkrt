@@ -1,23 +1,15 @@
 #include "./common.hlsli"
-//#include "./assets/shaders/util.hlsli"
 
 static const uint LOCAL_SIZE = 8;
 
-float rand2dTo1d(float2 value, float2 dotDir = float2(12.9898, 78.233))
+float3 hash3df(float2 value)
 {
-    float2 smallValue = sin(value);
-    float random = dot(smallValue, dotDir);
-    random = frac(sin(random) * 143758.5453);
-    return random;
+	float3 p3 = frac(float3(value.xyx) * float3(0.1031, 0.1030, 0.0973));
+	p3 += dot(p3, p3.yxz+33.33);
+	return frac((p3.xxy+p3.yzz)*p3.zyx);
 }
-float3 hash32(float2 value)
-{
-    return float3(
-		rand2dTo1d(value, float2(12.989, 78.233)),
-		rand2dTo1d(value, float2(39.346, 11.135)),
-		rand2dTo1d(value, float2(73.156, 52.235))
-	);
-}
+
+static const uint SAMPLE_COUNT = 16;
 
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
@@ -25,71 +17,67 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     uint2 dims;
     gOutAOImage.GetDimensions(dims.x, dims.y);
     if (any(thread_id.xy >= dims.xy)) { return; }
-    gOutAOImage[thread_id.xy] = float4(float2(thread_id.xy), 0.0, 0.0);
-#if 0
-    Texture2D<float> in_depth = gTexture2Df1s[pc.DepthTextureIndex];
-    RWTexture2D<float4> in_normal = gRWTexture2Df4s[pc.NormalImageIndex];
-    RWTexture2D<float4> out_ao = gRWTexture2Df4s[pc.AOImageIndex];
-	
-    uint2 dims;
-    out_ao.GetDimensions(dims.x, dims.y);
-    if(any(thread_id.xy >= dims.xy)) { return; } 
-	
-	//float normll = in_normal[thread_id.xy].z;
-	//normll *= -1.0;
-	//out_ao[thread_id.xy] = normll;
-	//return;
-	
-	GPUEngAOSettings in_ao_settings = get_gsb(GPUEngAOSettings, 0);
-	
+
     const float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
-    float depth = in_depth.Load(int3(thread_id.xy, 0)).x; 
-	
-    // Reverse-Z: 0.0 is infinity, 1.0 is near. 
-    // If depth is near 0, it's the skybox/far plane.
-    if(depth < 1e-5) { out_ao[thread_id.xy] = 0.0; return; }  
-	
-    const float3 vs_pos = unproject_inf_revz_depth(float3(uv * 2.0 - 1.0, depth));
-	const float3 vs_normal = (in_normal[thread_id.xy].xyz);
+    float depth = gDepthTexture.Load(int3(thread_id.xy, 0)).x; 
 
-    const float3 random_vec = gTexture2Ds[pc.NoiseTextureIndex].SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv * (float2(dims.xy) / 4.0), 0).xyz;
-    const float3 tangent = normalize(random_vec + vs_normal * dot(random_vec, vs_normal));
-    const float3 bitangent = cross(vs_normal, tangent); 
-    
-    const float3x3 TBN = float3x3(tangent, bitangent, vs_normal); 
-	
-	float occlusion = 0.0;
+    if (depth < 1e-5) 
+    { 
+        gOutAOImage[thread_id.xy] = float4(1.0, 1.0, 1.0, 1.0); 
+        return; 
+    }
+
+    //GPUEngAOSettings in_ao_settings = get_gsb(GPUEngAOSettings, 0);
+    const float radius = 0.5; //in_ao_settings.Radius;
+    const float bias = 0.1; //in_ao_settings.Bias;
+
+    float3 vs_pos = depth_to_view_pos(thread_id.xy, dims, depth);
+    float3 normal = calculate_normal_from_depth(int2(thread_id.xy), int2(dims), gDepthTexture);
+
+    float2 noise_scale = float2(dims) / 4.0; 
+    float3 random_vec = float3(gNoiseTexture.SampleLevel(gSamplerStates[ENG_SAMPLER_LINEAR], uv * noise_scale, 0).rg, 0.0);
+
+    float3 tangent = normalize(random_vec - normal * dot(random_vec, normal));
+    float3 bitangent = cross(normal, tangent);
+    float3x3 TBN = float3x3(tangent, bitangent, normal);
+
     const float4x4 proj = get_gsb(GPUEngConstants, 0).proj;
+    float occlusion = 0.0;
 
-    for(uint i=0; i<64; ++i)
+    for (uint i = 0; i < SAMPLE_COUNT; ++i)
     {
-        // multiply from the right, because this matrix was constructed
-		// inside the shader, which means it's row-major, contrary
-		// to matrices sent from the CPU (which were made using GLM)
-		// that need to be multiplied from the left :).
-        float3 sample_vs_offset = mul(gRWBuffers[pc.SampleBufferIndex].Load<float3>(i * sizeof(float3)).xyz, TBN);
-        float3 sample_pos = vs_pos + sample_vs_offset * in_ao_settings.radius;
-		
-        float4 offset = mul(proj, float4(sample_pos, 1.0));
-        float2 sample_ndc = offset.xy / offset.w;
-        float2 sample_uv = sample_ndc * 0.5 + 0.5;
-		
-		if(any(sample_uv < 0.0) || any(sample_uv > 1.0)) continue;
+        // Generate uniform hemisphere sample oriented along +Z normal axis via hash
+        float3 rand_sample = hash3df(uv + float(i) * float2(0.1173, 0.7341));
+        float phi = rand_sample.x * 2.0 * 3.14159265;
+        float cos_theta = rand_sample.y; 
+        float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
         
-		uint2 sample_px = uint2(sample_uv * float2(dims));
-		sample_px = clamp(sample_px, uint2(0, 0), dims - 1);
+        float3 hemisphere_ray = float3(sin_theta * cos(phi), sin_theta * sin(phi), cos_theta);
 
-		float sampled_z_depth = in_depth.Load(int3(sample_px, 0));
-        
-        if(sampled_z_depth < 1e-5) continue;
+        float scale = float(i) / float(SAMPLE_COUNT);
+        scale = lerp(0.1, 1.0, scale * scale);
+        hemisphere_ray *= scale;
 
-        const float3 actual_vs_pos = unproject_inf_revz_depth(float3(sample_uv * 2.0 - 1.0, sampled_z_depth));
-		
-        float dist_diff = abs(vs_pos.z - actual_vs_pos.z);
-        float range_check = saturate(1.0 - abs(vs_pos.z - actual_vs_pos.z) / in_ao_settings.radius);
+        float3 sample_pos = vs_pos + mul(hemisphere_ray, TBN) * radius;
+
+        float2 offset_ndc = float2(
+            (sample_pos.x * proj[0][0]) / -sample_pos.z,
+            (sample_pos.y * proj[1][1]) / -sample_pos.z
+        );
+
+        float2 offset_uv = offset_ndc * 0.5 + 0.5;
+
+        if (any(offset_uv < 0.0) || any(offset_uv > 1.0)) { continue; }
+
+        uint2 offset_coord = uint2(offset_uv * float2(dims));
+        float sample_depth = gDepthTexture.Load(int3(offset_coord, 0)).x;
         
-        if (actual_vs_pos.z >= sample_pos.z + in_ao_settings.bias) { occlusion += range_check; }
+        float scene_vs_z = -proj[2][3] / sample_depth;
+
+        float range_check = smoothstep(0.0, 1.0, radius / abs(vs_pos.z - scene_vs_z));
+        if (scene_vs_z >= sample_pos.z + bias) { occlusion += 1.0 * range_check; }
     }
-    out_ao[thread_id.xy] = 1.0 - (occlusion / 64.0);
-#endif
-    }
+
+    float ao_factor = 1.0 - (occlusion / float(SAMPLE_COUNT));
+    gOutAOImage[thread_id.xy] = float4(ao_factor.xxx, 1.0);
+}
