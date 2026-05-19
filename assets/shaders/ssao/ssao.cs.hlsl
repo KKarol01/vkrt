@@ -9,7 +9,7 @@ float3 hash3df(float2 value)
 	return frac((p3.xxy+p3.yzz)*p3.zyx);
 }
 
-static const uint SAMPLE_COUNT = 16;
+static const uint SAMPLE_COUNT = 32;
 
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
