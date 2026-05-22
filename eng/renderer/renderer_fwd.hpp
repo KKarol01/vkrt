@@ -137,7 +137,7 @@ enum class VertexComponent : uint32_t
     NORMAL_BIT = 0x2,
     TANGENT_BIT = 0x4,
     UV0_BIT = 0x8,
-    LAST,
+    ALL = POSITION_BIT | NORMAL_BIT | TANGENT_BIT | UV0_BIT
 };
 ENG_ENABLE_FLAGS_OPERATORS(VertexComponent);
 
@@ -172,8 +172,8 @@ enum class ImageFormat : uint8_t
     D32_SFLOAT,
     R16F,
     R32F,
-	R16FG16F,
-	R32FG32F,
+    R16FG16F,
+    R32FG32F,
     R16FG16FB16FA16F,
     R32FG32FB32FA32F,
     LAST_ENUM,
@@ -494,7 +494,7 @@ struct ImageView
     uint32_t dst_subresource{ ~0u };
 };
 
-inline size_t get_vertex_component_size(VertexComponent comp)
+inline constexpr size_t get_vertex_component_size(VertexComponent comp)
 {
     switch(comp)
     {
@@ -513,9 +513,9 @@ inline size_t get_vertex_component_size(VertexComponent comp)
     return 0;
 }
 
-inline size_t get_vertex_layout_size(Flags<VertexComponent> layout)
+inline constexpr size_t get_vertex_layout_size(Flags<VertexComponent> layout)
 {
-    static_assert((int)VertexComponent::LAST == 9);
+    static_assert((int)VertexComponent::ALL == 15);
     static constexpr VertexComponent comps[]{ VertexComponent::POSITION_BIT, VertexComponent::NORMAL_BIT,
                                               VertexComponent::TANGENT_BIT, VertexComponent::UV0_BIT };
     size_t sum = 0;
@@ -526,17 +526,22 @@ inline size_t get_vertex_layout_size(Flags<VertexComponent> layout)
     return sum;
 }
 
-inline size_t get_vertex_component_offset(Flags<VertexComponent> layout, VertexComponent comp)
+inline constexpr size_t get_vertex_component_offset(Flags<VertexComponent> layout, VertexComponent comp)
 {
     return get_vertex_layout_size(layout & (std::to_underlying(comp) - 1)); // calc size of all previous present components in the bitmask
 }
 
-inline size_t get_vertex_count(std::span<const float> vertices, Flags<VertexComponent> layout)
+inline constexpr size_t get_vertex_component_offset(VertexComponent comp)
+{
+    return get_vertex_component_offset(Flags<VertexComponent>{ VertexComponent::ALL }, comp);
+}
+
+inline constexpr size_t get_vertex_count(std::span<const float> vertices, Flags<VertexComponent> layout)
 {
     return vertices.size_bytes() / get_vertex_layout_size(layout);
 }
 
-inline size_t get_index_size(IndexFormat format)
+inline constexpr size_t get_index_size(IndexFormat format)
 {
     switch(format)
     {
@@ -551,7 +556,7 @@ inline size_t get_index_size(IndexFormat format)
     return 0;
 }
 
-inline size_t get_index_count(std::span<const std::byte> indices, IndexFormat format)
+inline constexpr size_t get_index_count(std::span<const std::byte> indices, IndexFormat format)
 {
     return indices.size() / get_index_size(format);
 }

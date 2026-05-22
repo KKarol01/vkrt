@@ -21,7 +21,15 @@ void MeshRenderer::instance_entity(ecs::EntityId entity)
         const auto& rmp = rmat.mesh_pass.get();
         for(auto i = 0u; i < rmp.effects.size(); ++i)
         {
-            if(rmp.effects[i]) { m_pass_datas_arr[i].meshes_vec.emplace_back(rmsh, msh.gpu_resource); }
+            if(rmp.effects[i])
+            {
+                if((MeshPassType)i == MeshPassType::Z_PREPASS)
+                {
+                    if(rmat.alpha_cutoff > 0.0) { continue; }
+                }
+
+                m_pass_datas_arr[i].meshes_vec.emplace_back(rmsh, msh.gpu_resource);
+            }
         }
     }
 }
@@ -62,15 +70,28 @@ void MeshRenderer::build_passes()
 
         pass.indirect_cmds_offset = cmds_byte_start;
 
-        if(!pass.indirect_buf)
+        struct MakeOrResizeBufData
         {
-            pass.indirect_buf = get_renderer().make_buffer(ENG_FMT("{} indirect buffer", to_string((MeshPassType)i)),
-                                                           Buffer::init(indirect_cap, BufferUsage::INDIRECT_BIT));
+            Handle<Buffer>* buf;
+            size_t size;
+            StackString<64> name;
+            Flags<BufferUsage> usage;
+        };
+        MakeOrResizeBufData mkorrszbufs[]{
+            { &pass.indirect_buf, indirect_cap, ENG_FMT("{} indirect buffer", to_string((MeshPassType)i)), BufferUsage::INDIRECT_BIT },
+            { &pass.instance_buf, ret.gpuinstanceids_vec.size() * sizeof(ret.gpuinstanceids_vec[0]),
+              ENG_FMT("{} instance buffer", to_string((MeshPassType)i)), BufferUsage::STORAGE_BIT },
+        };
+        for(auto i = 0u; i < std::size(mkorrszbufs); ++i)
+        {
+            auto& d = mkorrszbufs[i];
+            if(!*d.buf) { *d.buf = get_renderer().make_buffer(d.name.as_view(), Buffer::init(d.size, d.usage)); }
+            else { get_renderer().resize_buffer(*d.buf, d.size, false); }
         }
-        else { get_renderer().resize_buffer(pass.indirect_buf, indirect_cap, false); }
 
         get_renderer().staging->copy(pass.indirect_buf.get(), counts, 0ull);
         get_renderer().staging->copy(pass.indirect_buf.get(), ret.cmds_vec, cmds_byte_start);
+        get_renderer().staging->copy(pass.instance_buf.get(), ret.gpuinstanceids_vec, 0);
 
         pass.meshes_vec.clear();
     }
@@ -81,10 +102,13 @@ MeshRenderer::SetupPassData MeshRenderer::setup(MeshPassType type, RGBuilder& b)
     const auto& pass = m_pass_datas_arr[(int)type];
     SetupPassData data{};
     if(pass.batches_vec.empty()) { return data; }
+    data.constants = b.read_buffer(get_renderer().current_data->render_resources.constants);
     data.index = b.import_resource(get_renderer().bufs.indices);
     data.index = b.read_index(data.index);
     data.indirect = b.import_resource(pass.indirect_buf);
     data.indirect = b.read_indirect(data.indirect);
+    data.gpuinstances = b.import_resource(pass.instance_buf);
+    data.gpuinstances = b.read_buffer(data.gpuinstances);
     return data;
 }
 
@@ -151,6 +175,8 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
     PassData::InstanceBatch* pb{};
     std::vector<std::byte> cmds(groups.size() * get_renderer().backend->get_indirect_indexed_command_size());
     uint32_t cmdoff{};
+    std::vector<GPUInstanceId> gpuinstanceids;
+    gpuinstanceids.reserve(vec.size());
     for(auto g : groups)
     {
         const auto& fi = vec[g.offset];
@@ -165,12 +191,19 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
         get_renderer().backend->make_indirect_indexed_command(cmds.data() + cmdoff * get_renderer().backend->get_indirect_indexed_command_size(),
                                                               meshlet.index_count, g.size, meshlet.index_offset,
                                                               meshlet.vertex_offset, g.offset);
+        for(auto i = 0u; i < g.size; ++i)
+        {
+            gpuinstanceids.push_back(GPUInstanceId{
+                .cmdi = cmdoff, .resi = g.offset, .insti = g.offset + i, .mati = *vec[g.offset + i].material });
+        }
         ++cmdoff;
     }
 
     pass.batches_vec.shrink_to_fit();
 
-    return BuildPassResult{ .cmds_vec = std::move(cmds), .cmd_count = (uint32_t)groups.size() };
+    return BuildPassResult{ .cmds_vec = std::move(cmds),
+                            .gpuinstanceids_vec = std::move(gpuinstanceids),
+                            .cmd_count = (uint32_t)groups.size() };
 }
 
 } // namespace gfx

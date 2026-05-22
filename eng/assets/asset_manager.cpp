@@ -33,10 +33,6 @@ void AssetManager::init()
     {
         m_engb_containers_vec.emplace_back(get_engine().fs->open_file(p, fs::OpenMode::READ_WRITE_BYTES));
     }
-    if(m_engb_containers_vec.empty())
-    {
-        m_engb_containers_vec.emplace_back(get_engine().fs->get_asset("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
-    }
 }
 
 const Asset& AssetManager::get_asset(const fs::Path& file_path)
@@ -62,14 +58,26 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
         asset->path = file_path;
         auto it = m_loaded_assets_map.emplace(file_path, std::move(*asset));
 
-        m_serializing_threads.push_back(std::make_unique<std::jthread>(std::jthread{
-            &AssetManager::serialize_asset_to_enbc_thread, this, std::ref(it.first->second) }));
+        if(get_engine().settings.serialize_to_enbc)
+        {
+            m_serializing_threads.push_back(std::make_unique<std::jthread>(std::jthread{
+                &AssetManager::serialize_asset_to_enbc_thread, this, std::ref(it.first->second) }));
+        }
 
         return it.first->second;
     }
 
     ENG_ERROR("Extension not supported {}", file_path.string());
     return s_null_asset;
+}
+
+serialization::engb::Container& AssetManager::get_latest_container()
+{
+    if(m_engb_containers_vec.empty())
+    {
+        m_engb_containers_vec.emplace_back(get_engine().fs->get_asset("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
+    }
+    return m_engb_containers_vec.front();
 }
 
 std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(uint64_t hash, serialization::engb::Container** out_container)
@@ -109,32 +117,43 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     ENG_TIMER_SCOPED("Deserializing {}", file_path.string());
     std::shared_lock lock{ m_engbc_vec_mutex };
 
-    std::vector<std::byte> decompressed_asset;
-    std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
-    size_t asset_read_offset = 0;
-    uint64_t uncompressed_size = 0;
-    container->m_file->read((std::byte*)&uncompressed_size, 8, list.asset_start - 8);
-    decompressed_asset.reserve(uncompressed_size);
-    auto success = compression::zlib_inflate(
-        [&](size_t size) {
-            const auto file_read = container->get_asset_data(list, std::span{ file_buf.data(), size }, asset_read_offset);
-            asset_read_offset += file_read;
-            const auto bytes_to_process = std::min(file_read, size);
-            auto span = std::span<const std::byte>{ file_buf.data(), bytes_to_process };
-            return span;
-        },
-        [&](std::span<const std::byte> data) {
-            decompressed_asset.insert(decompressed_asset.end(), data.begin(), data.end());
-        });
-    if(!success)
+    std::vector<std::byte> asset_bytes;
+    if(list.flags.test(engb::ListFlags::CONTENT_COMPRESSED_BIT))
     {
-        ENG_WARN("Failed to decompress serialized data {}", file_path.string());
-        return std::nullopt;
+        std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
+        size_t asset_read_offset = 0;
+        uint64_t uncompressed_size = 0;
+        container->m_file->read((std::byte*)&uncompressed_size, 8, list.asset_start - 8);
+        asset_bytes.reserve(uncompressed_size);
+        auto success = compression::zlib_inflate(
+            [&](size_t size) {
+                const auto file_read = container->get_asset_data(list, std::span{ file_buf.data(), size }, asset_read_offset);
+                asset_read_offset += file_read;
+                const auto bytes_to_process = std::min(file_read, size);
+                auto span = std::span<const std::byte>{ file_buf.data(), bytes_to_process };
+                return span;
+            },
+            [&](std::span<const std::byte> data) { asset_bytes.insert(asset_bytes.end(), data.begin(), data.end()); });
+        if(!success)
+        {
+            ENG_WARN("Failed to decompress serialized data {}", file_path.string());
+            return std::nullopt;
+        }
+    }
+    else
+    {
+        asset_bytes.resize(list.asset_size);
+        const auto n_bytesread = container->get_asset_data(list, std::span{ asset_bytes }, 0);
+        if(n_bytesread != list.asset_size)
+        {
+            ENG_WARN("Could not read asset bytes.");
+            return std::nullopt;
+        }
     }
 
     size_t read_bytes = 0;
     Asset asset{};
-    deserialize(asset, std::span{ decompressed_asset }, read_bytes);
+    deserialize(asset, std::span{ asset_bytes }, read_bytes);
     return asset;
 }
 
@@ -155,6 +174,7 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
     ENG_TIMER_SCOPED("Serializing asset {}", asset.path.string());
     std::vector<std::byte> asset_bytes;
     serialize(std::span{ asset_bytes }, asset, size);
+
     if(size > 0)
     {
         asset_bytes.resize(size);
@@ -166,9 +186,11 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
 
         std::scoped_lock lock{ m_engbc_vec_mutex };
         auto& engbc = get_latest_container();
-        engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {},
-                        engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
+        // engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
+        engbc.add_asset(0, ENG_HASH(asset.path.string()), {}, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
+        engbc.append_asset_bytes(std::span{ asset_bytes }, true);
 
+#if 0
         size_t bytes_compressed = 0;
         const auto res = compression::zlib_deflate(
             [&](size_t size) {
@@ -185,6 +207,7 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
 
         ENG_ASSERT(res, "Zlib compression failed {}", asset.path.string());
         engbc.append_asset_bytes({}, true);
+#endif
     }
 
     asset.geometry_data.resize(0);

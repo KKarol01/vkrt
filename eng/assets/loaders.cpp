@@ -13,6 +13,7 @@
 #include <eng/ecs/components.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
+#include <eng/renderer/bindlesspool.hpp>
 
 namespace eng
 {
@@ -51,6 +52,8 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
         static constexpr const char* FAST_COMPS[]{ "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0" };
         static constexpr gfx::VertexComponent GFX_COMPS[]{ gfx::VertexComponent::POSITION_BIT, gfx::VertexComponent::NORMAL_BIT,
                                                            gfx::VertexComponent::TANGENT_BIT, gfx::VertexComponent::UV0_BIT };
+        static constexpr fastgltf::AccessorType GFX_COMP_TYPES[]{ fastgltf::AccessorType::Vec3, fastgltf::AccessorType::Vec3,
+                                                                  fastgltf::AccessorType::Vec4, fastgltf::AccessorType::Vec2 };
         const auto vertex_layout = [&gltfprim] {
             Flags<gfx::VertexComponent> vertex_layout{};
             for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
@@ -83,6 +86,8 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             const auto cb3 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<3>(vec, idx); };
             const auto cb4 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<4>(vec, idx); };
 
+            ENG_ASSERT(GFX_COMP_TYPES[comp] == gltfacc.type);
+
             if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, gltfacc, cb3); }
             else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, gltfacc, cb3); }
             else if(comp == 2) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(gltfasset, gltfacc, cb4); }
@@ -102,7 +107,8 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             }
             auto it = gltfprim.findAttribute(FAST_COMPS[i]);
             auto& acc = gltfasset.accessors.at(it->accessorIndex);
-            if(i == 0) { vertices.resize(acc.count * vertex_size / sizeof(float)); }
+
+            if(i == 0) { vertices.resize(acc.count * vertex_size); }
             fast_iterate(i, acc, GFX_COMPS[i]);
         }
 
@@ -187,7 +193,7 @@ uint32_t load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFo
                                                        gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
                                                                         gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
                                                                             gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                        0, 1, gfx::ImageLayout::READ_ONLY));
+                                                                        1, 1, gfx::ImageLayout::READ_ONLY));
     if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
     else
     {
@@ -248,6 +254,9 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
 
         const fastgltf::Material& gltfmat = gltfasset.materials[*gltfprim.materialIndex];
         auto mat = gfx::Material::init(gltfmat.name.c_str());
+
+        if(gltfmat.alphaMode == fastgltf::AlphaMode::Mask) { mat.alpha_cutoff = gltfmat.alphaCutoff; }
+
         if(gltfmat.pbrData.baseColorTexture)
         {
             uint32_t texidx = load_texture(asset, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,

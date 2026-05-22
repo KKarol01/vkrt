@@ -28,6 +28,11 @@ template <typename T, typename Field> struct StructField
 #define ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(Type, field)                                                            \
     StructField { &Type::field }
 
+// For declaring custom functions to serialize/deserialize a type
+#define ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(Type)                                                               \
+    template <> void serialize<Type>(std::span<std::byte> dst, const Type& src, size_t& out_bytes_written);            \
+    template <> void deserialize<Type>(Type & dst, std::span<const std::byte> src, size_t& out_bytes_written);
+
 // Specialize this function with ENG_SERIALIZATION_REGISTER_FIELDS for a type that you want to be automatically serialized.
 template <typename T> inline constexpr auto get_struct_fields() { static_assert(false, "Specialize this function."); }
 
@@ -80,11 +85,6 @@ template <typename T>
 inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
 template <typename T, typename Storage>
 inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
-
-// For declaring custom functions to serialize/deserialize a type
-#define ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(Type)                                                               \
-    template <> void serialize<Type>(std::span<std::byte> dst, const Type& src, size_t& out_bytes_written);            \
-    template <> void deserialize<Type>(Type & dst, std::span<const std::byte> src, size_t& out_bytes_written);
 
 template <typename T, size_t... index>
 inline void serialize_fields(std::span<std::byte> dst, const T& src, size_t& out_bytes_written, std::index_sequence<index...>)

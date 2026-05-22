@@ -333,9 +333,9 @@ void FileSystem::delete_file(const Path& path)
         if(ptr) { ptr->close(); }
         m_files_map.erase(it);
     }
-    if(!std::filesystem::remove(path))
+    if(!std::filesystem::remove(path) && std::filesystem::exists(path))
     {
-        if(std::filesystem::exists(path)) { ENG_WARN("Could not remove file {}", path.string()); }
+        ENG_WARN("Could not remove file {}", path.string());
     }
 }
 

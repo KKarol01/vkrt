@@ -80,6 +80,12 @@ struct FrameTime
     int index = 0;
 };
 
+struct Settings
+{
+    void parse_cmdline_args(int count, const char* const argv[]);
+    bool serialize_to_enbc{ true };
+};
+
 class Engine
 {
   public:
@@ -87,6 +93,7 @@ class Engine
     void destroy();
     void start();
 
+    Settings settings{};
     fs::FileSystem* fs{};
     assets::AssetManager* assets{};
 

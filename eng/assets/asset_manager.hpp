@@ -55,7 +55,7 @@ class AssetManager
     const Asset& get_asset(const fs::Path& file_path);
 
   private:
-    serialization::engb::Container& get_latest_container() { return m_engb_containers_vec.front(); }
+    serialization::engb::Container& get_latest_container();
     std::optional<serialization::engb::List> try_find_list_by_hash(uint64_t hash,
                                                                    serialization::engb::Container** out_container = nullptr);
 

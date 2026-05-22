@@ -196,7 +196,10 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
     for(auto txt : src.textures)
     {
         // store index to image array so it can later be deserialized
-        *txt.image = (uint32_t)std::distance(src.images.begin(), std::ranges::find(src.images, txt.image));
+        auto it = std::ranges::find(src.images, txt.image);
+        ENG_ASSERT(it != src.images.end());
+        *txt.image = (uint32_t)std::distance(src.images.begin(), it);
+        ENG_ASSERT(*txt.image < src.images.size());
         serialize(dst, txt, out_bytes_written);
     }
 
@@ -215,8 +218,9 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         // remap image handles to store indices to t.images array, so they can be safely deserialized.
         if(mat.base_color_texture)
         {
-            *mat.base_color_texture.image =
-                (uint32_t)std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
+            auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
+            *mat.base_color_texture.image = (uint32_t)idx;
+            if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
         }
         if(mat.normal_texture)
         {

@@ -566,9 +566,12 @@ struct MeshPass : public Pass
     struct PassData
     {
         RGAccessId constants;
-        RGAccessId instances;
         RGAccessId positions;
+        RGAccessId attributes;
+        RGAccessId indices;
+        RGAccessId instances;
         RGAccessId indirect;
+
         RGAccessId depth;
         RGAccessId out_color;
     };
@@ -602,11 +605,13 @@ struct MeshPass : public Pass
 
                 if(data.depth_buffer) { d.depth = b.access_depth(data.depth_buffer); }
 
-                d.constants = b.read_buffer(cd.render_resources.constants);
-                d.instances = b.import_resource(r.bufs.instances);
-                d.instances = b.read_buffer(d.instances);
+                d.constants = mesh_setup.constants;
                 d.positions = b.import_resource(r.bufs.positions);
                 d.positions = b.read_buffer(d.positions);
+                d.attributes = b.import_resource(r.bufs.attributes);
+                d.attributes = b.read_buffer(d.attributes);
+                d.instances = mesh_setup.gpuinstances;
+                d.indirect = mesh_setup.indirect;
             },
             [this](RGBuilder& b, const PassData& d) {
                 if(!d.positions) { return; }
@@ -653,7 +658,7 @@ struct MeshPass : public Pass
                 VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
                 DescriptorResource shaderresources[]{
                     DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::storage_buffer(b.get_buf(d.positions)),
+                    DescriptorResource::storage_buffer(b.get_buf(d.instances)),
                 };
                 auto* cmd = b.open_cmd_buf();
                 cmd->begin_rendering(vkrinfo);

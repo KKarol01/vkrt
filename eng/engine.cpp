@@ -153,9 +153,52 @@ void Window::add_on_resize(const on_resize_cb_t& a) { on_resize_callbacks.push_b
 
 void Window::add_on_mouse_move(const on_mouse_move_cb_t& a) { on_mouse_move_callbacks.push_back(a); }
 
+void Settings::parse_cmdline_args(int count, const char* const argv[])
+{
+    enum Type
+    {
+        TNone,
+        TBool,
+        TLastEnum,
+    };
+    struct Setting
+    {
+        Type type{};
+        void* setting{};
+        union DefaultValue {
+            bool Bool;
+        } value;
+    };
+    std::unordered_map<std::string_view, Setting> settings{ { "--no-serialize", { TBool, &serialize_to_enbc, { .Bool = false } } } };
+    for(auto i = 1u; i < count; ++i)
+    {
+        auto it = settings.find(argv[i]);
+        if(it == settings.end())
+        {
+            ENG_WARN("Undefined cmdline arg {}", argv[i]);
+            continue;
+        }
+        switch(it->second.type)
+        {
+            static_assert((int)TLastEnum == 2);
+        case TBool:
+        {
+            *(bool*)it->second.setting = it->second.value.Bool;
+            continue;
+        }
+        default:
+        {
+            ENG_ASSERT(false, "Unhandled enum");
+            continue;
+        }
+        }
+    }
+}
+
 void Engine::init(int argc, char* argv[])
 {
-    if(!glfwInit()) { ENG_WARN("Could not initialize GLFW"); }
+    settings.parse_cmdline_args(argc, argv);
+    if(!glfwInit()) { ENG_ERROR("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     fs = new fs::FileSystem{};

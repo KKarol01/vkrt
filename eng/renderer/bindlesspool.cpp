@@ -235,7 +235,7 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     }
     else
     {
-        ENG_ERROR("Invalid type");
+        ENG_ASSERT("Invalid type");
         writes.pop_back();
         return;
     }

@@ -46,112 +46,6 @@ ImageBlockData get_block_data(ImageFormat format)
     }
 }
 
-void ShaderIncludes::add_file(const fs::Path& path)
-{
-    ShaderIncludes::File f{};
-    f.path = path;
-    f.includes = parse_includes(path);
-    m_files_map[path] = std::move(f);
-    auto it = m_files_map.find(path);
-    for(auto* f : it->second.includes)
-    {
-        f->included_by.insert(&it->second);
-    }
-}
-
-std::vector<ShaderIncludes::File*> ShaderIncludes::parse_includes(const fs::Path& path)
-{
-    const auto shader_dir = path.parent_path().string();
-    auto file = get_engine().fs->get_asset(path, fs::OpenMode::READ_BYTES);
-    if(!file || !file->is_open()) { return {}; }
-    std::vector<ShaderIncludes::File*> includes;
-    for(std::string line; file->getline(line);)
-    {
-        if(!line.starts_with("#include")) { continue; }
-        auto start = line.find('"');
-        if(start == std::string::npos) { continue; }
-        auto end = line.find('"', start + 1);
-        if(end == std::string::npos) { continue; }
-        std::string incpath{ line.begin() + start + 1 + 1, line.begin() + end };
-        ENG_ASSERT(incpath.starts_with('/'));
-        if(!incpath.starts_with("/assets/")) { incpath = shader_dir + incpath; }
-        auto pathit = m_files_map.find(incpath);
-        if(pathit != m_files_map.end()) { includes.push_back(&pathit->second); }
-        else
-        {
-            add_file(incpath);
-            pathit = m_files_map.find(incpath);
-            includes.push_back(&pathit->second);
-        }
-    }
-    return includes;
-}
-
-void ShaderIncludes::add_shader(Handle<Shader> shader)
-{
-    auto it = m_files_map.find(shader->path);
-    if(it == m_files_map.end())
-    {
-        add_file(shader->path);
-        it = m_files_map.find(shader->path);
-    }
-    it->second.shader = shader;
-}
-
-void ShaderIncludes::remove_shader(Handle<Shader> shader)
-{
-    auto it = m_files_map.find(shader->path);
-    if(it == m_files_map.end()) { return; }
-    for(auto* f : it->second.includes)
-    {
-        f->included_by.erase(&it->second);
-    }
-    m_files_map.erase(shader->path);
-}
-
-std::vector<const ShaderIncludes::File*> ShaderIncludes::get_shader_includes(Handle<Shader> shader) const
-{
-    std::vector<const ShaderIncludes::File*> includes;
-    const auto recurse = [this, &includes](const auto& self, const ShaderIncludes::File* file) -> void {
-        includes.push_back(file);
-        for(const auto* f : file->includes)
-        {
-            self(self, f);
-        }
-    };
-    auto it = m_files_map.find(shader->path);
-    if(it == m_files_map.end()) { return {}; }
-    for(const auto* f : it->second.includes)
-    {
-        recurse(recurse, f);
-    }
-    return includes;
-}
-
-std::vector<Handle<Shader>> ShaderIncludes::get_all_affected_shaders(const fs::Path& path) const
-{
-    std::vector<Handle<Shader>> shaders;
-    std::unordered_set<const ShaderIncludes::File*> visited_files;
-    const auto recurse = [this, &shaders, &visited_files](const auto& self, const ShaderIncludes::File* file) -> void {
-        if(visited_files.contains(file)) { return; }
-        if(file->shader) { shaders.push_back(file->shader); }
-        for(const auto* f : file->included_by)
-        {
-            self(self, f);
-        }
-    };
-    auto it = m_files_map.find(path);
-    if(it == m_files_map.end()) { return {}; }
-    for(const auto* f : it->second.included_by)
-    {
-        recurse(recurse, f);
-    }
-    std::ranges::sort(shaders);
-    auto [a, b] = std::ranges::unique(shaders);
-    shaders.erase(a, b);
-    return shaders;
-}
-
 void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, const GeometryDescriptor& desc)
 {
     auto& batch = batches.emplace_back();
@@ -170,30 +64,41 @@ void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, c
     }
     else
     {
-        const auto vx_count = desc.get_num_vertices();
-        const auto vx_size = get_vertex_layout_size(desc.vertex_layout);
-        const auto vx_flts = vx_size / sizeof(float);
-        const auto pos_size = sizeof(glm::vec3);
-        const auto att_size = vx_size - pos_size;
-        const auto att_size_flts = att_size / sizeof(float);
-        ENG_ASSERT(att_size > 0);
-        std::vector<float> vpos(vx_count * 3);
-        std::vector<float> vatt(vx_count * att_size_flts);
+        const auto n_vertices = desc.get_num_vertices();
+        const auto layout_size = get_vertex_layout_size(desc.vertex_layout);
+        const auto n_layout_flts = layout_size / sizeof(float);
+        const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
+        const auto attrs_size = layout_size - pos_size;
+        // const auto att_size_flts = attrs_size / sizeof(float);
+        //  this is temp, as i'm too lazy to support nonuniform vertex attribute layouts
+        constexpr auto n_required_att_flts = 9;
+        const auto n_att_flts = n_required_att_flts;
+        std::vector<float> out_pos(n_vertices * 3);
+        std::vector<float> out_att(n_vertices * n_att_flts, 0.0f);
         const float* src = static_cast<const float*>(desc.vertices.data());
-        for(size_t i = 0; i < vx_count; ++i)
+        for(size_t i = 0; i < n_vertices; ++i)
         {
-            const float* vertex_start = src + (i * vx_flts);
-            vpos[i * 3 + 0] = vertex_start[0];
-            vpos[i * 3 + 1] = vertex_start[1];
-            vpos[i * 3 + 2] = vertex_start[2];
-            const float* attr_start = vertex_start + 3;
-            for(size_t j = 0; j < att_size_flts; ++j)
+            const float* vertex_start = src + (i * n_layout_flts);
+            out_pos[i * 3 + 0] = vertex_start[0];
+            out_pos[i * 3 + 1] = vertex_start[1];
+            out_pos[i * 3 + 2] = vertex_start[2];
+            const float* att_start = vertex_start + 3;
+            float* dst_att_start = &out_att[i * n_att_flts];
+            static_assert((int)VertexComponent::ALL == 15);
+            for(auto comp : { VertexComponent::NORMAL_BIT, VertexComponent::TANGENT_BIT, VertexComponent::UV0_BIT })
             {
-                vatt[i * att_size_flts + j] = attr_start[j];
+                if(desc.vertex_layout.test(comp))
+                {
+                    const auto src_flt_offset = get_vertex_component_offset(batch.vertex_layout, comp) / sizeof(float) - 3;
+                    const auto flt_offset = get_vertex_component_offset(comp) / sizeof(float) - 3;
+                    const auto comp_size = get_vertex_component_size(comp);
+                    std::memcpy(dst_att_start + flt_offset, att_start + src_flt_offset, comp_size);
+                }
             }
         }
-        batch.positions = std::move(vpos);
-        batch.attributes = std::move(vatt);
+        batch.vertex_layout = VertexComponent::ALL; // todo: remove this when nonuniform layout supported
+        batch.positions = std::move(out_pos);
+        batch.attributes = std::move(out_att);
     }
 }
 
@@ -360,8 +265,8 @@ void Renderer::init_pipelines()
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
         default_pipelines[(int)MeshPassType::OPAQUE] =
-            make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/default_unlit/default_unlit.vs.hlsl",
-                                                     "/assets/shaders/default_unlit/default_unlit.ps.hlsl" })
+            make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/meshpass/default_unlit.vs.hlsl",
+                                                     "/assets/shaders/meshpass/default_unlit.ps.hlsl" })
                               .init_image_attachments(PipelineCreateInfo::AttachmentState{
                                   .count = 1,
                                   .color_formats = { settings.color_format },
@@ -373,7 +278,7 @@ void Renderer::init_pipelines()
                                                                                     .dst_alpha_factor = BlendFactor::ZERO,
                                                                                     .alpha_op = BlendOp::ADD } },
                                   .depth_format = settings.depth_format })
-                              .init_depth_test(true, false, settings.read_depth_compare)
+                              .init_depth_test(true, true, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
         default_pipelines[(int)MeshPassType::WIREFRAME] =
@@ -458,7 +363,7 @@ void Renderer::init_bufs()
     bufs.indices = make_buffer("vertex indices", Buffer::init(1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT |
                                                                         BufferUsage::AS_BUILD_INPUT));
     bufs.bspheres = make_buffer("bounding spheres", Buffer::init(1024, BufferUsage::STORAGE_BIT));
-    bufs.materials = make_buffer("materials", Buffer::init(1024, BufferUsage::STORAGE_BIT));
+    bufs.materials = make_buffer("materials", Buffer::init(1024 * 100, BufferUsage::STORAGE_BIT));
     for(uint32_t i = 0; i < 2; ++i)
     {
         bufs.transforms[i] = make_buffer(ENG_FMT("trs {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
@@ -784,20 +689,26 @@ void Renderer::compile_rendergraph()
             d.zpdepth = b.as_res_id(depth);
             d.final_color = b.as_res_id(final_color);
         },
-        [](RGBuilder& b, const RenderResources& d) {
+        [this](RGBuilder& b, const RenderResources& d) {
             auto* c = get_engine().camera;
-            GPUEngConstants constants_buffer{};
-            constants_buffer.view = c->get_view();
-            constants_buffer.proj = c->get_projection();
-            constants_buffer.proj_view = c->get_projection() * c->get_view();
-            constants_buffer.inv_view = glm::inverse(c->get_view());
-            constants_buffer.inv_proj = glm::inverse(c->get_projection());
-            constants_buffer.inv_proj_view = constants_buffer.inv_view * constants_buffer.inv_proj;
-            constants_buffer.cam_pos = c->pos;
+            GPUEngConstants constants{};
+
+            constants.GPUVertexPositionBufferIndex =
+                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.positions));
+            constants.GPUVertexAttributeBufferIndex =
+                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.attributes));
+            constants.GPUMaterialBufferIndex =
+                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.materials));
+            constants.view = c->get_view();
+            constants.proj = c->get_projection();
+            constants.proj_view = c->get_projection() * c->get_view();
+            constants.inv_view = glm::inverse(c->get_view());
+            constants.inv_proj = glm::inverse(c->get_projection());
+            constants.inv_proj_view = constants.inv_view * constants.inv_proj;
+            constants.cam_pos = c->pos;
 
             auto* cmd = b.open_cmd_buf();
-            get_renderer().staging->copy(b.get_buf(d.constants).buffer.get(), &constants_buffer, 0ull,
-                                         sizeof(constants_buffer), false);
+            get_renderer().staging->copy(b.get_buf(d.constants).buffer.get(), &constants, 0ull, sizeof(constants), false);
             cmd->wait_sync(get_renderer().staging->flush(true));
         });
 
@@ -814,7 +725,7 @@ void Renderer::compile_rendergraph()
     // todo: add enum to index this
     if(pass_data.color_buffers[0] && pass_data.depth_buffer) {}
 
-    passes.ao->init(rgraph, pass_data);
+    // passes.ao->init(rgraph, pass_data);
 
     // struct ApplyAOData
     //{
@@ -1219,10 +1130,6 @@ Handle<Material> Renderer::make_material(const Material& desc)
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
-    ENG_ASSERT((batch.vertex_layout & ~(VertexComponent::POSITION_BIT | VertexComponent::NORMAL_BIT |
-                                        VertexComponent::TANGENT_BIT | VertexComponent::UV0_BIT))
-                   .empty());
-
     const auto ret_handle = Handle<Geometry>{ (uint32_t)geometries.size() };
     new_geometries.add_descriptor(ret_handle, batch);
     geometries.emplace_back();
@@ -1299,8 +1206,8 @@ void Renderer::build_pending_geometries()
         total_mlt += res.meshlets.size();
     }
     final_result.positions.reserve(total_pos);
-    final_result.attributes.reserve(total_pos);
-    final_result.indices.reserve(total_pos);
+    final_result.attributes.reserve(total_att);
+    final_result.indices.reserve(total_idx);
     bspheres.reserve(total_mlt);
     for(const auto& res : results)
     {
@@ -1482,6 +1389,7 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
         const auto attr_stride = vx_size - pos_stride;
         const auto att_size_flts = attr_stride / sizeof(float);
         out_attributes.resize(mlt_vtxs.size() * att_size_flts);
+        ENG_ASSERT(att_size_flts == 9);
         for(size_t i = 0; i < mlt_vtxs.size(); ++i)
         {
             memcpy(&out_attributes[i * att_size_flts], &batch.attributes[mlt_vtxs[i] * att_size_flts], attr_stride);

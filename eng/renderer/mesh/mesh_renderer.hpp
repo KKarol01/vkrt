@@ -38,6 +38,7 @@ class MeshRenderer
         uint64_t meshes_hash{};
         std::vector<InstacedMeshHandle> meshes_vec;
 
+        Handle<Buffer> instance_buf;
         Handle<Buffer> indirect_buf;
         size_t indirect_cmds_offset{};
         std::vector<InstanceBatch> batches_vec;
@@ -45,13 +46,16 @@ class MeshRenderer
 
     struct SetupPassData
     {
+        RGAccessId constants;
         RGAccessId indirect;
         RGAccessId index;
+        RGAccessId gpuinstances;
     };
 
     struct BuildPassResult
     {
         std::vector<std::byte> cmds_vec;
+        std::vector<GPUInstanceId> gpuinstanceids_vec;
         uint32_t cmd_count;
     };
 

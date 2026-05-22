@@ -67,12 +67,11 @@
     
 struct GPUEngConstants
 {
-    ENG_TYPE_UINT vposb; // vertex positions buffer index
-    ENG_TYPE_UINT vatrb; // vertex attributes buffer index
-    ENG_TYPE_UINT vidxb; // index buffer index
+    ENG_TYPE_UINT GPUVertexPositionBufferIndex;
+    ENG_TYPE_UINT GPUVertexAttributeBufferIndex;
     ENG_TYPE_UINT GPUBoundingSpheresBufferIndex; // per-resource mesh bounding sphere buffer index
     ENG_TYPE_UINT GPUTransformsBufferIndex; // per-instance transform buffer index
-    ENG_TYPE_UINT rmatb; // per-instance material buffer index
+    ENG_TYPE_UINT GPUMaterialBufferIndex; // per-instance material buffer index
     ENG_TYPE_UINT GPULightsBufferIndex; // lights buffer index
 
     ENG_TYPE_MAT4 view;
@@ -92,7 +91,6 @@ struct GPUEngConstants
 
     ENG_TYPE_UINT mlt_frust_cull_enable;
     ENG_TYPE_UINT mlt_occ_cull_enable;
-
 };
 
 struct GPUEngAOSettings
@@ -149,11 +147,13 @@ struct GPUMaterial
 [[vk::binding(ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 0)]] Texture2D gTexture2Ds[];
 [[vk::binding(ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 0)]] Texture2D<float> gTexture2Df1s[];
 [[vk::binding(ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 0)]] Texture2D<float2> gTexture2Df2s[];
+[[vk::binding(ENG_BINDLESS_SAMPLED_IMAGE_BINDING, 0)]] Texture2D<float4> gTexture2Df4s[];
 [[vk::binding(ENG_BINDLESS_SAMPLER_BINDING, 0)]] SamplerState gSamplerStates[];
 [[vk::binding(ENG_BINDLESS_ACCELERATION_STRUCT_BINDING, 0)]] RaytracingAccelerationStructure gTLASs[];
 
 
-#define get_gsb(type, index) gRWBuffers[pc.type##BufferIndex].Load<type>(index * sizeof(type))
+#define get_gsb(type, index) gRWBuffers[NonUniformResourceIndex(pc.type##BufferIndex)].Load<type>(index * sizeof(type))
+#define get_gsb2(type, struct, index) gRWBuffers[NonUniformResourceIndex(struct.type##BufferIndex)].Load<type>(index * sizeof(type))
 
 #endif
 
@@ -173,9 +173,9 @@ ENG_DECLARE_STORAGE_BUFFER(GPUIndirectCountsBuffer) {
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, counts);
 } ENG_DECLARE_BINDLESS(GPUIndirectCountsBuffer);
 
-ENG_DECLARE_STORAGE_BUFFER(GPUIndicesBuffer) { 
+ENG_DECLARE_STORAGE_BUFFER(GPUIndexBuffer) { 
     ENG_TYPE_UNSIZED(ENG_TYPE_UINT, indices); 
-} ENG_DECLARE_BINDLESS(GPUIndicesBuffer);
+} ENG_DECLARE_BINDLESS(GPUIndexBuffer);
 
 ENG_DECLARE_STORAGE_BUFFER(GPUVertexPositionsBuffer) { 
     ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT3, positions); 

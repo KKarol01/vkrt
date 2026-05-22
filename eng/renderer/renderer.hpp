@@ -90,26 +90,6 @@ struct ImageBlockData
 
 ImageBlockData get_block_data(ImageFormat format);
 
-struct ShaderIncludes
-{
-    struct File
-    {
-        Handle<Shader> shader;
-        fs::Path path;
-        std::vector<File*> includes;
-        std::unordered_set<File*> included_by;
-    };
-
-    void add_file(const fs::Path& path);
-    std::vector<ShaderIncludes::File*> parse_includes(const fs::Path& path);
-    void add_shader(Handle<Shader> shader);
-    void remove_shader(Handle<Shader> shader);
-    std::vector<const File*> get_shader_includes(Handle<Shader> shader) const;
-    std::vector<Handle<Shader>> get_all_affected_shaders(const fs::Path& path) const;
-
-    std::unordered_map<fs::Path, File> m_files_map;
-};
-
 struct Shader
 {
     auto operator==(const Shader& o) const { return path == o.path; }
@@ -352,6 +332,7 @@ struct Material
     auto operator<=>(const Material& t) const = default;
     StackString<64> name;
     Handle<MeshPass> mesh_pass;
+    float alpha_cutoff{};                 //  anything > 0.0 means it's enabled and should be used
     ImageView base_color_texture;         // todo: put those in an array?
     ImageView normal_texture;             // todo: put those in an array?
     ImageView metallic_roughness_texture; // todo: put those in an array?
@@ -591,7 +572,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout,
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));
-ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.base_color_texture));
+ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.alpha_cutoff, t.base_color_texture));
 ENG_DEFINE_STD_HASH(eng::gfx::Mesh, ENG_HASH(t.geometry, t.material));
 ENG_DEFINE_STD_HASH(eng::gfx::MeshPass, ENG_HASH(t.name));
 ENG_DEFINE_STD_HASH(eng::gfx::ShaderEffect, ENG_HASH(t.pipeline));
@@ -754,7 +735,7 @@ class Renderer
         Handle<Buffer> indices;    // indices
         Handle<Buffer> bspheres;   // bounding spheres
         Handle<Buffer> materials;  // materials
-        Handle<Buffer> instances;  // instances
+        // Handle<Buffer> instances;  // instances
 
         Handle<Buffer> transforms[2]; // transforms
         Handle<Buffer> lights[2];     // lights
@@ -962,6 +943,7 @@ template <> inline constexpr auto get_struct_fields<gfx::Material>()
 {
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mesh_pass),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, alpha_cutoff),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_texture),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, normal_texture),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, metallic_roughness_texture));
