@@ -31,23 +31,13 @@ enum class DiscardContents : uint8_t
 class StagingBuffer
 {
     static constexpr size_t CAPACITY = 64ull * 1024 * 1024;
-    static constexpr size_t ALIGNMENT = 1024ull;
-
-    struct FreeAllocation
-    {
-        bool operator<(const FreeAllocation& a) const { return std::tie(index, offset) < std::tie(a.index, a.offset); }
-        uint32_t index{};
-        size_t offset{};
-        size_t size{};
-    };
+    static constexpr size_t ALIGNMENT = 256ull;
 
     struct Allocation
     {
-        size_t offset{};         // offset from the start of the buffer's memory
-        size_t size{};           // may be less_eq than real_size, if user requested size not multiple of alignment
-        size_t real_size{};      // not min'd down to user req size, if alloc happened to be bigger
-        Sync* semaphore{};       // signaled when completed
-        uint64_t signal_value{}; // value to wait on
+        size_t offset{};    // offset from the start of the buffer's memory
+        size_t size{};      // may be less_eq than real_size, if user requested size not multiple of alignment
+        size_t real_size{}; // not min'd down to user req size, if alloc happened to be bigger
     };
 
     // double buffered context so each frame cmd pool can be reset and cmd bufs reused.
@@ -63,9 +53,7 @@ class StagingBuffer
     Sync* flush(bool signal_sync);
     // Flushes and waits on the cpu until completion.
     void flush_wait();
-    // Flushes pending transactions and waits for completions of all submissions.
-    // void reset();
-
+	void reset();
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier = false);
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
@@ -98,12 +86,10 @@ class StagingBuffer
     void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipsLayers& range = {});
 
   private:
+    size_t get_free_space() const { return CAPACITY - head; }
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
-    void scan_for_finished_allocations();
-    void merge_free_allocations();
-    void insert_free_alloc(const FreeAllocation& alloc);
-    // Get frame dependent context
+    // Get current double buffered context
     Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
@@ -119,8 +105,9 @@ class StagingBuffer
     Buffer buffer;
     std::vector<Context> contexts;
     std::deque<Allocation> allocations;
-    std::vector<FreeAllocation> free_list; // key is floor(log2) of alloc size. min key is log2(alignment), max key is log2(capacity)
     uint64_t last_frame{};
+    size_t head{};
+	Sync* sync{};
 };
 } // namespace gfx
 } // namespace eng

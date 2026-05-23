@@ -91,27 +91,39 @@ inline thread_local char msg_buf[1024]{};
 namespace eng
 {
 
+struct Timer
+{
+    StackString<1024> label;
+    size_t time_us{};
+    size_t nest_level{};
+    Timer* parent{};
+};
+
 struct ScopedTimer
 {
+    ScopedTimer(size_t buf_len);
     ScopedTimer(std::string_view label);
     ~ScopedTimer();
-    StackString<1024> label;
-    double start_secs{};
-    uint32_t nest_level{ ~0u };
+    Timer* timer{};
 };
 
-thread_local inline std::deque<ScopedTimer> g_scoped_timers;
-
-struct ScopedTimerProxy
+struct TimerStorage
 {
-    ScopedTimerProxy(std::string_view label) { g_scoped_timers.emplace_back(label); }
-    ~ScopedTimerProxy() { g_scoped_timers.pop_back(); }
+    Timer* timer{};
+    std::deque<Timer> timers;
+    std::deque<ScopedTimer> manually_scoped_timers;
+    char label_buf[1024]{};
 };
+
+inline thread_local TimerStorage g_timers;
 
 } // namespace eng
 
-#define ENG_TIMER_CONCAT_LINE(a, b) a##b
+#define ENG_TIMER__CONCAT2(a, b) a##b
+#define ENG_TIMER__CONCAT(a, b) ENG_TIMER__CONCAT2(a, b)
 #define ENG_TIMER_SCOPED(msg, ...)                                                                                     \
-    ::eng::ScopedTimerProxy ENG_TIMER_CONCAT_LINE(eng_scoped_timer_proxy_, __LINE__){ ENG_FMT(msg, __VA_ARGS__) };
-#define ENG_TIMER_START(msg, ...) ::eng::g_scoped_timers.emplace_back(ENG_FMT(msg, __VA_ARGS__));
-#define ENG_TIMER_END() ::eng::g_scoped_timers.pop_back();
+    ::eng::ScopedTimer ENG_TIMER__CONCAT(eng_scoped_timer_,                                                            \
+                                         __LINE__){ ENG_FMT_TO_N(::eng::g_timers.label_buf, 1023, msg, __VA_ARGS__) };
+#define ENG_TIMER_START(msg, ...)                                                                                      \
+    ::eng::g_timers.manually_scoped_timers.emplace_back(ENG_FMT_TO_N(::eng::g_timers.label_buf, 1023, msg, __VA_ARGS__));
+#define ENG_TIMER_END() ::eng::g_timers.manually_scoped_timers.pop_back();

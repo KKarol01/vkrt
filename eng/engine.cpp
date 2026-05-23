@@ -59,46 +59,50 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 
 namespace eng
 {
+ScopedTimer::ScopedTimer(size_t buf_len) : ScopedTimer(std::string_view{ g_timers.label_buf, buf_len }) {}
 
-ScopedTimer::ScopedTimer(std::string_view label) : label(label), nest_level((uint32_t)g_scoped_timers.size())
+ScopedTimer::ScopedTimer(std::string_view label)
 {
 #ifdef ENG_DEBUG_BUILD
-    start_secs = glfwGetTime();
+    auto& t = g_timers.timers.emplace_back();
+    // push timer onto stack
+    t.label = label;
+    t.parent = g_timers.timer;
+    if(t.parent) { t.nest_level = t.parent->nest_level + 1; }
+    g_timers.timer = &t;
+    timer = &t;
+    t.time_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 #endif
 }
 
 ScopedTimer::~ScopedTimer()
 {
 #ifdef ENG_DEBUG_BUILD
-    const double ms = (glfwGetTime() - start_secs) * 1000.0;
-    std::string msg = ENG_FMT("[{: >6.2f}ms] : {}", ms, label.as_view());
 
-    if(nest_level == ~0u)
+    // calculate time delta
+    const auto time =
+        (size_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    timer->time_us = time - timer->time_us;
+
+    // pop timer from the stack
+    g_timers.timer = timer->parent;
+
+    // main timer, no previous parents, print messages in-order of push sequence
+    if(!timer->parent)
     {
-        ENG_LOG("{}", msg);
+        constexpr std::string_view tabs = "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+        for(const auto& t : g_timers.timers)
+        {
+            ENG_ASSERT(t.nest_level < tabs.size());
+            const auto delta_ms = std::chrono::duration<float, std::milli>(std::chrono::microseconds{ t.time_us });
+            ENG_LOG("{}[{: >6.2f}ms]{}", tabs.substr(0, t.nest_level), delta_ms.count(), t.label.as_view());
+        }
+        g_timers.timers.clear();
+        ENG_ASSERT(g_timers.manually_scoped_timers.empty());
         return;
     }
-
-    struct MessageStack
-    {
-        std::vector<std::string> lines;
-        void flush()
-        {
-            for(const auto& line : lines)
-            {
-                ENG_LOG("{}", line);
-            }
-            lines.clear();
-        }
-    };
-    thread_local MessageStack stack;
-
-    // Add indentation and store
-    std::string indent(nest_level, '\t');
-    stack.lines.push_back(indent + msg);
-
-    // If we've returned to the root level, print everything
-    if(nest_level == 0) { stack.flush(); }
 #endif
 }
 
@@ -227,6 +231,8 @@ void Engine::init(int argc, char* argv[])
     camera = new Camera{ glm::radians(90.0f), 0.1f };
     renderer->init(new gfx::RendererBackendVk{});
     ui->init();
+
+    engine_startup_time = std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
 void Engine::destroy()

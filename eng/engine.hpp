@@ -109,6 +109,7 @@ class Engine
     double last_frame_time{};
     double delta_time{};
     uint64_t tick{};
+    size_t engine_startup_time{};
     float refresh_rate{ 1.0f / 60.0f };
 
     Signal<void()> on_init;
