@@ -20,6 +20,7 @@ template <typename Storage = uint32_t> struct SlotAllocator
 
     Slot allocate()
     {
+        if(num_slots == *Slot{}) { return Slot{}; }
         if(!next_free) { return slots.emplace_back(num_slots++); }
         Slot s = next_free;
         next_free = slots[*s]; // get next free
@@ -35,6 +36,8 @@ template <typename Storage = uint32_t> struct SlotAllocator
         next_free = s;
         --num_slots;
     }
+
+    void erase(Storage s) { erase(Slot{ s }); }
 
     std::vector<Slot> slots;
     Slot next_free{};

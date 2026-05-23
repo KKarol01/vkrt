@@ -601,7 +601,8 @@ void Renderer::update()
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto entity = new_transforms[i];
-            const auto [transform, mesh] = get_engine().ecs->get<ecsc::Transform, ecsc::Mesh>(entity);
+            const auto& transform = get_engine().ecs->get<ecsc::Transform>(entity);
+            const auto& mesh = get_engine().ecs->get<ecsc::Mesh>(entity);
             const auto trsmat4x4 = transform.to_mat4();
             staging->copy(bufs.transforms[0].get(), &trsmat4x4[0][0], mesh.gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
         }

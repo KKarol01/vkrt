@@ -8,126 +8,103 @@
 #include <cmath>
 #include <memory>
 
-template <typename IndexType = uint32_t, size_t PAGE_SIZE = 4096> class SparseSet
+template <std::integral Index = uint32_t> class SparseSet
 {
+    inline static constexpr size_t IDX_PER_PAGE = 16384 / sizeof(Index);
+
   public:
-    using index_t = IndexType;
-    using page_t = std::unique_ptr<index_t>;
-    inline static constexpr index_t MAX_INDEX = ~index_t{};
+    inline static constexpr Index INVALID = ~Index{};
 
-    struct Iterator
+    auto begin() { return m_dense_vec.begin(); }
+    auto end() { return m_dense_vec.begin() + size(); }
+    auto begin() const { return m_dense_vec.begin(); }
+    auto end() const { return m_dense_vec.begin() + size(); }
+
+    // Allocates identifier, and returns index to linear dense storage.
+    Index allocate(Index index)
     {
-        explicit operator bool() const { return valid; }
-        index_t operator*() const { return dense; }
-        index_t dense{ ~index_t{} }; // Index to dense.
-        bool valid{ false };         // Was find, insertion or deletion successful.
-    };
-
-    auto begin() { return dense_array.begin(); }
-    auto end() { return dense_array.begin() + next_free; }
-    auto begin() const { return dense_array.begin(); }
-    auto end() const { return dense_array.begin() + next_free; }
-
-    // indexes dense.
-    index_t at(size_t dense) const { return dense_array.at(dense); }
-
-    bool has(index_t sparse) const
-    {
-        const auto pi = get_page_index(sparse);
-        const auto ipi = get_in_page_index(sparse);
-        if(sparse_array.size() <= pi || !sparse_array.at(get_page_index(sparse))) { return false; }
-        const auto s = sparse_array.at(pi).get()[ipi];
-        return s < size() && dense_array.at(s) == sparse;
+        // check if sparse set is full
+        if(size() == INVALID) { return INVALID; }
+        const auto [pi, ei] = unpack_index(index);
+        // allocate page, if needed
+        if(pi >= m_sparse_vec.size()) { m_sparse_vec.resize(pi + 1); }
+        auto*& p = m_sparse_vec[pi];
+        if(!p) { p = new Index[IDX_PER_PAGE]{}; }
+        assert(p);
+        if(!p) { return INVALID; }
+        if(has(index)) { return p[ei]; }
+        const auto di = m_size++;
+        // reserve storage
+        if(di >= m_dense_vec.capacity()) { m_dense_vec.reserve(align_up2(di + 1, IDX_PER_PAGE)); }
+        // assign to dense index to sparse
+        if(di == m_dense_vec.size()) { m_dense_vec.push_back(index); }
+        else { m_dense_vec[di] = index; }
+        // assign to sparse index to dense
+        p[ei] = di;
+        return di;
     }
 
-    size_t size() const { return next_free; }
-
-    // extracts key from dense. may return ~key_t on invalid iterator.
-    index_t get(Iterator it) const
+    // Allocates generated identifier, and returns index to linear dense storage.
+    Index allocate()
     {
-        if(!it || size() <= it.dense) { return ~index_t{}; }
-        return dense_array.at(it.dense);
+        if(m_size == m_dense_vec.size()) { m_dense_vec.push_back(m_size); }
+        return allocate(m_dense_vec[m_size]);
     }
 
-    // extracts from sparse. is false when sparse set does not have the key.
-    Iterator get(index_t sparse) const
+    // Frees index
+    Index free(Index index)
     {
-        if(has(sparse)) { return make_iterator(sparse, true); }
-        return Iterator{};
+        if(!has(index)) { return INVALID; }
+        auto [pi, ei] = unpack_index(index);
+        const auto di = m_sparse_vec[pi][ei];
+        // swap indices to sparse. now both sparse are invalid
+        std::swap(m_dense_vec[di], m_dense_vec[--m_size]);
+        // unpack index to sparse for the swapped element
+        // di is the removed one, the --m_size is the last one that will fill it's
+        // spot for the linear iteration to work.
+        // swapping, so that parameterless allocate() may reuse it.
+        std::tie(pi, ei) = unpack_index(m_dense_vec[di]);
+        // update index to dense for the replaced element
+        m_sparse_vec[pi][ei] = di;
+        return di;
     }
 
-    // inserts new key. iterator is false if no insertion happened.
-    Iterator insert(index_t sparse)
+    // Checks if index is allocated
+    bool has(Index index) const
     {
-        if(has(sparse)) { return make_iterator(sparse, false); }
-        if(next_free > MAX_INDEX)
-        {
-            assert(false && "Too many indices");
-            return make_iterator(MAX_INDEX, false);
-        }
-
-        // get page and allocate new if page is full
-        const auto page = get_page_index(sparse);
-        if(sparse_array.size() <= page) { sparse_array.resize(page + 1); }
-        if(!sparse_array.at(page))
-        {
-            sparse_array.at(page).reset(new index_t[PAGE_SIZE]);
-            memset(&sparse_array[page].get()[0], 0, sizeof(index_t) * PAGE_SIZE);
-        }
-
-        // insert element into dense. use free list head as index.
-        // if some elements were removed via std::swap, reuse them
-        assert(next_free <= dense_array.size());
-        sparse_to_dense(sparse) = next_free;
-        if(dense_array.size() == next_free) { dense_array.push_back(sparse); }
-        else { dense_array.at(next_free) = sparse; }
-
-        ++next_free;
-        return make_iterator(sparse, true);
+        if(index == INVALID) { return false; }
+        const auto [pi, ei] = unpack_index(index);
+        if(pi >= m_sparse_vec.size() || ei >= IDX_PER_PAGE) { return false; }
+        const auto* p = m_sparse_vec[pi];
+        if(!p) { return false; }
+        const auto di = p[ei];
+        if(di >= size() || index != m_dense_vec[di]) { return false; }
+        return true;
     }
 
-    // generates unique value and inserts it. useful for entity creation
-    Iterator insert()
+    // Returns linear storage index to dense.
+    Index to_dense(Index index) const
     {
-        if(next_free > MAX_INDEX)
-        {
-            assert(false && "Too many indices");
-            return make_iterator(MAX_INDEX, false);
-        }
-        if(next_free == dense_array.size()) { dense_array.push_back(next_free); }
-        return insert(dense_array.at(next_free));
+        if(!has(index)) { return INVALID; }
+        const auto [pi, ei] = unpack_index(index);
+        return m_sparse_vec[pi][ei];
     }
 
-    // Returns index to dense at which deletion (if any) happened.
-    // This is mainly used to delete from secondary vectors that keep associated data.
-    Iterator erase(index_t sparse)
-    {
-        if(!has(sparse)) { return Iterator{}; }
-        const auto idx = sparse_to_dense(sparse);
-        std::swap(dense_array.at(idx), dense_array.at(--next_free)); // swap to reuse on later inserts
-        sparse_to_dense(dense_array.at(idx)) = idx; // update the sparse index of the last element that got moved to new position
-        return Iterator{ idx, true };
-    }
+    // Returns the count of allocated indices.
+    size_t size() const { return m_size; }
 
   private:
-    const index_t& sparse_to_dense(index_t sparse) const
+    static size_t align_up2(size_t index, size_t alignment)
     {
-        return sparse_array.at(get_page_index(sparse)).get()[get_in_page_index(sparse)];
+        assert((alignment & (alignment - 1)) == 0);
+        return (index + alignment - 1) & ~(alignment - 1);
     }
-    index_t& sparse_to_dense(index_t sparse)
+    static std::pair<Index, Index> unpack_index(Index index)
     {
-        return sparse_array.at(get_page_index(sparse)).get()[get_in_page_index(sparse)];
-    }
-
-    size_t get_page_index(index_t sparse) const { return sparse / PAGE_SIZE; }
-    size_t get_in_page_index(index_t sparse) const { return sparse % PAGE_SIZE; }
-
-    Iterator make_iterator(index_t sparse, bool is_valid) const
-    {
-        return Iterator{ sparse_to_dense(sparse), is_valid };
+        return std::make_pair(index / IDX_PER_PAGE, index % IDX_PER_PAGE);
     }
 
-    std::vector<page_t> sparse_array; // map entry to index to key
-    std::vector<index_t> dense_array; // keys
-    size_t next_free{};               // index to dense
+    std::vector<Index*> m_sparse_vec;
+    std::vector<Index> m_dense_vec;
+    Index m_size{};
 };

@@ -853,6 +853,7 @@ class Renderer
 
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
+	
     // void instance_blas(const BLASInstanceSettings& settingsi);
     // void update_transform(ecs::entity_id entity);
 
