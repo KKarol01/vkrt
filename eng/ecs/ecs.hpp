@@ -110,18 +110,18 @@ struct ComponentTraits
 struct IComponentPool
 {
     virtual ~IComponentPool() = default;
-    bool has(EntitySlot e) const { return entities.has(e); }
-    size_t size() const { return entities.size(); }
+    bool has(EntitySlot e) const { return m_entities_set.has(e); }
+    size_t size() const { return m_entities_set.size(); }
     virtual void erase(EntitySlot e) = 0;
-    SparseSet<EntitySlot> entities; // for packing components
+    SparseSet<EntitySlot> m_entities_set; // for packing components
 };
 
 template <typename Component> struct ComponentPool : public IComponentPool
 {
     Component& get(EntitySlot e)
     {
-        const auto idx = entities.to_dense(e);
-        if(idx == entities.INVALID)
+        const auto idx = m_entities_set.to_dense(e);
+        if(idx == m_entities_set.INVALID)
         {
             static Component null_component{};
             ENG_ASSERT(false, "Invalid entity {}", e);
@@ -132,15 +132,15 @@ template <typename Component> struct ComponentPool : public IComponentPool
 
     template <typename... Args> void emplace(EntitySlot e, Args&&... args)
     {
-        const bool has_e = entities.has(e);
+        const bool has_e = m_entities_set.has(e);
         if(has_e)
         {
             ENG_WARN("Tried to overwrite entity {}", e);
             return;
         }
-        const auto it = entities.allocate(e);
-        ENG_ASSERT(it != entities.INVALID);
-        if(it == entities.INVALID)
+        const auto it = m_entities_set.allocate(e);
+        ENG_ASSERT(it != m_entities_set.INVALID);
+        if(it == m_entities_set.INVALID)
         {
             ENG_WARN("Failed to allocate storage for component for entity {}", it);
             return;
@@ -155,8 +155,8 @@ template <typename Component> struct ComponentPool : public IComponentPool
 
     void erase(EntitySlot e) override
     {
-        const auto it = entities.free(e);
-        if(it == entities.INVALID)
+        const auto it = m_entities_set.free(e);
+        if(it == m_entities_set.INVALID)
         {
             ENG_ERROR("Trying to delete invalid entity {}", e);
             return;
@@ -183,6 +183,32 @@ class Registry
         EntityId first_kid{};
     };
 
+    struct QueryGroup
+    {
+        void add_eid(EntityId eid)
+        {
+            hash = ENG_HASH(hash, eid);
+            entities.push_back(eid);
+        }
+        void erase_eid(EntityId eid)
+        {
+            auto [beg, end] = std::ranges::remove(entities, eid);
+            entities.erase(beg, end);
+            rehash();
+        }
+        void rehash()
+        {
+            hash = 0;
+            for(auto e : entities)
+            {
+                hash = ENG_HASH(hash, e);
+            }
+        }
+        Signature sig;
+        uint64_t hash{};
+        std::vector<EntityId> entities;
+    };
+
     template <typename... Components> static Signature get_signature()
     {
         return (ComponentTraits::get_signature<Components>() | ...);
@@ -194,10 +220,9 @@ class Registry
     bool has(EntityId eid) const { return *eid < entities.size() && eid == entities[eid.slot()]; }
 
     // Checks if entity is registered and if it has specified components.
-    template <typename... Components> bool has(EntityId eid) const
-    {
-        return has(eid) && get_md(eid).has_components(get_signature<Components...>());
-    }
+    template <typename... Components> bool has(EntityId eid) const { return has(eid, get_signature<Components...>()); }
+    // Checks if entity is registered and if it has specified components.
+    bool has(EntityId eid, Signature sig) const { return has(eid) && get_md(eid).has_components(sig); }
 
     // Creates an entity. Entity can be derefenced using * operator
     // And get_slot() returns stable index.
@@ -247,15 +272,8 @@ class Registry
             ENG_WARN("Invalid entity {}", *eid);
             return;
         }
-
         const Signature sig = ComponentTraits::get_signature<Components...>();
         auto& md = get_md(eid);
-        if((sig & md.sig).any())
-        {
-            ENG_WARN("Entity {} already has some of these components {}", *eid, (sig & md.sig).to_string());
-            return;
-        }
-
         const auto emplace_component = [this, eid](auto&& comp) {
             auto& pool = get_pool<std::decay_t<decltype(comp)>>();
             pool.emplace(eid.slot(), std::forward<decltype(comp)>(comp));
@@ -263,6 +281,7 @@ class Registry
         const auto old_sig = md.sig;
         md.sig |= sig;
         (emplace_component(std::forward<Components>(components)), ...);
+        update_query_groups(eid);
     }
 
     // Return the count of registered entities.
@@ -279,22 +298,6 @@ class Registry
     template <typename... Components> void erase_components(EntityId eid)
     {
         erase_components(eid, Signature{ ~ComponentId{} });
-    }
-
-    // Invokes a callback for every entity that has the specified components.
-    template <typename... Components>
-    void iterate_components(const auto& callback)
-        requires(std::is_invocable_v<decltype(callback), EntityId, std::add_lvalue_reference_t<Components>...>)
-    {
-        const IComponentPool* const pool = try_find_smallest_pool<Components...>();
-        const Signature sig = get_signature<Components...>();
-        if(!pool) { return; }
-        for(auto e : pool->entities)
-        {
-            const auto& md = metadatas[e];
-            if(!md.has_components(sig)) { continue; }
-            callback(entities[e], get<Components>(entities[e])...);
-        }
     }
 
     // Creates parent-child relationship.
@@ -392,6 +395,22 @@ class Registry
         }
     }
 
+    // Invokes a callback for every entity that has the specified components.
+    template <typename... Components>
+    void iterate_components(const auto& callback)
+        requires(std::is_invocable_v<decltype(callback), EntityId, std::add_lvalue_reference_t<Components>...>)
+    {
+        const IComponentPool* const pool = try_find_smallest_pool<Components...>();
+        const Signature sig = get_signature<Components...>();
+        if(!pool) { return; }
+        for(auto e : pool->m_entities_set)
+        {
+            const auto& md = metadatas[e];
+            if(!md.has_components(sig)) { continue; }
+            callback(entities[e], get<Components>(entities[e])...);
+        }
+    }
+
     // Traverses depth-first the relationship hierarchy of given entity.
     // Callback is called at least once for any valid entity.
     void traverse_hierarchy(EntityId eid, const auto& callback)
@@ -406,6 +425,14 @@ class Registry
             iterate_children(id, [&](EntityId id) { self(id, self); });
         };
         traverse(eid, traverse);
+    }
+
+    template <typename... Components> const QueryGroup& get_query_group()
+    {
+        const auto sig = get_signature<Components...>();
+        auto it = m_qgroups_map.find(sig);
+        if(it == m_qgroups_map.end()) { return m_qgroups_map.emplace(sig, init_query_group(sig)).first->second; }
+        return it->second;
     }
 
   private:
@@ -458,10 +485,42 @@ class Registry
         return smallest;
     }
 
+    QueryGroup init_query_group(Signature sig)
+    {
+        QueryGroup g{};
+        g.sig = sig;
+        auto* p = try_find_smallest_pool(sig);
+        if(p)
+        {
+            for(auto e : p->m_entities_set)
+            {
+                const auto eid = entities[e];
+                if(has(eid, sig)) { g.add_eid(eid); }
+            }
+        }
+        return g;
+    }
+
+    void update_query_groups(EntityId eid)
+    {
+        const auto& md = get_md(eid);
+        const auto esig = md.sig;
+        for(auto& [sig, g] : m_qgroups_map)
+        {
+            if(md.has_components(sig))
+            {
+                ENG_ASSERT(!std::ranges::contains(g.entities, eid));
+                g.add_eid(eid);
+            }
+            else { g.erase_eid(eid); }
+        }
+    }
+
     SlotAllocator<EntitySlot> entity_alloc;
     std::vector<EntityId> entities;        // besides indices from hierarchy, stores versions for erase() and has()
     std::vector<EntityMetadata> metadatas; // additional info for entities
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools; // component pools
+    std::unordered_map<Signature, QueryGroup> m_qgroups_map;
 };
 
 } // namespace ecs

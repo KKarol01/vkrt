@@ -548,19 +548,21 @@ void Renderer::update()
             compile_pipeline(h);
         }
     });
-
+    if(const auto& qg = get_engine().ecs->get_query_group<ecsc::Mesh>(); mesh_entt_hash != qg.hash)
     {
-        ENG_TIMER_SCOPED("Iterate components");
-        get_engine().ecs->iterate_components<ecsc::Mesh>([this](ecs::EntityId e, ecsc::Mesh& mesh) {
+        ENG_TIMER_SCOPED("Allocate mesh gpu resources");
+        for(auto e : qg.entities)
+        {
+            auto& mesh = get_engine().ecs->get<ecsc::Mesh>(e);
             if(mesh.gpu_resource == ~0u)
             {
                 mesh.gpu_resource = *gpu_resource_allocator.allocate();
                 new_transforms.push_back(e);
             }
             mesh_renderer.instance_entity(e);
-        });
+        }
+        mesh_entt_hash = qg.hash;
     }
-
     if(new_shaders.size())
     {
         for(auto h : new_shaders)

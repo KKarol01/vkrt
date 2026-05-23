@@ -39,21 +39,17 @@ void MeshRenderer::build_passes()
     for(auto i = 0u; i < (int)MeshPassType::LAST_ENUM; ++i)
     {
         auto& pass = m_pass_datas_arr[i];
-        const auto hash = [&pass] {
-            uint64_t hash{};
-            for(const auto& h : pass.meshes_vec)
-            {
-                hash = ENG_HASH(hash, h.mesh);
-            }
-            return hash;
-        }();
-
-        if(hash == pass.meshes_hash)
+        const auto& qgroup = get_engine().ecs->get_query_group<ecsc::Mesh>();
+        if(pass.meshes_hash != qgroup.hash)
         {
-            pass.meshes_vec.clear();
-            continue;
+            for(auto e : qgroup.entities)
+            {
+                instance_entity(e);
+            }
+            pass.meshes_hash = qgroup.hash;
         }
-        pass.meshes_hash = hash;
+        else { continue; }
+
         auto instances = extract_mesh_instances((MeshPassType)i, pass);
         sort_mesh_instances(instances);
         auto ret = build_pass_from_instances(pass, instances);
