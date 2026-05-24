@@ -387,6 +387,12 @@ enum class QueryType : uint8_t
     PERFORMANCE,
 };
 
+enum class DiscardContents : uint8_t
+{
+    NO,
+    YES,
+};
+
 class Renderer;
 struct ImageBlockData;
 struct Shader;

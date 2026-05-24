@@ -14,6 +14,7 @@
 #include <tuple>
 #include <algorithm>
 #include <limits>
+#include "traits.hpp"
 #include <eng/common/sparseset.hpp>
 #include <eng/common/slotmap.hpp>
 #include <eng/common/slotallocator.hpp>
@@ -66,6 +67,12 @@ namespace ecs
     Looping over just calls the callback with all it's children, in-order.
 */
 
+#define ENG_ECS_DEFINE_COMPONENT_ID(Type, val)                                                                         \
+    namespace eng::ecs                                                                                                 \
+    {                                                                                                                  \
+    template <> const ComponentId ComponentTraits::Id<Type>::id = val;                                                 \
+    }
+
 namespace test
 {
 class EcsTest;
@@ -73,38 +80,17 @@ class EcsTest;
 
 using EntitySlot = uint32_t;
 using EntityVersion = uint32_t;
+using EntityStorageType = uint64_t;
 // typed uint64_t for storing stable index to associated data and a version
-struct EntityId : public TypedId<EntityId, EntityVersion>
+struct EntityId : public TypedId<EntityId, EntityStorageType>
 {
     explicit EntityId(StorageType handle) : TypedId(handle) {}
     explicit EntityId() : TypedId() {}
     EntityId(EntitySlot slot, EntityVersion version) : TypedId(((uint64_t)version << 32) | (uint64_t)slot) {}
     auto operator<=>(const EntityId&) const = default;
-    EntitySlot slot() const { return EntitySlot{ (uint32_t)handle }; }
-    uint32_t version() const { return (uint32_t)(handle >> 32); }
+    EntitySlot slot() const { return EntitySlot{ (uint32_t)(handle & 0xFFFFFFFFu) }; }
+    EntityVersion version() const { return (uint32_t)(handle >> 32); }
     EntityId bump() const { return EntityId{ slot(), version() + 1 }; }
-};
-using ComponentId = uint32_t;
-inline static constexpr uint32_t MAX_COMPONENTS = std::numeric_limits<ComponentId>::digits;
-using Signature = std::bitset<MAX_COMPONENTS>;
-
-struct ComponentTraits
-{
-    template <typename Component> struct Id
-    {
-        static_assert(!std::is_reference_v<Component> && !std::is_pointer_v<Component>);
-        static_assert(!std::is_const_v<Component> && !std::is_volatile_v<Component>);
-        static_assert(std::is_object_v<Component>);
-        static ComponentId id;
-    };
-
-    // Gets stable unique 0-based index for component
-    template <typename Component> static ComponentId get_id() { return Id<std::remove_cvref_t<Component>>::id; }
-    // Returns bit mask of given components
-    template <typename... Components> static Signature get_signature()
-    {
-        return Signature{ (0 | ... | (1ull << get_id<Components>())) };
-    }
 };
 
 struct IComponentPool
@@ -217,7 +203,7 @@ class Registry
   public:
     // Checks if entity is registered. If stale entity handle was used, function will return false.
     // Stale handle has different version which changes after erasures.
-    bool has(EntityId eid) const { return *eid < entities.size() && eid == entities[eid.slot()]; }
+    bool has(EntityId eid) const { return eid.slot() < entities.size() && eid == entities[eid.slot()]; }
 
     // Checks if entity is registered and if it has specified components.
     template <typename... Components> bool has(EntityId eid) const { return has(eid, get_signature<Components...>()); }

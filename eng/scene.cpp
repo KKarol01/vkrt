@@ -7,9 +7,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <eng/ecs/components.hpp>
 #include <eng/scene.hpp>
 #include <eng/engine.hpp>
-#include <eng/ecs/components.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/fs/fs.hpp>
 #include <eng/physics/bvh.hpp>

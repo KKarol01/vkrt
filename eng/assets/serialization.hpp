@@ -234,17 +234,6 @@ inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src,
     deserialize(dst.handle, src, out_bytes_written);
 }
 
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(assets::Asset);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(assets::Node);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::ImageView);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::ParsedImageData);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::ParsedGeometryData);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::Material);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::Mesh);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(gfx::Meshlet);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(ecsc::Transform);
-// ENG_SERIALIZATION_DECLARE_STRUCT_FIELDS(assets::engb::List);
-
 // clang-format off
 /*
 .enbg custom asset byte container format

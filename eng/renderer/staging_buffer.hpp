@@ -22,12 +22,6 @@ namespace gfx
 {
 inline static constexpr auto STAGING_APPEND = ~0ull;
 
-enum class DiscardContents : uint8_t
-{
-    NO,
-    YES,
-};
-
 class StagingBuffer
 {
     static constexpr size_t CAPACITY = 64ull * 1024 * 1024;
