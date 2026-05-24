@@ -14,6 +14,7 @@
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/renderer/bindlesspool.hpp>
+#include <assets/shaders/common.hlsli>
 
 namespace eng
 {
@@ -193,12 +194,67 @@ uint32_t load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFo
                                                        gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
                                                                         gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
                                                                             gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                        1, 1, gfx::ImageLayout::READ_ONLY));
+                                                                        0, 1, gfx::ImageLayout::READ_ONLY));
     if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
     else
     {
-        gfx::get_renderer().staging->copy(img.get(), imgdata, 0, 0, true, gfx::DiscardContents::YES);
-        ENG_TODO("TODO: Process mips");
+        gfx::get_renderer().staging->copy(img.get(), imgdata, 0, 0, false, gfx::DiscardContents::YES);
+        auto* sync = gfx::get_renderer().staging->flush(true);
+        auto* cmd = gfx::get_renderer().current_data->cmdpool->begin();
+        cmd->wait_sync(sync, gfx::PipelineStage::TRANSFER_BIT);
+        // Track dimensions dynamically across the mip chain
+        int32_t src_w = static_cast<int32_t>(img->width);
+        int32_t src_h = static_cast<int32_t>(img->height);
+        int32_t src_d = static_cast<int32_t>(img->depth);
+
+        cmd->barrier(img.get(), gfx::PipelineStage::NONE, gfx::PipelineAccess::NONE, gfx::PipelineStage::TRANSFER_BIT,
+                     gfx::PipelineAccess::TRANSFER_RW, gfx::ImageLayout::UNDEFINED, gfx::ImageLayout::TRANSFER_DST,
+                     gfx::ImageMipsLayers{ { 0, ~0u }, { 0, 1 } });
+
+        for(uint32_t i = 1; i < img->mips; ++i)
+        {
+            int32_t dst_w = std::max(1, src_w / 2);
+            int32_t dst_h = std::max(1, src_h / 2);
+            int32_t dst_d = std::max(1, src_d / 2);
+
+            cmd->barrier(img.get(), gfx::PipelineStage::TRANSFER_BIT, gfx::PipelineAccess::TRANSFER_WRITE_BIT,
+                         gfx::PipelineStage::TRANSFER_BIT,       // dst_stage
+                         gfx::PipelineAccess::TRANSFER_READ_BIT, // dst_access
+                         gfx::ImageLayout::TRANSFER_DST,         // old_layout
+                         gfx::ImageLayout::TRANSFER_SRC,         // new_layout
+                         gfx::ImageMipsLayers{ .mips = { i - 1, 1 }, .layers = { 0, img->layers } });
+
+            gfx::ImageBlit blit_region{};
+            blit_region.srclayers = { .mip = i - 1, .layers = { 0, img->layers } };
+            blit_region.srcrange = { { 0, 0, 0 }, { src_w, src_h, src_d } };
+            blit_region.dstlayers = { .mip = i, .layers = { 0, img->layers } };
+            blit_region.dstrange = { { 0, 0, 0 }, { dst_w, dst_h, dst_d } };
+            blit_region.filter = gfx::ImageFilter::LINEAR;
+
+            cmd->blit(img.get(), img.get(), blit_region);
+
+            cmd->barrier(img.get(),
+                         gfx::PipelineStage::TRANSFER_BIT,       // src_stage
+                         gfx::PipelineAccess::TRANSFER_READ_BIT, // src_access
+                         gfx::PipelineStage::FRAGMENT_BIT,       // dst_stage (adjust if using compute shaders)
+                         gfx::PipelineAccess::SHADER_READ_BIT,   // dst_access
+                         gfx::ImageLayout::TRANSFER_SRC,         // old_layout
+                         gfx::ImageLayout::READ_ONLY,            // new_layout
+                         gfx::ImageMipsLayers{ .mips = { i - 1, 1 }, .layers = { 0, img->layers } });
+
+            src_w = dst_w;
+            src_h = dst_h;
+            src_d = dst_d;
+        }
+
+        cmd->barrier(img.get(), gfx::PipelineStage::TRANSFER_BIT, gfx::PipelineAccess::TRANSFER_WRITE_BIT,
+                     gfx::PipelineStage::FRAGMENT_BIT, gfx::PipelineAccess::SHADER_READ_BIT,
+                     gfx::ImageLayout::TRANSFER_DST, gfx::ImageLayout::READ_ONLY,
+                     gfx::ImageMipsLayers{ .mips = { img->mips - 1, 1 }, .layers = { 0, img->layers } });
+        gfx::get_renderer().current_data->cmdpool->end(cmd);
+        auto* s = gfx::get_renderer().current_data->get_sync();
+        gfx::get_renderer().gq->with_cmd_buf(cmd).signal_sync(s, gfx::PipelineStage::TRANSFER_BIT).submit();
+        gfx::get_renderer().current_data->wait_syncs.push_back(s);
     }
 
     if(!img) { return ~0u; }
@@ -255,7 +311,31 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
         const fastgltf::Material& gltfmat = gltfasset.materials[*gltfprim.materialIndex];
         auto mat = gfx::Material::init(gltfmat.name.c_str());
 
-        if(gltfmat.alphaMode == fastgltf::AlphaMode::Mask) { mat.alpha_cutoff = gltfmat.alphaCutoff; }
+        switch(gltfmat.alphaMode)
+        {
+        case fastgltf::AlphaMode::Opaque:
+        {
+            mat.mode = gfx::Material::Mode::OPAQUE;
+            break;
+        }
+        case fastgltf::AlphaMode::Mask:
+        {
+            mat.mode = gfx::Material::Mode::ALPHA;
+            mat.alpha_cutoff = gltfmat.alphaCutoff;
+            break;
+        }
+        case fastgltf::AlphaMode::Blend:
+        {
+            mat.mode = gfx::Material::Mode::TRANSPARENT;
+            mat.base_color_factor = pack_unorm4x8(gltfmat.pbrData.baseColorFactor.x(), gltfmat.pbrData.baseColorFactor.y(),
+                                                  gltfmat.pbrData.baseColorFactor.z(), gltfmat.pbrData.baseColorFactor.w());
+            break;
+        }
+        default:
+        {
+            ENG_WARN("Unandled alpha mode");
+        }
+        }
 
         if(gltfmat.pbrData.baseColorTexture)
         {

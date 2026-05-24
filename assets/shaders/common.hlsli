@@ -1,6 +1,9 @@
 #ifndef ENG_COMMON_H
 #define ENG_COMMON_H
 
+#define ENG_PI      3.1415926535897932384626433
+#define ENG_HALF_PI 1.5707963267948966192313216
+
 #define ENG_BINDLESS_STORAGE_BUFFER_BINDING 0 
 #define ENG_BINDLESS_STORAGE_IMAGE_BINDING 1
 // #define BINDLESS_COMBINED_IMAGE_BINDING 2
@@ -36,7 +39,7 @@
 #define ENG_TYPE_MAT3 float3x3
 #define ENG_TYPE_MAT4 float4x4
 
-#define ENG_DECLARE_STORAGE_BUFFER(type) struct type
+#define ENG_INLINE
 
 #elif __cplusplus
 #define ENG_TYPE_INT int32_t
@@ -58,10 +61,14 @@
 #define ENG_TYPE_MAT3 glm::mat3
 #define ENG_TYPE_MAT4 glm::mat4
 
-#define ENG_DECLARE_STORAGE_BUFFER(type) struct type
+#define ENG_INLINE inline
 
 #endif
  
+#ifdef __cplusplus
+namespace eng {
+#endif
+
 #ifndef NO_COMMON_STRUCTS
     // put other includes/types/bindless stuff here
     
@@ -131,14 +138,27 @@ struct GPUInstanceId
 struct GPUMaterial
 {
     ENG_TYPE_UINT base_color_idx;
+    ENG_TYPE_UINT base_color_factor;
 };
 
 #endif
 
-#ifndef __cplusplus
+#ifndef ENG_NO_COMMON_FUNCS
+ENG_INLINE ENG_TYPE_UINT pack_unorm4x8(ENG_TYPE_FLOAT r, ENG_TYPE_FLOAT g, ENG_TYPE_FLOAT b, ENG_TYPE_FLOAT a)
+{
+    return (((ENG_TYPE_UINT) (r * 255.0f + 0.5f)) << 0 | ((ENG_TYPE_UINT) (g * 255.0f + 0.5f)) << 8 | ((ENG_TYPE_UINT) (b * 255.0f + 0.5f)) << 16 | ((ENG_TYPE_UINT) (a * 255.0f + 0.5f)) << 24);
+}
+ENG_INLINE ENG_TYPE_FLOAT4 unpack_unorm4x8(ENG_TYPE_UINT rgba)
+{
+    return ENG_TYPE_FLOAT4((ENG_TYPE_FLOAT) (rgba & 0xFF) / 255.0f, (ENG_TYPE_FLOAT) ((rgba >> 8) & 0xFF) / 255.0f, (ENG_TYPE_FLOAT) ((rgba >> 16) & 0xFF) / 255.0f, (ENG_TYPE_FLOAT) ((rgba >> 24) & 0xFF) / 255.0f);
+}
+#endif
 
-#define ENG_PI      3.1415926535897932384626433
-#define ENG_HALF_PI 1.5707963267948966192313216
+#ifdef __cplusplus
+}
+#endif
+
+#ifndef __cplusplus
 
 [[vk::binding(ENG_BINDLESS_STORAGE_BUFFER_BINDING, 0)]] RWByteAddressBuffer gRWBuffers[];
 [[vk::binding(ENG_BINDLESS_STORAGE_IMAGE_BINDING, 0)]] RWTexture2D<float2> gRWTexture2Df2s[];
@@ -151,7 +171,7 @@ struct GPUMaterial
 [[vk::binding(ENG_BINDLESS_SAMPLER_BINDING, 0)]] SamplerState gSamplerStates[];
 [[vk::binding(ENG_BINDLESS_ACCELERATION_STRUCT_BINDING, 0)]] RaytracingAccelerationStructure gTLASs[];
 
-
+#define ENG_INVALID_HANDLE (~0u)
 #define get_gsb(type, index) gRWBuffers[NonUniformResourceIndex(pc.type##BufferIndex)].Load<type>(index * sizeof(type))
 #define get_gsb2(type, struct, index) gRWBuffers[NonUniformResourceIndex(struct.type##BufferIndex)].Load<type>(index * sizeof(type))
 

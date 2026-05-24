@@ -25,7 +25,7 @@ void MeshRenderer::instance_entity(ecs::EntityId entity)
             {
                 if((MeshPassType)i == MeshPassType::Z_PREPASS)
                 {
-                    if(rmat.alpha_cutoff > 0.0) { continue; }
+                    if(rmat.mode != Material::Mode::OPAQUE) { continue; }
                 }
 
                 m_pass_datas_arr[i].meshes_vec.emplace_back(rmsh, msh.gpu_resource);

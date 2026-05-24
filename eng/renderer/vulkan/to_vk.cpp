@@ -302,7 +302,7 @@ VkPipelineStageFlags2 to_vk(const Flags<PipelineStage>& a)
     VkPipelineStageFlags2 flags{};
     if(a.test(gfx::PipelineStage::TRANSFER_BIT))    { flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT; }
     if(a.test(gfx::PipelineStage::VERTEX_BIT))      { flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT; }
-    if(a.test(gfx::PipelineStage::FRAGMENT))        { flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; }
+    if(a.test(gfx::PipelineStage::FRAGMENT_BIT))        { flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; }
     if(a.test(gfx::PipelineStage::EARLY_Z_BIT))     { flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT; }
     if(a.test(gfx::PipelineStage::LATE_Z_BIT))      { flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT; }
     if(a.test(gfx::PipelineStage::COLOR_OUT_BIT))   { flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT; }

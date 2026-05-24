@@ -143,7 +143,7 @@ struct RGBuilder
     RGAccessId sample_texture(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::SHADER_READ_BIT;
@@ -183,7 +183,7 @@ struct RGBuilder
     RGAccessId read_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_READ_BIT;
@@ -199,7 +199,7 @@ struct RGBuilder
     RGAccessId write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                            Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_WRITE_BIT;
@@ -215,7 +215,7 @@ struct RGBuilder
     RGAccessId read_write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                                 Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT
+        const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
@@ -230,7 +230,7 @@ struct RGBuilder
 
     RGAccessId read_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
     {
-        const auto stage = pass->is_graphics()  ? PipelineStage::VERTEX_BIT | PipelineStage::FRAGMENT
+        const auto stage = pass->is_graphics()  ? PipelineStage::VERTEX_BIT | PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_READ_BIT;

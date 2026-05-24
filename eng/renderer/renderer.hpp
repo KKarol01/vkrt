@@ -24,6 +24,8 @@
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
 ENG_DEFINE_STD_HASH(eng::gfx::BufferView, ENG_HASH(t.buffer, t.range));
 
+#undef TRANSPARENT
+
 namespace eng
 {
 namespace gfx
@@ -322,6 +324,12 @@ struct MeshPass
 
 struct Material
 {
+    enum class Mode : uint8_t
+    {
+        OPAQUE,
+        ALPHA,
+        TRANSPARENT,
+    };
     static Material init(std::string_view name, Handle<MeshPass> mesh_pass = {})
     {
         Material mat{};
@@ -332,7 +340,9 @@ struct Material
     auto operator<=>(const Material& t) const = default;
     StackString<64> name;
     Handle<MeshPass> mesh_pass;
-    float alpha_cutoff{};                 //  anything > 0.0 means it's enabled and should be used
+    Mode mode{ Mode::OPAQUE };
+    float alpha_cutoff{}; //  anything > 0.0 means it's enabled and should be used
+    uint32_t base_color_factor{ ~0u };
     ImageView base_color_texture;         // todo: put those in an array?
     ImageView normal_texture;             // todo: put those in an array?
     ImageView metallic_roughness_texture; // todo: put those in an array?
@@ -704,6 +714,7 @@ class Renderer
         void reset_syncs();
         std::vector<Sync*> syncs;
         std::vector<Sync*> available_syncs;
+		std::vector<Sync*> wait_syncs;
 
         RenderResources render_resources;
 
@@ -776,7 +787,8 @@ class Renderer
         Handle<MeshPass> default_meshpasses[(int)MeshPassType::LAST_ENUM];
         Handle<Pipeline> apply_ao_pipeline;
 
-        Handle<Image> default_base_color;
+        Handle<Image> white_texture;
+        Handle<Image> magenta_black_texture;
 
         GraphicsSettings gfx_settings;
 
@@ -903,7 +915,7 @@ class Renderer
     FrameData* current_data{};
     uint64_t current_frame{}; // monotonically increasing counter
     Passes passes;
-	uint64_t mesh_entt_hash{};
+    uint64_t mesh_entt_hash{};
 };
 
 // clang-format off
@@ -945,7 +957,9 @@ template <> inline constexpr auto get_struct_fields<gfx::Material>()
 {
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mesh_pass),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mode),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, alpha_cutoff),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_factor),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_texture),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, normal_texture),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, metallic_roughness_texture));

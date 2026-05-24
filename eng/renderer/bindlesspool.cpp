@@ -129,6 +129,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
 
     if(desc.is_buffer())
     {
+        ENG_ASSERT(desc.as_buffer().buffer);
         slot.view = desc.as_buffer();
         slot.vkptr = desc.as_buffer().buffer->md.vk()->buffer;
         auto it = buffer_views.find(*desc.as_buffer().buffer);
@@ -136,6 +137,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
     }
     else if(desc.is_image())
     {
+        ENG_ASSERT(desc.as_image().image);
         slot.view = desc.as_image();
         slot.vkptr = desc.as_image().image->md.vk()->image;
         auto it = image_views.find(*desc.as_image().image);

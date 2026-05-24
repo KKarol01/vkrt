@@ -92,7 +92,7 @@ std::string to_string(const Flags<PipelineStage>& a)
 	if(a == PipelineStage::NONE)			 { append("NONE"); }
 	if(a.test(PipelineStage::TRANSFER_BIT))	 { append("TRANSFER_BIT"); }
 	if(a.test(PipelineStage::VERTEX_BIT))	 { append("VERTEX_BIT"); }
-	if(a.test(PipelineStage::FRAGMENT))		 { append("FRAGMENT"); }
+	if(a.test(PipelineStage::FRAGMENT_BIT))		 { append("FRAGMENT"); }
 	if(a.test(PipelineStage::EARLY_Z_BIT))	 { append("EARLY_Z_BIT"); }
 	if(a.test(PipelineStage::LATE_Z_BIT))	 { append("LATE_Z_BIT"); }
 	if(a.test(PipelineStage::COLOR_OUT_BIT)) { append("COLOR_OUT_BIT"); }

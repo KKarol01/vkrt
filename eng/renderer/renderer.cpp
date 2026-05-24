@@ -318,16 +318,29 @@ void Renderer::init_pipelines()
             settings.default_meshpasses[i] = make_mesh_pass(pass);
         }
 
-        settings.default_base_color =
-            make_image("default texture",
+        settings.magenta_black_texture =
+            make_image("magenta black  texture",
                        Image::init(2, 2, ImageFormat::R8G8B8A8_UNORM, ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
-        uint8_t data[] = {
-            255, 0, 255, 255, // Pixel 1: Magenta
-            0,   0, 0,   255, // Pixel 2: Black
-            0,   0, 0,   255, // Pixel 3: Black
-            255, 0, 255, 255  // Pixel 4: Magenta
-        };
-        staging->copy(settings.default_base_color.get(), data, 0, 0);
+        settings.white_texture = make_image("white texture", Image::init(2, 2, ImageFormat::R8G8B8A8_UNORM,
+                                                                         ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
+        {
+            uint8_t data[] = {
+                255, 0, 255, 255, // Pixel 1: Magenta
+                0,   0, 0,   255, // Pixel 2: Black
+                0,   0, 0,   255, // Pixel 3: Black
+                255, 0, 255, 255  // Pixel 4: Magenta
+            };
+            staging->copy(settings.magenta_black_texture.get(), data, 0, 0);
+        }
+        {
+            uint8_t data[] = {
+                255, 255, 255, 255, // Pixel 1
+                255, 255, 255, 255, // Pixel 2
+                255, 255, 255, 255, // Pixel 3
+                255, 255, 255, 255  // Pixel 4
+            };
+            staging->copy(settings.white_texture.get(), data, 0, 0);
+        }
     }
 
     {
@@ -483,6 +496,12 @@ void Renderer::update()
         else { return; }
     }
 
+    for(auto* s : current_data->wait_syncs)
+    {
+        s->wait_cpu(~0ull);
+    }
+    current_data->wait_syncs.clear();
+
     current_data->ren_fen->wait_cpu(~0ull);
     current_data->ren_fen->reset();
     current_data->cmdpool->reset();
@@ -586,8 +605,10 @@ void Renderer::update()
             // use stable handle index inside the storage to index it in the gpu
             if(backend->caps.supports_bindless)
             {
-                GPUMaterial gpumat{ .base_color_idx =
-                                        descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)) };
+                GPUMaterial gpumat{
+                    .base_color_idx = descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)),
+                    .base_color_factor = e->base_color_factor,
+                };
                 staging->copy(bufs.materials.get(), &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
@@ -1124,7 +1145,7 @@ Handle<Material> Renderer::make_material(const Material& desc)
 {
     Material mat = desc;
     if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpasses[(int)MeshPassType::OPAQUE]; }
-    if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.default_base_color); }
+    if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.white_texture); }
     materials.push_back(std::move(mat));
     const auto handle = Handle<Material>{ (uint32_t)materials.size() - 1 };
     new_materials.push_back(handle);
