@@ -133,43 +133,43 @@ size_t StagingBuffer::copy(Image& dst, const void* const src, uint32_t layer, ui
                                       std::max(dst.depth >> mip, 1u) };
 
     const auto block_data = get_block_data(dst.format);
-    if(extent.x == ~0u) { extent.x = dst.width; }
-    if(extent.y == ~0u) { extent.y = dst.height; }
-    if(extent.z == ~0u) { extent.z = dst.depth; }
-    ENG_ASSERT(extent.z == 1u);
+    if(extent.x == ~0u) { extent.x = mip_texels.x; }
+    if(extent.y == ~0u) { extent.y = mip_texels.y; }
+    if(extent.z == ~0u) { extent.z = mip_texels.z; }
+    ENG_ASSERT(extent.x > 0);
+    ENG_ASSERT(extent.y > 0);
+    ENG_ASSERT(extent.z == 1);
 
-    const glm::u32vec3 blocks =
-        glm::u32vec3{ extent.x, extent.y, extent.z } /
-        glm::u32vec3{ block_data.texel_extent.x, block_data.texel_extent.y, block_data.texel_extent.z };
-    const auto block_count = blocks.x * blocks.y * blocks.z;
-    const auto row_bytes = blocks.x * block_data.bytes_per_texel;
-    const auto src_bytes = block_count * block_data.bytes_per_texel;
+    glm::u64vec3 blocks = glm::u64vec3{ extent.x, extent.y, extent.z } /
+                          glm::u64vec3{ block_data.texel_extent.x, block_data.texel_extent.y, block_data.texel_extent.z };
+    const auto row_bytes = size_t(blocks.x) * size_t(block_data.bytes_per_texel);
+    const auto src_bytes = size_t(blocks.x) * size_t(blocks.y) * size_t(blocks.z) * size_t(block_data.bytes_per_texel);
 
     prepare_image(&dst, nullptr, discard == DiscardContents::YES, false, { { mip, 1 }, { layer, 1 } });
 
     size_t bytes_uploaded = 0;
     while(bytes_uploaded < src_bytes)
     {
-        const auto remaining_bytes = src_bytes - bytes_uploaded;
-        const auto rows_uploaded = bytes_uploaded / row_bytes;
+        const size_t remaining_bytes = src_bytes - bytes_uploaded;
+        const size_t block_rows_uploaded = bytes_uploaded / row_bytes;
         auto alloc = partial_allocate(remaining_bytes);
         if(alloc.size < row_bytes)
         {
             reset();
             continue;
         }
+        const size_t block_rows_allocated = alloc.size / row_bytes;
+        const size_t usable_bytes = block_rows_allocated * row_bytes;
+        memcpy(get_alloc_mem(alloc), (const std::byte*)src + bytes_uploaded, usable_bytes);
+        const glm::i32vec3 copy_offset = { offset.x, offset.y + int32_t(block_rows_uploaded * block_data.texel_extent.y),
+                                           offset.z };
+        const uint32_t texel_rows_uploaded = block_rows_uploaded * block_data.texel_extent.y;
+        const uint32_t texel_rows_allocated = block_rows_allocated * block_data.texel_extent.y;
+        const uint32_t remaining_texel_rows = extent.y - texel_rows_uploaded;
+        const uint32_t copy_rows = std::min(texel_rows_allocated, remaining_texel_rows);
+        const glm::u32vec3 copy_extent = { extent.x, copy_rows, extent.z };
 
-        const auto rows_allocated = alloc.size / row_bytes;
-        const auto usable_bytes = rows_allocated * row_bytes; // alloc.size rounded down
-        memcpy(get_alloc_mem(alloc), (std::byte*)src + bytes_uploaded, usable_bytes);
-
-        const auto copy_offset =
-            glm::i32vec3{ offset.x, offset.y + rows_uploaded, offset.z } *
-            glm::i32vec3{ block_data.texel_extent.x, block_data.texel_extent.y, block_data.texel_extent.z };
-        const auto copy_extent =
-            glm::u32vec3{ extent.x, rows_allocated, 1 } *
-            glm::u32vec3{ block_data.texel_extent.x, block_data.texel_extent.y, block_data.texel_extent.z };
-        auto copy = vk::VkBufferImageCopy2{};
+        vk::VkBufferImageCopy2 copy{};
         copy.bufferOffset = alloc.offset;
         copy.bufferRowLength = 0;
         copy.bufferImageHeight = 0;

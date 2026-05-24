@@ -582,7 +582,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout,
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));
-ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.alpha_cutoff, t.base_color_texture));
+ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.mode, t.alpha_cutoff, t.base_color_factor, t.base_color_texture));
 ENG_DEFINE_STD_HASH(eng::gfx::Mesh, ENG_HASH(t.geometry, t.material));
 ENG_DEFINE_STD_HASH(eng::gfx::MeshPass, ENG_HASH(t.name));
 ENG_DEFINE_STD_HASH(eng::gfx::ShaderEffect, ENG_HASH(t.pipeline));
@@ -714,7 +714,7 @@ class Renderer
         void reset_syncs();
         std::vector<Sync*> syncs;
         std::vector<Sync*> available_syncs;
-		std::vector<Sync*> wait_syncs;
+        std::vector<Sync*> wait_syncs;
 
         RenderResources render_resources;
 

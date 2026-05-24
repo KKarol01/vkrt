@@ -65,6 +65,8 @@ class ICommandBuffer
     virtual void wait_sync(Sync* sync, Flags<PipelineStage> stage = PipelineStage::ALL);
     virtual void signal_sync(Sync* sync, Flags<PipelineStage> stage = PipelineStage::ALL);
 
+    virtual void generate_mips(Image& img);
+
     struct SyncDep
     {
         Sync* sync{};

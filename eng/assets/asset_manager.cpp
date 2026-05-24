@@ -3,6 +3,7 @@
 #include <eng/engine.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
+#include <eng/renderer/submit_queue.hpp>
 #include <eng/assets/loaders.hpp>
 #include <eng/assets/serialization.hpp>
 #include <eng/assets/compression.hpp>
@@ -314,6 +315,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     deserialize(image_count, src, out_bytes_written);
     dst.images.resize(image_count);
     gfx::ParsedImageData imgd{};
+    auto* mip_cmd = gfx::get_renderer().current_data->cmdpool->begin();
     for(auto i = 0u; i < image_count; ++i)
     {
         // don't use deserialize() here, because it would double the image data for no reason, we can read from the stream
@@ -334,12 +336,18 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
         }
         else
         {
-            gfx::get_renderer().staging->copy(dst.images[i].get(), src.data() + out_bytes_written, 0, 0, true,
+            gfx::get_renderer().staging->copy(dst.images[i].get(), src.data() + out_bytes_written, 0, 0, false,
                                               gfx::DiscardContents::YES);
-            ENG_TODO("TODO: Process mips");
+            mip_cmd->generate_mips(dst.images[i].get());
         }
         out_bytes_written += pixel_data_size;
     }
+    gfx::get_renderer().current_data->cmdpool->end(mip_cmd);
+    auto* mip_sync = gfx::get_renderer().current_data->get_sync();
+    mip_cmd->wait_sync(gfx::get_renderer().staging->flush(true), gfx::PipelineStage::TRANSFER_BIT);
+    mip_cmd->signal_sync(mip_sync, gfx::PipelineStage::FRAGMENT_BIT);
+    gfx::get_renderer().gq->with_cmd_buf(mip_cmd).submit();
+    gfx::get_renderer().current_data->wait_syncs.push_back(mip_sync);
 
     uint64_t texture_count;
     deserialize(texture_count, src, out_bytes_written);

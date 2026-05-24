@@ -23,6 +23,59 @@ void ICommandBuffer::signal_sync(Sync* sync, Flags<PipelineStage> stage)
     sync_deps.emplace_back(sync, sync->get_next_signal_value(), stage, false);
 }
 
+void ICommandBuffer::generate_mips(Image& img)
+{
+    if(!img.md.ptr) { return; }
+    // Track dimensions dynamically across the mip chain
+    int32_t src_w = static_cast<int32_t>(img.width);
+    int32_t src_h = static_cast<int32_t>(img.height);
+    int32_t src_d = static_cast<int32_t>(img.depth);
+
+    barrier(img, gfx::PipelineStage::NONE, gfx::PipelineAccess::NONE, gfx::PipelineStage::TRANSFER_BIT,
+            gfx::PipelineAccess::TRANSFER_RW, gfx::ImageLayout::UNDEFINED, gfx::ImageLayout::TRANSFER_DST,
+            gfx::ImageMipsLayers{ { 0, ~0u }, { 0, 1 } });
+
+    for(uint32_t i = 1; i < img.mips; ++i)
+    {
+        int32_t dst_w = std::max(1, src_w / 2);
+        int32_t dst_h = std::max(1, src_h / 2);
+        int32_t dst_d = std::max(1, src_d / 2);
+
+        barrier(img, gfx::PipelineStage::TRANSFER_BIT, gfx::PipelineAccess::TRANSFER_WRITE_BIT,
+                gfx::PipelineStage::TRANSFER_BIT,       // dst_stage
+                gfx::PipelineAccess::TRANSFER_READ_BIT, // dst_access
+                gfx::ImageLayout::TRANSFER_DST,         // old_layout
+                gfx::ImageLayout::TRANSFER_SRC,         // new_layout
+                gfx::ImageMipsLayers{ .mips = { i - 1, 1 }, .layers = { 0, img.layers } });
+
+        gfx::ImageBlit blit_region{};
+        blit_region.srclayers = { .mip = i - 1, .layers = { 0, img.layers } };
+        blit_region.srcrange = { { 0, 0, 0 }, { src_w, src_h, src_d } };
+        blit_region.dstlayers = { .mip = i, .layers = { 0, img.layers } };
+        blit_region.dstrange = { { 0, 0, 0 }, { dst_w, dst_h, dst_d } };
+        blit_region.filter = gfx::ImageFilter::LINEAR;
+
+        blit(img, img, blit_region);
+
+        barrier(img,
+                gfx::PipelineStage::TRANSFER_BIT,       // src_stage
+                gfx::PipelineAccess::TRANSFER_READ_BIT, // src_access
+                gfx::PipelineStage::FRAGMENT_BIT,       // dst_stage (adjust if using compute shaders)
+                gfx::PipelineAccess::SHADER_READ_BIT,   // dst_access
+                gfx::ImageLayout::TRANSFER_SRC,         // old_layout
+                gfx::ImageLayout::READ_ONLY,            // new_layout
+                gfx::ImageMipsLayers{ .mips = { i - 1, 1 }, .layers = { 0, img.layers } });
+
+        src_w = dst_w;
+        src_h = dst_h;
+        src_d = dst_d;
+    }
+
+    barrier(img, gfx::PipelineStage::TRANSFER_BIT, gfx::PipelineAccess::TRANSFER_WRITE_BIT,
+            gfx::PipelineStage::FRAGMENT_BIT, gfx::PipelineAccess::SHADER_READ_BIT, gfx::ImageLayout::TRANSFER_DST,
+            gfx::ImageLayout::READ_ONLY, gfx::ImageMipsLayers{ .mips = { img.mips - 1, 1 }, .layers = { 0, img.layers } });
+}
+
 void CommandBufferVk::barrier(Flags<PipelineStage> src_stage, Flags<PipelineAccess> src_access,
                               Flags<PipelineStage> dst_stage, Flags<PipelineAccess> dst_access)
 {

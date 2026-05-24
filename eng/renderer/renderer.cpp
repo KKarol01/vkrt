@@ -508,8 +508,9 @@ void Renderer::update()
     current_data->reset_syncs();
     current_data->reset_queries();
 
-    if(auto lock = std::scoped_lock{ current_data->retired_mutex }; current_data->retired_resources.size() > 0)
+    if(current_data->retired_resources.size() > 0)
     {
+        std::scoped_lock lock{ current_data->retired_mutex };
         // ENG_LOG("Removing {} retired resources", current_data->retired_resources.size());
         auto remove_until = current_data->retired_resources.begin();
         for(auto& rs : current_data->retired_resources)
