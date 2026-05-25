@@ -54,6 +54,8 @@ template <size_t MAX_SIZE> struct StackString
     bool operator==(const char* other) const { return as_view() == std::string_view{ other }; }
     bool operator==(const std::string& other) const { return as_view() == std::string_view{ other }; }
 
+    operator std::string_view() const { return as_view(); }
+
     std::string_view as_view() const { return std::string_view{ string.data(), length }; }
     std::string to_string() const { return std::string{ string.data() }; }
     const char* c_str() const { return string.data(); }
@@ -64,8 +66,8 @@ template <size_t MAX_SIZE> struct StackString
         length = std::min(new_length, MAX_SIZE);
         string[length - 1] = '\0';
     }
+    constexpr u64 hash() const { return ENG_HASH(as_view()); }
 
-    constexpr uint64_t hash() const { return ENG_HASH(as_view()); }
 #ifdef ENG_DEBUG_BUILD1
     std::string string;
 #else

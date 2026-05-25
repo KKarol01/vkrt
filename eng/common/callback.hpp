@@ -25,7 +25,7 @@ template <typename Func> class Signal
             std::invoke(e, std::forward<decltype(args)>(args)...);
         }
     }
-    size_t size() const { return callbacks.size(); }
+    usize size() const { return callbacks.size(); }
     std::vector<Callback<Func>> callbacks;
 };
 

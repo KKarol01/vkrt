@@ -16,7 +16,7 @@ namespace eng
 // std::uintptr_t to allow storing regular pointers.
 template <typename T> struct HandleStorage
 {
-    using storage_type = uint32_t;
+    using storage_type = u32;
 };
 
 #define ENG_DEFINE_HANDLE_STORAGE(type, storage)                                                                       \

@@ -41,15 +41,15 @@ class EcsTest
 
         struct A
         {
-            uint32_t val;
+            u32 val;
         };
         struct B
         {
-            uint32_t val;
+            u32 val;
         };
         struct C
         {
-            uint32_t val;
+            u32 val;
         };
         auto count = 100000;
 
@@ -118,7 +118,7 @@ class EcsTest
                 else if(i % 3 == 1) { reg.add_components(e, A{}, B{}); }
                 else
                 {
-                    reg.add_components(e, A{ (uint32_t)i }, B{ (uint32_t)i + 1 }, C{ (uint32_t)i + 2 });
+                    reg.add_components(e, A{ (u32)i }, B{ (u32)i + 1 }, C{ (u32)i + 2 });
                     A a = reg.get<A>(e);
                     A& a2 = reg.get<A>(e);
                     auto ab = reg.get<A, B>(e);

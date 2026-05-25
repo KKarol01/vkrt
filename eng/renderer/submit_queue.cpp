@@ -27,19 +27,19 @@ void ICommandBuffer::generate_mips(Image& img)
 {
     if(!img.md.ptr) { return; }
     // Track dimensions dynamically across the mip chain
-    int32_t src_w = static_cast<int32_t>(img.width);
-    int32_t src_h = static_cast<int32_t>(img.height);
-    int32_t src_d = static_cast<int32_t>(img.depth);
+    i32 src_w = static_cast<i32>(img.width);
+    i32 src_h = static_cast<i32>(img.height);
+    i32 src_d = static_cast<i32>(img.depth);
 
     barrier(img, gfx::PipelineStage::NONE, gfx::PipelineAccess::NONE, gfx::PipelineStage::TRANSFER_BIT,
             gfx::PipelineAccess::TRANSFER_RW, gfx::ImageLayout::UNDEFINED, gfx::ImageLayout::TRANSFER_DST,
             gfx::ImageMipsLayers{ { 0, ~0u }, { 0, 1 } });
 
-    for(uint32_t i = 1; i < img.mips; ++i)
+    for(u32 i = 1; i < img.mips; ++i)
     {
-        int32_t dst_w = std::max(1, src_w / 2);
-        int32_t dst_h = std::max(1, src_h / 2);
-        int32_t dst_d = std::max(1, src_d / 2);
+        i32 dst_w = std::max(1, src_w / 2);
+        i32 dst_h = std::max(1, src_h / 2);
+        i32 dst_d = std::max(1, src_d / 2);
 
         barrier(img, gfx::PipelineStage::TRANSFER_BIT, gfx::PipelineAccess::TRANSFER_WRITE_BIT,
                 gfx::PipelineStage::TRANSFER_BIT,       // dst_stage
@@ -117,7 +117,7 @@ void CommandBufferVk::copy(const Buffer& dst, const Buffer& src, size_t dst_offs
     vkCmdCopyBuffer(cmd, src.md.vk()->buffer, dst.md.vk()->buffer, 1, &region);
 }
 
-void CommandBufferVk::copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, uint32_t count)
+void CommandBufferVk::copy(const Image& dst, const Buffer& src, const VkBufferImageCopy2* regions, u32 count)
 {
     auto vkinfo = vk::VkCopyBufferToImageInfo2{};
     vkinfo.srcBuffer = src.md.vk()->buffer;
@@ -186,7 +186,7 @@ void CommandBufferVk::clear_color(const Image& image, const Color4f& color)
     vkCmdClearColorImage(cmd, image.md.vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
 }
 
-void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth, std::optional<uint32_t> clear_stencil)
+void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth, std::optional<u32> clear_stencil)
 {
     const auto clear = VkClearDepthStencilValue{ .depth = clear_depth, .stencil = clear_stencil ? *clear_stencil : 0u };
     const auto range = VkImageSubresourceRange{ to_vk(clear_stencil ? ImageAspect::DEPTH_STENCIL : ImageAspect::DEPTH),
@@ -194,7 +194,7 @@ void CommandBufferVk::clear_depth_stencil(const Image& image, float clear_depth,
     vkCmdClearDepthStencilImage(cmd, image.md.vk()->image, to_vk(ImageLayout::TRANSFER_DST), &clear, 1, &range);
 }
 
-void CommandBufferVk::bind_index(const Buffer& index, uint32_t offset, VkIndexType type)
+void CommandBufferVk::bind_index(const Buffer& index, u32 offset, VkIndexType type)
 {
     vkCmdBindIndexBuffer(cmd, index.md.vk()->buffer, offset, type);
 }
@@ -206,7 +206,7 @@ void CommandBufferVk::bind_pipeline(const Pipeline& pipeline)
     current_pipeline = &pipeline;
 }
 
-void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
+void CommandBufferVk::bind_sets(const void* sets, u32 count)
 {
     if(!sets)
     {
@@ -221,7 +221,7 @@ void CommandBufferVk::bind_sets(const void* sets, uint32_t count)
     }
 }
 
-void CommandBufferVk::bind_resources(uint32_t slot, std::span<DescriptorResource> resources)
+void CommandBufferVk::bind_resources(u32 slot, std::span<DescriptorResource> resources)
 {
     rebind_desc_sets = true;
     descs_to_bind[slot] = resources;
@@ -232,12 +232,12 @@ void CommandBufferVk::push_constants(Flags<ShaderStage> stages, const void* cons
     vkCmdPushConstants(cmd, current_pipeline->info.layout->md.vk->layout, VK_SHADER_STAGE_ALL, range.offset, range.size, values);
 }
 
-void CommandBufferVk::set_viewports(const VkViewport* viewports, uint32_t count)
+void CommandBufferVk::set_viewports(const VkViewport* viewports, u32 count)
 {
     vkCmdSetViewportWithCount(cmd, count, viewports);
 }
 
-void CommandBufferVk::set_scissors(const VkRect2D* scissors, uint32_t count)
+void CommandBufferVk::set_scissors(const VkRect2D* scissors, u32 count)
 {
     vkCmdSetScissorWithCount(cmd, count, scissors);
 }
@@ -263,28 +263,27 @@ void CommandBufferVk::before_draw_dispatch()
     }
 }
 
-void CommandBufferVk::draw(uint32_t vertex_count, uint32_t instance_count, uint32_t vertex_offset, uint32_t instance_offset)
+void CommandBufferVk::draw(u32 vertex_count, u32 instance_count, u32 vertex_offset, u32 instance_offset)
 {
     before_draw_dispatch();
     vkCmdDraw(cmd, vertex_count, instance_count, vertex_offset, instance_offset);
 }
 
-void CommandBufferVk::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t index_offset,
-                                   uint32_t vertex_offset, uint32_t instance_offset)
+void CommandBufferVk::draw_indexed(u32 index_count, u32 instance_count, u32 index_offset, u32 vertex_offset, u32 instance_offset)
 {
     before_draw_dispatch();
     vkCmdDrawIndexed(cmd, index_count, instance_count, index_offset, vertex_offset, instance_offset);
 }
 
 void CommandBufferVk::draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
-                                                  size_t count_offset, uint32_t max_draw_count, uint32_t stride)
+                                                  size_t count_offset, u32 max_draw_count, u32 stride)
 {
     before_draw_dispatch();
     vkCmdDrawIndexedIndirectCount(cmd, indirect.md.vk()->buffer, indirect_offset, count.md.vk()->buffer, count_offset,
                                   max_draw_count, stride);
 }
 
-void CommandBufferVk::dispatch(uint32_t x, uint32_t y, uint32_t z)
+void CommandBufferVk::dispatch(u32 x, u32 y, u32 z)
 {
     before_draw_dispatch();
     vkCmdDispatch(cmd, x, y, z);
@@ -310,20 +309,20 @@ void CommandBufferVk::end_label()
 #endif
 }
 
-void CommandBufferVk::reset_query_indices(QueryPool* pool, uint32_t query_index, uint32_t count)
+void CommandBufferVk::reset_query_indices(QueryPool* pool, u32 query_index, u32 count)
 {
     if(!pool || !pool->md.ptr) { return; }
     if(pool->index == 0) { return; }
     vkCmdResetQueryPool(cmd, pool->md.vk()->vkpool, query_index, count);
 }
 
-void CommandBufferVk::write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, uint32_t index)
+void CommandBufferVk::write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, u32 index)
 {
     if(!pool || !pool->md.ptr) { return; }
     vkCmdWriteTimestamp2(cmd, to_vk(stage), pool->md.vk()->vkpool, index);
 }
 
-CommandPoolVk::CommandPoolVk(VkDevice dev, uint32_t family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
+CommandPoolVk::CommandPoolVk(VkDevice dev, u32 family_index, VkCommandPoolCreateFlags flags) noexcept : dev(dev)
 {
     auto vkinfo = vk::VkCommandPoolCreateInfo{};
     vkinfo.flags = flags;
@@ -416,7 +415,7 @@ void Sync::destroy()
     name.clear();
 }
 
-void Sync::signal_cpu(uint64_t value)
+void Sync::signal_cpu(u64 value)
 {
     if(value == ~0ull) { value = this->value + 1; }
     if(type == TIMELINE_SEMAPHORE)
@@ -434,7 +433,7 @@ void Sync::signal_cpu(uint64_t value)
     this->value = value;
 }
 
-bool Sync::wait_cpu(size_t timeout, uint64_t value) const
+bool Sync::wait_cpu(size_t timeout, u64 value) const
 {
     if(type == UNKNOWN)
     {
@@ -455,20 +454,20 @@ bool Sync::wait_cpu(size_t timeout, uint64_t value) const
     return false;
 }
 
-uint64_t Sync::signal_gpu(uint64_t value)
+u64 Sync::signal_gpu(u64 value)
 {
     this->value = value == ~0ull ? (this->value + 1) : value;
     return this->value;
 }
 
-uint64_t Sync::wait_gpu(uint64_t value)
+u64 Sync::wait_gpu(u64 value)
 {
     const auto val = value == ~0ull ? this->value : value;
     if(type == BINARY_SEMAPHORE) { this->value = 0; }
     return val;
 }
 
-void Sync::reset(uint64_t value)
+void Sync::reset(u64 value)
 {
     if(type == UNKNOWN) { return; }
     if(type == FENCE) { vkResetFences(RendererBackendVk::get_dev(), 1, &fence); }
@@ -481,7 +480,7 @@ void Sync::reset(uint64_t value)
     }
 }
 
-SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, uint32_t family_idx) noexcept
+SubmitQueue::SubmitQueue(VkDevice dev, VkQueue queue, u32 family_idx) noexcept
     : dev(dev), queue(queue), family_idx(family_idx), fence(get_renderer().make_sync({ SyncType::FENCE, 0, "" }))
 {
 }
@@ -491,7 +490,7 @@ CommandPoolVk* SubmitQueue::make_command_pool(VkCommandPoolCreateFlags flags)
     return &command_pools.emplace_back(dev, family_idx, flags);
 }
 
-SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
+SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, u64 value)
 {
     ENG_ASSERT(sync);
     if(sync->type == SyncType::BINARY_SEMAPHORE || sync->type == SyncType::TIMELINE_SEMAPHORE)
@@ -503,7 +502,7 @@ SubmitQueue& SubmitQueue::wait_sync(Sync* sync, Flags<PipelineStage> stages, uin
     return *this;
 }
 
-SubmitQueue& SubmitQueue::signal_sync(Sync* sync, Flags<PipelineStage> stages, uint64_t value)
+SubmitQueue& SubmitQueue::signal_sync(Sync* sync, Flags<PipelineStage> stages, u64 value)
 {
     if(!sync)
     {
@@ -563,17 +562,17 @@ void SubmitQueue::submit()
         vksiginfos[i].stageMask = to_vk(submission.signal_stages[i]);
     }
     auto vkinfo = vk::VkSubmitInfo2{};
-    vkinfo.waitSemaphoreInfoCount = (uint32_t)vkwaitinfos.size();
+    vkinfo.waitSemaphoreInfoCount = (u32)vkwaitinfos.size();
     vkinfo.pWaitSemaphoreInfos = vkwaitinfos.data();
-    vkinfo.commandBufferInfoCount = (uint32_t)vkcmdinfos.size();
+    vkinfo.commandBufferInfoCount = (u32)vkcmdinfos.size();
     vkinfo.pCommandBufferInfos = vkcmdinfos.data();
-    vkinfo.signalSemaphoreInfoCount = (uint32_t)vksiginfos.size();
+    vkinfo.signalSemaphoreInfoCount = (u32)vksiginfos.size();
     vkinfo.pSignalSemaphoreInfos = vksiginfos.data();
     VK_CHECK(vkQueueSubmit2(queue, 1, &vkinfo, submission.fence ? submission.fence->fence : nullptr));
     submission = Submission{};
 }
 
-bool SubmitQueue::submit_wait(uint64_t timeout)
+bool SubmitQueue::submit_wait(u64 timeout)
 {
     bool is_fence_temp = false;
     Sync* sfence{};
@@ -600,7 +599,7 @@ void SubmitQueue::present(Swapchain* swapchain)
     }
 
     auto vkinfo = vk::VkPresentInfoKHR{};
-    vkinfo.waitSemaphoreCount = (uint32_t)wait_sems.size();
+    vkinfo.waitSemaphoreCount = (u32)wait_sems.size();
     vkinfo.pWaitSemaphores = wait_sems.data();
     vkinfo.swapchainCount = 1;
     vkinfo.pSwapchains = &SwapchainMetadataVk::get(*swapchain).swapchain;

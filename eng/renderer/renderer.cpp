@@ -141,7 +141,7 @@ void Renderer::init(IRendererBackend* backend)
 void Renderer::init_helper_geom()
 {
     // std::vector<Vertex> vertices;
-    // std::vector<uint32_t> indices;
+    // std::vector<u32> indices;
     // const auto gen_uv_sphere = [&vertices, &indices] {
     //     const auto segs = 16;
     //     const auto rings = 16;
@@ -180,7 +180,7 @@ void Renderer::init_helper_geom()
     // };
 
     // gen_uv_sphere();
-    // ENG_ASSERT(vertices.size() <= ~uint16_t{});
+    // ENG_ASSERT(vertices.size() <= ~u16{});
     // helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
     // helpergeom.ppskybox = get_engine().renderer->make_pipeline(PipelineCreateInfo{
     //     .shaders = { get_engine().renderer->make_shader("common/skybox.vert.glsl"),
@@ -324,7 +324,7 @@ void Renderer::init_pipelines()
         settings.white_texture = make_image("white texture", Image::init(2, 2, ImageFormat::R8G8B8A8_UNORM,
                                                                          ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
         {
-            uint8_t data[] = {
+            u8 data[] = {
                 255, 0, 255, 255, // Pixel 1: Magenta
                 0,   0, 0,   255, // Pixel 2: Black
                 0,   0, 0,   255, // Pixel 3: Black
@@ -333,7 +333,7 @@ void Renderer::init_pipelines()
             staging->copy(settings.magenta_black_texture.get(), data, 0, 0);
         }
         {
-            uint8_t data[] = {
+            u8 data[] = {
                 255, 255, 255, 255, // Pixel 1
                 255, 255, 255, 255, // Pixel 2
                 255, 255, 255, 255, // Pixel 3
@@ -377,15 +377,15 @@ void Renderer::init_bufs()
                                                                         BufferUsage::AS_BUILD_INPUT));
     bufs.bspheres = make_buffer("bounding spheres", Buffer::init(1024, BufferUsage::STORAGE_BIT));
     bufs.materials = make_buffer("materials", Buffer::init(1024 * 100, BufferUsage::STORAGE_BIT));
-    for(uint32_t i = 0; i < 2; ++i)
+    for(u32 i = 0; i < 2; ++i)
     {
         bufs.transforms[i] = make_buffer(ENG_FMT("trs {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
         bufs.lights[i] = make_buffer(ENG_FMT("lights {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
     }
     {
         const auto* w = get_engine().window;
-        const auto num_tiles_x = (uint32_t)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
-        const auto num_tiles_y = (uint32_t)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
+        const auto num_tiles_x = (u32)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
+        const auto num_tiles_y = (u32)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
         bufs.fwdp_num_tiles = num_tiles;
     }
@@ -644,7 +644,7 @@ void Renderer::update()
         //      auto& l = get_engine().ecs->get<ecsc::Light>(new_lights[i]);
         //      const auto& t = get_engine().ecs->get<ecsc::Transform>(new_lights[i]);
         //      if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
-        //      GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (uint32_t)l.type };
+        //      GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (u32)l.type };
         //      staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
         //                    sizeof(GPULight));
         //  }
@@ -860,7 +860,7 @@ void Renderer::compile_rendergraph()
 //                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 //                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
 // VkViewport vkview{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
-// VkRect2D vksciss{ {}, { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
+// VkRect2D vksciss{ {}, { (u32)get_engine().window->width, (u32)get_engine().window->height } };
 // const auto vkreninfo = Vks(VkRenderingInfo{
 //     .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
 
@@ -872,7 +872,7 @@ void Renderer::compile_rendergraph()
 // const auto& maincullpass = rgraph->get_pass<pass::culling::MainPass>("culling::MainPass");
 // const auto& ib = maincullpass.batches[get_perframe_index()];
 // render_ibatch(cmd, ib, [this, &ib, &pf](CommandBuffer* cmd) {
-//     const auto outputmode = (uint32_t)debug_output;
+//     const auto outputmode = (u32)debug_output;
 //     cmd->bind_resource(0, current_data->constants);
 //     cmd->bind_resource(1, ib.ids_buf);
 //     const auto& fwd = rgraph->get_pass<pass::fwdp::LightCulling>("fwdp::LightCulling");
@@ -886,7 +886,7 @@ void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
 Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate)
 {
-    uint32_t order = 0;
+    u32 order = 0;
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
     for(; size >= 1024.0f && order < std::size(units); size /= 1024.0f, ++order) {}
@@ -980,12 +980,12 @@ bool Renderer::compile_shader(Shader& shader)
     }
 
     const auto compile_from_bytecode = [this, shhash, &shader, &pcfile]() -> bool {
-        uint64_t readhash{};
+        u64 readhash{};
         auto readb = pcfile->read((std::byte*)&readhash, 8, 0);
         ENG_ASSERT(readb == 8);
         if(shhash == readhash)
         {
-            std::vector<uint32_t> pcdata((pcfile->size() - 8) / 4);
+            std::vector<u32> pcdata((pcfile->size() - 8) / 4);
             readb = pcfile->read((std::byte*)pcdata.data(), pcdata.size() * 4, 8);
             ENG_ASSERT(readb % 4 == 0);
             auto res = backend->compile_shader(shader, std::as_bytes(std::span{ pcdata }));
@@ -1073,7 +1073,7 @@ Handle<DescriptorLayout> Renderer::make_layout(const DescriptorLayout& info)
     DescriptorLayout layout = info;
     backend->compile_layout(layout);
     dlayouts.push_back(std::move(layout));
-    return Handle<DescriptorLayout>{ (uint32_t)dlayouts.size() - 1 };
+    return Handle<DescriptorLayout>{ (u32)dlayouts.size() - 1 };
 }
 
 Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
@@ -1081,7 +1081,7 @@ Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
     PipelineLayout layout = info;
     backend->compile_layout(layout);
     pplayouts.push_back(std::move(layout));
-    return Handle<PipelineLayout>{ (uint32_t)pplayouts.size() - 1 };
+    return Handle<PipelineLayout>{ (u32)pplayouts.size() - 1 };
 }
 
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compilation compilation)
@@ -1148,14 +1148,14 @@ Handle<Material> Renderer::make_material(const Material& desc)
     if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpasses[(int)MeshPassType::OPAQUE]; }
     if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.white_texture); }
     materials.push_back(std::move(mat));
-    const auto handle = Handle<Material>{ (uint32_t)materials.size() - 1 };
+    const auto handle = Handle<Material>{ (u32)materials.size() - 1 };
     new_materials.push_back(handle);
     return handle;
 }
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
-    const auto ret_handle = Handle<Geometry>{ (uint32_t)geometries.size() };
+    const auto ret_handle = Handle<Geometry>{ (u32)geometries.size() };
     new_geometries.add_descriptor(ret_handle, batch);
     geometries.emplace_back();
     return ret_handle;
@@ -1172,13 +1172,13 @@ void Renderer::build_pending_geometries()
         Handle<Geometry> geometry;
         std::vector<float> positions;
         std::vector<float> attributes;
-        std::vector<uint16_t> indices;
+        std::vector<u16> indices;
         std::vector<Meshlet> meshlets;
     };
     std::vector<JobResult> results(new_geometries.batches.size());
     {
         const auto thread_count = std::thread::hardware_concurrency();
-        std::atomic<uint64_t> batch_idx = 0;
+        std::atomic<u64> batch_idx = 0;
         std::vector<std::jthread> jobs(thread_count);
         for(auto& j : jobs)
         {
@@ -1208,7 +1208,7 @@ void Renderer::build_pending_geometries()
                         ENG_ASSERT(batch.index_format == IndexFormat::U16);
                         res.positions = std::move(batch.positions);
                         res.attributes = std::move(batch.attributes);
-                        res.indices.resize(batch.indices.size() / sizeof(uint16_t));
+                        res.indices.resize(batch.indices.size() / sizeof(u16));
                         memcpy(res.indices.data(), batch.indices.data(), batch.indices.size());
                         res.meshlets = std::move(batch.meshlets);
                     }
@@ -1246,7 +1246,7 @@ void Renderer::build_pending_geometries()
     }
     resize_buffer(bufs.positions, total_pos * sizeof(float), STAGING_APPEND, true);
     resize_buffer(bufs.attributes, total_att * sizeof(float), STAGING_APPEND, true);
-    resize_buffer(bufs.indices, total_idx * sizeof(uint16_t), STAGING_APPEND, true);
+    resize_buffer(bufs.indices, total_idx * sizeof(u16), STAGING_APPEND, true);
     resize_buffer(bufs.bspheres, total_mlt * sizeof(glm::vec4), STAGING_APPEND, true);
     staging->copy(bufs.positions.get(), final_result.positions, STAGING_APPEND);
     staging->copy(bufs.attributes.get(), final_result.attributes, STAGING_APPEND);
@@ -1254,7 +1254,7 @@ void Renderer::build_pending_geometries()
     staging->copy(bufs.bspheres.get(), bspheres, STAGING_APPEND);
     for(auto& res : results)
     {
-        res.geometry->meshlet_range = { .offset = (uint32_t)meshlets.size(), .size = (uint32_t)res.meshlets.size() };
+        res.geometry->meshlet_range = { .offset = (u32)meshlets.size(), .size = (u32)res.meshlets.size() };
         for(auto& mlt : res.meshlets)
         {
             mlt.vertex_offset += bufs.vertex_count;
@@ -1314,7 +1314,7 @@ void Renderer::build_pending_blases()
     }
     cmd->barrier(PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_WRITE_BIT, PipelineStage::AS_BUILD_BIT, PipelineAccess::AS_READ_BIT);
 
-    std::vector<uint32_t> instance_ids;
+    std::vector<u32> instance_ids;
     std::vector<const Geometry*> tlas_geoms;
     std::vector<glm::mat3x4> trs;
     get_engine().ecs->iterate_components<ecsc::Mesh, ecsc::Transform>([&](ecs::EntityId e, const ecsc::Mesh& m,
@@ -1354,7 +1354,7 @@ void Renderer::build_pending_blases()
 }
 
 void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
-                                   std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets)
+                                   std::vector<u16>& out_indices, std::vector<Meshlet>& out_meshlets)
 {
     auto& context = new_geometries;
 
@@ -1369,7 +1369,7 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
     }
 
     // get indices to meshletize
-    std::vector<uint32_t> indices(batch.indices.size() / sizeof(uint32_t));
+    std::vector<u32> indices(batch.indices.size() / sizeof(u32));
     copy_indices(std::as_writable_bytes(std::span{ indices }), std::span{ batch.indices }, IndexFormat::U32, batch.index_format);
 
     // get positions to meshletize
@@ -1377,8 +1377,8 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
 
     const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
     std::vector<meshopt_Meshlet> mlts(max_meshlets);
-    std::vector<uint32_t> mlt_vtxs(max_meshlets * max_verts);   // indices to original vertices
-    std::vector<uint8_t> mlt_tris(max_meshlets * max_tris * 3); // indices to remapped vertices
+    std::vector<u32> mlt_vtxs(max_meshlets * max_verts);   // indices to original vertices
+    std::vector<u8> mlt_tris(max_meshlets * max_tris * 3); // indices to remapped vertices
 
     const auto vtx_count = positions.size() / 3;
     const auto pos_stride = 3 * sizeof(float);
@@ -1432,7 +1432,7 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
     {
         const auto& m = mlts[i];
         const auto& b = mlt_bnds[i];
-        out_meshlets[i] = Meshlet{ .vertex_offset = (int32_t)m.vertex_offset,
+        out_meshlets[i] = Meshlet{ .vertex_offset = (i32)m.vertex_offset,
                                    .vertex_count = m.vertex_count,
                                    .index_offset = m.triangle_offset,
                                    .index_count = m.triangle_count * 3,
@@ -1444,8 +1444,8 @@ Handle<Mesh> Renderer::make_mesh(const MeshDescriptor& batch)
 {
     Mesh mesh{ .geometry = batch.geometry, .material = batch.material };
     const auto found_it = std::find(meshes.begin(), meshes.end(), mesh);
-    if(found_it != meshes.end()) { return Handle<Mesh>{ (uint32_t)std::distance(meshes.begin(), found_it) }; }
-    const uint32_t idx = meshes.size();
+    if(found_it != meshes.end()) { return Handle<Mesh>{ (u32)std::distance(meshes.begin(), found_it) }; }
+    const u32 idx = meshes.size();
     meshes.push_back(mesh);
     return Handle<Mesh>{ idx };
 }
@@ -1459,7 +1459,7 @@ void Renderer::make_blas(Handle<Geometry> geom)
 Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 {
     shader_effects.push_back(info);
-    return Handle<ShaderEffect>{ (uint32_t)shader_effects.size() - 1 };
+    return Handle<ShaderEffect>{ (u32)shader_effects.size() - 1 };
 }
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
@@ -1573,7 +1573,7 @@ PipelineCreateInfo PipelineCreateInfo::init(const std::vector<fs::Path>& shaders
 }
 
 // todo: swapchain impl should not be here
-uint32_t Swapchain::acquire(uint64_t timeout, Sync* semaphore, Sync* fence)
+u32 Swapchain::acquire(u64 timeout, Sync* semaphore, Sync* fence)
 {
     current_index = acquire_impl(this, timeout, semaphore, fence);
     return current_index;
@@ -1661,7 +1661,7 @@ std::vector<Handle<Shader>> ShaderManager::get_affected_shaders(const fs::Path& 
     return affected;
 }
 
-uint64_t ShaderManager::get_hash(const fs::Path& path)
+u64 ShaderManager::get_hash(const fs::Path& path)
 {
     auto it = m_files_map.find(path);
     if(it == m_files_map.end()) { return 0; }
@@ -1687,7 +1687,7 @@ std::vector<Handle<Pipeline>> ShaderManager::get_associated_pipelines(Handle<Sha
 
 float TimestampQuery::to_ms(const TimestampQuery& q)
 {
-    uint64_t results[2];
+    u64 results[2];
     get_renderer().backend->get_query_pool_results(q.pool, q.index, 2, &results);
     return (float)(((double)(results[1] - results[0])) * get_renderer().backend->limits.timestampPeriodNs * 1e-6);
 }
@@ -1752,7 +1752,7 @@ std::vector<glm::vec3> Renderer::DebugGeomBuffers::expand_into_vertices()
 {
     const auto num_verts = std::transform_reduce(geometry.begin(), geometry.end(), 0ull, std::plus<>{}, [](auto val) {
         // NONE, AABB,
-        static constexpr uint32_t NUM_VERTS[]{ 0u, 24u };
+        static constexpr u32 NUM_VERTS[]{ 0u, 24u };
         return NUM_VERTS[std::to_underlying(val.type)];
     });
     std::vector<glm::vec3> verts;
@@ -1808,7 +1808,7 @@ std::vector<glm::vec3> Renderer::DebugGeomBuffers::expand_into_vertices()
 }
 
 ImageView ImageView::init(Handle<Image> image, std::optional<ImageFormat> format, std::optional<ImageViewType> type,
-                          uint32_t src_mip, uint32_t dst_mip, uint32_t src_layer, uint32_t dst_layer)
+                          u32 src_mip, u32 dst_mip, u32 src_layer, u32 dst_layer)
 {
     ENG_ASSERT(image);
     Image& img = image.get();

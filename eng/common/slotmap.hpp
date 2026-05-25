@@ -11,12 +11,12 @@ namespace eng
 /*
   Thread-safe lockless object pool with a free list.
  */
-template <typename UserType, size_t PAGE_SIZE = 1024, size_t NUM_PAGES = 64> class Slotmap
+template <typename UserType, usize PAGE_SIZE = 1024, usize NUM_PAGES = 64> class Slotmap
 {
   public:
-    using Storage = uint32_t;
-    using PageIndex = uint32_t;
-    using HeadTag = uint32_t;
+    using Storage = u32;
+    using PageIndex = u32;
+    using HeadTag = u32;
     using SlotId = TypedId<UserType, Storage>;
     inline static constexpr auto MAX_ELEMENTS = ~Storage{};
 

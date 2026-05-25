@@ -82,8 +82,8 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                 }
             }
 
-            uint64_t vtx_off = 0;
-            uint64_t idx_off = 0;
+            u64 vtx_off = 0;
+            u64 idx_off = 0;
             for(int n = 0; n < draw_data->CmdListsCount; n++)
             {
                 const ImDrawList* draw_list = draw_data->CmdLists[n];
@@ -179,13 +179,13 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
                     // Apply scissor/clipping rectangle
                     VkRect2D scissor;
-                    scissor.offset.x = (int32_t)(clip_min.x);
-                    scissor.offset.y = (int32_t)(clip_min.y);
-                    scissor.extent.width = (uint32_t)(clip_max.x - clip_min.x);
-                    scissor.extent.height = (uint32_t)(clip_max.y - clip_min.y);
+                    scissor.offset.x = (i32)(clip_min.x);
+                    scissor.offset.y = (i32)(clip_min.y);
+                    scissor.extent.width = (u32)(clip_max.x - clip_min.x);
+                    scissor.extent.height = (u32)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
 
-                    const auto tid = (uint32_t)imcmd->GetTexID();
+                    const auto tid = (u32)imcmd->GetTexID();
                     DescriptorResource bindresources[6]{};
                     bindresources[5] = DescriptorResource::sampled_image(Handle<Image>{ tid });
                     cmd->bind_resources(1, bindresources);
@@ -209,7 +209,7 @@ void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
     Handle<Image> image;
     if(imtex->Status == ImTextureStatus_WantCreate)
     {
-        image = r.make_image("imgui image", Image::init((uint32_t)imtex->Width, (uint32_t)imtex->Height, ImageFormat::R8G8B8A8_UNORM,
+        image = r.make_image("imgui image", Image::init((u32)imtex->Width, (u32)imtex->Height, ImageFormat::R8G8B8A8_UNORM,
                                                         ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
         images.push_back(image);
         imtex->SetTexID((ImTextureID)(*image));

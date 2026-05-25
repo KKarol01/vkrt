@@ -241,6 +241,7 @@ target_precompile_headers(eng
         <eng/common/sparseset.hpp>
         <eng/common/to_string.hpp>
         <eng/common/types.hpp>
+        <eng/common/scalar_types.hpp>
         <eng/ecs/ecs.hpp>
         <eng/string/stack_string.hpp>
 

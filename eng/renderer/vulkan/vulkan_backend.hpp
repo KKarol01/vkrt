@@ -44,10 +44,10 @@ struct DDGI
         float max_dist;
         float normal_bias;
         float max_probe_offset;
-        uint32_t frame_num;
-        int32_t irradiance_probe_side;
-        int32_t visibility_probe_side;
-        uint32_t rays_per_probe;
+        u32 frame_num;
+        i32 irradiance_probe_side;
+        i32 visibility_probe_side;
+        u32 rays_per_probe;
         VkDeviceAddress debug_probe_offsets;
     };
     using GPUProbeOffsetsLayout = glm::vec3;
@@ -57,9 +57,9 @@ struct DDGI
     glm::uvec3 probe_counts;
     glm::vec3 probe_walk;
     glm::vec3 probe_start;
-    int32_t irradiance_probe_side{ 6 };
-    int32_t visibility_probe_side{ 14 };
-    uint32_t rays_per_probe{ 64 };
+    i32 irradiance_probe_side{ 6 };
+    i32 visibility_probe_side{ 14 };
+    u32 rays_per_probe{ 64 };
     Handle<Buffer> buffer;
     Handle<Buffer> debug_probe_offsets_buffer;
     Handle<Image> radiance_texture;
@@ -83,14 +83,14 @@ struct FFTOcean
     struct FFTOceanPushConstants
     {
         FFTOceanSettings settings;
-        uint32_t gaussian;
-        uint32_t h0;
-        uint32_t ht;
-        uint32_t dtx;
-        uint32_t dtz;
-        uint32_t dft;
-        uint32_t disp;
-        uint32_t grad;
+        u32 gaussian;
+        u32 h0;
+        u32 ht;
+        u32 dtx;
+        u32 dtz;
+        u32 dft;
+        u32 disp;
+        u32 grad;
         float time;
     };
     bool recalc_state_0{ true };
@@ -172,7 +172,7 @@ struct SwapchainMetadataVk
     static void init(Swapchain& a);
     static void destroy(Swapchain& a);
     static SwapchainMetadataVk& get(Swapchain& a);
-    static uint32_t acquire(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence);
+    static u32 acquire(Swapchain* a, u64 timeout, Sync* semaphore, Sync* fence);
     VkSwapchainKHR swapchain{};
 };
 
@@ -204,11 +204,11 @@ class RendererBackendVk : public IRendererBackend
   public:
     struct IndirectIndexedCommand
     {
-        uint32_t indexCount;
-        uint32_t instanceCount;
-        uint32_t firstIndex;
-        int32_t vertexOffset;
-        uint32_t firstInstance;
+        u32 indexCount;
+        u32 instanceCount;
+        u32 firstIndex;
+        i32 vertexOffset;
+        u32 firstInstance;
     };
 
     static RendererBackendVk& get_instance();
@@ -243,15 +243,15 @@ class RendererBackendVk : public IRendererBackend
     void make_blas(Geometry& geom, ASRequirements& reqs, ICommandBuffer* cmd, Buffer* as_buffer, size_t as_offset,
                    Buffer* scratch_buffer, size_t scratch_offset) override;
     TopAccelerationStructure make_tlas(std::span<const Geometry*> geoms, std::span<const glm::mat3x4> transforms,
-                                       std::span<const uint32_t> instance_ids, ASRequirements& reqs, ICommandBuffer* cmd,
+                                       std::span<const u32> instance_ids, ASRequirements& reqs, ICommandBuffer* cmd,
                                        Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
                                        size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) override;
 
     ImageView::Metadata get_md(const ImageView& view) override;
 
     size_t get_indirect_indexed_command_size() const override;
-    void make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count, uint32_t first_index,
-                                       int32_t first_vertex, uint32_t first_instance) const override;
+    void make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count, u32 first_index,
+                                       i32 first_vertex, u32 first_instance) const override;
 
     void get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs) override;
     void get_memory_requirements(const Image& resource, RendererMemoryRequirements& reqs) override;
@@ -266,7 +266,7 @@ class RendererBackendVk : public IRendererBackend
 
     QueryPool* make_query_pool(const QueryPoolCreateInfo& info) override;
     void destroy_query_pool(QueryPool* pool) override;
-    void get_query_pool_results(QueryPool* pool, uint32_t query, uint32_t count, void* outdata) override;
+    void get_query_pool_results(QueryPool* pool, u32 query, u32 count, void* outdata) override;
     size_t get_query_result_size(QueryType type) override;
 
     VkInstance instance;

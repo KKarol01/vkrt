@@ -9,8 +9,8 @@ namespace eng
 {
 namespace ecs
 {
-using ComponentId = uint32_t;
-inline static constexpr uint32_t MAX_COMPONENTS = std::numeric_limits<ComponentId>::digits;
+using ComponentId = u32;
+inline static constexpr u32 MAX_COMPONENTS = std::numeric_limits<ComponentId>::digits;
 using Signature = std::bitset<MAX_COMPONENTS>;
 
 struct ComponentTraits

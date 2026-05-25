@@ -1,8 +1,8 @@
 #pragma once
-#include <eng/common/hash.hpp>
 #include <glm/fwd.hpp>
-#include <cstdint>
 #include <concepts>
+#include <eng/common/scalar_types.hpp>
+#include <eng/common/hash.hpp>
 
 namespace eng
 {
@@ -35,15 +35,15 @@ template <typename T, std::integral Storage> struct TypedId
     StorageType handle{ INVALID_VALUE };
 };
 
-template <typename Storage = size_t> struct Range_T
+template <typename Storage = usize> struct Range_T
 {
     auto operator<=>(const Range_T&) const = default;
     Storage offset{};
     Storage size{};
 };
 
-using Range32u = Range_T<uint32_t>;
-using Range64u = Range_T<uint64_t>;
+using Range32u = Range_T<u32>;
+using Range64u = Range_T<u64>;
 using Range3D32i = Range_T<glm::i32vec3>;
 using Range3D32u = Range_T<glm::u32vec3>;
 using Range3D64i = Range_T<glm::i64vec3>;
@@ -51,7 +51,7 @@ using Vec2f = glm::vec2;
 using Vec3i32 = glm::i32vec3;
 using Vec3u32 = glm::u32vec3;
 using Color4f = glm::f32vec4;
-using StringHash = uint64_t;
+using StringHash = u64;
 
 } // namespace eng
 

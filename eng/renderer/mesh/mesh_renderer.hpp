@@ -16,7 +16,7 @@ class MeshRenderer
         struct InstacedMeshHandle
         {
             Handle<gfx::Mesh> mesh;
-            uint32_t gpu_resource;
+            u32 gpu_resource;
         };
 
         struct MeshInstance
@@ -24,18 +24,18 @@ class MeshRenderer
             Handle<Geometry> geometry;
             Handle<Material> material;
             Handle<Pipeline> pipeline;
-            uint32_t gpu_resource;
-            uint32_t meshlet;
+            u32 gpu_resource;
+            u32 meshlet;
         };
 
         struct InstanceBatch
         {
             Handle<Pipeline> pipeline;
-            uint32_t first_command;
-            uint32_t command_count;
+            u32 first_command;
+            u32 command_count;
         };
 
-        uint64_t meshes_hash{};
+        u64 meshes_hash{};
         std::vector<InstacedMeshHandle> meshes_vec;
 
         Handle<Buffer> instance_buf;
@@ -56,7 +56,7 @@ class MeshRenderer
     {
         std::vector<std::byte> cmds_vec;
         std::vector<GPUInstanceId> gpuinstanceids_vec;
-        uint32_t cmd_count;
+        u32 cmd_count;
     };
 
     using InstancesVec = std::vector<PassData::MeshInstance>;

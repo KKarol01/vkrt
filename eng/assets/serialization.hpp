@@ -30,13 +30,13 @@ template <typename T, typename Field> struct StructField
 
 // For declaring custom functions to serialize/deserialize a type
 #define ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(Type)                                                               \
-    template <> void serialize<Type>(std::span<std::byte> dst, const Type& src, size_t& out_bytes_written);            \
-    template <> void deserialize<Type>(Type & dst, std::span<const std::byte> src, size_t& out_bytes_written);
+    template <> void serialize<Type>(std::span<std::byte> dst, const Type& src, usize& out_bytes_written);             \
+    template <> void deserialize<Type>(Type & dst, std::span<const std::byte> src, usize & out_bytes_written);
 
 // Specialize this function with ENG_SERIALIZATION_REGISTER_FIELDS for a type that you want to be automatically serialized.
 template <typename T> inline constexpr auto get_struct_fields() { static_assert(false, "Specialize this function."); }
 
-inline void safe_write(void* dst, const void* src, size_t& out_bytes_written, size_t dst_size, size_t src_size)
+inline void safe_write(void* dst, const void* src, usize& out_bytes_written, usize dst_size, usize src_size)
 {
     if(dst && src && out_bytes_written + src_size <= dst_size)
     {
@@ -45,7 +45,7 @@ inline void safe_write(void* dst, const void* src, size_t& out_bytes_written, si
     out_bytes_written += src_size;
 }
 
-inline void safe_read(void* dst, const void* src, size_t& out_bytes_written, size_t dst_size, size_t src_size)
+inline void safe_read(void* dst, const void* src, usize& out_bytes_written, usize dst_size, usize src_size)
 {
     if(dst && src && out_bytes_written + dst_size <= src_size)
     {
@@ -58,42 +58,41 @@ template <typename T>
 concept MemcpySafe = std::is_arithmetic_v<T> || std::is_same_v<T, std::byte> || std::is_enum_v<T>;
 
 // Forward declare templates so the ones below can be used by those above -- thanks c++
-template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, size_t& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, size_t& out_bytes_written);
+template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, usize& out_bytes_written);
+template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, usize& out_bytes_written);
 template <>
-inline void serialize<std::string>(std::span<std::byte> dst, const std::string& src, size_t& out_bytes_written);
+inline void serialize<std::string>(std::span<std::byte> dst, const std::string& src, usize& out_bytes_written);
 template <typename T>
-inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, size_t& out_bytes_written);
-template <typename T>
-inline void serialize(std::span<std::byte> dst, std::span<const T> src, size_t& out_bytes_written);
-template <size_t size>
-inline void serialize(std::span<std::byte> dst, const StackString<size>& src, size_t& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, size_t& out_bytes_written);
+inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, usize& out_bytes_written);
+template <typename T> inline void serialize(std::span<std::byte> dst, std::span<const T> src, usize& out_bytes_written);
+template <usize size>
+inline void serialize(std::span<std::byte> dst, const StackString<size>& src, usize& out_bytes_written);
+template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, usize& out_bytes_written);
 template <typename T, typename Storage>
-inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, size_t& out_bytes_written);
+inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written);
 
-template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, size_t& out_bytes_written);
-template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
-template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, size_t& out_bytes_written);
+template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, usize& out_bytes_written);
+template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
+template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T>
-inline void deserialize(std::vector<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
+inline void deserialize(std::vector<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T>
-inline void deserialize(std::span<T> dst, std::span<const std::byte> src, size_t& out_bytes_written);
-template <size_t size>
-inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
+inline void deserialize(std::span<T> dst, std::span<const std::byte> src, usize& out_bytes_written);
+template <usize size>
+inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T>
-inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
+inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T, typename Storage>
-inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
+inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 
-template <typename T, size_t... index>
-inline void serialize_fields(std::span<std::byte> dst, const T& src, size_t& out_bytes_written, std::index_sequence<index...>)
+template <typename T, usize... index>
+inline void serialize_fields(std::span<std::byte> dst, const T& src, usize& out_bytes_written, std::index_sequence<index...>)
 {
     constexpr auto fields = get_struct_fields<T>();
     ((serialize(dst, src.*std::get<index>(fields).fieldptr, out_bytes_written)), ...);
 }
 
-template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, size_t& out_bytes_written)
+template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, usize& out_bytes_written)
 {
     if constexpr(MemcpySafe<T>) { safe_write(dst.data(), &src, out_bytes_written, dst.size_bytes(), sizeof(T)); }
     else
@@ -104,25 +103,25 @@ template <typename T> inline void serialize(std::span<std::byte> dst, const T& s
     }
 }
 
-template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, size_t& out_bytes_written)
+template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, usize& out_bytes_written)
 {
     serialize(dst, src.flags, out_bytes_written);
 }
 
-template <> inline void serialize(std::span<std::byte> dst, const std::string& src, size_t& out_bytes_written)
+template <> inline void serialize(std::span<std::byte> dst, const std::string& src, usize& out_bytes_written)
 {
-    serialize(dst, (uint64_t)src.length(), out_bytes_written);
+    serialize(dst, (u64)src.length(), out_bytes_written);
     serialize(dst, std::span{ src.data(), src.length() }, out_bytes_written);
 }
 
 template <typename T>
-inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, size_t& out_bytes_written)
+inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, usize& out_bytes_written)
 {
     serialize(dst, src.size(), out_bytes_written);
     serialize(dst, std::span{ src }, out_bytes_written);
 }
 
-template <typename T> inline void serialize(std::span<std::byte> dst, std::span<const T> src, size_t& out_bytes_written)
+template <typename T> inline void serialize(std::span<std::byte> dst, std::span<const T> src, usize& out_bytes_written)
 {
     if constexpr(MemcpySafe<T>)
     {
@@ -137,33 +136,33 @@ template <typename T> inline void serialize(std::span<std::byte> dst, std::span<
     }
 }
 
-template <size_t size>
-inline void serialize(std::span<std::byte> dst, const StackString<size>& src, size_t& out_bytes_written)
+template <usize size>
+inline void serialize(std::span<std::byte> dst, const StackString<size>& src, usize& out_bytes_written)
 {
-    serialize(dst, (uint64_t)src.size(), out_bytes_written);
+    serialize(dst, (u64)src.size(), out_bytes_written);
     safe_write(dst.data(), src.c_str(), out_bytes_written, dst.size_bytes(), src.size());
 }
 
-template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, size_t& out_bytes_written)
+template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, usize& out_bytes_written)
 {
     serialize(dst, src.offset, out_bytes_written);
     serialize(dst, src.size, out_bytes_written);
 }
 
 template <typename T, typename Storage>
-inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, size_t& out_bytes_written)
+inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written)
 {
     serialize(dst, src.handle, out_bytes_written);
 }
 
-template <typename T, size_t... index>
-inline void deserialize_fields(T& dst, std::span<const std::byte> src, size_t& out_bytes_written, std::index_sequence<index...>)
+template <typename T, usize... index>
+inline void deserialize_fields(T& dst, std::span<const std::byte> src, usize& out_bytes_written, std::index_sequence<index...>)
 {
     constexpr auto fields = get_struct_fields<T>();
     ((deserialize(dst.*std::get<index>(fields).fieldptr, src, out_bytes_written)), ...);
 }
 
-template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     if constexpr(MemcpySafe<T>) { safe_read(&dst, src.data(), out_bytes_written, sizeof(T), src.size()); }
     else
@@ -174,30 +173,30 @@ template <typename T> inline void deserialize(T& dst, std::span<const std::byte>
     }
 }
 
-template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     deserialize(dst.flags, src, out_bytes_written);
 }
 
-template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
-    uint64_t size;
+    u64 size;
     deserialize(size, src, out_bytes_written);
     dst.resize(size);
     deserialize(std::span{ dst.data(), size }, src, out_bytes_written);
 }
 
 template <typename T>
-inline void deserialize(std::vector<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+inline void deserialize(std::vector<T>& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
-    uint64_t size;
+    u64 size;
     deserialize(size, src, out_bytes_written);
     dst.resize(size);
     deserialize(std::span{ dst.data(), dst.size() }, src, out_bytes_written);
 }
 
 template <typename T>
-inline void deserialize(std::span<T> dst, std::span<const std::byte> src, size_t& out_bytes_written)
+inline void deserialize(std::span<T> dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     if constexpr(MemcpySafe<T>)
     {
@@ -212,24 +211,23 @@ inline void deserialize(std::span<T> dst, std::span<const std::byte> src, size_t
     }
 }
 
-template <size_t size>
-inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+template <usize size>
+inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
-    uint64_t sz;
+    u64 sz;
     deserialize(sz, src, out_bytes_written);
     dst.resize(sz);
     safe_read(dst.string.data(), src.data(), out_bytes_written, sz, src.size_bytes());
 }
 
-template <typename T>
-inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+template <typename T> inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     deserialize(dst.offset, src, out_bytes_written);
     deserialize(dst.size, src, out_bytes_written);
 }
 
 template <typename T, typename Storage>
-inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     deserialize(dst.handle, src, out_bytes_written);
 }
@@ -266,10 +264,10 @@ namespace engb
 inline namespace v0
 {
 
-inline static constexpr size_t HEADER_BYTE_SZ = 4 + 1 + 4;
-inline static constexpr size_t LIST_BYTE_SZ = 4 * 8 + 2 * 1;
+inline static constexpr usize HEADER_BYTE_SZ = 4 + 1 + 4;
+inline static constexpr usize LIST_BYTE_SZ = 4 * 8 + 2 * 1;
 
-enum class ListFlags : uint8_t
+enum class ListFlags : u8
 {
     CONTENT_COMPRESSED_BIT = 1 << 0, // use zlib to decompress
 };
@@ -277,16 +275,16 @@ enum class ListFlags : uint8_t
 // Uncompressed header just before actual asset bytes
 struct AssetMetadata
 {
-    uint64_t uncompressed_size{};
+    u64 uncompressed_size{};
 };
 
 struct List
 {
-    uint64_t custom_hash{};
-    uint64_t content_hash{};
-    uint64_t asset_start{}; // start of asset bytes, skipping metadata from flags, which is left uncompressed
-    uint64_t asset_size{}; // this probably could be calculated from total file size or next_item_list_asset_start - this_item_list_asset_start
-    uint8_t version{};
+    u64 custom_hash{};
+    u64 content_hash{};
+    u64 asset_start{}; // start of asset bytes, skipping metadata from flags, which is left uncompressed
+    u64 asset_size{}; // this probably could be calculated from total file size or next_item_list_asset_start - this_item_list_asset_start
+    u8 version{};
     Flags<ListFlags> flags{};
 };
 
@@ -297,15 +295,15 @@ struct Container
 
     void read_list_section();
 
-    void add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset,
+    void add_asset(u8 version, u64 custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset,
                    const AssetMetadata& metadata = {});
     // for streaming compressed data later for the currently added asset, see asset_manager.cpp. set finished on last append to recalc hash.
     void append_asset_bytes(std::span<const std::byte> bytes, bool finished);
 
     void serialize();
 
-    std::optional<List> get_asset_list(uint64_t custom_hash) const;
-    size_t get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset) const;
+    std::optional<List> get_asset_list(u64 custom_hash) const;
+    usize get_asset_data(const List& list, std::span<std::byte> out_data, usize src_offset) const;
 
     fs::FilePtr m_file;
     std::vector<List> m_lists_vec;

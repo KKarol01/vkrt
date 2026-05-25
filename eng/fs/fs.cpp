@@ -162,7 +162,7 @@ struct Win32DirChangeHandle
     HANDLE m_event{};
     OVERLAPPED m_overlap{};
     Handle<fs::DirectoryListener> m_listener;
-    uint32_t m_buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128 / sizeof(uint32_t)]{};
+    u32 m_buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128 / sizeof(u32)]{};
     bool m_is_stopped{};
     std::thread m_wait_thread;
 };
@@ -261,7 +261,7 @@ void File::delete_from_disk()
 
 bool File::eof() const { return m_file.eof(); }
 
-uint64_t File::get_hash()
+u64 File::get_hash()
 {
     if(m_content_hash != 0) { return m_content_hash; }
     m_content_hash = ENG_HASH(read(m_size), 0);

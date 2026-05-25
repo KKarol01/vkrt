@@ -20,8 +20,8 @@ struct Node
 {
     std::string name;
     Range32u meshes{};
-    uint32_t transform{ ~0u };
-    uint32_t parent{ ~0u };
+    u32 transform{ ~0u };
+    u32 parent{ ~0u };
     Range32u children{};
 };
 
@@ -41,7 +41,7 @@ struct Asset
     std::vector<Handle<gfx::Mesh>> meshes;
     std::vector<ecsc::Transform> transforms;
     std::vector<Node> nodes;
-    std::vector<uint32_t> root_nodes;
+    std::vector<u32> root_nodes;
 
     std::deque<gfx::ParsedGeometryReadySignal> geometry_data;
     std::deque<std::shared_future<gfx::ParsedGeometryData>> geometry_data_futures;
@@ -56,7 +56,7 @@ class AssetManager
 
   private:
     serialization::engb::Container& get_latest_container();
-    std::optional<serialization::engb::List> try_find_list_by_hash(uint64_t hash,
+    std::optional<serialization::engb::List> try_find_list_by_hash(u64 hash,
                                                                    serialization::engb::Container** out_container = nullptr);
 
     std::optional<Asset> try_deserialize_asset(const fs::Path& file_path);

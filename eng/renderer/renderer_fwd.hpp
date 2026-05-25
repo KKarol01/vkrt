@@ -130,7 +130,7 @@ enum class IndexFormat
     U32,
 };
 
-enum class VertexComponent : uint32_t
+enum class VertexComponent : u32
 {
     NONE = 0x0,
     POSITION_BIT = 0x1,
@@ -161,7 +161,7 @@ enum class BufferUsage
 };
 ENG_ENABLE_FLAGS_OPERATORS(BufferUsage);
 
-enum class ImageFormat : uint8_t
+enum class ImageFormat : u8
 {
     UNDEFINED,
     R8G8B8A8_UNORM,
@@ -179,7 +179,7 @@ enum class ImageFormat : uint8_t
     LAST_ENUM,
 };
 
-enum class ImageAspect : uint8_t
+enum class ImageAspect : u8
 {
     NONE = 0x0,
     COLOR = 0x1,
@@ -191,7 +191,7 @@ enum class ImageAspect : uint8_t
 };
 ENG_ENABLE_FLAGS_OPERATORS(ImageAspect);
 
-enum class ImageUsage : uint32_t
+enum class ImageUsage : u32
 {
     NONE = 0x0,
     STORAGE_BIT = 0x1,
@@ -206,7 +206,7 @@ enum class ImageUsage : uint32_t
 };
 ENG_ENABLE_FLAGS_OPERATORS(ImageUsage);
 
-enum class ImageLayout : uint8_t
+enum class ImageLayout : u8
 {
     UNDEFINED,
     GENERAL,
@@ -219,14 +219,14 @@ enum class ImageLayout : uint8_t
     LAST_ENUM,
 };
 
-enum class ImageType : uint8_t
+enum class ImageType : u8
 {
     TYPE_1D,
     TYPE_2D,
     TYPE_3D,
 };
 
-enum class ImageViewType : uint8_t
+enum class ImageViewType : u8
 {
     NONE,
     TYPE_1D,
@@ -234,19 +234,19 @@ enum class ImageViewType : uint8_t
     TYPE_3D,
 };
 
-enum class ImageFilter : uint8_t
+enum class ImageFilter : u8
 {
     NEAREST,
     LINEAR,
 };
 
-enum class ImageAddressing : uint8_t
+enum class ImageAddressing : u8
 {
     REPEAT,
     CLAMP_EDGE
 };
 
-enum class MeshPassType : uint8_t
+enum class MeshPassType : u8
 {
     Z_PREPASS,
     OPAQUE,
@@ -255,7 +255,7 @@ enum class MeshPassType : uint8_t
     LAST_ENUM,
 };
 
-enum class PipelineStage : uint16_t
+enum class PipelineStage : u16
 {
     NONE = 0x0,
     TRANSFER_BIT = 0x1,
@@ -274,7 +274,7 @@ enum class PipelineStage : uint16_t
 };
 ENG_ENABLE_FLAGS_OPERATORS(PipelineStage);
 
-enum class PipelineAccess : uint32_t
+enum class PipelineAccess : u32
 {
     NONE = 0x0,
     SHADER_READ_BIT = 0x1,
@@ -307,7 +307,7 @@ enum class PipelineAccess : uint32_t
 };
 ENG_ENABLE_FLAGS_OPERATORS(PipelineAccess)
 
-enum class ShaderStage : uint32_t
+enum class ShaderStage : u32
 {
     NONE = 0x0,
     ALL = 0xFFFFFFFF,
@@ -358,14 +358,14 @@ enum class SamplerMipmapMode
     LINEAR,
 };
 
-enum class AllocateMemory : uint8_t
+enum class AllocateMemory : u8
 {
     ALIASED,  // Gpu memory allocator will not create unique memory for this resource.
     EXTERNAL, // Memory is managed by someone else (swapchain images).
     YES,
 };
 
-enum class Compilation : uint8_t
+enum class Compilation : u8
 {
     NOW,     // resources get compiled now
     DEFERRED // resources are put in a queue and batch-compiled
@@ -379,7 +379,7 @@ enum class AOMode
     LAST_ENUM,
 };
 
-enum class QueryType : uint8_t
+enum class QueryType : u8
 {
     NONE,
     TIMESTAMP,
@@ -387,7 +387,7 @@ enum class QueryType : uint8_t
     PERFORMANCE,
 };
 
-enum class DiscardContents : uint8_t
+enum class DiscardContents : u8
 {
     NO,
     YES,
@@ -438,7 +438,7 @@ class SubmitQueue;
 class ImGuiRenderer;
 class BindlessPool;
 class StagingBuffer;
-enum class QueryType : uint8_t;
+enum class QueryType : u8;
 struct QueryPoolCreateInfo;
 struct QueryPoolMetadataVk;
 struct GeometryMetadataVk;
@@ -489,15 +489,15 @@ struct ImageView
         ImageViewMetadataVk* vk;
     };
     static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                          uint32_t src_mip = 0u, uint32_t dst_mip = ~0u, uint32_t src_layer = 0u, uint32_t dst_layer = ~0u);
+                          u32 src_mip = 0u, u32 dst_mip = ~0u, u32 src_layer = 0u, u32 dst_layer = ~0u);
     auto operator<=>(const ImageView& a) const = default;
     explicit operator bool() const { return (bool)image; }
     Metadata get_md() const;
     Handle<Image> image;
     ImageViewType type{};
     ImageFormat format{};
-    uint32_t src_subresource{};
-    uint32_t dst_subresource{ ~0u };
+    u32 src_subresource{};
+    u32 dst_subresource{ ~0u };
 };
 
 inline constexpr size_t get_vertex_component_size(VertexComponent comp)
@@ -587,13 +587,10 @@ inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> 
         }
     };
     if(dstf == IndexFormat::U32 && srcf == IndexFormat::U32) { memcpy(dst.data(), src.data(), src.size_bytes()); }
-    else if(dstf == IndexFormat::U32 && srcf == IndexFormat::U16)
-    {
-        copy_over.template operator()<uint32_t, uint16_t>();
-    }
-    else if(dstf == IndexFormat::U32 && srcf == IndexFormat::U8) { copy_over.template operator()<uint32_t, uint8_t>(); }
+    else if(dstf == IndexFormat::U32 && srcf == IndexFormat::U16) { copy_over.template operator()<u32, u16>(); }
+    else if(dstf == IndexFormat::U32 && srcf == IndexFormat::U8) { copy_over.template operator()<u32, u8>(); }
     else if(dstf == IndexFormat::U16 && srcf == IndexFormat::U16) { memcpy(dst.data(), src.data(), src.size_bytes()); }
-    else if(dstf == IndexFormat::U16 && srcf == IndexFormat::U8) { copy_over.template operator()<uint16_t, uint8_t>(); }
+    else if(dstf == IndexFormat::U16 && srcf == IndexFormat::U8) { copy_over.template operator()<u16, u8>(); }
     else if(dstf == IndexFormat::U8 && srcf == IndexFormat::U8) { memcpy(dst.data(), src.data(), src.size_bytes()); }
     else
     {
@@ -657,25 +654,26 @@ struct ParsedGeometryData
     Flags<gfx::VertexComponent> vertex_layout;
     std::vector<float> positions{};
     std::vector<float> attributes{};
-    std::vector<uint16_t> indices{};
+    std::vector<u16> indices{};
     std::vector<gfx::Meshlet> meshlets{};
 };
 using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
 
 struct ParsedImageData
 {
-    uint32_t width{};
-    uint32_t height{};
+    StackString<128> name;
+    u32 width{};
+    u32 height{};
     gfx::ImageFormat format{};
     std::vector<std::byte> data;
 };
 
 struct Meshlet
 {
-    int32_t vertex_offset;
-    uint32_t vertex_count;
-    uint32_t index_offset;
-    uint32_t index_count;
+    i32 vertex_offset;
+    u32 vertex_count;
+    u32 index_offset;
+    u32 index_count;
     glm::vec4 bounding_sphere{};
 };
 
@@ -707,7 +705,8 @@ template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
 }
 template <> inline constexpr auto get_struct_fields<gfx::ParsedImageData>()
 {
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, width),
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, name),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, width),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, height),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, format),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, data));

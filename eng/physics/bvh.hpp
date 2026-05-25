@@ -31,26 +31,26 @@ struct Triangle
 
 class BVH
 {
-    inline static constexpr uint32_t INVALID_CHILD = ~0u;
+    inline static constexpr u32 INVALID_CHILD = ~0u;
     struct Node
     {
         struct Metadata
         {
-            uint32_t level{ ~0u };
+            u32 level{ ~0u };
         };
 
         bool is_leaf() const { return pcount > 0; }
         AABB aabb{};
-        uint32_t left_or_pstart{ INVALID_CHILD }; // if pcount==0, it's the index of the left child, and the right child
+        u32 left_or_pstart{ INVALID_CHILD }; // if pcount==0, it's the index of the left child, and the right child
                                                   // is 1 added to this; if pcount > 0, it's the offset into primitives array.
-        uint32_t pcount{}; // number of primitives. if 0, this is not a leaf node.
+        u32 pcount{}; // number of primitives. if 0, this is not a leaf node.
     };
 
   public:
     struct Stats
     {
         size_t size{};
-        uint32_t levels{};
+        u32 levels{};
         std::span<const Triangle> tris;
         std::span<const Node> nodes;
         std::span<const Node::Metadata> metadatas;
@@ -63,10 +63,10 @@ class BVH
     Stats get_stats() const;
 
   private:
-    void subdivide(uint32_t node);
-    void update_bounds(uint32_t node);
+    void subdivide(u32 node);
+    void update_bounds(u32 node);
 
-    uint32_t levels{};
+    u32 levels{};
     std::vector<Triangle> tris;
     std::vector<Node> nodes;
     std::vector<Node::Metadata> metadatas;

@@ -7,10 +7,14 @@
 #include <cassert>
 #include <cmath>
 #include <memory>
+#include <eng/common/types.hpp>
 
-template <std::integral Index = uint32_t> class SparseSet
+namespace eng
 {
-    inline static constexpr size_t IDX_PER_PAGE = 16384 / sizeof(Index);
+
+template <std::integral Index = u32> class SparseSet
+{
+    inline static constexpr usize IDX_PER_PAGE = 16384 / sizeof(Index);
 
   public:
     inline static constexpr Index INVALID = ~Index{};
@@ -91,10 +95,10 @@ template <std::integral Index = uint32_t> class SparseSet
     }
 
     // Returns the count of allocated indices.
-    size_t size() const { return m_size; }
+    usize size() const { return m_size; }
 
   private:
-    static size_t align_up2(size_t index, size_t alignment)
+    static usize align_up2(usize index, usize alignment)
     {
         assert((alignment & (alignment - 1)) == 0);
         return (index + alignment - 1) & ~(alignment - 1);
@@ -108,3 +112,5 @@ template <std::integral Index = uint32_t> class SparseSet
     std::vector<Index> m_dense_vec;
     Index m_size{};
 };
+
+} // namespace eng

@@ -83,7 +83,7 @@ serialization::engb::Container& AssetManager::get_latest_container()
     return m_engb_containers_vec.front();
 }
 
-std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(uint64_t hash, serialization::engb::Container** out_container)
+std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(u64 hash, serialization::engb::Container** out_container)
 {
     std::shared_lock lock{ m_engbc_vec_mutex };
     for(auto& c : m_engb_containers_vec)
@@ -101,7 +101,7 @@ std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(uin
 std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_path)
 {
     {
-        uint32_t head{};
+        u32 head{};
         while(m_serializing_threads.size())
         {
             if(m_serializing_threads[head]->joinable()) { break; }
@@ -125,7 +125,7 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     {
         std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
         size_t asset_read_offset = 0;
-        uint64_t uncompressed_size = 0;
+        u64 uncompressed_size = 0;
         container->m_file->read((std::byte*)&uncompressed_size, 8, list.asset_start - 8);
         asset_bytes.reserve(uncompressed_size);
         auto success = compression::zlib_inflate(
@@ -242,13 +242,13 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
     ENG_ASSERT(src.images.size() == src.image_data.size());
     serialize(dst, src.image_data, out_bytes_written);
 
-    serialize(dst, (uint64_t)src.textures.size(), out_bytes_written);
+    serialize(dst, (u64)src.textures.size(), out_bytes_written);
     for(auto txt : src.textures)
     {
         // store index to image array so it can later be deserialized
         auto it = std::ranges::find(src.images, txt.image);
         ENG_ASSERT(it != src.images.end());
-        *txt.image = (uint32_t)std::distance(src.images.begin(), it);
+        *txt.image = (u32)std::distance(src.images.begin(), it);
         ENG_ASSERT(*txt.image < src.images.size());
         serialize(dst, txt, out_bytes_written);
     }
@@ -261,7 +261,7 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         serialize(dst, gd, out_bytes_written);
     }
 
-    serialize(dst, (uint64_t)src.materials.size(), out_bytes_written);
+    serialize(dst, (u64)src.materials.size(), out_bytes_written);
     for(const auto& math : src.materials)
     {
         auto mat = math.get();
@@ -269,31 +269,31 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         if(mat.base_color_texture)
         {
             auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
-            *mat.base_color_texture.image = (uint32_t)idx;
+            *mat.base_color_texture.image = (u32)idx;
             if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
         }
         if(mat.normal_texture)
         {
             *mat.normal_texture.image =
-                (uint32_t)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
+                (u32)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
         }
         if(mat.metallic_roughness_texture)
         {
             *mat.metallic_roughness_texture.image =
-                (uint32_t)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
+                (u32)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
         }
         mat.mesh_pass = {}; // ignoring meshpass, as load_material uses default one
         serialize(dst, mat, out_bytes_written);
     }
 
-    serialize(dst, (uint64_t)src.meshes.size(), out_bytes_written);
+    serialize(dst, (u64)src.meshes.size(), out_bytes_written);
     for(const auto& meshh : src.meshes)
     {
         auto mesh = meshh.get();
-        *mesh.geometry = (uint32_t)std::distance(src.geometries.begin(), std::ranges::find(src.geometries, mesh.geometry));
+        *mesh.geometry = (u32)std::distance(src.geometries.begin(), std::ranges::find(src.geometries, mesh.geometry));
         if(mesh.material)
         {
-            *mesh.material = (uint32_t)std::distance(src.materials.begin(), std::ranges::find(src.materials, mesh.material));
+            *mesh.material = (u32)std::distance(src.materials.begin(), std::ranges::find(src.materials, mesh.material));
         }
         serialize(dst, mesh, out_bytes_written);
     }
@@ -311,7 +311,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     dst.path = pathstr;
     ENG_ASSERT(!dst.path.empty())
 
-    uint64_t image_count;
+    u64 image_count;
     deserialize(image_count, src, out_bytes_written);
     dst.images.resize(image_count);
     gfx::ParsedImageData imgd{};
@@ -319,16 +319,17 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     for(auto i = 0u; i < image_count; ++i)
     {
         // don't use deserialize() here, because it would double the image data for no reason, we can read from the stream
-        uint64_t pixel_data_size = 0;
+        u64 pixel_data_size = 0;
+        deserialize(imgd.name, src, out_bytes_written);
         deserialize(imgd.width, src, out_bytes_written);
         deserialize(imgd.height, src, out_bytes_written);
         deserialize(imgd.format, src, out_bytes_written);
         deserialize(pixel_data_size, src, out_bytes_written);
-        dst.images[i] = get_engine().renderer->make_image("EMPTY IMAGE NAME",
-                                                          gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
-                                                                           gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                               gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                           0, 1, gfx::ImageLayout::READ_ONLY));
+        dst.images[i] =
+            get_engine().renderer->make_image(imgd.name, gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
+                                                                          gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                              gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                          0, 1, gfx::ImageLayout::READ_ONLY));
         if(!dst.images[i])
         {
             ENG_WARN("Failed to create image {}", "EMPTY IMAGE NAME");
@@ -349,7 +350,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     gfx::get_renderer().gq->with_cmd_buf(mip_cmd).submit();
     gfx::get_renderer().current_data->wait_syncs.push_back(mip_sync);
 
-    uint64_t texture_count;
+    u64 texture_count;
     deserialize(texture_count, src, out_bytes_written);
     dst.textures.resize(texture_count);
     for(auto& txt : dst.textures)
@@ -358,11 +359,11 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
         txt.image = dst.images[*txt.image]; // when serializing, handles are made into indices into this array
     }
 
-    uint64_t geom_count;
+    u64 geom_count;
     deserialize(geom_count, src, out_bytes_written);
     dst.geometries.resize(geom_count);
     gfx::ParsedGeometryData geom;
-    for(uint64_t i = 0; i < geom_count; ++i)
+    for(u64 i = 0; i < geom_count; ++i)
     {
         deserialize(geom, src, out_bytes_written);
         dst.geometries[i] =
@@ -375,11 +376,11 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
                                                                        .meshlets = geom.meshlets });
     }
 
-    uint64_t material_count;
+    u64 material_count;
     deserialize(material_count, src, out_bytes_written);
     dst.materials.resize(material_count);
     gfx::Material mat;
-    for(uint64_t i = 0; i < material_count; ++i)
+    for(u64 i = 0; i < material_count; ++i)
     {
         deserialize(mat, src, out_bytes_written);
         if(mat.base_color_texture) { mat.base_color_texture = dst.textures[*mat.base_color_texture.image]; }
@@ -391,11 +392,11 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
         dst.materials[i] = gfx::get_renderer().make_material(mat);
     }
 
-    uint64_t mesh_count = 0;
+    u64 mesh_count = 0;
     deserialize(mesh_count, src, out_bytes_written);
     dst.meshes.resize(mesh_count);
     gfx::Mesh mesh;
-    for(uint64_t i = 0; i < mesh_count; ++i)
+    for(u64 i = 0; i < mesh_count; ++i)
     {
         deserialize(mesh, src, out_bytes_written);
         if(mesh.material) { mesh.material = dst.materials[*mesh.material]; }

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <eng/common/types.hpp>
 #include <eng/common/callback.hpp>
 
 struct GLFWwindow;
@@ -108,7 +109,7 @@ class Engine
     double get_time_secs();
     double last_frame_time{};
     double delta_time{};
-    uint64_t tick{};
+    u64 tick{};
     size_t engine_startup_time{};
     float refresh_rate{ 1.0f / 60.0f };
 

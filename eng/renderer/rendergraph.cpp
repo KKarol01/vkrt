@@ -124,7 +124,7 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
     const auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
     graph->resources.push_back(resource);
     const auto ret = add_access(RGAccess{
-        .resource = RGResourceId{ (uint32_t)graph->resources.size() - 1 },
+        .resource = RGResourceId{ (u32)graph->resources.size() - 1 },
         .prev_access = {},
         .buffer_view = {},
         .layout = layout,
@@ -147,7 +147,7 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
     return add_resource(std::move(res));
 }
 
-PersistentStorage* RGBuilder::find_persistent(uint64_t namehash)
+PersistentStorage* RGBuilder::find_persistent(u64 namehash)
 {
     auto it = graph->persistent_resources.find(std::make_pair(pass->id, namehash));
     if(it == graph->persistent_resources.end()) { return nullptr; }
@@ -216,7 +216,7 @@ RGAccessId RGBuilder::add_access(const RGAccess& a)
     }
 
     graph->accesses.push_back(a);
-    const auto ret = RGAccessId{ (uint32_t)graph->accesses.size() - 1 };
+    const auto ret = RGAccessId{ (u32)graph->accesses.size() - 1 };
     graph->get_res(ret).last_access = ret;
     pass->accesses.push_back(ret);
     pass->stage_mask |= a.stage;
@@ -320,7 +320,7 @@ void RGRenderGraph::compile()
     allocator->reset_pages();
 
     const auto group_passes = [this] {
-        const auto get_earliest_group_for_pass = [this](const std::vector<RGAccessId>& accesses) -> uint32_t {
+        const auto get_earliest_group_for_pass = [this](const std::vector<RGAccessId>& accesses) -> u32 {
             return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& val) {
                 return std::max(max, [this, &val] {
                     const auto& acc = get_acc(val);
@@ -347,7 +347,7 @@ void RGRenderGraph::compile()
                 }());
             });
         };
-        const auto update_resource_accesses = [this](const std::vector<RGAccessId>& accesses, uint32_t last_group) {
+        const auto update_resource_accesses = [this](const std::vector<RGAccessId>& accesses, u32 last_group) {
             std::for_each(accesses.begin(), accesses.end(), [this, last_group](RGAccessId a) {
                 const auto& acc = get_acc(a);
                 auto& res = get_res(a);
@@ -357,7 +357,7 @@ void RGRenderGraph::compile()
         };
         groups.clear();
         groups.resize(passes.size());
-        uint32_t last_gid = 0;
+        u32 last_gid = 0;
         for(auto& p : passes)
         {
             const auto gid = get_earliest_group_for_pass(p.pass->accesses);
@@ -428,7 +428,7 @@ void RGRenderGraph::compile()
     debug_data->build(this);
 }
 
-Sync* RGRenderGraph::execute(Sync** wait_syncs, uint32_t wait_count)
+Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
 {
     std::swap(sems[0], sems[1]);
     std::swap(cmd_pools[0], cmd_pools[1]);

@@ -22,7 +22,7 @@ namespace gfx
 
 struct DescriptorSetVk
 {
-    uint32_t setidx{ ~0u };
+    u32 setidx{ ~0u };
     VkDescriptorSet set{};
 };
 
@@ -36,15 +36,15 @@ class DescriptorPoolVk
 {
   public:
     DescriptorPoolVk() = default;
-    DescriptorPoolVk(uint32_t max_allocs, std::span<DescriptorSizeRatio> sizes)
+    DescriptorPoolVk(u32 max_allocs, std::span<DescriptorSizeRatio> sizes)
         : max_allocs(max_allocs), sizes(sizes.begin(), sizes.end())
     {
     }
 
-    DescriptorSetVk allocate(const DescriptorLayout& layout, uint32_t setidx);
+    DescriptorSetVk allocate(const DescriptorLayout& layout, u32 setidx);
     void add_page();
 
-    uint32_t max_allocs;
+    u32 max_allocs;
     std::vector<DescriptorSizeRatio> sizes;
     std::vector<VkDescriptorPool> used;
     std::vector<VkDescriptorPool> free;
@@ -55,9 +55,9 @@ class IDescriptorSetAllocator
   public:
     virtual ~IDescriptorSetAllocator() = default;
 
-    virtual void bind_resources(uint32_t slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) = 0;
+    virtual void bind_resources(u32 slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) = 0;
 
-    virtual uint32_t get_bindless(const DescriptorResource& view) { return ~0u; }
+    virtual u32 get_bindless(const DescriptorResource& view) { return ~0u; }
 
     virtual void flush(CommandBufferVk* cmd) = 0;
     // virtual void reset() = 0;
@@ -65,7 +65,7 @@ class IDescriptorSetAllocator
 
 class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 {
-    using SlotAllocatorType = SlotAllocator<uint32_t>;
+    using SlotAllocatorType = SlotAllocator<u32>;
 
     struct Slot
     {
@@ -74,7 +74,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
             return std::tie(view, vkptr, allocator) == std::tie(s.view, s.vkptr, s.allocator);
         }
         std::variant<BufferView, ImageView, TopAccelerationStructure> view;
-        uint32_t value{ ~0u };
+        u32 value{ ~0u };
         const void* vkptr{};
         SlotAllocatorType* allocator{};
     };
@@ -83,15 +83,15 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
     ~DescriptorSetAllocatorBindlessVk() override = default;
 
-    void bind_resources(uint32_t slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) override;
+    void bind_resources(u32 slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) override;
 
-    uint32_t get_bindless(const DescriptorResource& view) override;
+    u32 get_bindless(const DescriptorResource& view) override;
 
     void flush(CommandBufferVk* cmd) override;
 
   private:
-    uint32_t bind_resource(const DescriptorResource& desc);
-    void write_descriptor(DescriptorType type, const void* view, uint32_t slot);
+    u32 bind_resource(const DescriptorResource& desc);
+    void write_descriptor(DescriptorType type, const void* view, u32 slot);
     SlotAllocatorType& get_slot_allocator(DescriptorType type)
     {
         if(type == DescriptorType::STORAGE_BUFFER) { return storage_buffer_slots; }
@@ -104,7 +104,7 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 
     DescriptorPoolVk pool{};
     DescriptorSetVk set{};
-    std::array<uint32_t, PushRange::MAX_PUSH_BYTES / sizeof(uint32_t)> push_values;
+    std::array<u32, PushRange::MAX_PUSH_BYTES / sizeof(u32)> push_values;
     std::vector<Range32u> push_ranges;
 
     std::vector<VkWriteDescriptorSet> writes;
@@ -117,8 +117,8 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     SlotAllocatorType sampled_image_slots;
     SlotAllocatorType tlas_slots;
 
-    std::unordered_map<uint32_t, std::vector<Slot>> image_views;
-    std::unordered_map<uint32_t, std::vector<Slot>> buffer_views;
+    std::unordered_map<u32, std::vector<Slot>> image_views;
+    std::unordered_map<u32, std::vector<Slot>> buffer_views;
     std::unordered_map<uintptr_t, std::vector<Slot>> tlas_views;
 };
 

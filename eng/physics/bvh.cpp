@@ -15,7 +15,7 @@ BVH::BVH(std::span<const std::byte> vertices, size_t stride, std::span<const std
     // if using indices, make sure they form triangles; or check if vertices form triangles
     assert(ic > 0 ? ic % 3 == 0 : (vertices.size() / stride) % 3 == 0);
 
-    std::vector<uint32_t> ids(ic);
+    std::vector<u32> ids(ic);
     if(ic > 0)
     {
         gfx::copy_indices(std::as_writable_bytes(std::span{ ids }), std::span{ indices }, gfx::IndexFormat::U32, index_format);
@@ -38,13 +38,13 @@ BVH::BVH(std::span<const std::byte> vertices, size_t stride, std::span<const std
     assert(tris.size() <= UINT32_MAX);
 
     nodes.reserve(tri_count * 2 - 1);
-    nodes.push_back(Node{ .aabb = {}, .left_or_pstart = 0, .pcount = (uint32_t)tris.size() });
+    nodes.push_back(Node{ .aabb = {}, .left_or_pstart = 0, .pcount = (u32)tris.size() });
     update_bounds(0);
     subdivide(0);
     nodes.shrink_to_fit();
     metadatas.resize(nodes.size());
 
-    const auto count_levels = [this](uint32_t node, uint32_t level, const auto& self) -> uint32_t {
+    const auto count_levels = [this](u32 node, u32 level, const auto& self) -> u32 {
         const auto& n = nodes[node];
         metadatas[node].level = level;
         if(n.is_leaf()) { return level; }
@@ -64,7 +64,7 @@ BVH::Stats BVH::get_stats() const
     };
 }
 
-void BVH::subdivide(uint32_t node)
+void BVH::subdivide(u32 node)
 {
     auto& n = nodes[node];
     if(n.pcount <= 2) { return; }
@@ -74,8 +74,8 @@ void BVH::subdivide(uint32_t node)
     if(extent.z > extent[axis]) { axis = 2; }
     const auto splitpos = (n.aabb.min[axis] + n.aabb.max[axis]) * 0.5f;
 
-    uint32_t a = n.left_or_pstart;
-    uint32_t b = a + n.pcount - 1;
+    u32 a = n.left_or_pstart;
+    u32 b = a + n.pcount - 1;
     while(a <= b)
     {
         const auto p = tris[a].centroid()[axis];
@@ -101,7 +101,7 @@ void BVH::subdivide(uint32_t node)
     subdivide(lni + 1);
 }
 
-void BVH::update_bounds(uint32_t node)
+void BVH::update_bounds(u32 node)
 {
     auto& n = nodes[node];
     n.aabb = {};

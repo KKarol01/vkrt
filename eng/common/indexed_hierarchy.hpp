@@ -18,7 +18,7 @@ class IndexedHierarchy
     struct Node;
 
   public:
-    using NodeId = SlotAllocator<uint32_t>::Slot;
+    using NodeId = SlotAllocator<u32>::Slot;
 
   private:
     struct Node
@@ -33,7 +33,7 @@ class IndexedHierarchy
   public:
     bool has(NodeId id) const { return slots.has(id); }
 
-    uint32_t size() const { return slots.size(); }
+    u32 size() const { return slots.size(); }
 
     NodeId create()
     {
@@ -156,7 +156,7 @@ class IndexedHierarchy
     const Node& get(NodeId id) const { return const_cast<IndexedHierarchy*>(this)->get(id); }
 
     inline static Node null_object = Node{};
-    SlotAllocator<uint32_t> slots;
+    SlotAllocator<u32> slots;
     std::vector<Node> nodes;
 };
 

@@ -54,7 +54,7 @@ void MeshRenderer::build_passes()
         sort_mesh_instances(instances);
         auto ret = build_pass_from_instances(pass, instances);
 
-        std::vector<uint32_t> counts;
+        std::vector<u32> counts;
         counts.reserve(pass.batches_vec.size());
         for(const auto& b : pass.batches_vec)
         {
@@ -113,12 +113,12 @@ void MeshRenderer::draw(MeshPassType type, ICommandBuffer& cmd)
     const auto& pass = m_pass_datas_arr[(int)type];
     const auto cmd_size = get_renderer().backend->get_indirect_indexed_command_size();
     cmd.bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
-    uint32_t batch_idx = 0;
+    u32 batch_idx = 0;
     for(const auto& batch : pass.batches_vec)
     {
         cmd.bind_pipeline(batch.pipeline.get());
         cmd.draw_indexed_indirect_count(pass.indirect_buf.get(), pass.indirect_cmds_offset + batch.first_command * cmd_size,
-                                        pass.indirect_buf.get(), batch_idx * sizeof(uint32_t), batch.command_count, cmd_size);
+                                        pass.indirect_buf.get(), batch_idx * sizeof(u32), batch.command_count, cmd_size);
         ++batch_idx;
     }
 }
@@ -170,7 +170,7 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
     pass.batches_vec.reserve(vec.size());
     PassData::InstanceBatch* pb{};
     std::vector<std::byte> cmds(groups.size() * get_renderer().backend->get_indirect_indexed_command_size());
-    uint32_t cmdoff{};
+    u32 cmdoff{};
     std::vector<GPUInstanceId> gpuinstanceids;
     gpuinstanceids.reserve(vec.size());
     for(auto g : groups)
@@ -199,7 +199,7 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
 
     return BuildPassResult{ .cmds_vec = std::move(cmds),
                             .gpuinstanceids_vec = std::move(gpuinstanceids),
-                            .cmd_count = (uint32_t)groups.size() };
+                            .cmd_count = (u32)groups.size() };
 }
 
 } // namespace gfx

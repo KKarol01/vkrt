@@ -17,13 +17,13 @@ namespace gfx
 
 struct RGDebugData;
 class GPUTransientAllocator;
-using RGResourceId = TypedId<RGResource, uint32_t>;
-using RGAccessId = TypedId<RGAccess, uint32_t>;
+using RGResourceId = TypedId<RGResource, u32>;
+using RGAccessId = TypedId<RGAccess, u32>;
 
 struct RGPass
 {
-    using PassId = TypedId<RGPass, uint64_t>;
-    using PassOrder = uint32_t;
+    using PassId = TypedId<RGPass, u64>;
+    using PassOrder = u32;
     enum class Type
     {
         NONE,
@@ -41,7 +41,7 @@ struct RGPass
     StackString<32> name;
     Type type{ Type::NONE };
     std::vector<RGAccessId> accesses;
-    // std::vector<std::tuple<Sync*, Flags<PipelineStage>, uint64_t>> wait_syncs;
+    // std::vector<std::tuple<Sync*, Flags<PipelineStage>, u64>> wait_syncs;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
     TimestampQuery* query{};
@@ -62,7 +62,7 @@ struct RGClear
     struct DepthStencil
     {
         float depth;
-        std::optional<uint32_t> stencil;
+        std::optional<u32> stencil;
     };
     struct Color
     {
@@ -72,7 +72,7 @@ struct RGClear
     {
         return RGClear{ Color{ glm::vec4{ color[0], color[1], color[2], color[3] } } };
     }
-    static RGClear depth_stencil(float depth, std::optional<uint32_t> stencil = {})
+    static RGClear depth_stencil(float depth, std::optional<u32> stencil = {})
     {
         return RGClear{ DepthStencil{ depth, stencil } };
     }
@@ -96,8 +96,8 @@ struct RGResource
     StackString<64> name;
     NativeResource native{};
     RGAccessId last_access{};
-    uint32_t last_read_group{ ~0u };
-    uint32_t last_write_group{ ~0u };
+    u32 last_read_group{ ~0u };
+    u32 last_write_group{ ~0u };
     bool is_persistent{};
     bool is_aliased{};
     void* alloc{}; // from transient allocator if not persistent
@@ -130,7 +130,7 @@ struct RGBuilder
 {
     RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
     RGAccessId import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear = {});
-    PersistentStorage* find_persistent(uint64_t namehash);
+    PersistentStorage* find_persistent(u64 namehash);
     RGAccessId create_resource(std::string_view name, Buffer&& a, bool persistent = false);
     RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool persistent = false);
     RGAccessId add_access(const RGAccess& a);
@@ -375,7 +375,7 @@ class RGRenderGraph
 
     void compile();
 
-    Sync* execute(Sync** wait_syncs = nullptr, uint32_t wait_count = 0);
+    Sync* execute(Sync** wait_syncs = nullptr, u32 wait_count = 0);
 
     void free_resource(RGResource& res);
 
@@ -386,7 +386,7 @@ class RGRenderGraph
     GPUTransientAllocator* allocator{};
     RGDebugData* debug_data{};
 
-    std::unordered_map<std::pair<RGPass::PassId, uint64_t>, PersistentStorage, hash::PairHash> persistent_resources;
+    std::unordered_map<std::pair<RGPass::PassId, u64>, PersistentStorage, hash::PairHash> persistent_resources;
     std::vector<RGResource> resources;
     std::vector<RGAccess> accesses;
     std::vector<OrderedPass> passes;
@@ -408,7 +408,7 @@ struct RGDebugData
     };
     struct Access
     {
-        uint32_t resource{ ~0u };
+        u32 resource{ ~0u };
         Flags<PipelineStage> stage{};
         Flags<PipelineAccess> access{};
         ImageLayout layout{};

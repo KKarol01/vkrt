@@ -44,12 +44,12 @@ void MeshRenderData::build()
 
     std::vector<GPUInstanceId> insts;
     std::vector<IndexedIndirectDrawCommand> cmds;
-    std::vector<uint32_t> counts;
+    std::vector<u32> counts;
     insts.reserve(built_instances.size());
     cmds.reserve(built_instances.size());
     counts.reserve(built_instances.size());
     Handle<Pipeline> prev_pipeline;
-    uint32_t prev_meshlet = ~0u;
+    u32 prev_meshlet = ~0u;
     for(auto i = 0u; i < built_instances.size(); ++i)
     {
         const auto& inst = built_instances[i];
@@ -59,7 +59,7 @@ void MeshRenderData::build()
         {
             prev_pipeline = mp.pipeline;
             render_data.batches.push_back(InstanceBatch{
-                .pipeline = mp.pipeline, .instance_count = 0, .first_command = (uint32_t)cmds.size(), .command_count = 0 });
+                .pipeline = mp.pipeline, .instance_count = 0, .first_command = (u32)cmds.size(), .command_count = 0 });
             counts.push_back(0);
         }
         if(prev_meshlet != inst.meshlet_index)
@@ -73,7 +73,7 @@ void MeshRenderData::build()
                                                        .firstInstance = i });
         }
         insts.push_back(GPUInstanceId{
-            .cmdi = (uint32_t)cmds.size(), .resi = (uint32_t)insts.size(), .insti = inst.instance_index, .mati = *inst.material });
+            .cmdi = (u32)cmds.size(), .resi = (u32)insts.size(), .insti = inst.instance_index, .mati = *inst.material });
         ++render_data.batches.back().instance_count;
         ++cmds.back().instanceCount;
         render_data.batches.back().command_count = cmds.size() - render_data.batches.back().first_command;
@@ -105,7 +105,7 @@ void MeshRenderData::build()
     render_data.cmds_view = BufferView::init(render_data.indirect_buf, cmds_start, cmds_size);
 }
 
-void MeshRenderData::add_mesh(uint32_t instance_index, Handle<gfx::Mesh> mesh)
+void MeshRenderData::add_mesh(u32 instance_index, Handle<gfx::Mesh> mesh)
 {
     built_instances.clear();
     const auto& m = mesh.get();
@@ -122,7 +122,7 @@ void IndirectBatch::draw(const Callback<void(const IndirectDrawParams&)>& draw_c
     for(auto i = 0u; i < batches.size(); ++i)
     {
         const auto& batch = batches[i];
-        const auto cntoff = sizeof(uint32_t) * i;
+        const auto cntoff = sizeof(u32) * i;
         const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
         const auto cmdoff = cmdsize * cmdoffacc + cmds_view.range.offset;
         draw_callback(IndirectDrawParams{

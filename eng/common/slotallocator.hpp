@@ -9,7 +9,7 @@
 namespace eng
 {
 
-template <typename Storage = uint32_t> struct SlotAllocator
+template <typename Storage = u32> struct SlotAllocator
 {
     struct slot_t;
     using Slot = TypedId<slot_t, Storage>;

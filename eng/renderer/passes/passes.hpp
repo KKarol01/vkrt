@@ -55,11 +55,11 @@ struct PassInitData
 
 struct Pass
 {
-    Pass(std::string_view name, uint32_t order) : m_name(name), m_order(order) {}
+    Pass(std::string_view name, u32 order) : m_name(name), m_order(order) {}
     virtual ~Pass() = default;
     virtual void init(RGRenderGraph* graph, const PassInitData& data) = 0;
     std::string m_name;
-    uint32_t m_order{};
+    u32 m_order{};
     PassSettings m_settings;
 };
 
@@ -652,10 +652,10 @@ struct MeshPass : public Pass
                     vkrinfo.pDepthAttachment = &vkdep;
                 }
 
-                vkrinfo.renderArea = { .offset = {}, .extent = { (uint32_t)render_res.x, (uint32_t)render_res.y } };
+                vkrinfo.renderArea = { .offset = {}, .extent = { (u32)render_res.x, (u32)render_res.y } };
                 vkrinfo.layerCount = 1;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
-                VkRect2D scissor{ {}, { (uint32_t)render_res.x, (uint32_t)render_res.y } };
+                VkRect2D scissor{ {}, { (u32)render_res.x, (u32)render_res.y } };
                 DescriptorResource shaderresources[]{
                     DescriptorResource::storage_buffer(b.get_buf(d.constants)),
                     DescriptorResource::storage_buffer(b.get_buf(d.instances)),
@@ -849,7 +849,7 @@ namespace culling
 //         auto& r = get_renderer();
 //         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
 //         VkViewport vkview{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
-//         VkRect2D vksciss{ {}, { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
+//         VkRect2D vksciss{ {}, { (u32)get_engine().window->width, (u32)get_engine().window->height } };
 //         const auto vkdep =
 //             Vks(VkRenderingAttachmentInfo{ .imageView = rg->get_resource(zbufs).image->default_view->md.vk->view,
 //                                            .imageLayout = to_vk(ImageLayout::ATTACHMENT),
@@ -909,11 +909,11 @@ namespace culling
 //         auto& r = get_renderer();
 //         auto* w = get_engine().window;
 //         zbuf = info.zbufs;
-//         const auto hizpmips = (uint32_t)(std::log2f(std::max(w->width, w->height)) + 1);
+//         const auto hizpmips = (u32)(std::log2f(std::max(w->width, w->height)) + 1);
 //         hiz = g->make_resource(ImageDescriptor{ .name = "hizpyramid",
-//                                                 .width = (uint32_t)w->width,
-//                                                 .height = (uint32_t)w->height,
-//                                                 .mips = (uint32_t)(hizpmips),
+//                                                 .width = (u32)w->width,
+//                                                 .height = (u32)w->height,
+//                                                 .mips = (u32)(hizpmips),
 //                                                 .format = ImageFormat::R32F,
 //                                                 .usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT },
 //                                r->frame_count);
@@ -1043,9 +1043,9 @@ namespace culling
 //     struct CreateInfo
 //     {
 //         RenderGraph::ResourceView zbufs;
-//         uint32_t num_tiles;
-//         uint32_t lights_per_tile;
-//         uint32_t tile_pixels;
+//         u32 num_tiles;
+//         u32 lights_per_tile;
+//         u32 tile_pixels;
 //     };
 //     LightCulling(RenderGraph* g, const CreateInfo& info) : Pass("fwdp::LightCulling", RenderOrder::DEFAULT_UNLIT)
 //     {
@@ -1054,8 +1054,8 @@ namespace culling
 //         tile_pixels = info.tile_pixels;
 //         auto& r = get_renderer();
 //         zbufs = info.zbufs;
-//         const auto light_list_size = info.num_tiles * info.lights_per_tile * sizeof(uint32_t) + 128;
-//         const auto light_grid_size = info.num_tiles * 2 * sizeof(uint32_t);
+//         const auto light_list_size = info.num_tiles * info.lights_per_tile * sizeof(u32) + 128;
+//         const auto light_grid_size = info.num_tiles * 2 * sizeof(u32);
 //         culled_light_list_bufs =
 //             g->make_resource(BufferDescriptor{ "fwdp light list", light_list_size, BufferUsage::STORAGE_BIT }, r->frame_count);
 //         culled_light_grid_bufs =
@@ -1081,20 +1081,20 @@ namespace culling
 //         cmd->bind_resource(3, r->make_texture(TextureDescriptor{ rg->get_resource(zbufs).image->default_view,
 //                                                                  ImageLayout::GENERAL, true }));
 //
-//         const uint32_t zero = 0u;
+//         const u32 zero = 0u;
 //         r->sbuf->copy(rg->get_resource(culled_light_list_bufs).buffer, &zero, 0ull, 4);
 //         q->wait_sync(r->sbuf->flush(), PipelineStage::COMPUTE_BIT);
 //
 //         const auto* w = get_engine().window;
-//         auto dx = (uint32_t)w->width;
-//         auto dy = (uint32_t)w->height;
+//         auto dx = (u32)w->width;
+//         auto dy = (u32)w->height;
 //         dx = (dx + tile_pixels - 1) / tile_pixels;
 //         dy = (dy + tile_pixels - 1) / tile_pixels;
 //         cmd->dispatch(dx, dy, 1);
 //     }
-//     uint32_t num_tiles;
-//     uint32_t lights_per_tile;
-//     uint32_t tile_pixels;
+//     u32 num_tiles;
+//     u32 lights_per_tile;
+//     u32 tile_pixels;
 //     RenderGraph::ResourceView zbufs;
 //     RenderGraph::ResourceView culled_light_list_bufs;
 //     RenderGraph::ResourceView culled_light_grid_bufs;
@@ -1181,7 +1181,7 @@ namespace culling
 //         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
 //         const auto& cbuf = rg->get_resource(cbufs.get()).image.get();
 //         VkViewport vkview{ 0.0f, 0.0f, (float)cbuf.width, (float)cbuf.height, 0.0f, 1.0f };
-//         VkRect2D vksciss{ {}, { (uint32_t)cbuf.width, (uint32_t)cbuf.height } };
+//         VkRect2D vksciss{ {}, { (u32)cbuf.width, (u32)cbuf.height } };
 //
 //         const VkRenderingAttachmentInfo vkcols[] = {
 //             Vks(VkRenderingAttachmentInfo{ .imageView = cbuf.default_view->md.vk->view,

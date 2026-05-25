@@ -22,7 +22,7 @@
 ////                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 ////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vkinfo.format }));
 ////     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
-////     uint32_t bindless_indices[]{
+////     u32 bindless_indices[]{
 ////         r.get_bindless_index(r.index_buffer),
 ////         r.get_bindless_index(r.vertex_positions_buffer),
 ////         r.get_bindless_index(r.vertex_attributes_buffer),
@@ -48,7 +48,7 @@
 ////                               .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 ////                               .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table).vkinfo.format }));
 ////     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
-////     uint32_t bindless_indices[]{
+////     u32 bindless_indices[]{
 ////         r.get_bindless_index(r.index_buffer),
 ////         r.get_bindless_index(r.vertex_positions_buffer),
 ////         r.get_bindless_index(fd.transform_buffers),
@@ -75,7 +75,7 @@
 ////         Vks(VkImageViewCreateInfo{
 ////             .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 ////             .format = RendererVulkan::get_instance()->get_image(r.vsm.dir_light_page_table_rgb8).vkinfo.format }));
-////     uint32_t bindless_indices[]{
+////     u32 bindless_indices[]{
 ////         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table, page_view, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
 ////         r.get_bindless_index(r.make_texture(r.vsm.dir_light_page_table_rgb8, page_view_rgb8, VK_IMAGE_LAYOUT_GENERAL, nullptr)),
 ////         r.get_bindless_index(r.vsm.constants_buffer),
@@ -97,19 +97,19 @@
 ////     auto shadow_map = r.make_image_view(r.vsm.shadow_map_0);
 ////     struct PushConstants
 ////     {
-////         uint32_t indices_index;
-////         uint32_t vertex_positions_index;
-////         uint32_t vertex_attributes_index;
-////         uint32_t transforms_index;
-////         uint32_t constants_index;
-////         uint32_t meshes_index;
-////         uint32_t meshlets_vertices_index;
-////         uint32_t meshlets_triangles_index;
-////         // uint32_t vsm_buffer_index;
-////         // uint32_t vsm_physical_depth_image_index;
-////         // uint32_t page_table_index;
-////         // uint32_t fft_displacement_index;
-////         // uint32_t fft_gradient_index;
+////         u32 indices_index;
+////         u32 vertex_positions_index;
+////         u32 vertex_attributes_index;
+////         u32 transforms_index;
+////         u32 constants_index;
+////         u32 meshes_index;
+////         u32 meshlets_vertices_index;
+////         u32 meshlets_triangles_index;
+////         // u32 vsm_buffer_index;
+////         // u32 vsm_physical_depth_image_index;
+////         // u32 page_table_index;
+////         // u32 fft_displacement_index;
+////         // u32 fft_gradient_index;
 ////     };
 ////     PushConstants pc = {
 ////         r.get_bindless_index(r.index_buffer),
@@ -143,7 +143,7 @@
 ////
 ////     if(r->fftocean.gaussian_distribution_image) { return; }
 ////
-////     uint32_t ns = (uint32_t)r->fftocean.pc.settings.num_samples;
+////     u32 ns = (u32)r->fftocean.pc.settings.num_samples;
 ////
 ////     r->fftocean.gaussian_distribution_image =
 ////         r->make_image("fftocean/gaussian_distribution",
@@ -257,7 +257,7 @@
 ////
 ////     static_assert(sizeof(r->fftocean.pc) <= 128);
 ////     r->bindless_pool->bind(cmd, pipeline->bind_point);
-////     uint32_t dispatch_size = r->get_image(r->fftocean.h0_spectrum).vkinfo.extent.width / 8u;
+////     u32 dispatch_size = r->get_image(r->fftocean.h0_spectrum).vkinfo.extent.width / 8u;
 ////     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
 ////                        &r->fftocean.pc);
 ////     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
@@ -298,7 +298,7 @@
 ////     r->fftocean.pc.time = (float)glfwGetTime() * r->fftocean.pc.settings.time_speed;
 ////
 ////     r->bindless_pool->bind(cmd, pipeline->bind_point);
-////     uint32_t dispatch_size = r->fftocean.pc.settings.num_samples;
+////     u32 dispatch_size = r->fftocean.pc.settings.num_samples;
 ////     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
 ////                        &r->fftocean.pc);
 ////     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
@@ -352,7 +352,7 @@
 ////     static_assert(sizeof(r->fftocean.pc) <= 128);
 ////
 ////     r->bindless_pool->bind(cmd, pipeline->bind_point);
-////     uint32_t dispatch_size = r->fftocean.pc.settings.num_samples;
+////     u32 dispatch_size = r->fftocean.pc.settings.num_samples;
 ////
 ////     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
 ////                        &r->fftocean.pc);
@@ -438,7 +438,7 @@
 ////     static_assert(sizeof(r->fftocean.pc) <= 128);
 ////
 ////     r->bindless_pool->bind(cmd, pipeline->bind_point);
-////     uint32_t dispatch_size = r->fftocean.pc.settings.num_samples / 8u;
+////     u32 dispatch_size = r->fftocean.pc.settings.num_samples / 8u;
 ////     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
 ////                        &r->fftocean.pc);
 ////     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
@@ -470,7 +470,7 @@
 ////     static_assert(sizeof(r->fftocean.pc) <= 128);
 ////
 ////     r->bindless_pool->bind(cmd, pipeline->bind_point);
-////     uint32_t dispatch_size = r->fftocean.pc.settings.num_samples / 8u;
+////     u32 dispatch_size = r->fftocean.pc.settings.num_samples / 8u;
 ////     vkCmdPushConstants(cmd, r->bindless_pool->get_pipeline_layout(), VK_SHADER_STAGE_ALL, 0u, sizeof(r->fftocean.pc),
 ////                        &r->fftocean.pc);
 ////     vkCmdDispatch(cmd, dispatch_size, dispatch_size, 1u);
@@ -503,8 +503,8 @@
 ////         .clearValue = { .depthStencil = { 1.0f, 0 } },
 ////     });
 ////     const auto rendering_info = Vks(VkRenderingInfo{
-////         .renderArea = { .extent = { .width = (uint32_t)get_engine().window->width,
-////                                     .height = (uint32_t)get_engine().window->height } },
+////         .renderArea = { .extent = { .width = (u32)get_engine().window->width,
+////                                     .height = (u32)get_engine().window->height } },
 ////         .layerCount = 1,
 ////         .colorAttachmentCount = 0,
 ////         .pColorAttachments = nullptr,
@@ -593,8 +593,8 @@
 ////     auto& r = *RendererVulkan::get_instance();
 ////     set_pc_vsm_common(cmd);
 ////     r.bindless_pool->bind(cmd, pipeline->bind_point);
-////     vkCmdDispatch(cmd, (uint32_t)std::ceilf(get_engine().window->width / 8.0f),
-////                   (uint32_t)std::ceilf(get_engine().window->height / 8.0f), 1);
+////     vkCmdDispatch(cmd, (u32)std::ceilf(get_engine().window->width / 8.0f),
+////                   (u32)std::ceilf(get_engine().window->height / 8.0f), 1);
 //// }
 ////
 //// VsmShadowsPass::VsmShadowsPass(RenderGraph* rg)
@@ -735,8 +735,8 @@
 ////         .clearValue = { .depthStencil = { 1.0f, 0 } },
 ////     });
 ////     auto rendering_info = Vks(VkRenderingInfo{
-////         .renderArea = { .extent = { .width = (uint32_t)get_engine().window->width,
-////                                     .height = (uint32_t)get_engine().window->height } },
+////         .renderArea = { .extent = { .width = (u32)get_engine().window->width,
+////                                     .height = (u32)get_engine().window->height } },
 ////         .layerCount = 1,
 ////         .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
 ////         .pColorAttachments = r_col_atts,
@@ -745,7 +745,7 @@
 ////
 ////     vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
 ////     vkCmdBeginRendering(cmd, &rendering_info);
-////     VkRect2D r_sciss_1{ .offset = {}, .extent = { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
+////     VkRect2D r_sciss_1{ .offset = {}, .extent = { (u32)get_engine().window->width, (u32)get_engine().window->height } };
 ////     VkViewport r_view_1{
 ////         .x = 0.0f, .y = 0.0f, .width = get_engine().window->width, .height = get_engine().window->height, .minDepth = 0.0f, .maxDepth = 1.0f
 ////     };
@@ -807,7 +807,7 @@
 ////             }),
 ////         };
 ////         VkRect2D r_sciss_1{ .offset = {},
-////                             .extent = { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
+////                             .extent = { (u32)get_engine().window->width, (u32)get_engine().window->height } };
 ////         VkViewport r_view_1{ .x = 0.0f,
 ////                              .y = get_engine().window->height,
 ////                              .width = get_engine().window->width,
@@ -815,8 +815,8 @@
 ////                              .minDepth = 0.0f,
 ////                              .maxDepth = 1.0f };
 ////         auto rendering_info = Vks(VkRenderingInfo{
-////             .renderArea = { .extent = { .width = (uint32_t)get_engine().window->width,
-////                                         .height = (uint32_t)get_engine().window->height } },
+////             .renderArea = { .extent = { .width = (u32)get_engine().window->width,
+////                                         .height = (u32)get_engine().window->height } },
 ////             .layerCount = 1,
 ////             .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
 ////             .pColorAttachments = r_col_atts,

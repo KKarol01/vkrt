@@ -84,13 +84,13 @@ void DescriptorLayoutMetadataVk::init(DescriptorLayout& a)
     }();
 
     auto vkbindingflagsinfo = vk::VkDescriptorSetLayoutBindingFlagsCreateInfo{};
-    vkbindingflagsinfo.bindingCount = (uint32_t)vkbindingflags.size();
+    vkbindingflagsinfo.bindingCount = (u32)vkbindingflags.size();
     vkbindingflagsinfo.pBindingFlags = vkbindingflags.data();
 
     auto vklayoutinfo = vk::VkDescriptorSetLayoutCreateInfo{};
     vklayoutinfo.pNext = &vkbindingflagsinfo;
     vklayoutinfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-    vklayoutinfo.bindingCount = (uint32_t)vkbindings.size();
+    vklayoutinfo.bindingCount = (u32)vkbindings.size();
     vklayoutinfo.pBindings = vkbindings.data();
     VK_CHECK(vkCreateDescriptorSetLayout(RendererBackendVk::get_dev(), &vklayoutinfo, nullptr, &md->layout));
 }
@@ -117,7 +117,7 @@ void PipelineLayoutMetadataVk::init(PipelineLayout& a)
     VkPushConstantRange range{ .stageFlags = gfx::to_vk(a.push_range.stages), .offset = 0ull, .size = a.push_range.size };
 
     auto pli = vk::VkPipelineLayoutCreateInfo{};
-    pli.setLayoutCount = (uint32_t)vksls.size();
+    pli.setLayoutCount = (u32)vksls.size();
     pli.pSetLayouts = vksls.data();
     pli.pushConstantRangeCount = range.size > 0 ? 1u : 0u;
     pli.pPushConstantRanges = &range;
@@ -183,9 +183,9 @@ void PipelineMetadataVk::init(const Pipeline& a)
                                gfx::to_vk(a.info.attributes.at(i).format), a.info.attributes.at(i).offset };
     }
     auto pVertexInputState = vk::VkPipelineVertexInputStateCreateInfo{};
-    pVertexInputState.vertexBindingDescriptionCount = (uint32_t)a.info.bindings.size();
+    pVertexInputState.vertexBindingDescriptionCount = (u32)a.info.bindings.size();
     pVertexInputState.pVertexBindingDescriptions = vkbindings.data();
-    pVertexInputState.vertexAttributeDescriptionCount = (uint32_t)a.info.attributes.size();
+    pVertexInputState.vertexAttributeDescriptionCount = (u32)a.info.attributes.size();
     pVertexInputState.pVertexAttributeDescriptions = vkattributes.data();
 
     auto pInputAssemblyState = vk::VkPipelineInputAssemblyStateCreateInfo{};
@@ -232,7 +232,7 @@ void PipelineMetadataVk::init(const Pipeline& a)
 
     std::array<VkPipelineColorBlendAttachmentState, 8> vkblends;
     std::array<VkFormat, 8> vkcol_formats;
-    for(uint32_t i = 0; i < a.info.attachments.count; ++i)
+    for(u32 i = 0; i < a.info.attachments.count; ++i)
     {
         vkblends.at(i) = { a.info.attachments.blend_states.at(i).enable,
                            gfx::to_vk(a.info.attachments.blend_states.at(i).src_color_factor),
@@ -241,10 +241,10 @@ void PipelineMetadataVk::init(const Pipeline& a)
                            gfx::to_vk(a.info.attachments.blend_states.at(i).src_alpha_factor),
                            gfx::to_vk(a.info.attachments.blend_states.at(i).dst_alpha_factor),
                            gfx::to_vk(a.info.attachments.blend_states.at(i).alpha_op),
-                           VkColorComponentFlags{ ((uint32_t)a.info.attachments.blend_states.at(i).r) << 0 |
-                                                  ((uint32_t)a.info.attachments.blend_states.at(i).g) << 1 |
-                                                  ((uint32_t)a.info.attachments.blend_states.at(i).b) << 2 |
-                                                  ((uint32_t)a.info.attachments.blend_states.at(i).a) << 3 } };
+                           VkColorComponentFlags{ ((u32)a.info.attachments.blend_states.at(i).r) << 0 |
+                                                  ((u32)a.info.attachments.blend_states.at(i).g) << 1 |
+                                                  ((u32)a.info.attachments.blend_states.at(i).b) << 2 |
+                                                  ((u32)a.info.attachments.blend_states.at(i).a) << 3 } };
         vkcol_formats.at(i) = gfx::to_vk(a.info.attachments.color_formats.at(i));
     }
     auto pColorBlendState = vk::VkPipelineColorBlendStateCreateInfo{};
@@ -267,7 +267,7 @@ void PipelineMetadataVk::init(const Pipeline& a)
 
     auto vkinfo = vk::VkGraphicsPipelineCreateInfo{};
     vkinfo.pNext = &pDynamicRendering;
-    vkinfo.stageCount = (uint32_t)stages.size();
+    vkinfo.stageCount = (u32)stages.size();
     vkinfo.pStages = stages.data();
     vkinfo.pVertexInputState = &pVertexInputState;
     vkinfo.pInputAssemblyState = &pInputAssemblyState;
@@ -449,8 +449,8 @@ void SwapchainMetadataVk::init(Swapchain& a)
     vkswpinfo.minImageCount = Renderer::frame_delay;
     vkswpinfo.imageFormat = to_vk(image_format);
     vkswpinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    vkswpinfo.imageExtent = VkExtent2D{ (uint32_t)get_renderer().settings.present_resolution.x,
-                                        (uint32_t)get_renderer().settings.present_resolution.y };
+    vkswpinfo.imageExtent = VkExtent2D{ (u32)get_renderer().settings.present_resolution.x,
+                                        (u32)get_renderer().settings.present_resolution.y };
     vkswpinfo.imageArrayLayers = 1;
     vkswpinfo.imageUsage = to_vk(image_usage_flags);
     vkswpinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -461,11 +461,11 @@ void SwapchainMetadataVk::init(Swapchain& a)
     std::vector<VkImage> vkimgs(a.images.size());
     VK_CHECK(vkCreateSwapchainKHR(backend.dev, &vkswpinfo, nullptr, &md->swapchain));
 
-    uint32_t swapchain_image_count = Renderer::frame_delay;
+    u32 swapchain_image_count = Renderer::frame_delay;
     VK_CHECK(vkGetSwapchainImagesKHR(backend.dev, md->swapchain, &swapchain_image_count, vkimgs.data()));
 
     auto& r = get_renderer();
-    for(uint32_t i = 0; i < vkimgs.size(); ++i)
+    for(u32 i = 0; i < vkimgs.size(); ++i)
     {
         a.images[i] = r.make_image(ENG_FMT("swapchain_image_{}", i),
                                    Image::init(vkswpinfo.imageExtent.width, vkswpinfo.imageExtent.height, image_format, image_usage_flags),
@@ -495,10 +495,10 @@ SwapchainMetadataVk& SwapchainMetadataVk::get(Swapchain& a)
     return *(SwapchainMetadataVk*)a.metadata;
 }
 
-uint32_t SwapchainMetadataVk::acquire(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence)
+u32 SwapchainMetadataVk::acquire(Swapchain* a, u64 timeout, Sync* semaphore, Sync* fence)
 {
     auto& backend = RendererBackendVk::get_instance();
-    uint32_t index;
+    u32 index;
     VkSemaphore vksem{};
     VkFence vkfen{};
     if(semaphore) { vksem = semaphore->semaphore; }
@@ -735,7 +735,7 @@ void RendererBackendVk::init()
 //     bufs.vpos_buf = make_buffer(BufferDescriptor{ "vertex positions", 1024, BufferUsage::STORAGE_BIT });
 //     bufs.vattr_buf = make_buffer(BufferDescriptor{ "vertex attributes", 1024, BufferUsage::STORAGE_BIT });
 //     bufs.idx_buf = make_buffer(BufferDescriptor{ "vertex indices", 1024, BufferUsage::STORAGE_BIT | BufferUsage::INDEX_BIT });
-//     for(auto i = 0u; i < (uint32_t)MeshPassType::LAST_ENUM; ++i)
+//     for(auto i = 0u; i < (u32)MeshPassType::LAST_ENUM; ++i)
 //     {
 //         render_passes.at(i).cmd_buf = make_buffer(BufferDescriptor{ ENG_FMT("{}_cmds", to_string((MeshPassType)i)), 1024,
 //                                                                     BufferUsage::STORAGE_BIT | BufferUsage::INDIRECT_BIT });
@@ -743,7 +743,7 @@ void RendererBackendVk::init()
 //             make_buffer(BufferDescriptor{ ENG_FMT("{}_ids", to_string((MeshPassType)i)), 1024, BufferUsage::STORAGE_BIT });
 //     }
 //     bufs.cull_bs_buf = make_buffer(BufferDescriptor{ "meshlets instance bbs", 1024, BufferUsage::STORAGE_BIT });
-//     for(uint32_t i = 0; i < frame_datas.size(); ++i)
+//     for(u32 i = 0; i < frame_datas.size(); ++i)
 //     {
 //         auto& fd = frame_datas[i];
 //         bufs.trs_bufs[i] = make_buffer(BufferDescriptor{ ENG_FMT("trs {}", i), 1024, BufferUsage::STORAGE_BIT });
@@ -834,7 +834,7 @@ void RendererBackendVk::init()
 //         .culling = CullFace::BACK,
 //     });
 //     MeshPassCreateInfo info{ .name = "default_unlit" };
-//     info.effects[(uint32_t)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
+//     info.effects[(u32)MeshPassType::FORWARD] = make_shader_effect(ShaderEffect{ .pipeline = pp_default_unlit });
 //     default_meshpass = make_mesh_pass(info);
 //     default_material = materials.insert(Material{ .mesh_pass = default_meshpass }).handle;
 // }
@@ -850,50 +850,50 @@ void RendererBackendVk::init()
 //
 //         // fd.hiz_pyramid = make_image(ImageDescriptor{
 //         //     .name = ENG_FMT("hiz_pyramid_{}", i),
-//         //     .width = (uint32_t)get_engine().window->width,
-//         //     .height = (uint32_t)get_engine().window->height,
-//         //     .mips = (uint32_t)std::log2f(std::max(get_engine().window->width, get_engine().window->height)) + 1,
+//         //     .width = (u32)get_engine().window->width,
+//         //     .height = (u32)get_engine().window->height,
+//         //     .mips = (u32)std::log2f(std::max(get_engine().window->width, get_engine().window->height)) + 1,
 //         //     .format = ImageFormat::D32_SFLOAT,
 //         //     .usage = ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT });
 //         // fd.hiz_debug_output =
 //         //     make_image(ImageDescriptor{ .name = ENG_FMT("hiz_debug_output_{}", i),
-//         //                                 .width = (uint32_t)get_engine().window->width,
-//         //                                 .height = (uint32_t)get_engine().window->height,
+//         //                                 .width = (u32)get_engine().window->width,
+//         //                                 .height = (u32)get_engine().window->height,
 //         //                                 .format = ImageFormat::R32FG32FB32FA32F,
 //         //                                 .usage = ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 //
 //         // fd.gbuffer.color_image = make_image(ImageDescriptor{ .name = ENG_FMT("g_color_{}", i),
-//         //                                                      .width = (uint32_t)get_engine().window->width,
-//         //                                                      .height = (uint32_t)get_engine().window->height,
+//         //                                                      .width = (u32)get_engine().window->width,
+//         //                                                      .height = (u32)get_engine().window->height,
 //         //                                                      .format = ImageFormat::R8G8B8A8_SRGB,
 //         //                                                      .usage = ImageUsage::COLOR_ATTACHMENT_BIT |
 //         //                                                               ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 //         // fd.gbuffer.depth_buffer_image = make_image(ImageDescriptor{
 //         //     .name = ENG_FMT("g_depth_{}", i),
-//         //     .width = (uint32_t)get_engine().window->width,
-//         //     .height = (uint32_t)get_engine().window->height,
+//         //     .width = (u32)get_engine().window->width,
+//         //     .height = (u32)get_engine().window->height,
 //         //     .format = ImageFormat::D32_SFLOAT,
 //         //     .usage = ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 //
 //         /*make_image(&fd.gbuffer.color_image,
-//                      Image{ ENG_FMT("g_color_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+//                      Image{ ENG_FMT("g_color_{}", i), (u32)screen_rect.w, (u32)screen_rect.h, 1, 1, 1,
 //                             VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_1_BIT,
 //                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 //           make_image(&fd.gbuffer.view_space_positions_image,
-//                      Image{ ENG_FMT("g_view_pos_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+//                      Image{ ENG_FMT("g_view_pos_{}", i), (u32)screen_rect.w, (u32)screen_rect.h, 1, 1, 1,
 //                             VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
 //                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
 //                                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });
 //           make_image(&fd.gbuffer.view_space_normals_image,
-//                      Image{ ENG_FMT("g_view_nor_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+//                      Image{ ENG_FMT("g_view_nor_{}", i), (u32)screen_rect.w, (u32)screen_rect.h, 1, 1, 1,
 //                             VK_FORMAT_R32G32B32A32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
 //                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 //           make_image(&fd.gbuffer.depth_buffer_image,
-//                      Image{ ENG_FMT("g_depth_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+//                      Image{ ENG_FMT("g_depth_{}", i), (u32)screen_rect.w, (u32)screen_rect.h, 1, 1, 1,
 //                             VK_FORMAT_D16_UNORM, VK_SAMPLE_COUNT_1_BIT,
 //                             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT });
 //           make_image(&fd.gbuffer.ambient_occlusion_image,
-//                      Image{ ENG_FMT("ao_{}", i), (uint32_t)screen_rect.w, (uint32_t)screen_rect.h, 1, 1, 1,
+//                      Image{ ENG_FMT("ao_{}", i), (u32)screen_rect.w, (u32)screen_rect.h, 1, 1, 1,
 //                             VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
 //                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT });*/
 //     }
@@ -980,7 +980,7 @@ void RendererBackendVk::init()
 //     // fd.rendering_fence->wait_cpu(~0ull);
 //     // fd.cmdpool->reset();
 //
-//     // uint32_t swapchain_index{};
+//     // u32 swapchain_index{};
 //     // Image* swapchain_image{};
 //     //{
 //     //     VkResult acquire_ret;
@@ -1073,7 +1073,7 @@ void RendererBackendVk::init()
 //
 //     if(flags.test_clear(RenderFlags::DIRTY_TRANSFORMS_BIT)) { build_transforms_buffer(); }
 //
-//     // uint32_t old_triangles = *((uint32_t*)bufs.buf_draw_cmds->memory + 1);
+//     // u32 old_triangles = *((u32*)bufs.buf_draw_cmds->memory + 1);
 //     bake_indirect_commands();
 //     staging_buf->flush();
 //     // const auto cmd = fd.cmdpool->begin();
@@ -1082,16 +1082,16 @@ void RendererBackendVk::init()
 // #if 0
 //     struct PushConstantsCulling
 //     {
-//         uint32_t constants_index;
-//         uint32_t ids_index;
-//         uint32_t post_cull_ids_index;
-//         uint32_t bs_index;
-//         uint32_t transforms_index;
-//         uint32_t indirect_commands_index;
-//         uint32_t hiz_source;
-//         uint32_t hiz_dest;
-//         uint32_t hiz_width;
-//         uint32_t hiz_height;
+//         u32 constants_index;
+//         u32 ids_index;
+//         u32 post_cull_ids_index;
+//         u32 bs_index;
+//         u32 transforms_index;
+//         u32 indirect_commands_index;
+//         u32 hiz_source;
+//         u32 hiz_dest;
+//         u32 hiz_width;
+//         u32 hiz_height;
 //     };
 //
 //     PushConstantsCulling push_constants_culling{ .constants_index = bindless_pool->get_index(fd.constants),
@@ -1184,16 +1184,16 @@ void RendererBackendVk::init()
 //                                             .pDepthAttachment = &rainfos[1] });
 //     struct push_constants_1
 //     {
-//         uint32_t indices_index;
-//         uint32_t vertex_positions_index;
-//         uint32_t vertex_attributes_index;
-//         uint32_t transforms_index;
-//         uint32_t constants_index;
-//         uint32_t meshlet_instance_index;
-//         uint32_t meshlet_ids_index;
-//         uint32_t meshlet_bs_index;
-//         uint32_t hiz_pyramid_index;
-//         uint32_t hiz_debug_index;
+//         u32 indices_index;
+//         u32 vertex_positions_index;
+//         u32 vertex_attributes_index;
+//         u32 transforms_index;
+//         u32 constants_index;
+//         u32 meshlet_instance_index;
+//         u32 meshlet_ids_index;
+//         u32 meshlet_bs_index;
+//         u32 hiz_pyramid_index;
+//         u32 hiz_debug_index;
 //     };
 //     push_constants_1 pc1{
 //         .indices_index = bindless_pool->get_index(bufs.idx_buf),
@@ -1220,7 +1220,7 @@ void RendererBackendVk::init()
 //     cmd->begin_rendering(rinfo);
 //
 //     VkViewport viewport{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
-//     VkRect2D scissor{ {}, { (uint32_t)get_engine().window->width, (uint32_t)get_engine().window->height } };
+//     VkRect2D scissor{ {}, { (u32)get_engine().window->width, (u32)get_engine().window->height } };
 //     for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
 //     {
 //         const auto& mb = multibatches.at(i);
@@ -1254,7 +1254,7 @@ void RendererBackendVk::init()
 //     flags.clear();
 //     submit_queue->wait_idle();
 //
-//     uint32_t new_triangles = *((uint32_t*)bufs.buf_draw_cmds->memory + 2);
+//     u32 new_triangles = *((u32*)bufs.buf_draw_cmds->memory + 2);
 //     ENG_LOG("NUM TRIANGLES (PRE | POST) {} | {}; DIFF: {}", old_triangles, new_triangles, new_triangles - old_triangles);
 //     return;
 // #endif
@@ -1356,7 +1356,7 @@ bool RendererBackendVk::compile_shader(const Shader& shader, std::span<const std
     auto* shmd = shader.md.vk();
     auto vkshaderinfo = vk::VkShaderModuleCreateInfo{};
     vkshaderinfo.codeSize = precompiled.size_bytes();
-    vkshaderinfo.pCode = (const uint32_t*)precompiled.data();
+    vkshaderinfo.pCode = (const u32*)precompiled.data();
     ENG_ASSERT(!shmd->shader, "Shader {} had already vk module created, destroy it first", shader.path.string());
     VK_CHECK(vkCreateShaderModule(dev, &vkshaderinfo, nullptr, &shmd->shader));
     return true;
@@ -1456,7 +1456,7 @@ void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommand
     if(md->blas) { return; }
 
     auto& r = get_renderer();
-    std::vector<uint32_t> vk_prim_counts;
+    std::vector<u32> vk_prim_counts;
     std::vector<vk::VkAccelerationStructureBuildRangeInfoKHR> vk_build_ranges;
     const auto vk_geoms = std::views::iota(geom.meshlet_range.offset) | std::views::take(geom.meshlet_range.size) |
                           std::views::transform([&](auto mltidx) {
@@ -1490,7 +1490,7 @@ void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommand
     vk_build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     vk_build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     vk_build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-    vk_build_info.geometryCount = (uint32_t)vk_geoms.size();
+    vk_build_info.geometryCount = (u32)vk_geoms.size();
     vk_build_info.pGeometries = vk_geoms.data();
 
     ENG_ASSERT(vk_prim_counts.size() == vk_build_info.geometryCount);
@@ -1525,7 +1525,7 @@ void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommand
 }
 
 TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*> geoms, std::span<const glm::mat3x4> transforms,
-                                                      std::span<const uint32_t> instance_ids, ASRequirements& reqs,
+                                                      std::span<const u32> instance_ids, ASRequirements& reqs,
                                                       ICommandBuffer* cmd, Buffer* tlas_buffer, size_t tlas_offset,
                                                       Buffer* scratch_buffer, size_t scratch_offset,
                                                       Buffer* instances_buffer, size_t instances_offset)
@@ -1534,7 +1534,7 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
     ENG_ASSERT(geoms.size() == transforms.size() && geoms.size() == instance_ids.size());
 
     const auto vk_instances = std::views::zip_transform(
-                                  [this](const Geometry* geom, const glm::mat3x4& t, uint32_t instance_id) {
+                                  [this](const Geometry* geom, const glm::mat3x4& t, u32 instance_id) {
                                       vk::VkAccelerationStructureDeviceAddressInfoKHR vk_blas_address_info;
                                       vk_blas_address_info.accelerationStructure = geom->md.vk()->blas;
                                       const auto vk_blas_address =
@@ -1561,7 +1561,7 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
     vk_build_info.geometryCount = 1;
     vk_build_info.pGeometries = &vk_geom;
 
-    std::vector<uint32_t> vk_prim_counts{ (uint32_t)vk_instances.size() };
+    std::vector<u32> vk_prim_counts{ (u32)vk_instances.size() };
     vk::VkAccelerationStructureBuildSizesInfoKHR vk_build_sizes;
     vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &vk_build_info,
                                             vk_prim_counts.data(), &vk_build_sizes);
@@ -1633,8 +1633,8 @@ ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 
 size_t RendererBackendVk::get_indirect_indexed_command_size() const { return sizeof(IndirectIndexedCommand); }
 
-void RendererBackendVk::make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count,
-                                                      uint32_t first_index, int32_t first_vertex, uint32_t first_instance) const
+void RendererBackendVk::make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count,
+                                                      u32 first_index, i32 first_vertex, u32 first_instance) const
 {
     ENG_ASSERT(out != nullptr);
     IndirectIndexedCommand cmd{ index_count, instance_count, first_index, first_vertex, first_instance };
@@ -1683,7 +1683,7 @@ void RendererBackendVk::get_memory_requirements(const Image& resource, RendererM
 
 void* RendererBackendVk::allocate_aliasable_memory(const RendererMemoryRequirements& reqs)
 {
-    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = (uint32_t)reqs.backend_data };
+    const VkMemoryRequirements vkreqs{ .size = reqs.size, .alignment = reqs.alignment, .memoryTypeBits = (u32)reqs.backend_data };
     VmaAllocationCreateInfo info{};
     info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     VmaAllocation alloc{};
@@ -1802,7 +1802,7 @@ void RendererBackendVk::destroy_query_pool(QueryPool* pool)
     pool->md.ptr = nullptr;
 }
 
-void RendererBackendVk::get_query_pool_results(QueryPool* pool, uint32_t query, uint32_t count, void* outdata)
+void RendererBackendVk::get_query_pool_results(QueryPool* pool, u32 query, u32 count, void* outdata)
 {
     if(!pool || !pool->md.ptr || !outdata)
     {
@@ -1820,7 +1820,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
     // clang-format off
     switch(type)
     {
-    case QueryType::TIMESTAMP: { return sizeof(uint64_t); }
+    case QueryType::TIMESTAMP: { return sizeof(u64); }
     default: { ENG_ERROR("Unhandled case."); return 0u; }
     }
     // clang-format on
@@ -1867,7 +1867,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //{
 //     if(meshlets_to_instance.empty()) { return; }
 //
-//     std::array<bool, (uint32_t)MeshPassType::LAST_ENUM> recalc{};
+//     std::array<bool, (u32)MeshPassType::LAST_ENUM> recalc{};
 //     for(const auto& e : meshlets_to_instance)
 //     {
 //         const auto& mat = e.material.get();
@@ -1883,7 +1883,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //             {
 //                 rp.instances.push_back(MeshletInstance{ .geometry = e.geometry,
 //                                                         .material = e.material,
-//                                                         .meshlet_idx = (uint32_t)geom.meshlet_range.offset + i,
+//                                                         .meshlet_idx = (u32)geom.meshlet_range.offset + i,
 //                                                         .mesh_idx = e.mesh_idx });
 //             }
 //         }
@@ -1901,14 +1901,14 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //         });
 //
 //         rp.mbatches.resize(rp.instances.size());
-//         std::vector<uint32_t> cnts(rp.instances.size());
+//         std::vector<u32> cnts(rp.instances.size());
 //         std::vector<DrawIndexedIndirectCommand> cmds(rp.instances.size());
 //         std::vector<GPUInstanceId> gpu_ids(rp.instances.size());
 //         std::vector<glm::vec4> gpu_bbs(rp.instances.size());
 //         Handle<Pipeline> prev_pipeline;
-//         uint32_t prev_meshlet = ~0u;
-//         uint32_t cmd_off = ~0u;
-//         uint32_t pp_off = ~0u;
+//         u32 prev_meshlet = ~0u;
+//         u32 cmd_off = ~0u;
+//         u32 pp_off = ~0u;
 //         for(auto j = 0u; j < rp.instances.size(); ++j)
 //         {
 //             const auto& mi = rp.instances.at(j);
@@ -1928,8 +1928,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //                 ++cmd_off;
 //                 cmds.at(cmd_off) = DrawIndexedIndirectCommand{ .indexCount = ml.index_count,
 //                                                         .instanceCount = 0,
-//                                                         .firstIndex = (uint32_t)g.index_range.offset + ml.index_offset,
-//                                                         .vertexOffset = (int32_t)(g.vertex_range.offset + ml.vertex_offset),
+//                                                         .firstIndex = (u32)g.index_range.offset + ml.index_offset,
+//                                                         .vertexOffset = (s32)(g.vertex_range.offset + ml.vertex_offset),
 //                                                         .firstInstance = j };
 //             }
 //             ++rp.mbatches.at(pp_off).count;
@@ -1946,8 +1946,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //
 //         // const auto gpu_cmd_count = cmd_off; // +1
 //         const auto post_cull_tri_count = 0u;
-//         const auto meshlet_instance_count = (uint32_t)rp.instances.size();
-//         const auto cmdoff = align_up2(pp_off * sizeof(uint32_t), 8ull);
+//         const auto meshlet_instance_count = (u32)rp.instances.size();
+//         const auto cmdoff = align_up2(pp_off * sizeof(u32), 8ull);
 //         staging_buf->copy(rp.cmd_buf, cnts, 0);
 //         staging_buf->copy(rp.cmd_buf, &post_cull_tri_count, 4, { 0, 4 });
 //         staging_buf->copy(rp.cmd_buf, cmds, cmdoff);
@@ -1988,7 +1988,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     std::vector<const Geometry*> dirty_batches;
 //     std::vector<VkAccelerationStructureGeometryKHR> blas_geos;
 //     std::vector<VkAccelerationStructureBuildGeometryInfoKHR> blas_geo_build_infos;
-//     std::vector<uint32_t> scratch_sizes;
+//     std::vector<u32> scratch_sizes;
 //     std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
 //     Handle<Buffer> scratch_buffer;
 //
@@ -2015,7 +2015,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //             .pGeometries = &blas_geo,
 //         });
 //
-//         const uint32_t primitive_count = geometry.index_count / 3u;
+//         const u32 primitive_count = geometry.index_count / 3u;
 //         auto build_size_info = Vks(VkAccelerationStructureBuildSizesInfoKHR{});
 //         vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_geometry,
 //                                                 &primitive_count, &build_size_info);
@@ -2040,7 +2040,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false,
 //                                  rt_acc_props.minAccelerationStructureScratchOffsetAlignment);
 //
-//     for(uint32_t i = 0, scratch_offset = 0; const auto& acc_geoms : blas_geos) {
+//     for(u32 i = 0, scratch_offset = 0; const auto& acc_geoms : blas_geos) {
 //         const Geometry& geom = *dirty_batches.at(i);
 //         const GeometryMetadata& meta = geometry_metadatas.at(geom.metadata);
 //         blas_geo_build_infos.at(i).scratchData.deviceAddress = get_buffer(scratch_buffer).bda + scratch_offset;
@@ -2049,7 +2049,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //         VkAccelerationStructureBuildRangeInfoKHR& range_info = ranges.emplace_back();
 //         range_info = Vks(VkAccelerationStructureBuildRangeInfoKHR{
 //             .primitiveCount = geom.index_count / 3u,
-//             .primitiveOffset = (uint32_t)((geom.index_offset) * sizeof(uint32_t)),
+//             .primitiveOffset = (u32)((geom.index_offset) * sizeof(u32)),
 //             .firstVertex = geom.vertex_offset,
 //             .transformOffset = 0,
 //         });
@@ -2058,7 +2058,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     }
 //
 //     std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> poffsets(ranges.size());
-//     for(uint32_t i = 0; i < ranges.size(); ++i) {
+//     for(u32 i = 0; i < ranges.size(); ++i) {
 //         poffsets.at(i) = &ranges.at(i);
 //     }
 //
@@ -2074,9 +2074,9 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 // void RendererBackendVulkan::build_tlas()
 //{
 //     return;
-//     // std::vector<uint32_t> tlas_mesh_offsets;
-//     // std::vector<uint32_t> blas_mesh_offsets;
-//     // std::vector<uint32_t> triangle_geo_inst_ids;
+//     // std::vector<u32> tlas_mesh_offsets;
+//     // std::vector<u32> blas_mesh_offsets;
+//     // std::vector<u32> triangle_geo_inst_ids;
 //     // std::vector<VkAccelerationStructureInstanceKHR> tlas_instances;
 //
 //     // std::sort(blas_instances.begin(), blas_instances.end(), [](auto a, auto b) {
@@ -2090,8 +2090,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //// TODO: Compress mesh ids per triangle for identical blases with identical materials
 //// TODO: Remove geometry offset for indexing in shaders as all blases have only one geometry always
 // #if 0
-//     for(uint32_t i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
-//         const uint32_t mi_idx = mesh_instance_idxs.at(blas_instances.at(i));
+//     for(u32 i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
+//         const u32 mi_idx = mesh_instance_idxs.at(blas_instances.at(i));
 //         const auto& mr = get_engine().ecs_storage->get<components::Renderable>(mesh_instances.at(mi_idx));
 //         const Mesh& mb = meshes.at(mr.mesh_handle);
 //         const Geometry& geom = geometries.at(mb.geometry);
@@ -2101,7 +2101,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //                                    [&bi](const RenderInstance& e) { return e.handle == bi.instance_handle; }));*/
 //
 //         triangle_geo_inst_ids.reserve(triangle_geo_inst_ids.size() + geom.index_count / 3u);
-//         for(uint32_t j = 0; j < geom.index_count / 3u; ++j) {
+//         for(u32 j = 0; j < geom.index_count / 3u; ++j) {
 //             triangle_geo_inst_ids.push_back(mi_idx);
 //         }
 //
@@ -2154,7 +2154,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     });
 //
 //     auto build_size = Vks(VkAccelerationStructureBuildSizesInfoKHR{});
-//     const uint32_t max_primitives = tlas_instances.size();
+//     const u32 max_primitives = tlas_instances.size();
 //     vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlas_info,
 //                                             &max_primitives, &build_size);
 //
@@ -2225,10 +2225,10 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     ddgi.probe_walk = ddgi.probe_dims.size() / glm::vec3{ glm::max(ddgi.probe_counts, glm::uvec3{ 2u }) - glm::uvec3(1u) };
 //     // ddgi.probe_walk = {ddgi.probe_walk.x, 4.0f, ddgi.probe_walk.z};
 //
-//     const uint32_t irradiance_texture_width = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
-//     const uint32_t irradiance_texture_height = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.z;
-//     const uint32_t visibility_texture_width = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
-//     const uint32_t visibility_texture_height = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.z;
+//     const u32 irradiance_texture_width = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
+//     const u32 irradiance_texture_height = (ddgi.irradiance_probe_side + 2) * ddgi.probe_counts.z;
+//     const u32 visibility_texture_width = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.x * ddgi.probe_counts.y;
+//     const u32 visibility_texture_height = (ddgi.visibility_probe_side + 2) * ddgi.probe_counts.z;
 //
 //     *ddgi.radiance_texture = Image{ "ddgi radiance",
 //                                     ddgi.rays_per_probe,
@@ -2317,14 +2317,14 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //         return;
 //     }
 //
-//     const auto& rp = render_passes.at((uint32_t)req.mesh_pass);
+//     const auto& rp = render_passes.at((u32)req.mesh_pass);
 //     if(req.compute) { req.cmd->dispatch((rp.cmd_count + 31) / 32, 1, 1); }
 //     else
 //     {
 //         for(auto i = 0u; i < rp.mbatches.size(); ++i)
 //         {
 //             const auto cntoff = 0;
-//             const auto cntsz = sizeof(uint32_t);
+//             const auto cntsz = sizeof(u32);
 //             const auto cmdoff = align_up2(rp.mbatches.size() * cntsz, 8ull);
 //             const auto engcbi = get_bindless(bufs.const_bufs[0]);
 //             req.cmd->bind_pipeline(rp.mbatches.at(i).pipeline.get());
@@ -2354,16 +2354,16 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     image_views.erase(view);
 // }
 //
-// uint32_t RendererBackendVulkan::get_bindless(Handle<Buffer> buffer) { return bindless_pool->get_index(buffer); }
+// u32 RendererBackendVulkan::get_bindless(Handle<Buffer> buffer) { return bindless_pool->get_index(buffer); }
 //
 // void RendererBackendVulkan::update_resource(Handle<Buffer> dst) { bindless_pool->update_index(dst); }
 //
-// FrameData& RendererBackendVulkan::get_frame_data(uint32_t offset)
+// FrameData& RendererBackendVulkan::get_frame_data(u32 offset)
 //{
 //     return frame_datas[(get_engine().frame_num + offset) % frame_datas.size()];
 // }
 //
-// const FrameData& RendererBackendVulkan::get_frame_data(uint32_t offset) const
+// const FrameData& RendererBackendVulkan::get_frame_data(u32 offset) const
 //{
 //     return const_cast<RendererBackendVulkan*>(this)->get_frame_data();
 // }

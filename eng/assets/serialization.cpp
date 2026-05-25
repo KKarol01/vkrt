@@ -49,8 +49,8 @@ void Container::read_list_section()
         return;
     }
 
-    uint32_t num_lists;
-    memcpy(&num_lists, &buf[5], sizeof(uint32_t));
+    u32 num_lists;
+    memcpy(&num_lists, &buf[5], sizeof(u32));
     m_lists_vec.reserve(num_lists);
     for(auto i = 0u; i < num_lists; ++i)
     {
@@ -68,7 +68,7 @@ void Container::read_list_section()
     }
 }
 
-void Container::add_asset(uint8_t version, uint64_t custom_hash, Flags<ListFlags> flags,
+void Container::add_asset(u8 version, u64 custom_hash, Flags<ListFlags> flags,
                           std::span<const std::byte> asset, const AssetMetadata& metadata)
 {
     m_modified = true;
@@ -118,7 +118,7 @@ void Container::serialize()
     ENG_ASSERT(file_bytes_writen == total_size_bytes);
 }
 
-std::optional<List> Container::get_asset_list(uint64_t custom_hash) const
+std::optional<List> Container::get_asset_list(u64 custom_hash) const
 {
     for(const auto& l : m_lists_vec)
     {
@@ -144,11 +144,11 @@ template <>
 void serialize<engb::Container>(std::span<std::byte> dst, const engb::Container& src, size_t& out_bytes_written)
 {
     static constexpr const char* MAGIC = "engb";
-    static constexpr uint8_t VERSION = 0;
+    static constexpr u8 VERSION = 0;
     auto list = src.m_lists_vec;
     serialize(dst, std::span{ MAGIC, 4 }, out_bytes_written);
     serialize(dst, VERSION, out_bytes_written);
-    serialize(dst, (uint32_t)list.size(), out_bytes_written);
+    serialize(dst, (u32)list.size(), out_bytes_written);
     for(auto& l : list)
     {
         l.asset_start = engb::HEADER_BYTE_SZ + (src.m_lists_vec.size() * engb::LIST_BYTE_SZ) + 8 + l.asset_start;
@@ -161,8 +161,8 @@ template <>
 void deserialize<engb::Container>(engb::Container& dst, std::span<const std::byte> src, size_t& out_bytes_written)
 {
     char magic[4]{};
-    uint8_t version{};
-    uint32_t count{};
+    u8 version{};
+    u32 count{};
     deserialize(std::span{ magic, 4 }, src, out_bytes_written);
     deserialize(version, src, out_bytes_written);
     deserialize(count, src, out_bytes_written);

@@ -27,8 +27,8 @@ namespace gltf
 struct Context
 {
     Flags<ImportSettings> import_settings;
-    std::vector<uint32_t> images;
-    std::vector<uint32_t> textures;
+    std::vector<u32> images;
+    std::vector<u32> textures;
     std::vector<Range32u> materials;
     std::vector<Range32u> geometries;
     std::vector<Range32u> meshes;
@@ -42,9 +42,9 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
 
     const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
 
-    Range32u geoms{ (uint32_t)asset.geometries.size(), 0u };
+    Range32u geoms{ (u32)asset.geometries.size(), 0u };
     std::vector<float> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<u32> indices;
     for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
     {
         vertices.clear();
@@ -123,7 +123,7 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
                 continue;
             }
             indices.resize(acc.count);
-            fastgltf::copyFromAccessor<uint32_t>(gltfasset, acc, indices.data());
+            fastgltf::copyFromAccessor<u32>(gltfasset, acc, indices.data());
         }
         else
         {
@@ -152,7 +152,7 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
     return geoms;
 }
 
-uint32_t load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltfimgidx, Context& ctx)
+u32 load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltfimgidx, Context& ctx)
 {
     // todo: check if image format matches with the currently requested.
     if(ctx.images.empty()) { ctx.images.insert(ctx.images.begin(), gltfasset.images.size(), ~0u); }
@@ -192,7 +192,7 @@ uint32_t load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFo
     }
 
     const auto img = get_engine().renderer->make_image(gltfimg.name.c_str(),
-                                                       gfx::Image::init((uint32_t)x, (uint32_t)y, 0, format,
+                                                       gfx::Image::init((u32)x, (u32)y, 0, format,
                                                                         gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
                                                                             gfx::ImageUsage::TRANSFER_SRC_BIT,
                                                                         0, 1, gfx::ImageLayout::READ_ONLY));
@@ -206,20 +206,21 @@ uint32_t load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFo
 
     if(!img) { return ~0u; }
 
-    const uint32_t imgidx = asset.images.size();
+    const u32 imgidx = asset.images.size();
     asset.images.push_back(img);
     ctx.images[gltfimgidx] = imgidx;
 
     if(ctx.import_settings & ImportSettings::KEEP_DATA_BIT)
     {
-        asset.image_data.emplace_back((uint32_t)x, (uint32_t)y, format, std::vector<std::byte>(imgdata, imgdata + x * y * 4));
+        asset.image_data.emplace_back(gltfimg.name.c_str(), (u32)x, (u32)y, format,
+                                      std::vector<std::byte>(imgdata, imgdata + x * y * 4));
     }
     stbi_image_free(imgdata);
 
     return imgidx;
 }
 
-uint32_t load_texture(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltftexidx, Context& ctx)
+u32 load_texture(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFormat format, size_t gltftexidx, Context& ctx)
 {
     if(ctx.textures.empty()) { ctx.textures.insert(ctx.textures.begin(), gltfasset.textures.size(), ~0u); }
     if(ctx.textures[gltftexidx] != ~0u) { return ctx.textures[gltftexidx]; }
@@ -229,10 +230,10 @@ uint32_t load_texture(Asset& asset, const fastgltf::Asset& gltfasset, gfx::Image
         ENG_ERROR("Texture {} does not have associated image", gltftex.name.c_str());
         return ~0u;
     }
-    uint32_t image = load_image(asset, gltfasset, format, *gltftex.imageIndex, ctx);
+    u32 image = load_image(asset, gltfasset, format, *gltftex.imageIndex, ctx);
     if(image == ~0u) { return ~0u; }
 
-    uint32_t texidx = asset.textures.size();
+    u32 texidx = asset.textures.size();
     asset.textures.push_back(gfx::ImageView::init(asset.images[image], format));
     ctx.textures[gltftexidx] = texidx;
     return texidx;
@@ -244,7 +245,7 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
     if(ctx.materials[gltfmeshidx].size != 0u) { return ctx.materials[gltfmeshidx]; }
 
     const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
-    Range32u mats{ (uint32_t)asset.materials.size(), 0u };
+    Range32u mats{ (u32)asset.materials.size(), 0u };
     for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
     {
         const fastgltf::Primitive& gltfprim = gltfmesh.primitives[i];
@@ -286,8 +287,8 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
 
         if(gltfmat.pbrData.baseColorTexture)
         {
-            uint32_t texidx = load_texture(asset, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,
-                                           gltfmat.pbrData.baseColorTexture->textureIndex, ctx);
+            u32 texidx = load_texture(asset, gltfasset, gfx::ImageFormat::R8G8B8A8_SRGB,
+                                      gltfmat.pbrData.baseColorTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
                 mat.base_color_texture = asset.textures[ctx.textures[gltfmat.pbrData.baseColorTexture->textureIndex]];
@@ -295,7 +296,7 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
         }
         if(gltfmat.normalTexture)
         {
-            uint32_t texidx =
+            u32 texidx =
                 load_texture(asset, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM, gltfmat.normalTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
@@ -304,8 +305,8 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
         }
         if(gltfmat.pbrData.metallicRoughnessTexture)
         {
-            uint32_t texidx = load_texture(asset, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM,
-                                           gltfmat.pbrData.metallicRoughnessTexture->textureIndex, ctx);
+            u32 texidx = load_texture(asset, gltfasset, gfx::ImageFormat::R8G8B8A8_UNORM,
+                                      gltfmat.pbrData.metallicRoughnessTexture->textureIndex, ctx);
             if(texidx != ~0u)
             {
                 mat.metallic_roughness_texture =
@@ -334,7 +335,7 @@ Range32u load_mesh(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfme
     ENG_TIMER_START("Load material {}", node.name);
     Range32u mats = load_material(asset, gltfasset, gltfmeshidx, ctx);
     ENG_TIMER_END();
-    ENG_ASSERT(geoms == mats && geoms.offset == (uint32_t)asset.meshes.size());
+    ENG_ASSERT(geoms == mats && geoms.offset == (u32)asset.meshes.size());
     for(auto i = 0u; i < geoms.size; ++i)
     {
         asset.meshes.push_back(gfx::get_renderer().make_mesh(gfx::MeshDescriptor{
@@ -345,7 +346,7 @@ Range32u load_mesh(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfme
 }
 
 Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::Node& gltfnode, Node* parent_node,
-               Context& context, uint32_t* out_node_index)
+               Context& context, u32* out_node_index)
 {
     Node node{};
     node.name = gltfnode.name.c_str();
@@ -386,11 +387,11 @@ Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::N
     children.reserve(gltfnode.children.size());
     for(const auto& e : gltfnode.children)
     {
-        uint32_t out_idx;
+        u32 out_idx;
         children.push_back(load_node(asset, gltfasset, gltfasset.nodes[e], &node, context, &out_idx));
     }
-    const auto nodeidx = (uint32_t)asset.nodes.size();
-    node.children = { (uint32_t)asset.nodes.size() + 1, (uint32_t)children.size() };
+    const auto nodeidx = (u32)asset.nodes.size();
+    node.children = { (u32)asset.nodes.size() + 1, (u32)children.size() };
     asset.nodes.push_back(node);
     for(auto& child : children)
     {
@@ -436,7 +437,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, 
     ctx.cmd = gfx::get_renderer().current_data->cmdpool->begin();
     for(auto i = 0u; i < gltfscene.nodeIndices.size(); ++i)
     {
-        uint32_t out_index;
+        u32 out_index;
         gltf::load_node(asset, gltfasset.get<1>(), gltfasset->nodes[gltfscene.nodeIndices[i]], nullptr, ctx, &out_index);
         asset.root_nodes.push_back(out_index);
     }

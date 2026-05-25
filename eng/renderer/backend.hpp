@@ -69,16 +69,16 @@ class IRendererBackend
     virtual void make_blas(Geometry& geom, ASRequirements& reqs, ICommandBuffer* cmd, Buffer* as_buffer,
                            size_t as_offset, Buffer* scratch_buffer, size_t scratch_offset) = 0;
     virtual TopAccelerationStructure make_tlas(std::span<const Geometry*> geoms, std::span<const glm::mat3x4> transforms,
-                                               std::span<const uint32_t> instance_ids, ASRequirements& reqs,
-                                               ICommandBuffer* cmd, Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
+                                               std::span<const u32> instance_ids, ASRequirements& reqs, ICommandBuffer* cmd,
+                                               Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
                                                size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) = 0;
 
     // Returns cached metadata of image view. If not found, allocates image view in a thread-safe manner.
     virtual ImageView::Metadata get_md(const ImageView& view) = 0;
 
     virtual size_t get_indirect_indexed_command_size() const = 0;
-    virtual void make_indirect_indexed_command(void* out, uint32_t index_count, uint32_t instance_count, uint32_t first_index,
-                                               int32_t first_vertex, uint32_t first_instance) const = 0;
+    virtual void make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count, u32 first_index,
+                                               i32 first_vertex, u32 first_instance) const = 0;
 
     // Gets requirements for a resource. Passing same reqs pointer multiple times accumulates requirements: max(size), max(alignment)
     virtual void get_memory_requirements(const Buffer& resource, RendererMemoryRequirements& reqs) = 0;
@@ -97,7 +97,7 @@ class IRendererBackend
 
     virtual QueryPool* make_query_pool(const QueryPoolCreateInfo& info) = 0;
     virtual void destroy_query_pool(QueryPool* pool) = 0;
-    virtual void get_query_pool_results(QueryPool* pool, uint32_t query, uint32_t count, void* outdata) = 0;
+    virtual void get_query_pool_results(QueryPool* pool, u32 query, u32 count, void* outdata) = 0;
     virtual size_t get_query_result_size(QueryType type) = 0;
 
     RendererBackendCaps caps{};

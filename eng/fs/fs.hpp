@@ -19,7 +19,7 @@ namespace fs
 {
 
 using Path = ::std::filesystem::path;
-using PathHash = uint64_t;
+using PathHash = u64;
 
 // Open mode. _BYTES suffix means posix 'b' flag that disables special '\n' handling on windows.
 enum class OpenMode
@@ -67,7 +67,7 @@ class File
     void set_write_head(size_t pos) { m_file.seekp(pos, std::ios::beg); }
     void delete_from_disk();
     bool eof() const;
-    uint64_t get_hash();
+    u64 get_hash();
     auto size() const { return m_size; }
     const Path& path() const { return m_path; }
 
@@ -77,7 +77,7 @@ class File
     size_t m_size{};
     Path m_path{};
     OpenMode m_mode{ OpenMode::NONE };
-    uint64_t m_content_hash{};
+    u64 m_content_hash{};
 };
 
 using FilePtr = std::shared_ptr<File>;

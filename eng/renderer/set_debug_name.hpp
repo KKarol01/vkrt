@@ -30,7 +30,7 @@ template <typename VkStruct> inline void set_debug_name(VkStruct object, std::st
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
         .pNext = nullptr,
         .objectType = VkObject<VkStruct>::type,
-        .objectHandle = reinterpret_cast<uint64_t>(object),
+        .objectHandle = reinterpret_cast<u64>(object),
         .pObjectName = name.data(),
     };
     vkSetDebugUtilsObjectNameEXT(RendererBackendVk::get_dev(), &obj_name);

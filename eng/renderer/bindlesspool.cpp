@@ -11,7 +11,7 @@ namespace eng
 namespace gfx
 {
 
-DescriptorSetVk DescriptorPoolVk::allocate(const DescriptorLayout& layout, uint32_t setidx)
+DescriptorSetVk DescriptorPoolVk::allocate(const DescriptorLayout& layout, u32 setidx)
 {
     while(true)
     {
@@ -48,14 +48,14 @@ void DescriptorPoolVk::add_page()
         vec.reserve(sizes.size());
         for(const auto& sz : sizes)
         {
-            vec.push_back(VkDescriptorPoolSize{ .type = to_vk(sz.type), .descriptorCount = (uint32_t)sz.ratio * max_allocs });
+            vec.push_back(VkDescriptorPoolSize{ .type = to_vk(sz.type), .descriptorCount = (u32)sz.ratio * max_allocs });
         }
         return vec;
     }();
     auto vk_pool_info = vk::VkDescriptorPoolCreateInfo{};
     vk_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
     vk_pool_info.maxSets = max_allocs;
-    vk_pool_info.poolSizeCount = (uint32_t)sizes.size();
+    vk_pool_info.poolSizeCount = (u32)sizes.size();
     vk_pool_info.pPoolSizes = vksizes.data();
     VK_CHECK(vkCreateDescriptorPool(RendererBackendVk::get_dev(), &vk_pool_info, nullptr, &free.emplace_back()));
     max_allocs = std::min(4096.0, std::ceil(max_allocs * 1.5));
@@ -78,7 +78,7 @@ DescriptorSetAllocatorBindlessVk::DescriptorSetAllocatorBindlessVk(const Pipelin
     set = pool.allocate(layout0, 0);
 }
 
-void DescriptorSetAllocatorBindlessVk::bind_resources(uint32_t slot, std::span<const DescriptorResource> descriptors,
+void DescriptorSetAllocatorBindlessVk::bind_resources(u32 slot, std::span<const DescriptorResource> descriptors,
                                                       const PipelineLayout& layout)
 {
     slot = 0; // slot 0, because bindless requires all pipeline layouts to be the same and have one descriptor layout/descriptor table
@@ -94,19 +94,19 @@ void DescriptorSetAllocatorBindlessVk::bind_resources(uint32_t slot, std::span<c
         if(!desc) { continue; }
         const auto binding = i;
         ENG_ASSERT(desc.index != ~0u); // if index > 0, binding should be saved and all with index > 0 be treated as one binding of an array
-        uint32_t bindless_index = bind_resource(desc);
+        u32 bindless_index = bind_resource(desc);
         push_values[binding] = bindless_index;
         push_ranges.push_back({ binding, 1 });
     }
 }
 
-uint32_t DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResource& view) { return bind_resource(view); }
+u32 DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResource& view) { return bind_resource(view); }
 
 void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
 {
     if(writes.size() > 0)
     {
-        vkUpdateDescriptorSets(RendererBackendVk::get_dev(), (uint32_t)writes.size(), writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(RendererBackendVk::get_dev(), (u32)writes.size(), writes.data(), 0, nullptr);
         writes.clear();
         buf_writes.clear();
         img_writes.clear();
@@ -114,13 +114,13 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
     for(const auto& range : push_ranges)
     {
         cmd->push_constants(ShaderStage::ALL, &push_values[range.offset],
-                            { (uint32_t)(range.offset * sizeof(uint32_t)), (uint32_t)(range.size * sizeof(uint32_t)) });
+                            { (u32)(range.offset * sizeof(u32)), (u32)(range.size * sizeof(u32)) });
     }
     push_ranges.clear();
     cmd->bind_sets(&set, 1);
 }
 
-uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResource& desc)
+u32 DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResource& desc)
 {
     Slot slot{};
     slot.allocator = &get_slot_allocator(desc.type);
@@ -185,7 +185,7 @@ uint32_t DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResourc
     return slot.value;
 }
 
-void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, uint32_t slot)
+void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, u32 slot)
 {
     auto& write = writes.emplace_back(vk::VkWriteDescriptorSet{});
     write.dstSet = set.set;

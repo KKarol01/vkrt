@@ -54,12 +54,12 @@ struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> render_meshes;
-    uint32_t gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
+    u32 gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
 };
 
 struct alignas(16) Light
 {
-    enum class Type : uint32_t
+    enum class Type : u32
     {
         POINT = GPU_LIGHT_TYPE_POINT,
     };
@@ -68,7 +68,7 @@ struct alignas(16) Light
     float range{};
     float intensity{ 1.0f };
     Type type;
-    uint32_t gpu_index{ ~0u };
+    u32 gpu_index{ ~0u };
 };
 
 } // namespace ecsc

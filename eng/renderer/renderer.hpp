@@ -42,29 +42,29 @@ inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
 
 struct DescriptorResource
 {
-    static DescriptorResource sampled_image(const ImageView& view, uint32_t index = 0)
+    static DescriptorResource sampled_image(const ImageView& view, u32 index = 0)
     {
         return DescriptorResource{ view, DescriptorType::SAMPLED_IMAGE, index };
     }
-    static DescriptorResource sampled_image(Handle<Image> image, uint32_t index = 0)
+    static DescriptorResource sampled_image(Handle<Image> image, u32 index = 0)
     {
         return sampled_image(ImageView::init(image), index);
     }
-    static DescriptorResource storage_image(const ImageView& view, uint32_t index = 0)
+    static DescriptorResource storage_image(const ImageView& view, u32 index = 0)
     {
         return DescriptorResource{ view, DescriptorType::STORAGE_IMAGE, index };
     }
 
-    static DescriptorResource storage_buffer(const BufferView& view, uint32_t index = 0)
+    static DescriptorResource storage_buffer(const BufferView& view, u32 index = 0)
     {
         return DescriptorResource{ view, DescriptorType::STORAGE_BUFFER, index };
     }
-    static DescriptorResource storage_buffer(Handle<Buffer> buffer, uint32_t index = 0)
+    static DescriptorResource storage_buffer(Handle<Buffer> buffer, u32 index = 0)
     {
         return storage_buffer(BufferView::init(buffer), index);
     }
 
-    static DescriptorResource acceleration_struct(TopAccelerationStructure tlas, uint32_t index = 0)
+    static DescriptorResource acceleration_struct(TopAccelerationStructure tlas, u32 index = 0)
     {
         return DescriptorResource{ tlas, DescriptorType::ACCELERATION_STRUCTURE, index };
     }
@@ -81,12 +81,12 @@ struct DescriptorResource
 
     std::variant<std::monostate, BufferView, ImageView, TopAccelerationStructure> resource;
     DescriptorType type{};
-    uint32_t index{ ~0u };
+    u32 index{ ~0u };
 };
 
 struct ImageBlockData
 {
-    uint32_t bytes_per_texel;
+    u32 bytes_per_texel;
     Vec3u32 texel_extent;
 };
 
@@ -109,8 +109,8 @@ struct Descriptor
 {
     auto operator<=>(const Descriptor& a) const = default;
     DescriptorType type{};
-    uint32_t slot{};
-    uint32_t size{};
+    u32 slot{};
+    u32 size{};
     Flags<ShaderStage> stages{};
     const Handle<Sampler>* immutable_samplers{};
 };
@@ -130,12 +130,12 @@ struct PushRange
     inline static constexpr auto MAX_PUSH_BYTES = 128u;
     auto operator<=>(const PushRange& a) const = default;
     Flags<ShaderStage> stages{};
-    uint32_t size{};
+    u32 size{};
 };
 
 struct PipelineLayout
 {
-    inline static constexpr uint32_t MAX_SETS = 4u;
+    inline static constexpr u32 MAX_SETS = 4u;
     bool operator==(const PipelineLayout& a) const { return layout == a.layout && push_range == a.push_range; }
     bool is_compatible(const PipelineLayout& a) const;
     std::vector<Handle<DescriptorLayout>> layout{};
@@ -150,18 +150,18 @@ struct PipelineCreateInfo
     struct VertexBinding
     {
         auto operator<=>(const VertexBinding&) const = default;
-        uint32_t binding;
-        uint32_t stride;
+        u32 binding;
+        u32 stride;
         bool instanced{ false };
     };
 
     struct VertexAttribute
     {
         auto operator<=>(const VertexAttribute&) const = default;
-        uint32_t location;
-        uint32_t binding;
+        u32 location;
+        u32 binding;
         VertexFormat format{};
-        uint32_t offset;
+        u32 offset;
     };
 
     struct StencilState
@@ -171,9 +171,9 @@ struct PipelineCreateInfo
         StencilOp pass{};
         StencilOp depth_fail{};
         CompareOp compare{};
-        uint32_t compare_mask{ ~0u };
-        uint32_t write_mask{ ~0u };
-        uint32_t ref{};
+        u32 compare_mask{ ~0u };
+        u32 write_mask{ ~0u };
+        u32 ref{};
     };
 
     struct BlendState
@@ -186,10 +186,10 @@ struct PipelineCreateInfo
         BlendFactor src_alpha_factor{};
         BlendFactor dst_alpha_factor{};
         BlendOp alpha_op{};
-        uint32_t r : 1 { 1 };
-        uint32_t g : 1 { 1 };
-        uint32_t b : 1 { 1 };
-        uint32_t a : 1 { 1 };
+        u32 r : 1 { 1 };
+        u32 g : 1 { 1 };
+        u32 b : 1 { 1 };
+        u32 a : 1 { 1 };
     };
 
     struct AttachmentState
@@ -209,7 +209,7 @@ struct PipelineCreateInfo
             return true;
         }
 
-        uint32_t count{};
+        u32 count{};
         std::array<ImageFormat, 8> color_formats{};
         std::array<BlendState, 8> blend_states{};
         ImageFormat depth_format{};
@@ -309,7 +309,7 @@ struct ShaderEffect
 
 struct MeshPass
 {
-    using Effects = std::array<Handle<ShaderEffect>, (uint32_t)MeshPassType::LAST_ENUM>;
+    using Effects = std::array<Handle<ShaderEffect>, (u32)MeshPassType::LAST_ENUM>;
     static MeshPass init(std::string_view name, const Effects& effects = {})
     {
         MeshPass pass{};
@@ -324,7 +324,7 @@ struct MeshPass
 
 struct Material
 {
-    enum class Mode : uint8_t
+    enum class Mode : u8
     {
         OPAQUE,
         ALPHA,
@@ -342,7 +342,7 @@ struct Material
     Handle<MeshPass> mesh_pass;
     Mode mode{ Mode::OPAQUE };
     float alpha_cutoff{}; //  anything > 0.0 means it's enabled and should be used
-    uint32_t base_color_factor{ ~0u };
+    u32 base_color_factor{ ~0u };
     ImageView base_color_texture;         // todo: put those in an array?
     ImageView normal_texture;             // todo: put those in an array?
     ImageView metallic_roughness_texture; // todo: put those in an array?
@@ -375,14 +375,14 @@ struct Buffer
 
 struct Image
 {
-    static Image init(uint32_t width, uint32_t height, ImageFormat format, Flags<ImageUsage> usage,
-                      ImageLayout layout = ImageLayout::UNDEFINED, uint32_t mips = 1)
+    static Image init(u32 width, u32 height, ImageFormat format, Flags<ImageUsage> usage,
+                      ImageLayout layout = ImageLayout::UNDEFINED, u32 mips = 1)
     {
-        mips = mips == ~0u ? (uint32_t)(std::log2f((float)std::min(width, height)) + 1) : mips;
+        mips = mips == ~0u ? (u32)(std::log2f((float)std::min(width, height)) + 1) : mips;
         return init(width, height, 0, format, usage, mips, 1, layout);
     }
-    static Image init(uint32_t width, uint32_t height, uint32_t depth, ImageFormat format, Flags<ImageUsage> usage,
-                      uint32_t mips = 1, uint32_t layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
+    static Image init(u32 width, u32 height, u32 depth, ImageFormat format, Flags<ImageUsage> usage,
+                      u32 mips = 1, u32 layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
     {
         return Image{
             .type = depth > 0    ? ImageType::TYPE_3D
@@ -392,7 +392,7 @@ struct Image
             .width = std::max(width, 1u),
             .height = std::max(height, 1u),
             .depth = std::max(depth, 1u),
-            .mips = mips == 0u ? (uint32_t)(std::log2f((float)std::min(width, height)) + 1) : mips,
+            .mips = mips == 0u ? (u32)(std::log2f((float)std::min(width, height)) + 1) : mips,
             .layers = layers,
             .usage = usage,
             .layout = layout,
@@ -402,11 +402,11 @@ struct Image
 
     ImageType type{ ImageType::TYPE_2D };
     ImageFormat format{};
-    uint32_t width{};
-    uint32_t height{};
-    uint32_t depth{ 1u };
-    uint32_t mips{ 1u };
-    uint32_t layers{ 1u };
+    u32 width{};
+    u32 height{};
+    u32 depth{ 1u };
+    u32 mips{ 1u };
+    u32 layers{ 1u };
     Flags<ImageUsage> usage{ ImageUsage::NONE };
     ImageLayout layout{ ImageLayout::UNDEFINED };
     struct Metadata
@@ -424,7 +424,7 @@ struct ImageMipsLayers
 
 struct ImageLayers
 {
-    uint32_t mip{};
+    u32 mip{};
     Range32u layers{};
 };
 
@@ -602,15 +602,15 @@ namespace gfx
 
 struct Swapchain
 {
-    using acquire_impl_fptr = uint32_t (*)(Swapchain* a, uint64_t timeout, Sync* semaphore, Sync* fence);
+    using acquire_impl_fptr = u32 (*)(Swapchain* a, u64 timeout, Sync* semaphore, Sync* fence);
     static inline acquire_impl_fptr acquire_impl{};
-    uint32_t acquire(uint64_t timeout = -1ull, Sync* semaphore = nullptr, Sync* fence = nullptr);
+    u32 acquire(u64 timeout = -1ull, Sync* semaphore = nullptr, Sync* fence = nullptr);
     Handle<Image> get_image() const;
     ImageView get_view() const;
     void* metadata{};
     std::vector<Handle<Image>> images;
     std::vector<ImageView> views;
-    uint32_t current_index{ 0ul };
+    u32 current_index{ 0ul };
 };
 
 class ShaderManager
@@ -618,7 +618,7 @@ class ShaderManager
     struct File
     {
         fs::Path path;
-        uint64_t hash{};
+        u64 hash{};
         Handle<Shader> shader;
         std::set<File*> headers_set;
         std::set<Handle<Pipeline>> pipelines_set;
@@ -631,7 +631,7 @@ class ShaderManager
     void parse_includes(File& f, File* pf);
     std::vector<Handle<Shader>> get_affected_shaders(const fs::Path& path,
                                                      std::vector<Handle<Pipeline>>* out_affected_pipelines = nullptr);
-    uint64_t get_hash(const fs::Path& path);
+    u64 get_hash(const fs::Path& path);
     void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
     std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
@@ -639,7 +639,7 @@ class ShaderManager
     std::unordered_map<fs::Path, File> m_files_map;
 };
 
-enum class SubmitFlags : uint32_t
+enum class SubmitFlags : u32
 {
 };
 
@@ -657,7 +657,7 @@ struct TimestampQuery
 {
     static float to_ms(const TimestampQuery& q);
     QueryPool* pool{};
-    uint32_t index{}; // index and index+1 for diff
+    u32 index{}; // index and index+1 for diff
     StackString<64> label;
 };
 
@@ -678,25 +678,25 @@ struct ScopedTimestampQuery
 namespace RenderOrder
 {
 // First pass, creation of main textures/targets happens here
-inline constexpr uint32_t SETUP_TARGETS = 0;
+inline constexpr u32 SETUP_TARGETS = 0;
 // Zprepass of the geometry
-inline constexpr uint32_t Z_PREPASS = 50;
+inline constexpr u32 Z_PREPASS = 50;
 // Rigth after prepass, but before any rendering to other buffers happens
-inline constexpr uint32_t POST_Z = 51;
+inline constexpr u32 POST_Z = 51;
 // Rendering of opaque/transparent/other passes happens with the use of geometry
-inline constexpr uint32_t MESH_RENDER = 100;
+inline constexpr u32 MESH_RENDER = 100;
 // Post processes happen here
-inline constexpr uint32_t POST = 150;
+inline constexpr u32 POST = 150;
 // UI happens here, after all rendering had finished
-inline constexpr uint32_t UI = 200;
+inline constexpr u32 UI = 200;
 // After UI, but right before present.
-inline constexpr uint32_t PRESENT = 250;
+inline constexpr u32 PRESENT = 250;
 }; // namespace RenderOrder
 
 class Renderer
 {
   public:
-    constexpr static inline uint32_t frame_delay = 2;
+    constexpr static inline u32 frame_delay = 2;
 
     struct FrameData
     {
@@ -751,9 +751,9 @@ class Renderer
         Handle<Buffer> transforms[2]; // transforms
         Handle<Buffer> lights[2];     // lights
 
-        static inline constexpr uint32_t fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
-        uint32_t fwdp_lights_per_tile{ 256 }; // changing requires resizing the buffers
-        uint32_t fwdp_num_tiles{};
+        static inline constexpr u32 fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
+        u32 fwdp_lights_per_tile{ 256 }; // changing requires resizing the buffers
+        u32 fwdp_num_tiles{};
 
         IndexFormat index_type{ IndexFormat::U16 };
         size_t vertex_count{};
@@ -856,7 +856,7 @@ class Renderer
     void build_pending_geometries();
     void build_pending_blases();
     void meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
-                             std::vector<uint16_t>& out_indices, std::vector<Meshlet>& out_meshlets);
+                             std::vector<u16>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     void make_blas(Handle<Geometry> geom);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);
@@ -907,15 +907,15 @@ class Renderer
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
-    SlotAllocator<uint32_t> gpu_resource_allocator;
-    SlotAllocator<uint32_t> gpu_light_allocator;
+    SlotAllocator<u32> gpu_resource_allocator;
+    SlotAllocator<u32> gpu_light_allocator;
     IDescriptorSetAllocator* descriptor_allocator{};
     ImGuiRenderer* imgui_renderer{};
     FrameData frame_datas[2]{};
     FrameData* current_data{};
-    uint64_t current_frame{}; // monotonically increasing counter
+    u64 current_frame{}; // monotonically increasing counter
     Passes passes;
-    uint64_t mesh_entt_hash{};
+    u64 mesh_entt_hash{};
 };
 
 // clang-format off
@@ -931,6 +931,8 @@ inline std::string to_string(AOMode a)
     }
 }
 // clang-format on
+
+inline IRendererBackend& get_renderer_backend() { return *get_renderer().backend; }
 
 } // namespace gfx
 

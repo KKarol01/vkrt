@@ -17,17 +17,17 @@ namespace ui
 class Panel
 {
   public:
-    Panel(std::string_view title, uint32_t* dock) : m_name(title), m_dockid(dock) {}
+    Panel(std::string_view title, u32* dock) : m_name(title), m_dockid(dock) {}
     virtual ~Panel() noexcept = default;
     virtual void draw(gfx::RGBuilder& rg) = 0;
     std::string m_name;
-    uint32_t* m_dockid{};
+    u32* m_dockid{};
 };
 
 class GamePanel : public Panel
 {
   public:
-    GamePanel(UI& ui, uint32_t* dock) : Panel("Game Panel", dock) {}
+    GamePanel(UI& ui, u32* dock) : Panel("Game Panel", dock) {}
 
     ~GamePanel() noexcept override = default;
 
@@ -65,7 +65,7 @@ class GamePanel : public Panel
 class ScenePanel : public Panel
 {
   public:
-    ScenePanel(UI& ui, uint32_t* dock) : Panel("Scene Panel", dock) {}
+    ScenePanel(UI& ui, u32* dock) : Panel("Scene Panel", dock) {}
 
     ~ScenePanel() noexcept override = default;
 
@@ -155,7 +155,7 @@ class ScenePanel : public Panel
 class InspectorPanel : public Panel
 {
   public:
-    InspectorPanel(UI& ui, ScenePanel* scene, uint32_t* dock) : Panel("Inspector Panel", dock), scene(scene) {}
+    InspectorPanel(UI& ui, ScenePanel* scene, u32* dock) : Panel("Inspector Panel", dock), scene(scene) {}
 
     ~InspectorPanel() noexcept override = default;
 
@@ -172,7 +172,7 @@ class InspectorPanel : public Panel
 class ConsolePanel : public Panel
 {
   public:
-    ConsolePanel(UI& ui, uint32_t* dock) : Panel("Console Panel", dock) {}
+    ConsolePanel(UI& ui, u32* dock) : Panel("Console Panel", dock) {}
 
     ~ConsolePanel() noexcept override = default;
 
@@ -209,7 +209,7 @@ class ConsolePanel : public Panel
 class RGDebugPanel : public Panel
 {
   public:
-    RGDebugPanel(UI& ui, uint32_t* dock) : Panel("RG Debug", dock) {}
+    RGDebugPanel(UI& ui, u32* dock) : Panel("RG Debug", dock) {}
 
     ~RGDebugPanel() noexcept override = default;
 
@@ -233,7 +233,7 @@ class DebugPanel : public Panel
     };
 
   public:
-    DebugPanel(UI& ui, uint32_t* dock) : Panel("Debug Panel", dock) {}
+    DebugPanel(UI& ui, u32* dock) : Panel("Debug Panel", dock) {}
 
     ~DebugPanel() noexcept override = default;
 

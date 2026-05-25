@@ -122,7 +122,7 @@ void StagingBuffer::blit(Image& dst, const Image& src, const ImageBlit& blit, bo
     else { barrier(); }
 }
 
-size_t StagingBuffer::copy(Image& dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back,
+size_t StagingBuffer::copy(Image& dst, const void* const src, u32 layer, u32 mip, bool transition_back,
                            DiscardContents discard, Vec3i32 offset, Vec3u32 extent)
 {
     ENG_ASSERT(src);
@@ -161,12 +161,12 @@ size_t StagingBuffer::copy(Image& dst, const void* const src, uint32_t layer, ui
         const size_t block_rows_allocated = alloc.size / row_bytes;
         const size_t usable_bytes = block_rows_allocated * row_bytes;
         memcpy(get_alloc_mem(alloc), (const std::byte*)src + bytes_uploaded, usable_bytes);
-        const glm::i32vec3 copy_offset = { offset.x, offset.y + int32_t(block_rows_uploaded * block_data.texel_extent.y),
+        const glm::i32vec3 copy_offset = { offset.x, offset.y + i32(block_rows_uploaded * block_data.texel_extent.y),
                                            offset.z };
-        const uint32_t texel_rows_uploaded = block_rows_uploaded * block_data.texel_extent.y;
-        const uint32_t texel_rows_allocated = block_rows_allocated * block_data.texel_extent.y;
-        const uint32_t remaining_texel_rows = extent.y - texel_rows_uploaded;
-        const uint32_t copy_rows = std::min(texel_rows_allocated, remaining_texel_rows);
+        const u32 texel_rows_uploaded = block_rows_uploaded * block_data.texel_extent.y;
+        const u32 texel_rows_allocated = block_rows_allocated * block_data.texel_extent.y;
+        const u32 remaining_texel_rows = extent.y - texel_rows_uploaded;
+        const u32 copy_rows = std::min(texel_rows_allocated, remaining_texel_rows);
         const glm::u32vec3 copy_extent = { extent.x, copy_rows, extent.z };
 
         vk::VkBufferImageCopy2 copy{};

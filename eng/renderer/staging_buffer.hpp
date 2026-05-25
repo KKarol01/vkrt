@@ -71,7 +71,7 @@ class StagingBuffer
     // Copy from src to layer and mip in dst, given subrange by offset and extent.
     // Optionally discard the layer/mip before copying (saves layout transition).
     // Optionally transition back the layer/mip to original layout from transfer dst, if not, inserts RW barrier.
-    size_t copy(Image& dst, const void* const src, uint32_t layer, uint32_t mip, bool transition_back = true,
+    size_t copy(Image& dst, const void* const src, u32 layer, u32 mip, bool transition_back = true,
                 DiscardContents discard = DiscardContents::YES, Vec3i32 offset = {}, Vec3u32 extent = { ~0u, ~0u, ~0u });
 
     // Inserts rw->rw barrier.
@@ -99,7 +99,7 @@ class StagingBuffer
     Buffer buffer;
     std::vector<Context> contexts;
     std::deque<Allocation> allocations;
-    uint64_t last_frame{};
+    u64 last_frame{};
     size_t head{};
 	Sync* sync{};
 };

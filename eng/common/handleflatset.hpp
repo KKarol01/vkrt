@@ -11,7 +11,7 @@ namespace eng
 template <typename T>
 concept FlatSetCompatible = requires(const T& a, const T& b) {
     { a == b } -> std::convertible_to<bool>;
-    { std::hash<T>{}(a) } -> std::convertible_to<uint64_t>;
+    { std::hash<T>{}(a) } -> std::convertible_to<u64>;
 };
 
 // Idea stolen from https://github.com/martinus/unordered_dense.
@@ -20,8 +20,8 @@ concept FlatSetCompatible = requires(const T& a, const T& b) {
 template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = std::equal_to<T>> class FlatSet
 {
   public:
-    using index_t = uint32_t;
-    using offset_t = uint32_t;
+    using index_t = u32;
+    using offset_t = u32;
 
     inline static constexpr auto MAX_INDEX = ~index_t{};
     inline static constexpr auto MAX_OFFSET = offset_t{ 0xFFFFFF };
@@ -32,8 +32,8 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     {
         bool empty() const { return offset == MAX_OFFSET; }
         void invalidate() { offset = MAX_OFFSET; }
-        uint32_t hash : 8 {};
-        uint32_t offset : 24 { MAX_OFFSET };
+        u32 hash : 8 {};
+        u32 offset : 24 { MAX_OFFSET };
         index_t index{ MAX_INDEX };
     };
 
@@ -48,7 +48,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     auto end() { return data.begin() + size(); }
 
     const T& at(index_t i) const { return data.at(offsets.at(i)); }
-    size_t size() const { return head; }
+    usize size() const { return head; }
 
     index_t find(const T& t)
     {
@@ -71,7 +71,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
 
         maybe_resize();
         const auto hash = Hash{}(t);
-        const auto hash8 = uint8_t{ hash & 0xFF };
+        const auto hash8 = u8{ hash & 0xFF };
         auto idx = hash & (buckets.size() - 1);
         Bucket nb{ hash8, 0u, (index_t)offsets.size() };
         Bucket* ob{}; // pointer to new bucket with new item after insertion to update index, if some bucket was reused
@@ -185,7 +185,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
     {
         if(!buckets.size()) { return nullptr; }
         const auto hash = Hash{}(t);
-        const auto hash8 = uint8_t{ hash & 0xFF };
+        const auto hash8 = u8{ hash & 0xFF };
         auto idx = hash & (buckets.size() - 1);
         auto offset = 0u;
         while(true)
@@ -205,7 +205,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
         rehash(std::max(buckets.size() << 1, 1ull));
     }
 
-    void rehash(size_t new_size)
+    void rehash(usize new_size)
     {
         head = 0;
         buckets.clear();
@@ -248,7 +248,7 @@ template <FlatSetCompatible T, typename Hash = std::hash<T>, typename EqualTo = 
         if(idx == set.MAX_INDEX) { return handle_t{}; }
         return handle_t{ idx };
     }
-    size_t size() const { return set.size(); }
+    usize size() const { return set.size(); }
 
     WrappedInsertionResult insert(auto&& t)
     {

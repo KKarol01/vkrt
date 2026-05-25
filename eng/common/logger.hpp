@@ -94,14 +94,14 @@ namespace eng
 struct Timer
 {
     StackString<1024> label;
-    size_t time_us{};
-    size_t nest_level{};
+    usize time_us{};
+    usize nest_level{};
     Timer* parent{};
 };
 
 struct ScopedTimer
 {
-    ScopedTimer(size_t buf_len);
+    ScopedTimer(usize buf_len);
     ScopedTimer(std::string_view label);
     ~ScopedTimer();
     Timer* timer{};

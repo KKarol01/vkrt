@@ -14,6 +14,7 @@
 #include <tuple>
 #include <algorithm>
 #include <limits>
+#include <eng/common/types.hpp>
 #include "traits.hpp"
 #include <eng/common/sparseset.hpp>
 #include <eng/common/slotmap.hpp>
@@ -78,18 +79,18 @@ namespace test
 class EcsTest;
 }
 
-using EntitySlot = uint32_t;
-using EntityVersion = uint32_t;
-using EntityStorageType = uint64_t;
-// typed uint64_t for storing stable index to associated data and a version
+using EntitySlot = u32;
+using EntityVersion = u32;
+using EntityStorageType = u64;
+// typed u64 for storing stable index to associated data and a version
 struct EntityId : public TypedId<EntityId, EntityStorageType>
 {
     explicit EntityId(StorageType handle) : TypedId(handle) {}
     explicit EntityId() : TypedId() {}
-    EntityId(EntitySlot slot, EntityVersion version) : TypedId(((uint64_t)version << 32) | (uint64_t)slot) {}
+    EntityId(EntitySlot slot, EntityVersion version) : TypedId(((u64)version << 32) | (u64)slot) {}
     auto operator<=>(const EntityId&) const = default;
-    EntitySlot slot() const { return EntitySlot{ (uint32_t)(handle & 0xFFFFFFFFu) }; }
-    EntityVersion version() const { return (uint32_t)(handle >> 32); }
+    EntitySlot slot() const { return EntitySlot{ (u32)(handle & 0xFFFFFFFFu) }; }
+    EntityVersion version() const { return (u32)(handle >> 32); }
     EntityId bump() const { return EntityId{ slot(), version() + 1 }; }
 };
 
@@ -191,7 +192,7 @@ class Registry
             }
         }
         Signature sig;
-        uint64_t hash{};
+        u64 hash{};
         std::vector<EntityId> entities;
     };
 

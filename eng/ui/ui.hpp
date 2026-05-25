@@ -16,7 +16,7 @@ class UI;
 
 inline UI& get_ui() { return *get_engine().ui; }
 
-using PanelId = TypedId<Panel, uint32_t>;
+using PanelId = TypedId<Panel, u32>;
 
 class UI
 {
@@ -35,11 +35,11 @@ class UI
     std::unordered_map<std::string, PanelId> panelmap;
 
     PanelId fullscreen;
-    uint32_t dock_id{};
-    uint32_t game{};
-    uint32_t scene{};
-    uint32_t console{};
-    uint32_t inspector{};
+    u32 dock_id{};
+    u32 game{};
+    u32 scene{};
+    u32 console{};
+    u32 inspector{};
 };
 
 } // namespace ui
