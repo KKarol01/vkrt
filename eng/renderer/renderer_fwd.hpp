@@ -376,6 +376,7 @@ enum class AOMode
     SSAO,
     GTAO,
     RTAO,
+    SSILVB,
     LAST_ENUM,
 };
 

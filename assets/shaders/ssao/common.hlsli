@@ -1,7 +1,7 @@
 #ifndef SSAO_COMMON_H
 #define SSAO_COMMON_H
 
-#include "./assets/shaders/common.hlsli"
+#include "assets/shaders/common.hlsli"
 
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
@@ -14,7 +14,7 @@ struct PushConstants
 [[vk::push_constant]] PushConstants pc;
 #endif
 
-#include "./assets/shaders/util.hlsli"
+#include "assets/shaders/util.hlsli"
 
 #define gDepthTexture gTexture2Df1s[pc.DepthTextureIndex]
 #define gNoiseTexture gTexture2Df2s[pc.NoiseTextureIndex]

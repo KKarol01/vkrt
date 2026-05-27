@@ -38,8 +38,8 @@ class GamePanel : public Panel
             ImVec2 mpcsize = ImGui::GetContentRegionAvail();
             if(mpcsize.x <= 0.0f || mpcsize.y <= 0.0f)
             {
-                mpcsize = ImVec2{ gfx::get_renderer().settings.render_resolution.x,
-                                  gfx::get_renderer().settings.render_resolution.y };
+                mpcsize = ImVec2{ gfx::get_renderer().settings.present_resolution.x,
+                                  gfx::get_renderer().settings.present_resolution.y };
             }
             const float targetAspect = 16.0f / 9.0f;
             float width = mpcsize.x;
@@ -55,7 +55,7 @@ class GamePanel : public Panel
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().current_data->render_resources;
-            auto color = b.sample_texture(b.as_acc_id(rt.final_color));
+            auto color = b.sample_texture(rt.final_color);
             ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height });
         }
         ImGui::End();
@@ -216,10 +216,7 @@ class RGDebugPanel : public Panel
     void draw(gfx::RGBuilder& b) override
     {
         auto& r = gfx::get_renderer();
-        if(ImGui::Begin(m_name.c_str())) 
-		{
-			
-		}
+        if(ImGui::Begin(m_name.c_str())) {}
         ImGui::End();
     }
 };

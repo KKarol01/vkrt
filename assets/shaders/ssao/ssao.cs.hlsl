@@ -1,4 +1,4 @@
-#include "./common.hlsli"
+#include "common.hlsli"
 
 static const uint LOCAL_SIZE = 8;
 
@@ -9,7 +9,7 @@ float3 hash3df(float2 value)
 	return frac((p3.xxy+p3.yzz)*p3.zyx);
 }
 
-static const uint SAMPLE_COUNT = 32;
+static const uint SAMPLE_COUNT = 64;
 
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
@@ -28,8 +28,8 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     }
 
     //GPUEngAOSettings in_ao_settings = get_gsb(GPUEngAOSettings, 0);
-    const float radius = 0.5; //in_ao_settings.Radius;
-    const float bias = 0.1; //in_ao_settings.Bias;
+    const float radius = 0.8; //in_ao_settings.Radius;
+    const float bias = 0.01; //in_ao_settings.Bias;
 
     float3 vs_pos = depth_to_view_pos(thread_id.xy, dims, depth);
     float3 normal = calculate_normal_from_depth(int2(thread_id.xy), int2(dims), gDepthTexture);
@@ -48,7 +48,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     {
         // Generate uniform hemisphere sample oriented along +Z normal axis via hash
         float3 rand_sample = hash3df(uv + float(i) * float2(0.1173, 0.7341));
-        float phi = rand_sample.x * 2.0 * 3.14159265;
+        float phi = rand_sample.x * 2.0 * ENG_PI;
         float cos_theta = rand_sample.y; 
         float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
         
@@ -79,5 +79,6 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     }
 
     float ao_factor = 1.0 - (occlusion / float(SAMPLE_COUNT));
-    gOutAOImage[thread_id.xy] = float4(ao_factor.xxx, 1.0);
+    gOutAOImage[thread_id.xy] *= float4(ao_factor.xxx, 1.0);
+    //gOutAOImage[thread_id.xy] = float4(normal.xyz, 1.0);
 }

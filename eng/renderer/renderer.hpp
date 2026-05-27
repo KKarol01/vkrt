@@ -381,8 +381,8 @@ struct Image
         mips = mips == ~0u ? (u32)(std::log2f((float)std::min(width, height)) + 1) : mips;
         return init(width, height, 0, format, usage, mips, 1, layout);
     }
-    static Image init(u32 width, u32 height, u32 depth, ImageFormat format, Flags<ImageUsage> usage,
-                      u32 mips = 1, u32 layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
+    static Image init(u32 width, u32 height, u32 depth, ImageFormat format, Flags<ImageUsage> usage, u32 mips = 1,
+                      u32 layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
     {
         return Image{
             .type = depth > 0    ? ImageType::TYPE_3D
@@ -649,8 +649,9 @@ struct RenderResources
     RGResourceId zpdepth;
     RGResourceId normal;
     RGResourceId ao;
-    RGResourceId opaque;      // set by the opaque mesh pass
-    RGResourceId final_color; // set by composite final color pass
+    RGResourceId opaque;
+    RGResourceId accum;
+    RGResourceId final_color;
 };
 
 struct TimestampQuery
@@ -681,7 +682,7 @@ namespace RenderOrder
 inline constexpr u32 SETUP_TARGETS = 0;
 // Zprepass of the geometry
 inline constexpr u32 Z_PREPASS = 50;
-// Rigth after prepass, but before any rendering to other buffers happens
+// Right after prepass, but before any rendering to other buffers happens
 inline constexpr u32 POST_Z = 51;
 // Rendering of opaque/transparent/other passes happens with the use of geometry
 inline constexpr u32 MESH_RENDER = 100;
@@ -752,7 +753,7 @@ class Renderer
         Handle<Buffer> lights[2];     // lights
 
         static inline constexpr u32 fwdp_tile_pixels{ 16 }; // changing would require recompiling compute shader with larger local size
-        u32 fwdp_lights_per_tile{ 256 }; // changing requires resizing the buffers
+        u32 fwdp_lights_per_tile{ 256 };                    // changing requires resizing the buffers
         u32 fwdp_num_tiles{};
 
         IndexFormat index_type{ IndexFormat::U16 };
@@ -776,7 +777,7 @@ class Renderer
         ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
-        Vec2f override_render_resolution{ -1, -1 };
+        Vec2f override_render_resolution{};
         Vec2f render_resolution{};
         Vec2f present_resolution{};
 
@@ -923,10 +924,11 @@ inline std::string to_string(AOMode a)
 {
     switch(a)
     {
-    static_assert((int)AOMode::LAST_ENUM == 3);
+    static_assert((int)AOMode::LAST_ENUM == 4);
     case AOMode::SSAO: return "SSAO";
     case AOMode::GTAO: return "GTAO";
     case AOMode::RTAO: return "RTAO";
+    case AOMode::SSILVB: return "SSILVB";
     default: { ENG_ASSERT("Unhandled case"); return ""; }
     }
 }

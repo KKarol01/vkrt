@@ -1,4 +1,4 @@
-#include "./common.hlsli"
+#include "common.hlsli"
 
 struct FSOutput
 {

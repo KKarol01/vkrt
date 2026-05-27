@@ -244,7 +244,7 @@ RGAccessId RGBuilder::access_resource(RGAccessId acc, Flags<PipelineStage> stage
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
-        .buffer_view = BufferView{ graph->get_buf(acc), range },
+        .buffer_view = BufferView::init(graph->get_buf(acc), range.offset, range.size),
         .stage = stage,
         .access = access,
     });

@@ -1,4 +1,4 @@
-#include "./common.hlsli"
+#include "common.hlsli"
 
 float4 unpackUnorm4x8(uint col)
 {

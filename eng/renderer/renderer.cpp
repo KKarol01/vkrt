@@ -472,12 +472,15 @@ void Renderer::update()
 {
     ENG_TIMER_SCOPED("Renderer update");
 
-    settings.render_resolution = settings.new_render_resolution;
-    if(settings.override_render_resolution.x == -1 && settings.override_render_resolution.y == -1)
+    if(settings.override_render_resolution.x != 0 && settings.override_render_resolution.y != 0)
     {
-        get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.present_resolution.x,
-                                               settings.present_resolution.y);
-        settings.render_resolution = settings.present_resolution;
+        settings.new_render_resolution = settings.override_render_resolution;
+    }
+    if(settings.render_resolution != settings.new_render_resolution)
+    {
+        settings.render_resolution = settings.new_render_resolution;
+        get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.render_resolution.x,
+                                               settings.render_resolution.y);
     }
 
     if(settings.regenerate_swapchain)
@@ -690,7 +693,7 @@ void Renderer::compile_rendergraph()
             };
 
             auto constsacc = b.create_resource(make_res_name("constants"),
-                                               Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), true);
+                                               Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
             constsacc = b.write_buffer(constsacc);
             d.constants = b.as_res_id(constsacc);
 
@@ -698,18 +701,25 @@ void Renderer::compile_rendergraph()
                 b.create_resource(make_res_name("opaque"),
                                   Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                               ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                  RGClear::color(), true);
+                                  RGClear::color());
 
             auto depth = b.create_resource(make_res_name("depth"),
                                            Image::init(settings.render_resolution.x, settings.render_resolution.y,
                                                        settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                           RGClear::depth_stencil(0.0), true);
+                                           RGClear::depth_stencil(0.0));
 
             auto final_color =
                 b.create_resource(make_res_name("finalcolor"),
-                                  Image::init(settings.present_resolution.x, settings.present_resolution.y, settings.color_format,
+                                  Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                               ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                  RGClear::color(), true);
+                                  RGClear::color());
+
+            // auto accum =
+            //     b.create_resource(make_res_name("accumulation"),
+            //                       Image::init(settings.present_resolution.x, settings.present_resolution.y, settings.color_format,
+            //                                   gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::STORAGE_BIT),
+            //                       {}, true);
+
             d.opaque = b.as_res_id(opaque);
             d.zpdepth = b.as_res_id(depth);
             d.final_color = b.as_res_id(final_color);
@@ -747,59 +757,24 @@ void Renderer::compile_rendergraph()
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
     passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
-    // todo: add enum to index this
-    if(pass_data.color_buffers[0] && pass_data.depth_buffer) {}
-
-    // passes.ao->init(rgraph, pass_data);
-
-    // struct ApplyAOData
-    //{
-    //     RGAccessId in_out_color;
-    //     RGAccessId in_ao;
-    // };
-    // rgraph->add_graphics_pass<ApplyAOData>(
-    //     "APPLY_AO", RenderOrder::MESH_RENDER,
-    //     [this](RGBuilder& b, ApplyAOData& d) {
-    //         d.in_out_color = b.read_write_image(b.as_acc_id(current_data->render_resources.color));
-    //         d.in_ao = b.read_image(b.as_acc_id(current_data->render_resources.ao));
-    //     },
-    //     [this](RGBuilder& b, const ApplyAOData& d) {
-    //         auto* cmd = b.open_cmd_buf();
-    //         cmd->bind_pipeline(settings.apply_ao_pipeline.get());
-    //         DescriptorResource resources[]{
-    //             DescriptorResource::storage_image(b.graph->get_acc(d.in_out_color).image_view),
-    //             DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
-    //         };
-    //         const auto& img = b.graph->get_img(d.in_ao).get();
-    //         cmd->bind_resources(1, resources);
-    //         cmd->dispatch((img.width + 7) / 8, (img.height + 7) / 8, 1);
-    //     });
-
-    struct CompositeFinalColorData
+    struct CopyToAccum
     {
-        RGAccessId in_color;
-        RGAccessId out_final_color;
+        RGAccessId input;
+        RGAccessId output;
     };
-    const auto compositefinalcolor = rgraph->add_graphics_pass<CompositeFinalColorData>(
-        "CompositeFinalColor", RenderOrder::POST,
-        [this](RGBuilder& b, CompositeFinalColorData& data) {
-            if(!current_data->render_resources.opaque) { return; }
-            data.in_color = b.copy_source(b.as_acc_id(current_data->render_resources.opaque));
-            // todo: make this persistent and double-buffered
-            data.out_final_color = b.as_acc_id(current_data->render_resources.final_color);
-            data.out_final_color = b.copy_dest(data.out_final_color);
+    rgraph->add_graphics_pass<CopyToAccum>(
+        "Copy To Accum", RenderOrder::POST,
+        [this](RGBuilder& b, CopyToAccum& d) {
+            d.input = b.copy_source(current_data->render_resources.opaque);
+            d.output = b.copy_dest(current_data->render_resources.final_color);
         },
-        [this](RGBuilder& pb, const CompositeFinalColorData& data) {
-            auto* cmd = pb.open_cmd_buf();
-            auto& dsti = pb.graph->get_img(data.out_final_color).get();
-            const auto& srci = pb.graph->get_img(data.in_color).get();
-            cmd->blit(dsti, srci,
-                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
-                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
-                                 .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
-                                 .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
-                                 .filter = ImageFilter::LINEAR });
+        [this](RGBuilder& b, const CopyToAccum& d) {
+            auto* cmd = b.open_cmd_buf();
+            cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
         });
+
+    pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = current_data->render_resources.final_color;
+    passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);
 
@@ -811,8 +786,7 @@ void Renderer::compile_rendergraph()
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
         "CopyToSwapchain", RenderOrder::PRESENT,
         [=, this](RGBuilder& b, CopySwapchainData& data) {
-            auto final_color_acc = b.copy_source(b.as_acc_id(get_renderer().current_data->render_resources.final_color));
-            data.input = final_color_acc;
+            data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
             data.output = b.import_resource(swapchain->get_image());
             data.output = b.copy_dest(data.output);
         },
@@ -1622,9 +1596,9 @@ void ShaderManager::parse_includes(File& f, File* pf)
             if(start == std::string::npos) { continue; }
             auto end = line.find('"', start + 1);
             if(end == std::string::npos) { continue; }
-            std::string incpath{ line.begin() + start + 1 + 1, line.begin() + end };
-            ENG_ASSERT(incpath.starts_with('/'));
-            if(!incpath.starts_with("/assets/")) { incpath = shader_dir + incpath; }
+            std::string incpath{ line.begin() + start + 1, line.begin() + end };
+            ENG_ASSERT(!incpath.starts_with('/'));
+            if(!incpath.starts_with("assets/")) { incpath = shader_dir + incpath; }
             ENG_ASSERT(fs::Path{ incpath }.extension() == ".hlsli");
             auto& inc_file = m_files_map[incpath];
             inc_file.path = incpath;

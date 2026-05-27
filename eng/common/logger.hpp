@@ -126,4 +126,4 @@ inline thread_local TimerStorage g_timers;
                                          __LINE__){ ENG_FMT_TO_N(::eng::g_timers.label_buf, 1023, msg, __VA_ARGS__) };
 #define ENG_TIMER_START(msg, ...)                                                                                      \
     ::eng::g_timers.manually_scoped_timers.emplace_back(ENG_FMT_TO_N(::eng::g_timers.label_buf, 1023, msg, __VA_ARGS__));
-#define ENG_TIMER_END() ::eng::g_timers.manually_scoped_timers.pop_back();
+#define ENG_TIMER_END(...) ::eng::g_timers.manually_scoped_timers.pop_back();

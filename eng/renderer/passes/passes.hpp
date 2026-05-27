@@ -43,6 +43,7 @@ enum class GBufferType
     DIFFUSE,
     SPECULAR,
     NORMAL,
+    ACCUMULATION,
     LAST_ENUM,
 };
 
@@ -687,13 +688,17 @@ struct SSAO : public Pass
             r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::RTAO] =
             r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::SSILVB] =
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssilvb.cs.hlsl" }));
     }
 
     ~SSAO() override = default;
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
-        // if(!data.depth_buffer || !data.gbuffer[(int)GBufferType::NORMAL]) { return; }
+        if(!data.depth_buffer) { return; }
+        if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
+        // if(!data.gbuffer[(int)GBufferType::NORMAL] ) { return; }
         auto& r = get_renderer();
         m_name = to_string(r.settings.gfx_settings.ao_mode);
 
@@ -701,7 +706,7 @@ struct SSAO : public Pass
         {
             m_noise_texture = r.make_image("SSAONoiseTex", Image::init(8, 8, ImageFormat::R16FG16F,
                                                                        ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
-            std::mt19937 mt{ 15 };
+            std::mt19937 mt{ 0 };
             std::uniform_real_distribution<float> dist{ -1.0, 1.0 };
 
             size_t tex_sz = 8;
@@ -761,10 +766,7 @@ struct SSAO : public Pass
                 d.constants = b.read_buffer(r.current_data->render_resources.constants);
                 d.noise = b.import_resource(m_noise_texture);
                 d.noise = b.sample_texture(d.noise);
-                d.out_ao = b.create_resource("SSAOOutput", Image::init(r.settings.render_resolution.x,
-                                                                       r.settings.render_resolution.y, ImageFormat::R16FG16FB16FA16F,
-                                                                       ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
-                d.out_ao = b.write_image(d.out_ao);
+                d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
                 r.current_data->render_resources.opaque = b.as_res_id(d.out_ao);
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
