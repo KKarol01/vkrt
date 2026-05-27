@@ -1,4 +1,4 @@
-#include "./assets/shaders/common.hlsli"
+#include "assets/shaders/common.hlsli"
 
 static const uint LOCAL_SIZE = 8;
 

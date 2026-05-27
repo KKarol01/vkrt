@@ -1,6 +1,4 @@
-#include "./common.hlsli"
-#include "./assets/shaders/common.hlsli"
-#include "./assets/shaders/util.hlsli"
+#include "common.hlsli"
 
 #define LOCAL_SIZE 8
 

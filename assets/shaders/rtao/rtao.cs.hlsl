@@ -1,5 +1,5 @@
-#include "./common.hlsli"
-#include "./assets/shaders/util.hlsli"
+#include "common.hlsli"
+#include "assets/shaders/util.hlsli"
 
 #define LOCAL_SIZE 8
 #define NUM_RAYS 64

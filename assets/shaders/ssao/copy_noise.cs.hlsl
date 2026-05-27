@@ -1,4 +1,4 @@
-#include "./assets/shaders/common.hlsli"
+#include "assets/shaders/common.hlsli"
 
 struct PushConstants
 {

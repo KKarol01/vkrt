@@ -1588,7 +1588,7 @@ void ShaderManager::parse_includes(File& f, File* pf)
             return;
         }
         f.hash = ENG_HASH(f.hash, file->get_hash());
-        const auto shader_dir = f.path.parent_path().string();
+        const auto shader_dir = f.path.parent_path();
         for(std::string line; file->getline(line);)
         {
             if(!line.starts_with("#include")) { continue; }
@@ -1596,9 +1596,10 @@ void ShaderManager::parse_includes(File& f, File* pf)
             if(start == std::string::npos) { continue; }
             auto end = line.find('"', start + 1);
             if(end == std::string::npos) { continue; }
-            std::string incpath{ line.begin() + start + 1, line.begin() + end };
-            ENG_ASSERT(!incpath.starts_with('/'));
-            if(!incpath.starts_with("assets/")) { incpath = shader_dir + incpath; }
+            fs::Path incpath{ line.begin() + start + 1, line.begin() + end };
+            ENG_ASSERT(!incpath.string().starts_with('/'));
+            if(!incpath.string().starts_with("assets/")) { incpath = shader_dir / incpath; }
+            else { incpath = "/" / incpath; }
             ENG_ASSERT(fs::Path{ incpath }.extension() == ".hlsli");
             auto& inc_file = m_files_map[incpath];
             inc_file.path = incpath;

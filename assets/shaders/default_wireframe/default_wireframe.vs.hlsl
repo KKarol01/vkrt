@@ -1,4 +1,4 @@
-#include "./common.hlsli"
+#include "common.hlsli"
 
 VS_OUT main(uint vertex_index : SV_VertexID)
 {

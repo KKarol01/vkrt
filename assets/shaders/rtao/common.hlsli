@@ -1,7 +1,7 @@
 #ifndef RTAO_COMMON_HLSLI
 #define RTAO_COMMON_HLSLI
 
-#include "./assets/shaders/common.hlsli"
+#include "assets/shaders/common.hlsli"
 
 struct PushConstants
 {

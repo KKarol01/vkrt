@@ -1,7 +1,7 @@
 #ifndef GTAO_COMMON_H
 #define GTAO_COMMON_H
 
-#include "./assets/shaders/common.hlsli"
+#include "assets/shaders/common.hlsli"
 
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
@@ -15,5 +15,7 @@ struct PushConstants
 };
 [[vk::push_constant]] PushConstants pc;
 #endif
+
+#include "assets/shaders/util.hlsli"
 
 #endif

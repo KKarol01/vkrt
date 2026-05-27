@@ -1,7 +1,7 @@
 #ifndef WIREFRAME_COMMON_HLSLI
 #define WIREFRAME_COMMON_HLSLI
 
-#include "./assets/shaders/common.hlsli"
+#include "assets/shaders/common.hlsli"
 
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants

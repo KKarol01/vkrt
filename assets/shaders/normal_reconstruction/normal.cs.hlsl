@@ -1,5 +1,5 @@
-#include "./common.hlsli"
-#include "./assets/shaders/util.hlsli"
+#include "common.hlsli"
+#include "assets/shaders/util.hlsli"
 
 static const uint LOCAL_SIZE = 8; 
 static const uint TILE_BORDER = 1;
