@@ -147,13 +147,6 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
     return add_resource(std::move(res));
 }
 
-PersistentStorage* RGBuilder::find_persistent(u64 namehash)
-{
-    auto it = graph->persistent_resources.find(std::make_pair(pass->id, namehash));
-    if(it == graph->persistent_resources.end()) { return nullptr; }
-    return &it->second;
-}
-
 RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool persistent)
 {
     ENG_ASSERT(!name.empty());
@@ -161,19 +154,28 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
-            const auto hash = ENG_HASH(name);
-            if(auto* p = find_persistent(hash)) { return p->native; }
-            auto native_handle = get_engine().renderer->make_buffer(name, std::move(a));
+            const auto namehash = ENG_HASH(pass->id, name);
+            const auto objecthash = ENG_HASH(a);
+            if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
+            {
+                if(it->second.hash != objecthash)
+                {
+                    // object has changed -- for example image resolution might have changed -- recreate
+                    get_renderer().queue_destroy(*std::get_if<Handle<Buffer>>(&it->second.native));
+                    graph->persistent_resources.erase(it);
+                }
+                else { return it->second.native; }
+            }
+            auto native_handle = get_renderer().make_buffer(name, std::move(a));
             if(persistent)
             {
-                auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
-                                                                         PersistentStorage{ .native = native_handle });
-                return persistent_it.first->second.native;
+                graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
+                                                    std::forward_as_tuple(objecthash, native_handle));
             }
             return native_handle;
         }
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
-        return get_engine().renderer->make_buffer(name, std::move(a), allocation_mode);
+        return get_renderer().make_buffer(name, std::move(a), allocation_mode);
     }();
     return add_resource(RGResource{ name, native, persistent, is_aliased });
 }
@@ -185,19 +187,28 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const st
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
-            const auto hash = ENG_HASH(name);
-            if(auto* p = find_persistent(hash)) { return p->native; }
-            auto native_handle = get_engine().renderer->make_image(name, std::move(a));
+            const auto namehash = ENG_HASH(pass->id, name);
+            const auto objecthash = ENG_HASH(a);
+            if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
+            {
+                if(it->second.hash != objecthash)
+                {
+                    // object has changed -- for example image resolution might have changed -- recreate
+                    get_renderer().queue_destroy(*std::get_if<Handle<Image>>(&it->second.native));
+                    graph->persistent_resources.erase(it);
+                }
+                else { return it->second.native; }
+            }
+            auto native_handle = get_renderer().make_image(name, std::move(a));
             if(persistent)
             {
-                auto persistent_it = graph->persistent_resources.emplace(std::make_pair(pass->id, hash),
-                                                                         PersistentStorage{ .native = native_handle });
-                return persistent_it.first->second.native;
+                graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
+                                                    std::forward_as_tuple(objecthash, native_handle));
             }
             return native_handle;
         }
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
-        return get_engine().renderer->make_image(name, std::move(a), allocation_mode);
+        return get_renderer().make_image(name, std::move(a), allocation_mode);
     }();
     return add_resource(RGResource{ name, native, persistent, is_aliased, clear });
 }
@@ -310,12 +321,14 @@ void RGRenderGraph::init(Renderer* r)
     allocators[0] = new GPUTransientAllocator{ allocate_aliasable };
     allocators[1] = new GPUTransientAllocator{ allocate_aliasable };
     allocator = allocators[0];
-    debug_data = new RGDebugData{};
+    m_debug_datas_arr[0] = new RGDebugData{};
+    m_debug_datas_arr[1] = new RGDebugData{};
 }
 
 void RGRenderGraph::compile()
 {
     std::swap(allocators[0], allocators[1]);
+    std::swap(m_debug_datas_arr[0], m_debug_datas_arr[1]);
     allocator = allocators[0];
     allocator->reset_pages();
 
@@ -425,7 +438,7 @@ void RGRenderGraph::compile()
 
     group_passes();
     bind_aliased_memory_to_resources();
-    debug_data->build(this);
+    m_debug_datas_arr[0]->build(this);
 }
 
 Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
@@ -560,7 +573,7 @@ void RGDebugData::build(RGRenderGraph* rg)
         auto& dg = groups.emplace_back();
         for(const auto& p : g.passes)
         {
-            auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {}, &p->query });
+            auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {}, p->query });
             for(const auto& pa : p->accesses)
             {
                 const auto& pacc = rg->get_acc(pa);

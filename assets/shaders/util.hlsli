@@ -33,9 +33,9 @@ float3 unproject_inf_revz_depth(float2 uv, Texture2D<float> depth_texture)
 	return unproject_inf_revz_depth(float3(uv * 2.0 - 1.0, depth_texture.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv, 0)));
 }
 
-float3 depth_to_view_pos(uint2 dtid, uint2 dims, float depth)
+float3 depth_to_view_pos(uint2 coords, uint2 dims, float depth)
 {
-    float2 uv = (float2(dtid) + 0.5) / float2(dims);
+    float2 uv = (float2(coords) + 0.5) / float2(dims);
     float2 ndc_xy = uv * 2.0 - 1.0;
 	return unproject_inf_revz_depth(float3(ndc_xy.xy, depth)); 
 }
@@ -57,5 +57,12 @@ float3 calculate_normal_from_depth(int2 coords, int2 dimensions, Texture2D<float
     // This results in +Z pointing toward the camera.
     return normalize(cross(vV, vH));
 }
+
+// https://blog.demofox.org/2022/01/01/interleaved-gradient-noise-a-different-kind-of-low-discrepancy-sequence/
+float IGN(int x, int y)
+{
+    return fmod(52.9829189f * fmod(0.06711056f * float(x) + 0.00583715f * float(y), 1.0f), 1.0f);
+}
+
 
 #endif

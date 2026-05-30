@@ -131,7 +131,7 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             continue;
         }
 
-        asset.geometries.push_back(get_engine().renderer->make_geometry(gfx::GeometryDescriptor{
+        asset.geometries.push_back(gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{
             .flags = {},
             .vertex_layout = vertex_layout,
             .index_format = gfx::IndexFormat::U32,
@@ -191,11 +191,11 @@ u32 load_image(Asset& asset, const fastgltf::Asset& gltfasset, gfx::ImageFormat 
         return ~0u;
     }
 
-    const auto img = get_engine().renderer->make_image(gltfimg.name.c_str(),
-                                                       gfx::Image::init((u32)x, (u32)y, 0, format,
-                                                                        gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                            gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                        0, 1, gfx::ImageLayout::READ_ONLY));
+    const auto img = gfx::get_renderer().make_image(gltfimg.name.c_str(),
+                                                    gfx::Image::init((u32)x, (u32)y, 0, format,
+                                                                     gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                         gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                     0, 1, gfx::ImageLayout::READ_ONLY));
     if(!img) { ENG_ERROR("Failed to create image{}", gltfimg.name.c_str()); }
     else
     {
@@ -314,7 +314,7 @@ Range32u load_material(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             }
         }
 
-        asset.materials.push_back(get_engine().renderer->make_material(mat));
+        asset.materials.push_back(gfx::get_renderer().make_material(mat));
         ++mats.size;
     }
 

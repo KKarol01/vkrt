@@ -43,7 +43,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 
     const float4x4 proj = get_gsb(GPUEngConstants, 0).proj;
     float occlusion = 0.0;
-
+    
     for (uint i = 0; i < SAMPLE_COUNT; ++i)
     {
         // Generate uniform hemisphere sample oriented along +Z normal axis via hash

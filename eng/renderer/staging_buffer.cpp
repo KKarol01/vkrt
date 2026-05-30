@@ -59,9 +59,12 @@ void StagingBuffer::flush_wait() { flush(true)->wait_cpu(~0ull); }
 
 void StagingBuffer::reset()
 {
-    ENG_TIMER_SCOPED("Staging reset");
-    flush_wait();
-    head = 0;
+    {
+        ENG_TIMER_SCOPED("Staging reset");
+        flush_wait();
+        head = 0;
+    }
+	int x = 0;
 }
 
 void StagingBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier)

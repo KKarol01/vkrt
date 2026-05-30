@@ -21,9 +21,7 @@
 #include <eng/fs/fs.hpp>
 #include <eng/renderer/mesh/mesh_renderer.hpp>
 
-ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
-ENG_DEFINE_STD_HASH(eng::gfx::BufferView, ENG_HASH(t.buffer, t.range));
-
+// Windows macro. Expands to '1'. Don't need it, compiles without it. Thanks MS.
 #undef TRANSPARENT
 
 namespace eng
@@ -362,6 +360,11 @@ struct Buffer
         return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = {} };
     }
 
+    bool operator==(const Buffer& a) const
+    {
+        return usage == a.usage && capacity == a.capacity && size == a.size && memory == a.memory;
+    }
+
     Flags<BufferUsage> usage{};
     size_t capacity{};
     size_t size{};
@@ -398,6 +401,12 @@ struct Image
             .layout = layout,
             .md = {},
         };
+    }
+
+    bool operator==(const Image& a) const
+    {
+        return type == a.type && format == a.format && width == a.width && height == a.height && depth == a.depth &&
+               mips == a.mips && layers == a.layers && usage == a.usage && layout == a.layout;
     }
 
     ImageType type{ ImageType::TYPE_2D };
@@ -557,6 +566,8 @@ template <typename T> struct LayoutCompatibilityChecker
 } // namespace gfx
 } // namespace eng
 
+ENG_DEFINE_STD_HASH(eng::gfx::Buffer, ENG_HASH(t.usage, t.capacity, t.size, t.memory));
+ENG_DEFINE_STD_HASH(eng::gfx::Image, ENG_HASH(t.type, t.format, t.width, t.depth, t.mips, t.layers, t.usage, t.layout));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexBinding, ENG_HASH(t.binding, t.stride, t.instanced));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::VertexAttribute, ENG_HASH(t.location, t.binding, t.format, t.offset));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::StencilState,
@@ -566,19 +577,15 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::BlendState,
                              t.dst_alpha_factor, t.alpha_op, t.r > 0 ? true : false, t.g > 0 ? true : false,
                              t.b > 0 ? true : false, t.a > 0 ? true : false));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo::AttachmentState,
-                    ENG_HASH(t.count, t.depth_format, t.stencil_format, ENG_HASH_AS_SPAN(t.color_formats.begin(), t.count),
-                             ENG_HASH_AS_SPAN(t.blend_states.begin(), t.count)));
+                    ENG_HASH(t.count, t.depth_format, t.stencil_format, std::span{ t.color_formats.begin(), t.count },
+                             std::span{ t.blend_states.begin(), t.count }));
 ENG_DEFINE_STD_HASH(eng::gfx::Descriptor, ENG_HASH(t.type, t.slot, t.size, t.stages, t.immutable_samplers));
-ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout, ENG_HASH(ENG_HASH_AS_SPAN(t.layout.begin(), t.layout.size())));
-
+ENG_DEFINE_STD_HASH(eng::gfx::DescriptorLayout, ENG_HASH(t.layout));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo,
                     ENG_HASH(t.layout, t.attachments, t.depth_test, t.depth_write, t.depth_compare, t.stencil_test,
                              t.stencil_front, t.stencil_back, t.topology, t.polygon_mode, t.culling, t.front_is_ccw,
-                             t.line_width, ENG_HASH_AS_SPAN(t.shaders.begin(), t.shaders.size()),
-                             ENG_HASH_AS_SPAN(t.bindings.begin(), t.bindings.size()),
-                             ENG_HASH_AS_SPAN(t.attributes.begin(), t.attributes.size())));
-ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout,
-                    ENG_HASH(t.push_range.stages, t.push_range.size, ENG_HASH_AS_SPAN(t.layout.begin(), t.layout.size())));
+                             t.line_width, t.shaders, t.bindings, t.attributes));
+ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout, ENG_HASH(t.push_range.stages, t.push_range.size, t.layout));
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
 ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));
@@ -769,12 +776,13 @@ class Renderer
 
     struct GraphicsSettings
     {
-        AOMode ao_mode{ AOMode::SSAO };
+        AOMode ao_mode{ AOMode::SSILVB };
     };
 
     struct Settings
     {
         ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
+        ImageFormat normal_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         Vec2f new_render_resolution{};
         Vec2f override_render_resolution{};

@@ -6,6 +6,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
+#include <eng/common/hash.hpp>
 #include <eng/assets/serialization.hpp>
 
 // Windows macro. Expands to '2'. Don't need it, compiles without it. Thanks MS.
@@ -736,5 +737,7 @@ template <> inline constexpr auto get_struct_fields<glm::vec4>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, w));
 }
 } // namespace serialization
-
 } // namespace eng
+
+ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));
+ENG_DEFINE_STD_HASH(eng::gfx::BufferView, ENG_HASH(t.buffer, t.range));

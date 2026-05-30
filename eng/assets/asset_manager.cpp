@@ -326,10 +326,10 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
         deserialize(imgd.format, src, out_bytes_written);
         deserialize(pixel_data_size, src, out_bytes_written);
         dst.images[i] =
-            get_engine().renderer->make_image(imgd.name, gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
-                                                                          gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                              gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                          0, 1, gfx::ImageLayout::READ_ONLY));
+            gfx::get_renderer().make_image(imgd.name, gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
+                                                                       gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                           gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                       0, 1, gfx::ImageLayout::READ_ONLY));
         if(!dst.images[i])
         {
             ENG_WARN("Failed to create image {}", "EMPTY IMAGE NAME");

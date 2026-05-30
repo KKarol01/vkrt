@@ -9,6 +9,8 @@ struct PushConstants
 	ENG_TYPE_UINT GPUEngConstantsBufferIndex;
     ENG_TYPE_UINT DepthTextureIndex;
 	ENG_TYPE_UINT NoiseTextureIndex;
+	ENG_TYPE_UINT NormalTextureIndex;
+	ENG_TYPE_UINT ColorTextureIndex;
     ENG_TYPE_UINT OutAOImageIndex;
 };
 [[vk::push_constant]] PushConstants pc;
@@ -18,6 +20,8 @@ struct PushConstants
 
 #define gDepthTexture gTexture2Df1s[pc.DepthTextureIndex]
 #define gNoiseTexture gTexture2Df2s[pc.NoiseTextureIndex]
+#define gNormalTexture gTexture2Df4s[pc.NormalTextureIndex]
+#define gColorTexture gTexture2Df4s[pc.ColorTextureIndex]
 #define gOutAOImage gRWTexture2Df4s[pc.OutAOImageIndex]
 
 /*

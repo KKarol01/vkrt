@@ -182,9 +182,9 @@ void Renderer::init_helper_geom()
     // gen_uv_sphere();
     // ENG_ASSERT(vertices.size() <= ~u16{});
     // helpergeom.uvsphere = make_geometry(GeometryDescriptor{ .vertices = vertices, .indices = indices });
-    // helpergeom.ppskybox = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { get_engine().renderer->make_shader("common/skybox.vert.glsl"),
-    //                  get_engine().renderer->make_shader("common/skybox.frag.glsl") },
+    // helpergeom.ppskybox = get_renderer().make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_renderer().make_shader("common/skybox.vert.glsl"),
+    //                  get_renderer().make_shader("common/skybox.frag.glsl") },
     //     .layout = common_playout,
     //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
     //     .depth_test = true,
@@ -233,15 +233,15 @@ void Renderer::init_pipelines()
         return;
     }
 
-    // hiz_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { get_engine().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = common_playout });
-    // cull_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { get_engine().renderer->make_shader("culling/culling.comp.glsl") },
+    // hiz_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_renderer().make_shader("culling/hiz.comp.glsl") }, .layout = common_playout });
+    // cull_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_renderer().make_shader("culling/culling.comp.glsl") },
     //     .layout = common_playout,
     // });
-    // cullzout_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { get_engine().renderer->make_shader("common/zoutput.vert.glsl"),
-    //                  get_engine().renderer->make_shader("common/zoutput.frag.glsl") },
+    // cullzout_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_renderer().make_shader("common/zoutput.vert.glsl"),
+    //                  get_renderer().make_shader("common/zoutput.frag.glsl") },
     //     .layout = common_playout,
     //     .attachments = { .depth_format = ImageFormat::D32_SFLOAT },
     //     .depth_test = true,
@@ -249,8 +249,8 @@ void Renderer::init_pipelines()
     //     .depth_compare = DepthCompare::GREATER,
     //     .culling = CullFace::BACK,
     // });
-    // fwdp_cull_lights_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-    //     .shaders = { get_engine().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
+    // fwdp_cull_lights_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+    //     .shaders = { get_renderer().make_shader("forwardp/cull_lights.comp.glsl") },
     //     .layout = common_playout,
     // });
 
@@ -268,8 +268,8 @@ void Renderer::init_pipelines()
             make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/meshpass/default_unlit.vs.hlsl",
                                                      "/assets/shaders/meshpass/default_unlit.ps.hlsl" })
                               .init_image_attachments(PipelineCreateInfo::AttachmentState{
-                                  .count = 1,
-                                  .color_formats = { settings.color_format },
+                                  .count = 8,
+                                  .color_formats = { settings.color_format, ImageFormat::UNDEFINED, settings.normal_format },
                                   .blend_states = { PipelineCreateInfo::BlendState{ .enable = true,
                                                                                     .src_color_factor = BlendFactor::SRC_ALPHA,
                                                                                     .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
@@ -692,35 +692,35 @@ void Renderer::compile_rendergraph()
                 return std::string_view{ resname, resnamelen };
             };
 
-            auto constsacc = b.create_resource(make_res_name("constants"),
+            auto constsacc = b.create_resource(make_res_name("Constants"),
                                                Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
             constsacc = b.write_buffer(constsacc);
             d.constants = b.as_res_id(constsacc);
 
             auto opaque =
-                b.create_resource(make_res_name("opaque"),
+                b.create_resource(make_res_name("Opaque"),
                                   Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                               ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                  RGClear::color());
+                                  RGClear::color(), true);
+            auto opaque_normals =
+                b.create_resource(make_res_name("Opaque Normals"),
+                                  Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
+                                              ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                  RGClear::color(), true);
 
-            auto depth = b.create_resource(make_res_name("depth"),
+            auto depth = b.create_resource(make_res_name("Depth"),
                                            Image::init(settings.render_resolution.x, settings.render_resolution.y,
                                                        settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
-                                           RGClear::depth_stencil(0.0));
+                                           RGClear::depth_stencil(0.0), true);
 
             auto final_color =
-                b.create_resource(make_res_name("finalcolor"),
+                b.create_resource(make_res_name("Final Color"),
                                   Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                               ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                  RGClear::color());
-
-            // auto accum =
-            //     b.create_resource(make_res_name("accumulation"),
-            //                       Image::init(settings.present_resolution.x, settings.present_resolution.y, settings.color_format,
-            //                                   gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::STORAGE_BIT),
-            //                       {}, true);
+                                  RGClear::color(), true);
 
             d.opaque = b.as_res_id(opaque);
+            d.normal = b.as_res_id(opaque_normals);
             d.zpdepth = b.as_res_id(depth);
             d.final_color = b.as_res_id(final_color);
         },
@@ -753,8 +753,12 @@ void Renderer::compile_rendergraph()
     passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
     // passes.reconstruct_normals->init(rgraph);
     // passes.ao[(int)settings.gfx_settings.ao_mode]->init(rgraph);
-    pass_data.color_buffers[0] = current_data->render_resources.opaque;
+    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = current_data->render_resources.opaque;
+    pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = current_data->render_resources.normal;
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
+
+    pass_data.color_buffers = {};
+    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = current_data->render_resources.opaque;
     passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
     struct CopyToAccum
@@ -773,7 +777,10 @@ void Renderer::compile_rendergraph()
             cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
         });
 
+    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = current_data->render_resources.opaque;
+    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = current_data->render_resources.normal;
     pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = current_data->render_resources.final_color;
+    pass_data.depth_buffer = current_data->render_resources.zpdepth;
     passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);
@@ -784,7 +791,7 @@ void Renderer::compile_rendergraph()
         RGAccessId output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
-        "CopyToSwapchain", RenderOrder::PRESENT,
+        "Copy To Swap", RenderOrder::PRESENT,
         [=, this](RGBuilder& b, CopySwapchainData& data) {
             data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
             data.output = b.import_resource(swapchain->get_image());
@@ -803,7 +810,7 @@ void Renderer::compile_rendergraph()
                                  .filter = ImageFilter::LINEAR });
         });
     rgraph->add_graphics_pass<RGAccessId>(
-        "PresentSwapchain", RenderOrder::PRESENT,
+        "Present", RenderOrder::PRESENT,
         [copyswapchaindata](RGBuilder& b, RGAccessId& output) {
             output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
@@ -1709,13 +1716,12 @@ void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
     ENG_ASSERT(verts.size() > geometry.size() && verts.size() % 2 == 0);
     if(!vpos_buf)
     {
-        vpos_buf = get_engine().renderer->make_buffer("debug verts", Buffer::init(verts.size() * sizeof(verts[0]),
-                                                                                  BufferUsage::STORAGE_BIT));
+        vpos_buf = get_renderer().make_buffer("debug verts", Buffer::init(verts.size() * sizeof(verts[0]), BufferUsage::STORAGE_BIT));
     }
 
     ENG_ASSERT(false);
-    // get_engine().renderer->sbuf->copy(vpos_buf, verts, 0);
-    // get_engine().renderer->sbuf->flush()->wait_cpu(~0ull);
+    // get_renderer().sbuf->copy(vpos_buf, verts, 0);
+    // get_renderer().sbuf->flush()->wait_cpu(~0ull);
 
     ENG_ASSERT(false);
     // cmd->bind_resource(1, vpos_buf);

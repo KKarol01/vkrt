@@ -246,7 +246,7 @@ class DebugPanel : public Panel
     void draw_render_graph()
     {
         const auto& r = gfx::get_renderer();
-        const auto& rgdd = *r.rgraph->debug_data;
+        const auto& rgdd = *r.rgraph->m_debug_datas_arr[1];
 
         if(ImGui::TreeNodeEx("Resources", ImGuiTreeNodeFlags_DefaultOpen))
         {

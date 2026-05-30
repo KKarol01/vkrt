@@ -68,8 +68,8 @@ void Container::read_list_section()
     }
 }
 
-void Container::add_asset(u8 version, u64 custom_hash, Flags<ListFlags> flags,
-                          std::span<const std::byte> asset, const AssetMetadata& metadata)
+void Container::add_asset(u8 version, u64 custom_hash, Flags<ListFlags> flags, std::span<const std::byte> asset,
+                          const AssetMetadata& metadata)
 {
     m_modified = true;
     m_lists_vec.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), 0, version, flags);
@@ -97,7 +97,7 @@ void Container::append_asset_bytes(std::span<const std::byte> bytes, bool finish
     if(finished)
     {
         m_lists_vec.back().content_hash =
-            ENG_HASH(ENG_HASH_AS_SPAN(m_asset_bytes.begin() + m_lists_vec.back().asset_start, m_lists_vec.back().asset_size));
+            ENG_HASH(std::span{ m_asset_bytes.begin() + m_lists_vec.back().asset_start, m_lists_vec.back().asset_size });
     }
 }
 

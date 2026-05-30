@@ -573,11 +573,11 @@ struct MeshPass : public Pass
         RGAccessId instances;
         RGAccessId indirect;
 
+        RGAccessId color_buffers[8]{};
         RGAccessId depth;
-        RGAccessId out_color;
     };
 
-    MeshPass(MeshPassType type) : Pass(ENG_FMT("MESH_PASS_{}", to_string(type)), RenderOrder::MESH_RENDER), m_type(type)
+    MeshPass(MeshPassType type) : Pass(ENG_FMT("Mesh Pass {}", to_string(type)), RenderOrder::MESH_RENDER), m_type(type)
     {
     }
 
@@ -600,8 +600,7 @@ struct MeshPass : public Pass
 
                 for(auto i = 0u; i < data.color_buffers.size(); ++i)
                 {
-                    if(data.color_buffers[i]) { d.out_color = b.access_color(data.color_buffers[i]); }
-                    if(i > 0) { ENG_ASSERT(!data.color_buffers[i]); }
+                    if(data.color_buffers[i]) { d.color_buffers[i] = b.access_color(data.color_buffers[i]); }
                 }
 
                 if(data.depth_buffer) { d.depth = b.access_depth(data.depth_buffer); }
@@ -624,15 +623,17 @@ struct MeshPass : public Pass
 
                 auto vkrinfo = vk::VkRenderingInfo{};
 
-                vk::VkRenderingAttachmentInfo vkcols[1]{};
-                if(d.out_color)
+                vk::VkRenderingAttachmentInfo vkcols[8]{};
+                vkrinfo.pColorAttachments = vkcols;
+                if(m_type != MeshPassType::Z_PREPASS) { vkrinfo.colorAttachmentCount = std::size(vkcols); }
+
+                for(auto i = 0; i < std::size(vkcols); ++i)
                 {
-                    vkcols[0].imageView = b.get_img(d.out_color).get_md().vk->view;
-                    vkcols[0].imageLayout = to_vk(b.graph->get_acc(d.out_color).layout);
-                    vkcols[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                    vkcols[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                    vkrinfo.pColorAttachments = vkcols;
-                    vkrinfo.colorAttachmentCount = 1;
+                    if(!d.color_buffers[i]) { continue; }
+                    vkcols[i].imageView = b.get_img(d.color_buffers[i]).get_md().vk->view;
+                    vkcols[i].imageLayout = to_vk(b.graph->get_acc(d.color_buffers[i]).layout);
+                    vkcols[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                    vkcols[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
                 }
 
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
@@ -704,14 +705,14 @@ struct SSAO : public Pass
 
         if(!m_noise_texture)
         {
-            m_noise_texture = r.make_image("SSAONoiseTex", Image::init(8, 8, ImageFormat::R16FG16F,
-                                                                       ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+            m_noise_texture = r.make_image("SSAO Noise", Image::init(8, 8, ImageFormat::R16FG16F,
+                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
             std::mt19937 mt{ 0 };
             std::uniform_real_distribution<float> dist{ -1.0, 1.0 };
 
             size_t tex_sz = 8;
-            auto buf = r.make_buffer("SSAOTempNoiseBuf", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
-                                                                      BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
+            auto buf = r.make_buffer("SSAO Temp Noise", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
+                                                                     BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
             r.queue_destroy(buf);
             auto* bufptr = (float*)buf->memory;
             for(auto i = 0; i < tex_sz * tex_sz * 2; ++i)
@@ -727,7 +728,7 @@ struct SSAO : public Pass
                 RGAccessId out_noise_img;
             };
             graph->add_compute_pass<NoiseOutput>(
-                "SSAOGenNoise", RenderOrder::SETUP_TARGETS,
+                "SSAO Generate Noise", RenderOrder::SETUP_TARGETS,
                 [=, this](RGBuilder& b, NoiseOutput& d) {
                     d.noise_buf = b.import_resource(buf);
                     d.noise_buf = b.read_buffer(d.noise_buf);
@@ -755,7 +756,9 @@ struct SSAO : public Pass
             RGAccessId depth;
             RGAccessId constants;
             RGAccessId noise;
+            RGAccessId normals;
             RGAccessId settings;
+            RGAccessId opaque;
             RGAccessId out_ao;
         };
         graph->add_compute_pass<PassSSAOOutput>(
@@ -766,6 +769,8 @@ struct SSAO : public Pass
                 d.constants = b.read_buffer(r.current_data->render_resources.constants);
                 d.noise = b.import_resource(m_noise_texture);
                 d.noise = b.sample_texture(d.noise);
+                d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
+                d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
                 d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
                 r.current_data->render_resources.opaque = b.as_res_id(d.out_ao);
             },
@@ -777,6 +782,8 @@ struct SSAO : public Pass
                     DescriptorResource::storage_buffer(b.get_buf(d.constants)),
                     DescriptorResource::sampled_image(b.get_img(d.depth)),
                     DescriptorResource::sampled_image(b.get_img(d.noise)),
+                    DescriptorResource::sampled_image(b.get_img(d.normals)),
+                    DescriptorResource::sampled_image(b.get_img(d.opaque)),
                     DescriptorResource::storage_image(b.get_img(d.out_ao)),
                 };
                 cmd->bind_resources(1, resources);
@@ -919,8 +926,8 @@ namespace culling
 //                                                 .format = ImageFormat::R32F,
 //                                                 .usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT | ImageUsage::TRANSFER_DST_BIT },
 //                                r->frame_count);
-//         hiz_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-//             .shaders = { get_engine().renderer->make_shader("culling/hiz.comp.glsl") }, .layout = r->bindless_pplayout });
+//         hiz_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+//             .shaders = { get_renderer().make_shader("culling/hiz.comp.glsl") }, .layout = r->bindless_pplayout });
 //     }
 //     void setup() override
 //     {
@@ -987,8 +994,8 @@ namespace culling
 //         fwd_id_bufs = g->import_resource(std::span{ vfwd_batch_ids });
 //         fwd_cmd_bufs = g->import_resource(std::span{ vfwd_batch_cmds });
 //         hiz = info.phiz->hiz;
-//         cull_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-//             .shaders = { get_engine().renderer->make_shader("culling/culling.comp.glsl") },
+//         cull_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+//             .shaders = { get_renderer().make_shader("culling/culling.comp.glsl") },
 //             .layout = r->bindless_pplayout,
 //         });
 //     }
@@ -1062,8 +1069,8 @@ namespace culling
 //             g->make_resource(BufferDescriptor{ "fwdp light list", light_list_size, BufferUsage::STORAGE_BIT }, r->frame_count);
 //         culled_light_grid_bufs =
 //             g->make_resource(BufferDescriptor{ "fwdp light grid", light_grid_size, BufferUsage::STORAGE_BIT }, r->frame_count);
-//         light_culling_pipeline = get_engine().renderer->make_pipeline(PipelineCreateInfo{
-//             .shaders = { get_engine().renderer->make_shader("forwardp/cull_lights.comp.glsl") },
+//         light_culling_pipeline = get_renderer().make_pipeline(PipelineCreateInfo{
+//             .shaders = { get_renderer().make_shader("forwardp/cull_lights.comp.glsl") },
 //             .layout = r->bindless_pplayout,
 //         });
 //     }

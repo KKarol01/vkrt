@@ -38,7 +38,7 @@ struct RGPass
     virtual void execute(RGBuilder& pb) = 0;
     virtual void* get_user_data() const { return nullptr; }
     PassId id; // hash of name
-    StackString<32> name;
+    StackString<64> name;
     Type type{ Type::NONE };
     std::vector<RGAccessId> accesses;
     // std::vector<std::tuple<Sync*, Flags<PipelineStage>, u64>> wait_syncs;
@@ -123,6 +123,7 @@ struct RGAccess
 
 struct PersistentStorage
 {
+    u64 hash{};
     RGResource::NativeResource native;
 };
 
@@ -130,7 +131,6 @@ struct RGBuilder
 {
     RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
     RGAccessId import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear = {});
-    PersistentStorage* find_persistent(u64 namehash);
     RGAccessId create_resource(std::string_view name, Buffer&& a, bool persistent = false);
     RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool persistent = false);
     RGAccessId add_access(const RGAccess& a);
@@ -384,9 +384,9 @@ class RGRenderGraph
     Sync* sems[2]{};
     GPUTransientAllocator* allocators[2]{};
     GPUTransientAllocator* allocator{};
-    RGDebugData* debug_data{};
+    RGDebugData* m_debug_datas_arr[2]{};
 
-    std::unordered_map<std::pair<RGPass::PassId, u64>, PersistentStorage, hash::PairHash> persistent_resources;
+    std::unordered_map<u64, PersistentStorage> persistent_resources;
     std::vector<RGResource> resources;
     std::vector<RGAccess> accesses;
     std::vector<OrderedPass> passes;
@@ -418,7 +418,7 @@ struct RGDebugData
     {
         std::string name;
         std::vector<Access> accesses;
-        TimestampQuery** query{};
+        TimestampQuery* query{};
     };
     struct Group
     {

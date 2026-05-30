@@ -449,8 +449,8 @@ void SwapchainMetadataVk::init(Swapchain& a)
     vkswpinfo.minImageCount = Renderer::frame_delay;
     vkswpinfo.imageFormat = to_vk(image_format);
     vkswpinfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    vkswpinfo.imageExtent = VkExtent2D{ (u32)get_renderer().settings.present_resolution.x,
-                                        (u32)get_renderer().settings.present_resolution.y };
+    vkswpinfo.imageExtent =
+        VkExtent2D{ (u32)get_renderer().settings.present_resolution.x, (u32)get_renderer().settings.present_resolution.y };
     vkswpinfo.imageArrayLayers = 1;
     vkswpinfo.imageUsage = to_vk(image_usage_flags);
     vkswpinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -509,7 +509,7 @@ u32 SwapchainMetadataVk::acquire(Swapchain* a, u64 timeout, Sync* semaphore, Syn
 
 RendererBackendVk& RendererBackendVk::get_instance()
 {
-    return *static_cast<RendererBackendVk*>(get_engine().renderer->backend);
+    return *static_cast<RendererBackendVk*>(get_renderer().backend);
 }
 
 void RendererBackendVk::init()
@@ -593,6 +593,7 @@ void RendererBackendVk::init()
     dev_2_features.features.fillModeNonSolid = true;
     dev_2_features.features.vertexPipelineStoresAndAtomics = true;
     dev_2_features.features.fragmentStoresAndAtomics = true;
+    dev_2_features.features.independentBlend = true;
 
     auto dev_vk12_features = vk::VkPhysicalDeviceVulkan12Features{};
     dev_vk12_features.drawIndirectCount = true;
@@ -1633,8 +1634,8 @@ ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
 
 size_t RendererBackendVk::get_indirect_indexed_command_size() const { return sizeof(IndirectIndexedCommand); }
 
-void RendererBackendVk::make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count,
-                                                      u32 first_index, i32 first_vertex, u32 first_instance) const
+void RendererBackendVk::make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count, u32 first_index,
+                                                      i32 first_vertex, u32 first_instance) const
 {
     ENG_ASSERT(out != nullptr);
     IndirectIndexedCommand cmd{ index_count, instance_count, first_index, first_vertex, first_instance };
@@ -1929,8 +1930,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //                 cmds.at(cmd_off) = DrawIndexedIndirectCommand{ .indexCount = ml.index_count,
 //                                                         .instanceCount = 0,
 //                                                         .firstIndex = (u32)g.index_range.offset + ml.index_offset,
-//                                                         .vertexOffset = (s32)(g.vertex_range.offset + ml.vertex_offset),
-//                                                         .firstInstance = j };
+//                                                         .vertexOffset = (s32)(g.vertex_range.offset +
+//                                                         ml.vertex_offset), .firstInstance = j };
 //             }
 //             ++rp.mbatches.at(pp_off).count;
 //             ++cnts.at(pp_off);

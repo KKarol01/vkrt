@@ -1,6 +1,7 @@
 #ifndef ENG_COMMON_H
 #define ENG_COMMON_H
 
+#define ENG_TWO_PI  6.2831853071795864769252867    
 #define ENG_PI      3.1415926535897932384626433
 #define ENG_HALF_PI 1.5707963267948966192313216
 
@@ -143,6 +144,9 @@ struct GPUMaterial
 
 #endif
 
+//
+//  DEFINE CPU/GPU FUNS HERE
+//
 #ifndef ENG_NO_COMMON_FUNCS
 ENG_INLINE ENG_TYPE_UINT pack_unorm4x8(ENG_TYPE_FLOAT r, ENG_TYPE_FLOAT g, ENG_TYPE_FLOAT b, ENG_TYPE_FLOAT a)
 {
@@ -155,11 +159,13 @@ ENG_INLINE ENG_TYPE_FLOAT4 unpack_unorm4x8(ENG_TYPE_UINT rgba)
 #endif
 
 #ifdef __cplusplus
-}
+} // namespace eng
 #endif
 
 #ifndef __cplusplus
-
+//
+// DEFINE HLSL RESOURCE BINDINGS HERE
+//
 [[vk::binding(ENG_BINDLESS_STORAGE_BUFFER_BINDING, 0)]] RWByteAddressBuffer gRWBuffers[];
 [[vk::binding(ENG_BINDLESS_STORAGE_IMAGE_BINDING, 0)]] RWTexture2D<float2> gRWTexture2Df2s[];
 [[vk::binding(ENG_BINDLESS_STORAGE_IMAGE_BINDING, 0)]] RWTexture2D<float4> gRWTexture2Df4s[];
@@ -171,9 +177,16 @@ ENG_INLINE ENG_TYPE_FLOAT4 unpack_unorm4x8(ENG_TYPE_UINT rgba)
 [[vk::binding(ENG_BINDLESS_SAMPLER_BINDING, 0)]] SamplerState gSamplerStates[];
 [[vk::binding(ENG_BINDLESS_ACCELERATION_STRUCT_BINDING, 0)]] RaytracingAccelerationStructure gTLASs[];
 
+#define gSamplerLinear gSamplerStates[ENG_SAMPLER_LINEAR]
+#define gSamplerLinearClamp gSamplerStates[ENG_SAMPLER_LINEAR_CLAMP]
+#define gSamplerNearest gSamplerStates[ENG_SAMPLER_NEAREST]
+#define gSamplerHiz gSamplerStates[ENG_SAMPLER_HIZ]
+
 #define ENG_INVALID_HANDLE (~0u)
 #define get_gsb(type, index) gRWBuffers[NonUniformResourceIndex(pc.type##BufferIndex)].Load<type>(index * sizeof(type))
 #define get_gsb2(type, struct, index) gRWBuffers[NonUniformResourceIndex(struct.type##BufferIndex)].Load<type>(index * sizeof(type))
+
+#define get_gi(type) gTexture2Df4s[NonUniformResourceIndex(pc.type##TextureIndex)]
 
 #endif
 

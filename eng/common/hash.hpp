@@ -91,5 +91,3 @@ struct PairHash
     }
 
 #define ENG_HASH(...) eng::hash::fnv1a_list(__VA_ARGS__)
-#define ENG_HASH_AS_SPAN(start, count)                                                                                 \
-    std::span { start, count }
