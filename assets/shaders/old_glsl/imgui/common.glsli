@@ -13,7 +13,7 @@ struct ImGuiVertex
 };
 
 ENG_DECLARE_STORAGE_BUFFER(GPUImGuiVertexBuffer) {
-    ENG_TYPE_UNSIZED(ImGuiVertex, vertices);
+    ENG_UNSIZED(ImGuiVertex, vertices);
 } ENG_DECLARE_BINDLESS(GPUImGuiVertexBuffer);
 
 

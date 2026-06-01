@@ -6,8 +6,8 @@
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
 {
-    ENG_TYPE_UINT GPUEngConstantsBufferIndex;
-    ENG_TYPE_UINT GPUInstanceIdBufferIndex;
+    ENG_UINT GPUEngConstantsBufferIndex;
+    ENG_UINT GPUInstanceIdBufferIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 #endif

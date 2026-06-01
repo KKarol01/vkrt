@@ -5,12 +5,12 @@
 
 struct PushConstants
 {
-    ENG_TYPE_UINT GPUEngConstantsBufferIndex;
-    ENG_TYPE_UINT GPUEngAOSettingsBufferIndex;
-    ENG_TYPE_UINT DepthTextureIndex;
-    ENG_TYPE_UINT NormalTextureIndex;
-    ENG_TYPE_UINT SceneTlasIndex;
-    ENG_TYPE_UINT AOImageIndex;
+    ENG_UINT GPUEngConstantsBufferIndex;
+    ENG_UINT GPUEngAOSettingsBufferIndex;
+    ENG_UINT DepthTextureIndex;
+    ENG_UINT NormalTextureIndex;
+    ENG_UINT SceneTlasIndex;
+    ENG_UINT AORWTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 

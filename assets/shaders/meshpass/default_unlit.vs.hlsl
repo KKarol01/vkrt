@@ -8,13 +8,13 @@ struct VSInput
 
 VSOutput main(VSInput vsinput)
 {
-	GPUEngConstants constants = get_gsb2(GPUEngConstants, pc, 0);
-	GPUInstanceId instanceid = get_gsb2(GPUInstanceId, pc, vsinput.instance_index);
+	GPUEngConstants constants = get_grwb2(GPUEngConstants, pc, 0);
+	GPUInstanceId instanceid = get_grwb2(GPUInstanceId, pc, vsinput.instance_index);
 	
     VSOutput vsoutput;
-	vsoutput.position = mul(constants.proj_view, float4(get_gsb2(GPUVertexPosition, constants, vsinput.vertex_index).pos.xyz, 1.0));
-	vsoutput.normal = float4(get_gsb2(GPUVertexAttribute, constants, vsinput.vertex_index).normal.xyz, 0.0);
-	vsoutput.uv = get_gsb2(GPUVertexAttribute, constants, vsinput.vertex_index).uv.xy;
+	vsoutput.position = mul(constants.proj_view, float4(get_grwb2(GPUVertexPosition, constants, vsinput.vertex_index).pos.xyz, 1.0));
+	vsoutput.normal = float4(get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).normal.xyz, 0.0);
+	vsoutput.uv = get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).uv.xy;
 	vsoutput.material_index = instanceid.mati;
     
     return vsoutput;

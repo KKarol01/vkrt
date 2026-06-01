@@ -6,14 +6,14 @@
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
 {
-    ENG_TYPE_UINT GPUEngConstantsBufferIndex;
-    ENG_TYPE_UINT GPUVertexPositionBufferIndex;
+    ENG_UINT GPUEngConstantsBufferIndex;
+    ENG_UINT GPUVertexPositionBufferIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 #endif
 
-#define gGPUEngConstants get_gsb(GPUEngConstants, 0)
-#define gGPUVertexPosition(index) get_gsb(GPUVertexPosition, index)
+#define gGPUEngConstants get_grwb(GPUEngConstants, 0)
+#define gGPUVertexPosition(index) get_grwb(GPUVertexPosition, index)
 
 struct VS_OUT
 {

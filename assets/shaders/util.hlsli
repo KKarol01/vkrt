@@ -19,7 +19,7 @@
 */
 float3 unproject_inf_revz_depth(float3 ndc) 
 {
-	const float4x4 proj = get_gsb(GPUEngConstants, 0).proj;
+	const float4x4 proj = get_grwb(GPUEngConstants, 0).proj;
 	const float z = -proj[2][3] / ndc.z;
 	return float3(
 		(ndc.x * -z) / proj[0][0],
@@ -30,7 +30,7 @@ float3 unproject_inf_revz_depth(float3 ndc)
 
 float3 unproject_inf_revz_depth(float2 uv, Texture2D<float> depth_texture) 
 {
-	return unproject_inf_revz_depth(float3(uv * 2.0 - 1.0, depth_texture.SampleLevel(gSamplerStates[ENG_SAMPLER_NEAREST], uv, 0)));
+	return unproject_inf_revz_depth(float3(uv * 2.0 - 1.0, depth_texture.SampleLevel(gSamplerNearest, uv, 0)));
 }
 
 float3 depth_to_view_pos(uint2 coords, uint2 dims, float depth)

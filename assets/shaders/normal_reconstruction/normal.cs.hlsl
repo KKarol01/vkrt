@@ -11,8 +11,8 @@ groupshared float tile_z[TILE_SIZE * TILE_SIZE];
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
-    RWTexture2D<float4> normalTex = gRWTexture2Df4s[pc.NormalImageIndex];
-    Texture2D<float4> depthTex = gTexture2Ds[pc.DepthImageIndex];
+    RWTexture2D<float4> normalTex = gRWTextures2Dfloat4[pc.NormalRWTextureIndex];
+    Texture2D<float4> depthTex = gTexture2Ds[pc.DepthRWTextureIndex];
     
     uint2 dims;
     normalTex.GetDimensions(dims.x, dims.y);

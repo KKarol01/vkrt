@@ -6,9 +6,9 @@
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
 {
-    ENG_TYPE_UINT GPUEngConstantsBufferIndex;
-    ENG_TYPE_UINT DepthImageIndex;
-    ENG_TYPE_UINT NormalImageIndex;
+    ENG_UINT GPUEngConstantsBufferIndex;
+    ENG_UINT DepthRWTextureIndex;
+    ENG_UINT NormalRWTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 #endif

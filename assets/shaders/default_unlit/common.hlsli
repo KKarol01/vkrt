@@ -6,8 +6,8 @@
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
 {
-    ENG_TYPE_UINT GPUEngConstantsBufferIndex;
-    ENG_TYPE_UINT GPUVertexPositionBufferIndex;
+    ENG_UINT GPUEngConstantsBufferIndex;
+    ENG_UINT GPUVertexPositionBufferIndex;
 	// uint32_t imidb;
 	// uint32_t GPUFWDPLightGridsBufferIndex;
 	// uint32_t GPUFWDPLightListsBufferIndex;

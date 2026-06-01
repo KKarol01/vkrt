@@ -2,8 +2,8 @@
 
 struct PushConstants
 {
-    ENG_TYPE_UINT NoiseBufferIndex;
-    ENG_TYPE_UINT OutNoiseImageIndex;
+    ENG_UINT NoiseBufferIndex;
+    ENG_UINT OutNoiseRWTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 
@@ -11,7 +11,7 @@ struct PushConstants
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
     uint2 outsize;
-    gRWTexture2Df2s[pc.OutNoiseImageIndex].GetDimensions(outsize.x, outsize.y);
+    gRWTextures2Dfloat2[pc.OutNoiseRWTextureIndex].GetDimensions(outsize.x, outsize.y);
     
     if (any(thread_id.xy >= outsize))
     {
@@ -19,5 +19,5 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     }
  
     uint noiseidx = (thread_id.y * outsize.x + thread_id.x) * 2;
-    gRWTexture2Df2s[pc.OutNoiseImageIndex][thread_id.xy] = gRWBuffers[pc.NoiseBufferIndex].Load<float2>((noiseidx) * sizeof(float));
+    gRWTextures2Dfloat2[pc.OutNoiseRWTextureIndex][thread_id.xy] = gRWBuffers[pc.NoiseBufferIndex].Load<float2>((noiseidx) * sizeof(float));
 }

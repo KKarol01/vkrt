@@ -4,8 +4,8 @@ static const uint LOCAL_SIZE = 8;
 
 struct PushConstants
 {
-    ENG_TYPE_UINT ColorTextureIndex;
-    ENG_TYPE_UINT AOTextureIndex;
+    ENG_UINT ColorTextureIndex;
+    ENG_UINT AOTextureIndex;
     
 };
 [[vk::push_constant]] PushConstants pc;
@@ -13,8 +13,8 @@ struct PushConstants
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
-    RWTexture2D<float4> in_out_color = gRWTexture2Df4s[pc.ColorTextureIndex];
-    RWTexture2D<float4> in_ao = gRWTexture2Df4s[pc.AOTextureIndex];
+    RWTexture2D<float4> in_out_color = gRWTextures2Dfloat4[pc.ColorTextureIndex];
+    RWTexture2D<float4> in_ao = gRWTextures2Dfloat4[pc.AOTextureIndex];
 	
     uint2 dims;
     in_ao.GetDimensions(dims.x, dims.y);

@@ -6,7 +6,7 @@
 #endif
 
 ENG_DECLARE_STORAGE_BUFFER(GPUDebugVerticessBuffer) {
-    ENG_TYPE_UNSIZED(ENG_TYPE_FLOAT3, positions); 
+    ENG_UNSIZED(ENG_FLOAT3, positions); 
 } ENG_DECLARE_BINDLESS(GPUDebugVerticessBuffer);
 
 #ifndef NO_PUSH_CONSTANTS

@@ -18,10 +18,10 @@ float GTAO(
     float3 viewV = normalize(-centerPos);
 
     float2 projScale = float2(
-        get_gsb(GPUEngConstants, 0).proj[0][0],
-        get_gsb(GPUEngConstants, 0).proj[1][1]);
+        get_grwb(GPUEngConstants, 0).proj[0][0],
+        get_grwb(GPUEngConstants, 0).proj[1][1]);
 
-    float2 radius = projScale * get_gsb(GPUEngAOSettings, 0).radius / abs(centerPos.z);
+    float2 radius = projScale * get_grwb(GPUEngAOSettings, 0).radius / abs(centerPos.z);
 
     float visibility = 0.0;
 
@@ -80,9 +80,9 @@ float GTAO(
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
-    Texture2D<float> in_depth = gTexture2Df1s[pc.DepthTextureIndex];
-	RWTexture2D<float4> in_normal = gRWTexture2Df4s[pc.NormalImageIndex];
-	RWTexture2D<float4> out_ao = gRWTexture2Df4s[pc.AOImageIndex];
+    Texture2D<float> in_depth = gTextures2Dfloat[pc.DepthTextureIndex];
+	RWTexture2D<float4> in_normal = gRWTextures2Dfloat4[pc.NormalRWTextureIndex];
+	RWTexture2D<float4> out_ao = gRWTextures2Dfloat4[pc.AORWTextureIndex];
 	
 	uint2 out_size;
 	out_ao.GetDimensions(out_size.x, out_size.y);

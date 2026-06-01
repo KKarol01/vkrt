@@ -6,7 +6,7 @@
 
 float3 get_camera_pos()
 {
-    return get_gsb(GPUEngConstants, 0).cam_pos;
+    return get_grwb(GPUEngConstants, 0).cam_pos;
 }
 
 float IGN(float2 pixel)
@@ -48,9 +48,9 @@ float3x3 make_tbn(float3 n)
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
-    Texture2D<float> in_depth = gTexture2Df1s[pc.DepthTextureIndex];
+    Texture2D<float> in_depth = gTextures2Dfloat[pc.DepthTextureIndex];
     Texture2D<float4> in_normal = gTexture2Ds[pc.NormalTextureIndex];
-    RWTexture2D<float4> out_image = gRWTexture2Df4s[pc.AOImageIndex];
+    RWTexture2D<float4> out_image = gRWTextures2Dfloat4[pc.AORWTextureIndex];
 
     uint2 size;
     out_image.GetDimensions(size.x, size.y);
@@ -72,8 +72,8 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     float3 normal_v = normalize(in_normal[thread_id.xy].xyz);
 
     // 3. Convert to world space
-    float3 pos_w = mul(get_gsb(GPUEngConstants, 0).inv_view, float4(pos_v, 1)).xyz;
-    float3 normal_w = normalize(mul((float3x3)get_gsb(GPUEngConstants, 0).inv_view, normal_v));
+    float3 pos_w = mul(get_grwb(GPUEngConstants, 0).inv_view, float4(pos_v, 1)).xyz;
+    float3 normal_w = normalize(mul((float3x3)get_grwb(GPUEngConstants, 0).inv_view, normal_v));
 
     float3x3 tbn = make_tbn(normal_w);
 
@@ -91,8 +91,8 @@ void main(uint3 thread_id : SV_DispatchThreadID)
         RayDesc ray;
         ray.Origin    = pos_w;
         ray.Direction = ray_dir;
-        ray.TMin      = get_gsb(GPUEngAOSettings, 0).bias;
-        ray.TMax      = get_gsb(GPUEngAOSettings, 0).radius;
+        ray.TMin      = get_grwb(GPUEngAOSettings, 0).bias;
+        ray.TMax      = get_grwb(GPUEngAOSettings, 0).radius;
 
         RayQuery<RAY_FLAG_FORCE_OPAQUE> q;
         q.TraceRayInline(gTLASs[pc.SceneTlasIndex], RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);

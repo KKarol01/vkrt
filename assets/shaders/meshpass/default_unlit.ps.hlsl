@@ -12,11 +12,11 @@ FSOutput main(VSOutput vsoutput)
 	
 	float fmaterialid = 1.0 / log2(float(vsoutput.material_index));
 	
-	GPUEngConstants constants = get_gsb2(GPUEngConstants, pc, 0);
+	GPUEngConstants constants = get_grwb2(GPUEngConstants, pc, 0);
     
     float4 base_color = float4(1.0, 1.0, 1.0, 1.0);
-	GPUMaterial mat = get_gsb2(GPUMaterial, constants, vsoutput.material_index);
-    Texture2D<float4> base_color_tex = gTexture2Df4s[NonUniformResourceIndex(mat.base_color_idx)];
+	GPUMaterial mat = get_grwb2(GPUMaterial, constants, vsoutput.material_index);
+    Texture2D<float4> base_color_tex = gTextures2Dfloat4[NonUniformResourceIndex(mat.base_color_idx)];
     base_color = base_color_tex.Sample(gSamplerStates[ENG_SAMPLER_LINEAR], vsoutput.uv);
     base_color *= unpack_unorm4x8(mat.base_color_factor);
 	if(base_color.a < 0.5) { discard; } 

@@ -6,23 +6,24 @@
 #ifndef NO_PUSH_CONSTANTS
 struct PushConstants
 {
-	ENG_TYPE_UINT GPUEngConstantsBufferIndex;
-    ENG_TYPE_UINT DepthTextureIndex;
-	ENG_TYPE_UINT NoiseTextureIndex;
-	ENG_TYPE_UINT NormalTextureIndex;
-	ENG_TYPE_UINT ColorTextureIndex;
-    ENG_TYPE_UINT OutAOImageIndex;
+	ENG_UINT GPUEngConstantsBufferIndex;
+    ENG_UINT DepthTextureIndex;
+	ENG_UINT NoiseTextureIndex;
+	ENG_UINT NormalTextureIndex;
+	ENG_UINT ColorTextureIndex;
+	ENG_UINT VelocityTextureIndex;
+    ENG_UINT OutAORWTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 #endif
 
 #include "assets/shaders/util.hlsli"
 
-#define gDepthTexture gTexture2Df1s[pc.DepthTextureIndex]
-#define gNoiseTexture gTexture2Df2s[pc.NoiseTextureIndex]
-#define gNormalTexture gTexture2Df4s[pc.NormalTextureIndex]
-#define gColorTexture gTexture2Df4s[pc.ColorTextureIndex]
-#define gOutAOImage gRWTexture2Df4s[pc.OutAOImageIndex]
+#define gDepthTexture gTextures2Dfloat[pc.DepthTextureIndex]
+#define gNoiseTexture gTextures2Dfloat2[pc.NoiseTextureIndex]
+#define gNormalTexture gTextures2Dfloat4[pc.NormalTextureIndex]
+#define gColorTexture gTextures2Dfloat4[pc.ColorTextureIndex]
+#define gOutAOImage gRWTextures2Dfloat4[pc.OutAORWTextureIndex]
 
 /*
 Generated with:
