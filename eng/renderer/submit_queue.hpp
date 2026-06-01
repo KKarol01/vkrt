@@ -51,8 +51,7 @@ class ICommandBuffer
     virtual void end_rendering() = 0;
 
     virtual void draw(u32 vertex_count, u32 instance_count, u32 vertex_offset, u32 instance_offset) = 0;
-    virtual void draw_indexed(u32 index_count, u32 instance_count, u32 index_offset,
-                              u32 vertex_offset, u32 instance_offset) = 0;
+    virtual void draw_indexed(u32 index_count, u32 instance_count, u32 index_offset, u32 vertex_offset, u32 instance_offset) = 0;
     virtual void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
                                              size_t count_offset, u32 max_draw_count, u32 stride) = 0;
     virtual void dispatch(u32 x, u32 y, u32 z) = 0;
@@ -62,6 +61,7 @@ class ICommandBuffer
     virtual void reset_query_indices(QueryPool* pool, u32 query_index, u32 count) = 0;
     virtual void write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, u32 index) = 0;
 
+    virtual void wait_sync(Sync* sync, u64 wait_value, Flags<PipelineStage> stage = PipelineStage::ALL);
     virtual void wait_sync(Sync* sync, Flags<PipelineStage> stage = PipelineStage::ALL);
     virtual void signal_sync(Sync* sync, Flags<PipelineStage> stage = PipelineStage::ALL);
 
@@ -118,8 +118,7 @@ class CommandBufferVk : public ICommandBuffer
 
     void before_draw_dispatch();
     void draw(u32 vertex_count, u32 instance_count, u32 vertex_offset, u32 instance_offset) override;
-    void draw_indexed(u32 index_count, u32 instance_count, u32 index_offset, u32 vertex_offset,
-                      u32 instance_offset) override;
+    void draw_indexed(u32 index_count, u32 instance_count, u32 index_offset, u32 vertex_offset, u32 instance_offset) override;
     // Draw using
     void draw_indexed_indirect_count(const Buffer& indirect, size_t indirect_offset, const Buffer& count,
                                      size_t count_offset, u32 max_draw_count, u32 stride) override;

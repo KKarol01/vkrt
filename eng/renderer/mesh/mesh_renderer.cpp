@@ -98,7 +98,8 @@ MeshRenderer::SetupPassData MeshRenderer::setup(MeshPassType type, RGBuilder& b)
     const auto& pass = m_pass_datas_arr[(int)type];
     SetupPassData data{};
     if(pass.batches_vec.empty()) { return data; }
-    data.constants = b.read_buffer(get_renderer().current_data->render_resources.constants);
+    data.constants = b.import_resource(get_renderer().current_data->render_resources.constants);
+    data.constants = b.read_buffer(data.constants);
     data.index = b.import_resource(get_renderer().bufs.indices);
     data.index = b.read_index(data.index);
     data.indirect = b.import_resource(pass.indirect_buf);

@@ -126,7 +126,7 @@ void StagingBuffer::blit(Image& dst, const Image& src, const ImageBlit& blit, bo
 }
 
 size_t StagingBuffer::copy(Image& dst, const void* const src, u32 layer, u32 mip, bool transition_back,
-                           DiscardContents discard, Vec3i32 offset, Vec3u32 extent)
+                           DiscardContents discard, i32_3 offset, u32_3 extent)
 {
     ENG_ASSERT(src);
     ENG_ASSERT(offset.z == 0);

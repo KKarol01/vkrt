@@ -85,7 +85,7 @@ struct DescriptorResource
 struct ImageBlockData
 {
     u32 bytes_per_texel;
-    Vec3u32 texel_extent;
+    u32_3 texel_extent;
 };
 
 ImageBlockData get_block_data(ImageFormat format);
@@ -355,7 +355,7 @@ struct Mesh
 
 struct Buffer
 {
-    static Buffer init(size_t capacity, Flags<BufferUsage> usage)
+    static constexpr Buffer init(size_t capacity, Flags<BufferUsage> usage)
     {
         return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = {} };
     }
@@ -384,8 +384,8 @@ struct Image
         mips = mips == ~0u ? (u32)(std::log2f((float)std::min(width, height)) + 1) : mips;
         return init(width, height, 0, format, usage, mips, 1, layout);
     }
-    static Image init(u32 width, u32 height, u32 depth, ImageFormat format, Flags<ImageUsage> usage, u32 mips = 1,
-                      u32 layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
+    static constexpr Image init(u32 width, u32 height, u32 depth, ImageFormat format, Flags<ImageUsage> usage,
+                                u32 mips = 1, u32 layers = 1, ImageLayout layout = ImageLayout::UNDEFINED)
     {
         return Image{
             .type = depth > 0    ? ImageType::TYPE_3D
@@ -450,9 +450,9 @@ struct ImageCopy
 {
     ImageLayers srclayers{};
     ImageLayers dstlayers{};
-    Vec3i32 srcoffset{};
-    Vec3i32 dstoffset{};
-    Vec3u32 extent{};
+    i32_3 srcoffset{};
+    i32_3 dstoffset{};
+    u32_3 extent{};
 };
 
 struct Sampler
@@ -652,11 +652,12 @@ enum class SubmitFlags : u32
 
 struct RenderResources
 {
-    RGResourceId constants;
-    RGResourceId zpdepth;
-    RGResourceId normal;
+    Handle<Buffer> constants;
+    Handle<Image> depth;
+    Handle<Image> normal;
+    Handle<Image> velocity;
     RGResourceId ao;
-    RGResourceId opaque;
+    Handle<Image> opaque;
     RGResourceId accum;
     RGResourceId final_color;
 };
@@ -784,10 +785,11 @@ class Renderer
         ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
         ImageFormat normal_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
-        Vec2f new_render_resolution{};
-        Vec2f override_render_resolution{};
-        Vec2f render_resolution{};
-        Vec2f present_resolution{};
+        ImageFormat velocity_format{ ImageFormat::R16FG16F };
+        f32_2 new_render_resolution{};
+        f32_2 override_render_resolution{};
+        f32_2 render_resolution{};
+        f32_2 present_resolution{};
 
         DepthCompare read_depth_compare{ DepthCompare::GEQUAL };
         DepthCompare rw_depth_compare{ DepthCompare::GEQUAL };
@@ -809,6 +811,7 @@ class Renderer
         // std::shared_ptr<pass::Pass> reconstruct_normals;
         std::array<std::shared_ptr<pass::Pass>, (int)MeshPassType::LAST_ENUM> mesh_passes{};
         std::shared_ptr<pass::Pass> ao;
+        std::shared_ptr<pass::Pass> velocity;
     };
 
     struct BuildGeometryBatch
@@ -835,6 +838,7 @@ class Renderer
     void init_pipelines();
     void init_perframes();
     void init_bufs();
+    void init_buffered_resources();
 
     void update();
     void compile_rendergraph();
@@ -922,6 +926,7 @@ class Renderer
     ImGuiRenderer* imgui_renderer{};
     FrameData frame_datas[2]{};
     FrameData* current_data{};
+    FrameData* prev_data{};
     u64 current_frame{}; // monotonically increasing counter
     Passes passes;
     u64 mesh_entt_hash{};

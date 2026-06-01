@@ -121,29 +121,49 @@ class GPUTransientAllocator
 RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
 {
     ENG_ASSERT(!clear);
-    const auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
+    auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
+    RGWaitSync* wait_sync{};
+    if(auto it = graph->persistent_resources.find(ENG_HASH(pass->id, resource.name)); it != graph->persistent_resources.end())
+    {
+        if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED)
+        {
+            layout = it->second.last_layout;
+        }
+        if(it->second.wait_sync.sync) { wait_sync = &it->second.wait_sync; }
+    }
+
     graph->resources.push_back(resource);
-    const auto ret = add_access(RGAccess{
-        .resource = RGResourceId{ (u32)graph->resources.size() - 1 },
-        .prev_access = {},
-        .buffer_view = {},
-        .layout = layout,
-        .stage = {},
-        .access = {},
-    });
-    // if(clear) { p->clears.emplace_back(ret, *clear); }
+    const auto ret = add_access(RGAccess{ .resource = RGResourceId{ (u32)graph->resources.size() - 1 },
+                                          .prev_access = {},
+                                          .buffer_view = {},
+                                          .layout = layout,
+                                          .stage = {},
+                                          .access = {},
+                                          .wait_sync = wait_sync });
     return ret;
 }
 
 RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear)
 {
+    if((resource.index() == 0 && !std::get<0>(resource)) || (resource.index() == 1 && !std::get<1>(resource)))
+    {
+        static_assert(std::variant_size_v<RGResource::NativeResource> == 2);
+        return {};
+    }
+
     const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
                                  [&resource](const auto& e) { return e.native == resource; });
     if(it != graph->resources.end()) { return it->last_access; }
+
     auto res = RGResource{ "", resource, true, false, clear };
-    if((res.is_buffer() && !res.as_buffer()) || (!res.is_buffer() && !res.as_image())) { return RGAccessId{}; }
     if(res.is_buffer()) { res.name = get_renderer().backend->get_debug_name(res.as_buffer().get()); }
     else { res.name = get_renderer().backend->get_debug_name(res.as_image().get()); }
+
+    const auto hash = ENG_HASH(pass->id, res.name);
+    auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
+    pr.hash = 0;                                  // imported resources don't need a hash.
+    pr.native = resource;
+
     return add_resource(std::move(res));
 }
 
@@ -169,8 +189,9 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
             auto native_handle = get_renderer().make_buffer(name, std::move(a));
             if(persistent)
             {
-                graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
-                                                    std::forward_as_tuple(objecthash, native_handle));
+                auto res = graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
+                                                               std::forward_as_tuple(objecthash, native_handle));
+                ENG_ASSERT(res.second, "Name conflict with resource {} in pass {}", name, pass->name.as_view());
             }
             return native_handle;
         }
@@ -457,6 +478,16 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
         const auto& g = groups[i];
         Flags<PipelineStage> gstages;
         ICommandBuffer* layout_cmd = nullptr;
+        const auto consume_wait_sync = [this, &layout_cmd](RGAccess& acc) {
+            auto* sync = acc.wait_sync;
+            acc.wait_sync = nullptr; // consume as later accesses now are synced
+            ENG_ASSERT(sync);
+            if(!sync) { return; }
+            // return, because if sems are the same, it means frame_delay has passed and renderer waited for the fence
+            if(sync->sync == sems[0]) { return; }
+            if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
+            layout_cmd->wait_sync(sync->sync, sync->wait_value, acc.stage);
+        };
 
         for(const auto* p : g.passes)
         {
@@ -471,6 +502,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                     if(res.clear)
                     {
                         if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
+
                         acc.stage = PipelineStage::TRANSFER_BIT;
                         acc.access = PipelineAccess::TRANSFER_WRITE_BIT;
                         acc.layout = ImageLayout::TRANSFER_DST;
@@ -487,11 +519,18 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                             const auto clear = res.clear->get_ds();
                             layout_cmd->clear_depth_stencil(res.as_image().get(), clear.depth, clear.stencil);
                         }
+
+                        if(acc.wait_sync) { consume_wait_sync(acc); }
                     }
                     continue;
                 }
+
                 const auto& pacc = get_acc(acc.prev_access);
+                ENG_ASSERT((!pacc.is_first_access() && !pacc.wait_sync) || (pacc.is_first_access())); // only first access may store wait_sync
+                if(pacc.wait_sync) { consume_wait_sync(acc); }
+
                 if(pacc.layout == acc.layout) { continue; }
+
                 if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
                 Handle<Image> img = acc.image_view.image;
                 layout_cmd->barrier(img.get(), pacc.stage, pacc.access, acc.stage, acc.access, pacc.layout, acc.layout);
@@ -514,17 +553,25 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
             p->cmd->write_timestamp(p->query->pool, PipelineStage::ALL, p->query->index + 1);
             cmd_pools[0]->end(p->cmd);
             queue->with_cmd_buf(p->cmd);
-
-            // for(const auto& [sync, stages, value] : p->wait_syncs)
-            //{
-            //     queue->wait_sync(sync, stages, value);
-            // }
-            for(const auto& ra : p->accesses)
+            for(auto accid : p->accesses)
             {
-                auto& res = get_res(ra);
+                auto& acc = get_acc(accid);
+                auto& res = get_res(accid);
                 // todo: maybe pool handles here? renderer already does that, soo...
                 // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
-                if(!res.is_persistent && res.last_access == ra) { free_resource(res); }
+                if(res.last_access == accid)
+                {
+                    if(!res.is_persistent) { free_resource(res); }
+                    else
+                    {
+                        if(auto it = persistent_resources.find(ENG_HASH(p->id, res.name)); it != persistent_resources.end())
+                        {
+                            auto& pr = it->second;
+                            pr.last_layout = acc.layout;
+                            pr.wait_sync = { sems[0], sems[0]->get_current_wait_value() };
+                        }
+                    }
+                }
             }
         }
         queue->wait_sync(sems[0], gstages);

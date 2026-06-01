@@ -41,7 +41,6 @@ struct RGPass
     StackString<64> name;
     Type type{ Type::NONE };
     std::vector<RGAccessId> accesses;
-    // std::vector<std::tuple<Sync*, Flags<PipelineStage>, u64>> wait_syncs;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
     TimestampQuery* query{};
@@ -104,6 +103,12 @@ struct RGResource
     std::optional<RGClear> clear;
 };
 
+struct RGWaitSync
+{
+    Sync* sync{};
+    u64 wait_value{ ~0u };
+};
+
 struct RGAccess
 {
     bool is_read() const { return (access & PipelineAccess::READS).any(); }
@@ -119,20 +124,25 @@ struct RGAccess
     ImageLayout layout{ ImageLayout::UNDEFINED };
     Flags<PipelineStage> stage;
     Flags<PipelineAccess> access;
+    RGWaitSync* wait_sync{}; // optionally links to persistent storage if importing from previous frame which might not have yet finished
 };
 
 struct PersistentStorage
 {
     u64 hash{};
     RGResource::NativeResource native;
+    RGWaitSync wait_sync{};
+    ImageLayout last_layout{ ImageLayout::UNDEFINED };
+    // Flags<PipelineStage> last_stage{};
+    // Flags<PipelineAccess> last_access{};
 };
 
 struct RGBuilder
 {
     RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
     RGAccessId import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear = {});
-    RGAccessId create_resource(std::string_view name, Buffer&& a, bool persistent = false);
-    RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool persistent = false);
+    RGAccessId create_resource(std::string_view name, Buffer&& a, bool is_persistent = false);
+    RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool is_persistent = false);
     RGAccessId add_access(const RGAccess& a);
     RGAccessId access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
                                std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},

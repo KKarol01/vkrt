@@ -72,7 +72,7 @@ template <typename... Args> inline constexpr u64 fnv1a_list(const auto&... args)
 
 struct PairHash
 {
-    template <typename T1, typename T2> usize operator()(const std::pair<T1, T2>& p) const
+    template <typename T1, typename T2> constexpr usize operator()(const std::pair<T1, T2>& p) const
     {
         return eng::hash::fnv1a_list(p.first, p.second);
     }
@@ -86,7 +86,7 @@ struct PairHash
     {                                                                                                                  \
     template <> struct hash<type>                                                                                      \
     {                                                                                                                  \
-        size_t operator()(const type& t) const { return code; }                                                        \
+        size_t constexpr operator()(const type& t) const { return code; }                                              \
     };                                                                                                                 \
     }
 

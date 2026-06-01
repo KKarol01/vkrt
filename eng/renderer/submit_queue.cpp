@@ -8,14 +8,16 @@
 #include <eng/renderer/bindlesspool.hpp>
 #include <eng/engine.hpp>
 
-namespace eng
+namespace eng::gfx
 {
-namespace gfx
+void ICommandBuffer::wait_sync(Sync* sync, u64 wait_value, Flags<PipelineStage> stage)
 {
+    sync_deps.emplace_back(sync, wait_value, stage, true);
+}
 
 void ICommandBuffer::wait_sync(Sync* sync, Flags<PipelineStage> stage)
 {
-    sync_deps.emplace_back(sync, sync->get_current_wait_value(), stage, true);
+    wait_sync(sync, sync->get_current_wait_value(), stage);
 }
 
 void ICommandBuffer::signal_sync(Sync* sync, Flags<PipelineStage> stage)
@@ -610,5 +612,4 @@ void SubmitQueue::present(Swapchain* swapchain)
 
 void SubmitQueue::wait_idle() { vkQueueWaitIdle(queue); }
 
-} // namespace gfx
-} // namespace eng
+} // namespace eng::gfx

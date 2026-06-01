@@ -72,7 +72,7 @@ class StagingBuffer
     // Optionally discard the layer/mip before copying (saves layout transition).
     // Optionally transition back the layer/mip to original layout from transfer dst, if not, inserts RW barrier.
     size_t copy(Image& dst, const void* const src, u32 layer, u32 mip, bool transition_back = true,
-                DiscardContents discard = DiscardContents::YES, Vec3i32 offset = {}, Vec3u32 extent = { ~0u, ~0u, ~0u });
+                DiscardContents discard = DiscardContents::YES, i32_3 offset = {}, u32_3 extent = { ~0u, ~0u, ~0u });
 
     // Inserts rw->rw barrier.
     void barrier();
