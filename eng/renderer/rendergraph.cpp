@@ -123,7 +123,7 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
     ENG_ASSERT(!clear);
     auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
     RGWaitSync* wait_sync{};
-    if(auto it = graph->persistent_resources.find(ENG_HASH(pass->id, resource.name)); it != graph->persistent_resources.end())
+    if(auto it = graph->persistent_resources.find(ENG_HASH(resource.name)); it != graph->persistent_resources.end())
     {
         if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED)
         {
@@ -159,7 +159,7 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
     if(res.is_buffer()) { res.name = get_renderer().backend->get_debug_name(res.as_buffer().get()); }
     else { res.name = get_renderer().backend->get_debug_name(res.as_image().get()); }
 
-    const auto hash = ENG_HASH(pass->id, res.name);
+    const auto hash = ENG_HASH(res.name);
     auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
     pr.hash = 0;                                  // imported resources don't need a hash.
     pr.native = resource;
@@ -174,7 +174,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
-            const auto namehash = ENG_HASH(pass->id, name);
+            const auto namehash = ENG_HASH(name);
             const auto objecthash = ENG_HASH(a);
             if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
             {
@@ -208,7 +208,7 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const st
     RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
-            const auto namehash = ENG_HASH(pass->id, name);
+            const auto namehash = ENG_HASH(name);
             const auto objecthash = ENG_HASH(a);
             if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
             {
@@ -332,8 +332,8 @@ ICommandBuffer* RGBuilder::open_cmd_buf()
 void RGRenderGraph::init(Renderer* r)
 {
     queue = r->get_queue(QueueType::GRAPHICS);
-    sems[0] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
-    sems[1] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync sem" });
+    sems[0] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync 0" });
+    sems[1] = r->make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "rgraph sync 1" });
     cmd_pools[0] = queue->make_command_pool();
     cmd_pools[1] = queue->make_command_pool();
     const auto allocate_aliasable = [r](const RendererMemoryRequirements& reqs) {
@@ -466,7 +466,6 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
 {
     std::swap(sems[0], sems[1]);
     std::swap(cmd_pools[0], cmd_pools[1]);
-    // sems[0]->reset();
     cmd_pools[0]->reset();
     for(auto i = 0u; i < wait_count; ++i)
     {
@@ -478,7 +477,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
         const auto& g = groups[i];
         Flags<PipelineStage> gstages;
         ICommandBuffer* layout_cmd = nullptr;
-        const auto consume_wait_sync = [this, &layout_cmd](RGAccess& acc) {
+        const auto consume_wait_sync = [this, &layout_cmd](const RGPass* p, RGAccess& acc) {
             auto* sync = acc.wait_sync;
             acc.wait_sync = nullptr; // consume as later accesses now are synced
             ENG_ASSERT(sync);
@@ -486,6 +485,8 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
             // return, because if sems are the same, it means frame_delay has passed and renderer waited for the fence
             if(sync->sync == sems[0]) { return; }
             if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
+            ENG_LOG("Waiting on a sync {} for resource {} in pass {}", sync->sync->name, p->name.as_view(),
+                    get_res(acc.resource).name.as_view());
             layout_cmd->wait_sync(sync->sync, sync->wait_value, acc.stage);
         };
 
@@ -496,9 +497,12 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
             {
                 auto& acc = get_acc(pa);
                 const auto& res = get_res(pa);
-                if(res.is_buffer()) { continue; }
                 if(acc.is_first_access())
                 {
+                    if(acc.wait_sync) { consume_wait_sync(p, acc); }
+
+                    if(res.is_buffer()) { continue; }
+
                     if(res.clear)
                     {
                         if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
@@ -519,15 +523,12 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                             const auto clear = res.clear->get_ds();
                             layout_cmd->clear_depth_stencil(res.as_image().get(), clear.depth, clear.stencil);
                         }
-
-                        if(acc.wait_sync) { consume_wait_sync(acc); }
                     }
                     continue;
                 }
 
                 const auto& pacc = get_acc(acc.prev_access);
                 ENG_ASSERT((!pacc.is_first_access() && !pacc.wait_sync) || (pacc.is_first_access())); // only first access may store wait_sync
-                if(pacc.wait_sync) { consume_wait_sync(acc); }
 
                 if(pacc.layout == acc.layout) { continue; }
 
@@ -564,7 +565,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                     if(!res.is_persistent) { free_resource(res); }
                     else
                     {
-                        if(auto it = persistent_resources.find(ENG_HASH(p->id, res.name)); it != persistent_resources.end())
+                        if(auto it = persistent_resources.find(ENG_HASH(res.name)); it != persistent_resources.end())
                         {
                             auto& pr = it->second;
                             pr.last_layout = acc.layout;

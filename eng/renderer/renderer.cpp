@@ -834,7 +834,7 @@ void Renderer::compile_rendergraph()
     pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
     pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] = prev_data->render_resources.opaque;
+    //pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
     // pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
     // pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
     // pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;

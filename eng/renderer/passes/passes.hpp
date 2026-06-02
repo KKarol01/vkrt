@@ -750,62 +750,64 @@ struct SSAO : public Pass
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
-        if(!data.depth_buffer) { return; }
-        if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
-        if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
-        if(!data.prev_gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
-        if(!data.prev_gbuffer[(int)GBufferType::VELOCITY]) { return; }
-        // if(!data.gbuffer[(int)GBufferType::NORMAL] ) { return; }
+        //if(!data.depth_buffer) { return; }
+        //if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
+        //if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
+
         auto& r = get_renderer();
+
+        // if(!data.prev_gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
+        // if(!data.prev_gbuffer[(int)GBufferType::VELOCITY]) { return; }
+        //  if(!data.gbuffer[(int)GBufferType::NORMAL] ) { return; }
         m_name = to_string(r.settings.gfx_settings.ao_mode);
 
-        if(!m_noise_texture)
-        {
-            m_noise_texture = r.make_image("SSAO Noise", Image::init(8, 8, ImageFormat::R16FG16F,
-                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
-            std::mt19937 mt{ 0 };
-            std::uniform_real_distribution<float> dist{ -1.0, 1.0 };
+        //if(!m_noise_texture)
+        //{
+        //    m_noise_texture = r.make_image("SSAO Noise", Image::init(8, 8, ImageFormat::R16FG16F,
+        //                                                             ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+        //    std::mt19937 mt{ 0 };
+        //    std::uniform_real_distribution<float> dist{ -1.0, 1.0 };
 
-            size_t tex_sz = 8;
-            auto buf = r.make_buffer("SSAO Temp Noise", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
-                                                                     BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
-            r.queue_destroy(buf);
-            auto* bufptr = (float*)buf->memory;
-            for(auto i = 0; i < tex_sz * tex_sz * 2; ++i)
-            {
-                bufptr[i] = dist(mt);
-            }
+        //    size_t tex_sz = 8;
+        //    auto buf = r.make_buffer("SSAO Temp Noise", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
+        //                                                             BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
+        //    r.queue_destroy(buf);
+        //    auto* bufptr = (float*)buf->memory;
+        //    for(auto i = 0; i < tex_sz * tex_sz * 2; ++i)
+        //    {
+        //        bufptr[i] = dist(mt);
+        //    }
 
-            auto copypp =
-                r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
-            struct NoiseOutput
-            {
-                RGAccessId noise_buf;
-                RGAccessId out_noise_img;
-            };
-            graph->add_compute_pass<NoiseOutput>(
-                "SSAO Generate Noise", RenderOrder::SETUP_TARGETS,
-                [=, this](RGBuilder& b, NoiseOutput& d) {
-                    d.noise_buf = b.import_resource(buf);
-                    d.noise_buf = b.read_buffer(d.noise_buf);
-                    d.out_noise_img = b.import_resource(m_noise_texture);
-                    d.out_noise_img = b.write_image(d.out_noise_img);
-                },
-                [=](RGBuilder& b, const NoiseOutput& d) {
-                    auto& r = get_renderer();
-                    auto* cmd = b.open_cmd_buf();
+        //    auto copypp =
+        //        r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
+        //    struct NoiseOutput
+        //    {
+        //        RGAccessId noise_buf;
+        //        RGAccessId out_noise_img;
+        //    };
+        //    graph->add_compute_pass<NoiseOutput>(
+        //        "SSAO Generate Noise", RenderOrder::SETUP_TARGETS,
+        //        [=, this](RGBuilder& b, NoiseOutput& d) {
+        //            d.noise_buf = b.import_resource(buf);
+        //            d.noise_buf = b.read_buffer(d.noise_buf);
+        //            d.out_noise_img = b.import_resource(m_noise_texture);
+        //            d.out_noise_img = b.write_image(d.out_noise_img);
+        //        },
+        //        [=](RGBuilder& b, const NoiseOutput& d) {
+        //            auto& r = get_renderer();
+        //            auto* cmd = b.open_cmd_buf();
 
-                    DescriptorResource resources[]{
-                        DescriptorResource::storage_buffer(b.get_buf(d.noise_buf)),
-                        DescriptorResource::storage_image(b.get_img(d.out_noise_img)),
-                    };
-                    cmd->bind_pipeline(copypp.get());
-                    cmd->bind_resources(1, resources);
-                    ENG_ASSERT(tex_sz == 8);
-                    cmd->dispatch(1, 1, 1);
-                    r.destroy_pipeline(copypp);
-                });
-        }
+        //            DescriptorResource resources[]{
+        //                DescriptorResource::storage_buffer(b.get_buf(d.noise_buf)),
+        //                DescriptorResource::storage_image(b.get_img(d.out_noise_img)),
+        //            };
+        //            cmd->bind_pipeline(copypp.get());
+        //            cmd->bind_resources(1, resources);
+        //            ENG_ASSERT(tex_sz == 8);
+        //            cmd->dispatch(1, 1, 1);
+        //            r.destroy_pipeline(copypp);
+        //        });
+        //}
 
         struct PassSSAOOutput
         {
@@ -823,33 +825,35 @@ struct SSAO : public Pass
             m_name.c_str(), RenderOrder::POST,
             [=, this](RGBuilder& b, PassSSAOOutput& d) {
                 auto& r = get_renderer();
-                d.depth = b.sample_texture(data.depth_buffer);
+                //d.depth = b.sample_texture(data.depth_buffer);
                 d.constants = b.import_resource(r.current_data->render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
-                d.noise = b.import_resource(m_noise_texture);
-                d.noise = b.sample_texture(d.noise);
-                d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
-                d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
-                d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
-                d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
-                d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
+                //d.noise = b.import_resource(m_noise_texture);
+                //d.noise = b.sample_texture(d.noise);
+                //d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
+                //d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
+                //d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
+                //d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
+                //d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
+                auto x = b.import_resource(r.prev_data->render_resources.constants);
+                b.read_buffer(x);
                 // r.current_data->render_resources.opaque = b.as_res_id(d.out_ao);
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
-                auto& r = get_renderer();
-                auto* cmd = b.open_cmd_buf();
-                cmd->bind_pipeline(m_pp_arr[(int)r.settings.gfx_settings.ao_mode].get());
-                DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.depth)),
-                    DescriptorResource::sampled_image(b.get_img(d.noise)),
-                    DescriptorResource::sampled_image(b.get_img(d.normals)),
-                    DescriptorResource::sampled_image(b.get_img(d.opaque)),
-                    DescriptorResource::sampled_image(b.get_img(d.velocity)),
-                    DescriptorResource::storage_image(b.get_img(d.out_ao)),
-                };
-                cmd->bind_resources(1, resources);
-                cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
+                // auto& r = get_renderer();
+                 auto* cmd = b.open_cmd_buf();
+                // cmd->bind_pipeline(m_pp_arr[(int)r.settings.gfx_settings.ao_mode].get());
+                // DescriptorResource resources[]{
+                //     DescriptorResource::storage_buffer(b.get_buf(d.constants)),
+                //     DescriptorResource::sampled_image(b.get_img(d.depth)),
+                //     DescriptorResource::sampled_image(b.get_img(d.noise)),
+                //     DescriptorResource::sampled_image(b.get_img(d.normals)),
+                //     DescriptorResource::sampled_image(b.get_img(d.opaque)),
+                //     DescriptorResource::sampled_image(b.get_img(d.velocity)),
+                //     DescriptorResource::storage_image(b.get_img(d.out_ao)),
+                // };
+                // cmd->bind_resources(1, resources);
+                // cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
             });
     }
 
