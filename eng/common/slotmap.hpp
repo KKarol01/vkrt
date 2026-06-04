@@ -39,6 +39,84 @@ template <typename UserType, usize PAGE_SIZE = 1024, usize NUM_PAGES = 64> class
     UserType& at(SlotId slot)
     {
         if(!slot) { return null_object; }
+        return list[*slot];
+    }
+
+    const UserType& at(SlotId slot) const
+    {
+        if(!slot) { return null_object; }
+        return list[*slot];
+    }
+
+    auto& operator[](this auto& self, Storage idx) { return self.at(SlotId{ idx }); }
+
+    template <typename... Args> SlotId emplace(Args&&... args)
+    {
+        std::scoped_lock lock{ mutex };
+        SlotId slot;
+        if(free_list.size())
+        {
+            slot = SlotId{ free_list.back() };
+            free_list.pop_back();
+            std::construct_at(&list[*slot], std::forward<Args>(args)...);
+        }
+        else
+        {
+            slot = SlotId{ (u32)list.size() };
+            list.emplace_back(std::forward<Args>(args)...);
+        }
+        return slot;
+    }
+
+    void erase(Storage index) { erase(SlotId{ index }); }
+
+    void erase(SlotId index)
+    {
+        std::scoped_lock lock{ mutex };
+        std::destroy_at(&list[*index]);
+        free_list.push_back(*index);
+    }
+
+  private:
+    inline static UserType null_object{};
+    std::vector<UserType> list;
+    std::deque<u32> free_list;
+    std::mutex mutex;
+};
+
+namespace v2
+{
+/*
+  Thread-safe lockless object pool with a free list.
+ */
+template <typename UserType, usize PAGE_SIZE = 1024, usize NUM_PAGES = 64> class Slotmap
+{
+  public:
+    using Storage = u32;
+    using PageIndex = u32;
+    using HeadTag = u32;
+    using SlotId = TypedId<UserType, Storage>;
+    inline static constexpr auto MAX_ELEMENTS = ~Storage{};
+
+  private:
+    struct Slot
+    {
+        union {
+            UserType data;
+            PageIndex next_free;
+        };
+    };
+    struct Head
+    {
+        operator bool() const { return index != ~0u; }
+        PageIndex index{ ~0u };
+        HeadTag tag{};
+    };
+
+  public:
+    UserType& at(SlotId slot)
+    {
+        if(!slot) { return null_object; }
         return _at(*slot).data;
     }
 
@@ -127,5 +205,6 @@ template <typename UserType, usize PAGE_SIZE = 1024, usize NUM_PAGES = 64> class
     std::atomic<Storage> size{};
     std::array<std::atomic<Slot*>, NUM_PAGES> slots{};
 };
+} // namespace v2
 
 } // namespace eng

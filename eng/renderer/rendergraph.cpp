@@ -479,10 +479,9 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
         ICommandBuffer* layout_cmd = nullptr;
         const auto consume_wait_sync = [this, &layout_cmd](const RGPass* p, RGAccess& acc) {
             auto* sync = acc.wait_sync;
-            acc.wait_sync = nullptr; // consume as later accesses now are synced
             ENG_ASSERT(sync);
             if(!sync) { return; }
-            // return, because if sems are the same, it means frame_delay has passed and renderer waited for the fence
+            // return, because if sems are the same, it means frame_delay had passed and renderer waited for the fence
             if(sync->sync == sems[0]) { return; }
             if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
             ENG_LOG("Waiting on a sync {} for resource {} in pass {}", sync->sync->name, p->name.as_view(),

@@ -283,7 +283,7 @@ void Renderer::init_pipelines()
                                                                                     .dst_alpha_factor = BlendFactor::ZERO,
                                                                                     .alpha_op = BlendOp::ADD } },
                                   .depth_format = settings.depth_format })
-                              .init_depth_test(true, true, settings.read_depth_compare)
+                              .init_depth_test(true, false, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
         default_pipelines[(int)MeshPassType::WIREFRAME] =
@@ -419,12 +419,6 @@ void Renderer::init_buffered_resources()
                 make_buffer(make_res_name("Constants", i), Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
         }
 
-        struct BufferedImage
-        {
-            const char* name{};
-            Handle<Image>* rrimg{};
-            Image img{};
-        };
         for(auto& [name, rrimg, img] :
             { BufferedImage{ "Opaque", &rr.opaque,
                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
@@ -583,13 +577,13 @@ void Renderer::update()
             {
                 // ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
                 backend->destroy_buffer(buf->get());
-                buffers.erase(Slotmap<Buffer, 1024>::SlotId{ buf->handle });
+                buffers.erase(buf->handle);
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
                 backend->destroy_image(img->get());
-                images.erase(Slotmap<Image, 1024>::SlotId{ img->handle });
+                images.erase(img->handle);
             }
         }
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
