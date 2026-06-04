@@ -283,7 +283,7 @@ void Renderer::init_pipelines()
                                                                                     .dst_alpha_factor = BlendFactor::ZERO,
                                                                                     .alpha_op = BlendOp::ADD } },
                                   .depth_format = settings.depth_format })
-                              .init_depth_test(true, true, settings.read_depth_compare)
+                              .init_depth_test(true, false, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
         default_pipelines[(int)MeshPassType::WIREFRAME] =
@@ -419,25 +419,19 @@ void Renderer::init_buffered_resources()
                 make_buffer(make_res_name("Constants", i), Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
         }
 
-        struct BufferedImage
-        {
-            const char* name{};
-            Handle<Image>* rrimg{};
-            Image img{};
-        };
         for(auto& [name, rrimg, img] :
-            { BufferedImage{ "Opaque", &rr.opaque,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
-                                         ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Opaque Normals", &rr.normal,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
-                                         ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Depth", &rr.depth,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT) },
-              BufferedImage{ "Velocity", &rr.velocity,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) } })
+            { std::make_tuple("Opaque", &rr.opaque,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
+                                          ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)),
+              std::make_tuple("Opaque Normals", &rr.normal,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
+                                          ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)),
+              std::make_tuple("Depth", &rr.depth,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                          settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT)),
+              std::make_tuple("Velocity", &rr.velocity,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                          settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)) })
         {
             if(*rrimg) { queue_destroy(*rrimg); }
             *rrimg = make_image(make_res_name(name, i), Image{ img });
@@ -580,13 +574,13 @@ void Renderer::update()
             {
                 // ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
                 backend->destroy_buffer(buf->get());
-                buffers.erase(Slotmap<Buffer, 1024>::SlotId{ buf->handle });
+                buffers.erase(buf->handle);
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
                 backend->destroy_image(img->get());
-                images.erase(Slotmap<Image, 1024>::SlotId{ img->handle });
+                images.erase(img->handle);
             }
         }
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
@@ -834,11 +828,11 @@ void Renderer::compile_rendergraph()
     pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
     pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    //pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
+    // pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
     passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);
