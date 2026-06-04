@@ -569,7 +569,11 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                         {
                             auto& pr = it->second;
                             pr.last_layout = acc.layout;
-                            pr.wait_sync = { sems[0], sems[0]->get_current_wait_value() };
+                            if(res.last_write_group != ~0u)
+                            {
+                                // only add for resources that are not read-only
+                                pr.wait_sync = { sems[0], sems[0]->get_current_wait_value() };
+                            }
                         }
                     }
                 }
