@@ -429,7 +429,7 @@ void Renderer::init_buffered_resources()
             { BufferedImage{ "Opaque", &rr.opaque,
                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
                                          ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Opaque Normals", &rr.normal,
+              BufferedImage{ "Opaque Normals", &rr.normals,
                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
                                          ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
               BufferedImage{ "Depth", &rr.depth,
@@ -437,7 +437,10 @@ void Renderer::init_buffered_resources()
                                          settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT) },
               BufferedImage{ "Velocity", &rr.velocity,
                              Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) } })
+                                         settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
+              BufferedImage{ "History Length", &rr.history_len,
+                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                         settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) } })
         {
             if(*rrimg) { queue_destroy(*rrimg); }
             *rrimg = make_image(make_res_name(name, i), Image{ img });
@@ -762,7 +765,7 @@ void Renderer::compile_rendergraph()
             d.constants = b.as_res_id(b.write_buffer(b.import_resource(rr.constants)));
             d.depth = b.as_res_id(b.import_resource(rr.depth, RGClear::depth_stencil(0.0)));
             d.opaque = b.as_res_id(b.import_resource(rr.opaque, RGClear::color()));
-            d.normals = b.as_res_id(b.import_resource(rr.normal, RGClear::color()));
+            d.normals = b.as_res_id(b.import_resource(rr.normals, RGClear::color()));
             d.velocity = b.as_res_id(b.import_resource(rr.velocity, RGClear::color()));
             d.final_color = b.as_res_id(b.create_resource(
                 make_res_name("Final Color"),
@@ -834,11 +837,11 @@ void Renderer::compile_rendergraph()
     pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
     pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    //pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
+    // pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
     passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);

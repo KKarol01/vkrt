@@ -654,8 +654,9 @@ struct RenderResources
 {
     Handle<Buffer> constants;
     Handle<Image> depth;
-    Handle<Image> normal;
+    Handle<Image> normals;
     Handle<Image> velocity;
+    Handle<Image> history_len;
     RGResourceId ao;
     Handle<Image> opaque;
     RGResourceId accum;
@@ -786,6 +787,7 @@ class Renderer
         ImageFormat normal_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         ImageFormat velocity_format{ ImageFormat::R16FG16F };
+        ImageFormat history_len_format{ ImageFormat::R16F };
         f32_2 new_render_resolution{};
         f32_2 override_render_resolution{};
         f32_2 render_resolution{};

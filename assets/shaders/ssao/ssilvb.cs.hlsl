@@ -115,6 +115,8 @@ void main(uint3 dtid : SV_DispatchThreadID)
     
     float4 current_signal = float4(lighting, visibility);
 
+	//gOutAOImage[dtid.xy] *= 0.5;
+
     // =========================================================================
     // SPATIOTEMPORAL ACCUMULATION
     // =========================================================================
