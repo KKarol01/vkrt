@@ -75,6 +75,9 @@ template <typename UserType> class Slotmap
 
             Slot& slot = m_slots_vec[idx];
             slot.tag.set_free(false);
+            // index reserved, unlock
+            lock.unlock();
+
             std::construct_at(&slot.data, std::forward<Args>(args)...);
             return PublicId{ idx, *slot.tag };
         }
@@ -97,9 +100,10 @@ template <typename UserType> class Slotmap
 
         slot.tag.set_free(true);
         slot.tag.inc();
-        m_free_vec.push_back(pubid.get_idx());
-
+        lock.unlock();
         std::destroy_at(&slot.data);
+        lock.lock();
+        m_free_vec.push_back(pubid.get_idx());
     }
 
   private:
