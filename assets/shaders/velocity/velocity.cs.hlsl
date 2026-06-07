@@ -32,9 +32,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
     if(depth < 1e-5) { out_vel[dtid.xy] = 0.0; return; }
     
     float4 cvpos = float4(depth_to_view_pos(dtid.xy, dims, depth), 1.0);
-    float4 pvpos = mul(consts.inv_view, cvpos);
+    float4 pvpos = mul(prev_consts.inv_view, cvpos);
     pvpos = mul(prev_consts.view, pvpos);
-    pvpos = mul(consts.proj, pvpos);
+    pvpos = mul(prev_consts.proj, pvpos);
     pvpos.xy /= pvpos.w;
     out_vel[dtid.xy] = dtuv.xy - (pvpos.xy * 0.5 + 0.5);
 }

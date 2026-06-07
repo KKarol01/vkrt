@@ -283,7 +283,7 @@ void Renderer::init_pipelines()
                                                                                     .dst_alpha_factor = BlendFactor::ZERO,
                                                                                     .alpha_op = BlendOp::ADD } },
                                   .depth_format = settings.depth_format })
-                              .init_depth_test(true, false, settings.read_depth_compare)
+                              .init_depth_test(true, true, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::BACK));
 
         default_pipelines[(int)MeshPassType::WIREFRAME] =
@@ -367,7 +367,7 @@ void Renderer::init_perframes()
 {
     static_assert(frame_delay == 2);
     current_data = &frame_datas[0];
-    prev_data = &frame_datas[1];
+    prev_data = nullptr;
     for(auto i = 0u; i < frame_delay; ++i)
     {
         frame_datas[i].cmdpool = gq->make_command_pool();
@@ -402,6 +402,9 @@ void Renderer::init_bufs()
 
 void Renderer::init_buffered_resources()
 {
+    get_engine().camera->update_projection(glm::radians(75.0f), 0.1f, settings.render_resolution.x,
+                                           settings.render_resolution.y);
+
     char resname[128]{};
     size_t resnamelen;
     const auto make_res_name = [&resname, &resnamelen, this](const char* const name, u32 idx) {
@@ -420,21 +423,23 @@ void Renderer::init_buffered_resources()
         }
 
         for(auto& [name, rrimg, img] :
-            { BufferedImage{ "Opaque", &rr.opaque,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
-                                         ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Opaque Normals", &rr.normals,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
-                                         ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Depth", &rr.depth,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT) },
-              BufferedImage{ "Velocity", &rr.velocity,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "History Length", &rr.history_len,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) } })
+            { std::make_tuple("Opaque", &rr.opaque,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
+                                          ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)),
+              std::make_tuple("Opaque Normals", &rr.normals,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
+                                          ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)),
+              std::make_tuple("Depth", &rr.depth,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                          settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT)),
+              std::make_tuple("Velocity", &rr.velocity,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                          settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)),
+              std::make_tuple("History Length", &rr.history_len,
+                              Image::init(settings.render_resolution.x, settings.render_resolution.y,
+                                          settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT))
+
+            })
         {
             if(*rrimg) { queue_destroy(*rrimg); }
             *rrimg = make_image(make_res_name(name, i), Image{ img });
@@ -713,17 +718,17 @@ void Renderer::update()
     build_pending_geometries();
     build_pending_blases();
     {
-        ENG_TIMER_SCOPED("Build passes");
+        // ENG_TIMER_SCOPED("Build passes");
         mesh_renderer.build_passes();
     }
 
     {
-        ENG_TIMER_SCOPED("Compile rendergraph");
+        // ENG_TIMER_SCOPED("Compile rendergraph");
         compile_rendergraph();
     }
 
     {
-        ENG_TIMER_SCOPED("render");
+        // ENG_TIMER_SCOPED("render");
         Sync* rg_wait_syncs[]{ staging->flush(true) };
         Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
         gq->wait_sync(current_data->swp_sem).present(swapchain);
@@ -743,6 +748,7 @@ void Renderer::compile_rendergraph()
         RGResourceId opaque;
         RGResourceId normals;
         RGResourceId velocity;
+        RGResourceId history_len;
         RGResourceId final_color;
     };
     const auto import_resources = rgraph->add_graphics_pass<ImportedResources>(
@@ -761,6 +767,7 @@ void Renderer::compile_rendergraph()
             d.opaque = b.as_res_id(b.import_resource(rr.opaque, RGClear::color()));
             d.normals = b.as_res_id(b.import_resource(rr.normals, RGClear::color()));
             d.velocity = b.as_res_id(b.import_resource(rr.velocity, RGClear::color()));
+            d.history_len = b.as_res_id(b.import_resource(rr.history_len));
             d.final_color = b.as_res_id(b.create_resource(
                 make_res_name("Final Color"),
                 Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
@@ -785,6 +792,7 @@ void Renderer::compile_rendergraph()
             constants.inv_proj = glm::inverse(c->get_projection());
             constants.inv_proj_view = constants.inv_view * constants.inv_proj;
             constants.cam_pos = c->pos;
+            constants.frame_index = (u32)current_frame;
 
             auto* cmd = b.open_cmd_buf();
             get_renderer().staging->copy(b.get_buf(d.constants).buffer.get(), &constants, 0ull, sizeof(constants), false);
@@ -830,12 +838,8 @@ void Renderer::compile_rendergraph()
     pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
     pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
     pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = import_resources.history_len;
     pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
     passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);
@@ -929,13 +933,13 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
-    auto it = buffers.emplace(std::move(buffer));
-    if(!it)
+    auto id = buffers.emplace(std::move(buffer));
+    if(!id)
     {
         ENG_WARN("Could not create buffer {}", name);
         return Handle<Buffer>{};
     }
-    return Handle<Buffer>{ *it };
+    return Handle<Buffer>{ *id };
 }
 
 void Renderer::queue_destroy(Handle<Buffer> buffer)
@@ -949,13 +953,13 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
 {
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
-    auto it = images.emplace(std::move(image));
-    if(!it)
+    auto id = images.emplace(std::move(image));
+    if(!id)
     {
         ENG_WARN("Could not create image {}", name);
         return Handle<Image>{};
     }
-    return Handle<Image>{ *it };
+    return Handle<Image>{ *id };
 }
 
 void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)

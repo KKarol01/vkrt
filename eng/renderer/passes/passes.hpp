@@ -55,7 +55,6 @@ struct PassInitData
     std::array<RGResourceId, 8> color_buffers;
     RGResourceId depth_buffer;
     std::array<RGResourceId, (int)GBufferType::LAST_ENUM> gbuffer;
-    std::array<RGResourceId, (int)GBufferType::LAST_ENUM> prev_gbuffer;
 };
 
 struct Pass
@@ -707,7 +706,8 @@ struct VelocityBuffer : public Pass
                 auto& r = get_renderer();
                 d.constants = b.import_resource(r.current_data->render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
-                // d.prev_constants = b.read_buffer(r.prev_data->render_resources.constants);
+                d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
+                d.prev_constants = b.read_buffer(d.prev_constants);
                 d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
                 d.out_vel = b.read_write_image(data.gbuffer[(int)GBufferType::VELOCITY]);
             },
@@ -756,11 +756,7 @@ struct SSAO : public Pass
         if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
 
         auto& r = get_renderer();
-        if(!r.prev_data->render_resources.history_len) { return; }
 
-        // if(!data.prev_gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
-        // if(!data.prev_gbuffer[(int)GBufferType::VELOCITY]) { return; }
-        // if(!data.gbuffer[(int)GBufferType::NORMAL]) { return; }
         m_name = to_string(r.settings.gfx_settings.ao_mode);
 
         if(!m_noise_texture)
@@ -811,6 +807,8 @@ struct SSAO : public Pass
                 });
         }
 
+        if(!r.prev_data) { return; }
+
         struct PassSSAOOutput
         {
             RGAccessId depth;
@@ -821,13 +819,14 @@ struct SSAO : public Pass
             RGAccessId opaque;
             RGAccessId velocity;
             RGAccessId history_len;
-            RGAccessId out_ao;
+            RGAccessId history;
+            RGAccessId out_color;
 
             RGAccessId prev_constants;
-            RGAccessId prev_opaque;
             RGAccessId prev_normals;
             RGAccessId prev_depth;
             RGAccessId prev_history_len;
+            RGAccessId prev_history;
         };
         graph->add_compute_pass<PassSSAOOutput>(
             m_name.c_str(), RenderOrder::POST,
@@ -841,21 +840,27 @@ struct SSAO : public Pass
                 d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
                 d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
                 d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
-                d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
+                d.history = b.read_write_image(b.create_resource(get_buffered_name("AO History").as_view(),
+                                                                 Image::init(r.settings.render_resolution.x,
+                                                                             r.settings.render_resolution.y,
+                                                                             ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
+                                                                 {}, true));
                 d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
+                d.out_color = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
 
                 d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
                 d.prev_constants = b.read_buffer(d.prev_constants);
-                d.prev_opaque = b.import_resource(r.prev_data->render_resources.opaque);
-                d.prev_opaque = b.sample_texture(d.prev_opaque);
                 d.prev_normals = b.import_resource(r.prev_data->render_resources.normals);
                 d.prev_normals = b.sample_texture(d.prev_normals);
                 d.prev_depth = b.import_resource(r.prev_data->render_resources.depth);
                 d.prev_depth = b.sample_texture(d.prev_depth);
                 d.prev_history_len = b.import_resource(r.prev_data->render_resources.history_len);
                 d.prev_history_len = b.sample_texture(d.prev_history_len);
-
-                // r.current_data->render_resources.opaque = b.as_res_id(d.out_ao);
+                d.prev_history = b.read_image(b.create_resource(get_buffered_name("AO History", -1).as_view(),
+                                                                Image::init(r.settings.render_resolution.x,
+                                                                            r.settings.render_resolution.y,
+                                                                            ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
+                                                                {}, true));
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
                 auto& r = get_renderer();
@@ -868,7 +873,16 @@ struct SSAO : public Pass
                     DescriptorResource::sampled_image(b.get_img(d.normals)),
                     DescriptorResource::sampled_image(b.get_img(d.opaque)),
                     DescriptorResource::sampled_image(b.get_img(d.velocity)),
-                    DescriptorResource::storage_image(b.get_img(d.out_ao)),
+                    DescriptorResource::storage_image(b.get_img(d.history_len)),
+                    DescriptorResource::storage_image(b.get_img(d.history)),
+                    DescriptorResource::storage_image(b.get_img(d.out_color)),
+
+                    DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
+                    DescriptorResource::sampled_image(b.get_img(d.prev_depth)),
+                    DescriptorResource::sampled_image(b.get_img(d.prev_normals)),
+                    DescriptorResource::sampled_image(b.get_img(d.prev_history_len)),
+                    DescriptorResource::storage_image(b.get_img(d.prev_history)),
+
                 };
                 cmd->bind_resources(1, resources);
                 cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);

@@ -98,6 +98,8 @@ struct GPUEngConstants
 
     ENG_UINT mlt_frust_cull_enable;
     ENG_UINT mlt_occ_cull_enable;
+	
+	ENG_UINT frame_index;
 };
 
 struct GPUEngAOSettings

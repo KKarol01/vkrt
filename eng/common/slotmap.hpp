@@ -1,210 +1,112 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <vector>
+#include <deque>
+#include <shared_mutex>
+#include <eng/common/logger.hpp>
 #include <eng/common/types.hpp>
 
 namespace eng
 {
-
 /*
   Thread-safe lockless object pool with a free list.
  */
-template <typename UserType, usize PAGE_SIZE = 1024, usize NUM_PAGES = 64> class Slotmap
+template <typename UserType> class Slotmap
 {
-  public:
-    using Storage = u32;
-    using PageIndex = u32;
-    using HeadTag = u32;
-    using SlotId = TypedId<UserType, Storage>;
-    inline static constexpr auto MAX_ELEMENTS = ~Storage{};
+    struct Tag : public TypedId<Tag, u32>
+    {
+        using Base = TypedId<Tag, u32>;
+        inline static constexpr u32 IDX_MASK = 0x7FFFFFFF;
+        inline static constexpr u32 FREE_MASK = ~IDX_MASK;
+        Tag() : Base() {}
+        explicit Tag(u32 tag) : Base(tag) {}
+        bool is_free() const { return (Base::handle & FREE_MASK) != 0; }
+        void set_free(bool value)
+        {
+            if(value) { Base::handle |= FREE_MASK; }
+            else { Base::handle = Base::handle & (~FREE_MASK); }
+        }
+        void inc() { Base::handle = (Base::handle & FREE_MASK) | (((Base::handle & IDX_MASK) + 1) & IDX_MASK); }
+    };
 
-  private:
     struct Slot
     {
-        union {
-            UserType data;
-            PageIndex next_free;
-        };
-    };
-    struct Head
-    {
-        operator bool() const { return index != ~0u; }
-        PageIndex index{ ~0u };
-        HeadTag tag{};
+        UserType data;
+        Tag tag;
     };
 
   public:
-    UserType& at(SlotId slot)
+    struct PublicId : public TypedId<PublicId, u64>
     {
-        if(!slot) { return null_object; }
-        return list[*slot];
-    }
+        using Base = TypedId<PublicId, u64>;
+        PublicId() : Base() {}
+        explicit PublicId(u64 id) : Base(id) {}
+        PublicId(u32 idx, u32 tag) : PublicId(((u64)tag << 32) | (u64)idx) {}
+        u32 get_idx() const { return (u32)Base::handle; }
+        Tag get_tag() const { return Tag{ (u32)(Base::handle >> 32u) }; }
+    };
 
-    const UserType& at(SlotId slot) const
+    auto& at(this auto& self, u64 id)
     {
-        if(!slot) { return null_object; }
-        return list[*slot];
-    }
-
-    auto& operator[](this auto& self, Storage idx) { return self.at(SlotId{ idx }); }
-
-    template <typename... Args> SlotId emplace(Args&&... args)
-    {
-        std::scoped_lock lock{ mutex };
-        SlotId slot;
-        if(free_list.size())
+        PublicId pubid{ id };
+        if(!pubid) { return null_object; }
+        std::shared_lock lock{ self.m_mutex };
+        auto& slot = self.m_slots_vec[pubid.get_idx()];
+        if(slot.tag != pubid.get_tag())
         {
-            slot = SlotId{ free_list.back() };
-            free_list.pop_back();
-            std::construct_at(&list[*slot], std::forward<Args>(args)...);
+            ENG_ASSERT(false, "Invalid id");
+            return null_object;
         }
-        else
-        {
-            slot = SlotId{ (u32)list.size() };
-            list.emplace_back(std::forward<Args>(args)...);
-        }
-        return slot;
+        return slot.data;
     }
 
-    void erase(Storage index) { erase(SlotId{ index }); }
+    auto& operator[](this auto& self, u64 id) { return self.at(id); }
 
-    void erase(SlotId index)
+    template <typename... Args> PublicId emplace(Args&&... args)
     {
-        std::scoped_lock lock{ mutex };
-        std::destroy_at(&list[*index]);
-        free_list.push_back(*index);
+        std::unique_lock lock{ m_mutex };
+        if(!m_free_vec.empty())
+        {
+            const auto idx = m_free_vec.back();
+            m_free_vec.pop_back();
+
+            Slot& slot = m_slots_vec[idx];
+            slot.tag.set_free(false);
+            std::construct_at(&slot.data, std::forward<Args>(args)...);
+            return PublicId{ idx, *slot.tag };
+        }
+
+        PublicId pubid{ (u32)m_slots_vec.size(), 0u };
+        m_slots_vec.emplace_back(UserType{ std::forward<Args>(args)... }, pubid.get_tag());
+
+        return pubid;
+    }
+
+    void erase(u64 id)
+    {
+        PublicId pubid{ id };
+        if(!pubid) { return; }
+
+        std::unique_lock lock{ m_mutex };
+        if(pubid.get_idx() >= m_slots_vec.size()) { return; }
+        Slot& slot = m_slots_vec[pubid.get_idx()];
+        if(slot.tag != pubid.get_tag() || slot.tag.is_free()) { return; }
+
+        slot.tag.set_free(true);
+        slot.tag.inc();
+        m_free_vec.push_back(pubid.get_idx());
+
+        std::destroy_at(&slot.data);
     }
 
   private:
     inline static UserType null_object{};
-    std::vector<UserType> list;
-    std::deque<u32> free_list;
-    std::mutex mutex;
+    std::deque<Slot> m_slots_vec;
+    std::deque<u32> m_free_vec;
+    std::shared_mutex m_mutex;
 };
-
-namespace v2
-{
-/*
-  Thread-safe lockless object pool with a free list.
- */
-template <typename UserType, usize PAGE_SIZE = 1024, usize NUM_PAGES = 64> class Slotmap
-{
-  public:
-    using Storage = u32;
-    using PageIndex = u32;
-    using HeadTag = u32;
-    using SlotId = TypedId<UserType, Storage>;
-    inline static constexpr auto MAX_ELEMENTS = ~Storage{};
-
-  private:
-    struct Slot
-    {
-        union {
-            UserType data;
-            PageIndex next_free;
-        };
-    };
-    struct Head
-    {
-        operator bool() const { return index != ~0u; }
-        PageIndex index{ ~0u };
-        HeadTag tag{};
-    };
-
-  public:
-    UserType& at(SlotId slot)
-    {
-        if(!slot) { return null_object; }
-        return _at(*slot).data;
-    }
-
-    const UserType& at(SlotId slot) const
-    {
-        if(!slot) { return null_object; }
-        return _at(*slot).data;
-    }
-
-    auto& operator[](this auto& self, Storage idx) { return self.at(SlotId{ idx }); }
-
-    template <typename... Args> SlotId emplace(Args&&... args)
-    {
-        const auto index = allocate();
-        auto [page_index, array_index] = unpack_index(*index);
-        if(page_index >= NUM_PAGES)
-        {
-            ENG_ASSERT(false, "Slotmap too small");
-            return SlotId{};
-        }
-        auto* sp = slots[page_index].load();
-        if(!sp)
-        {
-            std::allocator<Slot> allocator;
-            Slot* new_page = allocator.allocate(PAGE_SIZE);
-            Slot* expected = nullptr;
-            if(!slots[page_index].compare_exchange_strong(expected, new_page))
-            {
-                allocator.deallocate(new_page, PAGE_SIZE);
-                sp = expected;
-            }
-            else { sp = new_page; }
-        }
-        ENG_ASSERT(sp);
-        std::construct_at<UserType>(&sp[array_index].data, std::forward<Args>(args)...);
-        return index;
-    }
-
-    void erase(Storage index) { erase(SlotId{ index }); }
-
-    void erase(SlotId index)
-    {
-        auto [page_index, array_index] = unpack_index(*index);
-        if(page_index >= NUM_PAGES) { return; }
-        auto* sp = slots[page_index].load();
-        if(!sp) { return; }
-        std::destroy_at(&sp[array_index].data);
-        auto head = free_list.load();
-        Head new_head;
-        do
-        {
-            new_head.index = *index;
-            new_head.tag = head.tag + 1;
-            slots[page_index][array_index].next_free = head.index;
-        }
-        while(free_list.compare_exchange_weak(head, new_head));
-    }
-
-  private:
-    static std::tuple<PageIndex, PageIndex> unpack_index(PageIndex index)
-    {
-        return std::make_tuple(index / PAGE_SIZE, index % PAGE_SIZE);
-    }
-
-    static PageIndex pack_index(PageIndex page, PageIndex slot) { return page * PAGE_SIZE + slot; }
-
-    auto& _at(this auto& self, PageIndex index)
-    {
-        auto [page, slot] = unpack_index(index);
-        return std::forward_like<decltype(self)>(self.slots[page][slot]);
-    }
-
-    SlotId allocate()
-    {
-        auto head = free_list.load();
-        while(head)
-        {
-            Head new_head{ .index = _at(head.index).next_free, .tag = head.tag + 1 };
-            if(free_list.compare_exchange_weak(head, new_head)) { return SlotId{ head.index }; }
-        }
-        return SlotId{ size.fetch_add(1) };
-    }
-
-    inline static UserType null_object{};
-    std::atomic<Head> free_list{};
-    std::atomic<Storage> size{};
-    std::array<std::atomic<Slot*>, NUM_PAGES> slots{};
-};
-} // namespace v2
 
 } // namespace eng

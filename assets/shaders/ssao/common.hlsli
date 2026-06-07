@@ -12,7 +12,15 @@ struct PushConstants
 	ENG_UINT NormalTextureIndex;
 	ENG_UINT ColorTextureIndex;
 	ENG_UINT VelocityTextureIndex;
-    ENG_UINT OutAORWTextureIndex;
+	ENG_UINT OutHistoryLenRWTextureIndex;
+	ENG_UINT OutHistoryRWTextureIndex;
+	ENG_UINT OutColorRWTextureIndex;
+	
+	ENG_UINT PrevGPUEngConstantsBufferIndex;
+	ENG_UINT PrevDepthTextureIndex;
+	ENG_UINT PrevNormalTextureIndex;
+	ENG_UINT PrevHistoryLenTextureIndex;
+	ENG_UINT PrevHistoryRWTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 #endif
@@ -23,7 +31,7 @@ struct PushConstants
 #define gNoiseTexture gTextures2Dfloat2[pc.NoiseTextureIndex]
 #define gNormalTexture gTextures2Dfloat4[pc.NormalTextureIndex]
 #define gColorTexture gTextures2Dfloat4[pc.ColorTextureIndex]
-#define gOutAOImage gRWTextures2Dfloat4[pc.OutAORWTextureIndex]
+#define gOutAOImage gRWTextures2Dfloat4[pc.OutColorRWTextureIndex]
 
 /*
 Generated with:

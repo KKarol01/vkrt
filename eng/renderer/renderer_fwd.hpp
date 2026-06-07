@@ -16,7 +16,6 @@
 
 namespace eng
 {
-
 namespace gfx
 {
 enum class CullFace
@@ -473,6 +472,14 @@ struct IndirectDrawParams;
 struct IndirectBatch;
 class MeshRenderData;
 
+} // namespace gfx
+
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, u64);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Image, u64);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Shader, u64);
+
+namespace gfx
+{
 struct BufferView
 {
     auto operator<=>(const BufferView&) const = default;

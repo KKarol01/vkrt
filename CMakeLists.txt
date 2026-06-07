@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.29)
 project(eng)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(Vulkan REQUIRED)
 
 add_subdirectory(third_party/glm SYSTEM)

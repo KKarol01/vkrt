@@ -51,7 +51,7 @@ class GamePanel : public Panel
             }
             width = std::ceil(width);
             height = std::ceil(height);
-            gfx::get_renderer().settings.new_render_resolution = { width, height };
+            //gfx::get_renderer().settings.new_render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             auto& rt = gfx::get_renderer().current_data->render_resources;

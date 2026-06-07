@@ -248,7 +248,7 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         // store index to image array so it can later be deserialized
         auto it = std::ranges::find(src.images, txt.image);
         ENG_ASSERT(it != src.images.end());
-        *txt.image = (u32)std::distance(src.images.begin(), it);
+        *txt.image = (u64)std::distance(src.images.begin(), it);
         ENG_ASSERT(*txt.image < src.images.size());
         serialize(dst, txt, out_bytes_written);
     }
@@ -269,18 +269,18 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         if(mat.base_color_texture)
         {
             auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
-            *mat.base_color_texture.image = (u32)idx;
+            *mat.base_color_texture.image = (u64)idx;
             if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
         }
         if(mat.normal_texture)
         {
             *mat.normal_texture.image =
-                (u32)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
+                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
         }
         if(mat.metallic_roughness_texture)
         {
             *mat.metallic_roughness_texture.image =
-                (u32)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
+                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
         }
         mat.mesh_pass = {}; // ignoring meshpass, as load_material uses default one
         serialize(dst, mat, out_bytes_written);
@@ -290,10 +290,10 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
     for(const auto& meshh : src.meshes)
     {
         auto mesh = meshh.get();
-        *mesh.geometry = (u32)std::distance(src.geometries.begin(), std::ranges::find(src.geometries, mesh.geometry));
+        *mesh.geometry = (u64)std::distance(src.geometries.begin(), std::ranges::find(src.geometries, mesh.geometry));
         if(mesh.material)
         {
-            *mesh.material = (u32)std::distance(src.materials.begin(), std::ranges::find(src.materials, mesh.material));
+            *mesh.material = (u64)std::distance(src.materials.begin(), std::ranges::find(src.materials, mesh.material));
         }
         serialize(dst, mesh, out_bytes_written);
     }
@@ -356,7 +356,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     for(auto& txt : dst.textures)
     {
         deserialize(txt, src, out_bytes_written);
-        txt.image = dst.images[*txt.image]; // when serializing, handles are made into indices into this array
+        txt.image = dst.images[(u32)*txt.image]; // when serializing, handles are made into indices into this array
     }
 
     u64 geom_count;
@@ -383,11 +383,11 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     for(u64 i = 0; i < material_count; ++i)
     {
         deserialize(mat, src, out_bytes_written);
-        if(mat.base_color_texture) { mat.base_color_texture = dst.textures[*mat.base_color_texture.image]; }
-        if(mat.normal_texture) { mat.normal_texture = dst.textures[*mat.normal_texture.image]; }
+        if(mat.base_color_texture) { mat.base_color_texture = dst.textures[(u32)*mat.base_color_texture.image]; }
+        if(mat.normal_texture) { mat.normal_texture = dst.textures[(u32)*mat.normal_texture.image]; }
         if(mat.metallic_roughness_texture)
         {
-            mat.metallic_roughness_texture = dst.textures[*mat.metallic_roughness_texture.image];
+            mat.metallic_roughness_texture = dst.textures[(u32)*mat.metallic_roughness_texture.image];
         }
         dst.materials[i] = gfx::get_renderer().make_material(mat);
     }
@@ -399,8 +399,8 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     for(u64 i = 0; i < mesh_count; ++i)
     {
         deserialize(mesh, src, out_bytes_written);
-        if(mesh.material) { mesh.material = dst.materials[*mesh.material]; }
-        if(mesh.geometry) { mesh.geometry = dst.geometries[*mesh.geometry]; }
+        if(mesh.material) { mesh.material = dst.materials[(u32)*mesh.material]; }
+        if(mesh.geometry) { mesh.geometry = dst.geometries[(u32)*mesh.geometry]; }
         dst.meshes[i] = gfx::get_renderer().make_mesh(gfx::MeshDescriptor{ mesh.geometry, mesh.material });
     }
 

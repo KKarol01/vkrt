@@ -484,8 +484,8 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
             // return, because if sems are the same, it means frame_delay had passed and renderer waited for the fence
             if(sync->sync == sems[0]) { return; }
             if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
-            ENG_LOG("Waiting on a sync {} for resource {} in pass {}", sync->sync->name, p->name.as_view(),
-                    get_res(acc.resource).name.as_view());
+            //ENG_LOG("Waiting on a sync {} for resource {} in pass {}", sync->sync->name, p->name.as_view(),
+            //        get_res(acc.resource).name.as_view());
             layout_cmd->wait_sync(sync->sync, sync->wait_value, acc.stage);
         };
 

@@ -642,7 +642,7 @@ class ShaderManager
     void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
     std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
-    Slotmap<Shader, 16, 8> m_shader_alloc;
+    Slotmap<Shader> m_shader_alloc;
     std::unordered_map<fs::Path, File> m_files_map;
 };
 
@@ -893,8 +893,8 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer, 16, 64> buffers;
-    Slotmap<Image, 16, 64> images;
+    Slotmap<Buffer> buffers;
+    Slotmap<Image> images;
 
     HandleFlatSet<Sampler> samplers;
     ShaderManager m_shaders;
@@ -951,11 +951,21 @@ inline std::string to_string(AOMode a)
 
 inline IRendererBackend& get_renderer_backend() { return *get_renderer().backend; }
 
+inline StackString<128> get_buffered_name(std::string_view name, i32 offset = 0)
+{
+    thread_local char buf[128]{};
+    const isize delay = (isize)get_renderer().frame_delay;
+    isize idx = get_renderer().current_frame;
+    idx = (((idx + offset) % delay) + delay) % delay;
+    const auto len = ENG_FMT_TO_N(buf, 128, "{}{}", name, idx);
+    return StackString<128>{ std::string_view{ buf, len } };
+}
+
 } // namespace gfx
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(Slotmap<eng::gfx::Buffer, 1024>::SlotId{*handle}); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(Slotmap<eng::gfx::Image, 1024>::SlotId{*handle}); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(*handle); });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(*handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().m_shaders[handle]; });
