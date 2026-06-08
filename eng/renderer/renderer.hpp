@@ -642,7 +642,7 @@ class ShaderManager
     void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
     std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
-    Slotmap<Shader> m_shader_alloc;
+    MutexSlotmap<Shader, DontLockMutexTag> m_shader_alloc;
     std::unordered_map<fs::Path, File> m_files_map;
 };
 
@@ -725,6 +725,9 @@ class Renderer
         std::vector<Sync*> syncs;
         std::vector<Sync*> available_syncs;
         std::vector<Sync*> wait_syncs;
+
+        void reset_staging();
+        StagingBuffer* staging{}; // small data staging to avoid stutters when big fills up
 
         RenderResources render_resources;
 
@@ -893,8 +896,8 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer> buffers;
-    Slotmap<Image> images;
+    MutexSlotmap<Buffer> buffers;
+    MutexSlotmap<Image> images;
 
     HandleFlatSet<Sampler> samplers;
     ShaderManager m_shaders;

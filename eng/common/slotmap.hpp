@@ -11,11 +11,18 @@
 
 namespace eng
 {
+
+using LockMutexTag = std::true_type;
+using DontLockMutexTag = std::true_type;
+
 /*
-  Thread-safe lockless object pool with a free list.
+  Thread-safe object pool with a free list.
+  First 32 bits are an index which can be used to access associated data.
+  Last 32 bits are tag.
  */
-template <typename UserType> class Slotmap
+template <typename UserType, typename LockMutex = LockMutexTag> class MutexSlotmap
 {
+
     struct Tag : public TypedId<Tag, u32>
     {
         using Base = TypedId<Tag, u32>;
@@ -53,7 +60,7 @@ template <typename UserType> class Slotmap
     {
         PublicId pubid{ id };
         if(!pubid) { return null_object; }
-        std::shared_lock lock{ self.m_mutex };
+        std::shared_lock lock = self.get_shared_lock();
         auto& slot = self.m_slots_vec[pubid.get_idx()];
         if(slot.tag != pubid.get_tag())
         {
@@ -67,7 +74,7 @@ template <typename UserType> class Slotmap
 
     template <typename... Args> PublicId emplace(Args&&... args)
     {
-        std::unique_lock lock{ m_mutex };
+        std::unique_lock lock = get_exclusive_lock();
         if(!m_free_vec.empty())
         {
             const auto idx = m_free_vec.back();
@@ -76,7 +83,7 @@ template <typename UserType> class Slotmap
             Slot& slot = m_slots_vec[idx];
             slot.tag.set_free(false);
             // index reserved, unlock
-            lock.unlock();
+            unlock_exclusive_lock(lock);
 
             std::construct_at(&slot.data, std::forward<Args>(args)...);
             return PublicId{ idx, *slot.tag };
@@ -93,20 +100,55 @@ template <typename UserType> class Slotmap
         PublicId pubid{ id };
         if(!pubid) { return; }
 
-        std::unique_lock lock{ m_mutex };
+        std::unique_lock lock = get_exclusive_lock();
         if(pubid.get_idx() >= m_slots_vec.size()) { return; }
         Slot& slot = m_slots_vec[pubid.get_idx()];
         if(slot.tag != pubid.get_tag() || slot.tag.is_free()) { return; }
 
         slot.tag.set_free(true);
         slot.tag.inc();
-        lock.unlock();
+        unlock_exclusive_lock(lock);
         std::destroy_at(&slot.data);
-        lock.lock();
+        lock_exclusive_lock(lock);
         m_free_vec.push_back(pubid.get_idx());
     }
 
   private:
+    std::shared_lock<std::shared_mutex> get_shared_lock()
+    {
+        if constexpr(LockMutex()) { return std::shared_lock{ m_mutex }; }
+        return std::shared_lock<std::shared_mutex>{};
+    }
+    std::unique_lock<std::shared_mutex> get_exclusive_lock()
+    {
+        if constexpr(LockMutex()) { return std::unique_lock{ m_mutex }; }
+        return std::unique_lock<std::shared_mutex>{};
+    }
+    void lock_exclusive_lock(auto& lock)
+    {
+        if constexpr(LockMutex()) { lock.lock(); }
+    }
+    void unlock_exclusive_lock(auto& lock)
+    {
+        if constexpr(LockMutex()) { lock.unlock(); }
+    }
+    void lock_shared()
+    {
+        if constexpr(LockMutex()) { m_mutex.lock_shared(); }
+    }
+    void unlock_shared()
+    {
+        if constexpr(LockMutex()) { m_mutex.unlock_shared(); }
+    }
+    void lock_exclusive()
+    {
+        if constexpr(LockMutex()) { m_mutex.lock(); }
+    }
+    void unlock_exclusive()
+    {
+        if constexpr(LockMutex()) { m_mutex.unlock(); }
+    }
+
     inline static UserType null_object{};
     std::deque<Slot> m_slots_vec;
     std::deque<u32> m_free_vec;

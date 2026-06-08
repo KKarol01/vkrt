@@ -24,7 +24,6 @@ inline static constexpr auto STAGING_APPEND = ~0ull;
 
 class StagingBuffer
 {
-    static constexpr size_t CAPACITY = 64ull * 1024 * 1024;
     static constexpr size_t ALIGNMENT = 256ull;
 
     struct Allocation
@@ -42,12 +41,12 @@ class StagingBuffer
     };
 
   public:
-    void init(SubmitQueue* queue);
+    void init(SubmitQueue* queue, usize capacity);
     // Flushes pending transactions. Optionally returns signal sync.
     Sync* flush(bool signal_sync);
     // Flushes and waits on the cpu until completion.
     void flush_wait();
-	void reset();
+    void reset();
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
     void copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier = false);
     // Copies data from src buffer to dst buffer. Adjusts the size. Use STAGING_APPEND to append data instead of calculating offsets manually.
@@ -80,7 +79,7 @@ class StagingBuffer
     void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipsLayers& range = {});
 
   private:
-    size_t get_free_space() const { return CAPACITY - head; }
+    size_t get_free_space() const { return m_capacity - m_head; }
     // Always succeeds, but may not allocate entire size due to lack of space.
     Allocation partial_allocate(size_t size);
     // Get current double buffered context
@@ -95,13 +94,14 @@ class StagingBuffer
                        ImageMipsLayers src_range = { { 0u, ~0u }, { 0u, ~0u } });
     bool translate_dst_offset(const Buffer& dst, size_t& offset, size_t size);
 
-    SubmitQueue* queue{};
-    Buffer buffer;
-    std::vector<Context> contexts;
-    std::deque<Allocation> allocations;
-    u64 last_frame{};
-    size_t head{};
-	Sync* sync{};
+    usize m_capacity;
+    SubmitQueue* m_queue{};
+    Buffer m_buf;
+    std::vector<Context> m_ctx_vec;
+    std::deque<Allocation> m_alloc_vec;
+    u64 m_last_frame{};
+    size_t m_head{};
+    Sync* m_sync{};
 };
 } // namespace gfx
 } // namespace eng

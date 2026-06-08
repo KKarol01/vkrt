@@ -121,7 +121,7 @@ void Renderer::init(IRendererBackend* backend)
 
     gq = backend->get_queue(QueueType::GRAPHICS);
     staging = new StagingBuffer{};
-    staging->init(gq);
+    staging->init(gq, 64 * MiB);
     rgraph = new RGRenderGraph{};
     rgraph->init(this);
 
@@ -375,6 +375,8 @@ void Renderer::init_perframes()
         frame_datas[i].ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         frame_datas[i].swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         frame_datas[i].timestamp_pool = backend->make_query_pool({ QueryType::TIMESTAMP, 1024 });
+        frame_datas[i].staging = new StagingBuffer{};
+        frame_datas[i].staging->init(gq, 1 * MiB);
     }
 }
 
@@ -568,6 +570,7 @@ void Renderer::update()
     current_data->cmdpool->reset();
     current_data->reset_syncs();
     current_data->reset_queries();
+    current_data->reset_staging();
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -795,8 +798,9 @@ void Renderer::compile_rendergraph()
             constants.frame_index = (u32)current_frame;
 
             auto* cmd = b.open_cmd_buf();
-            get_renderer().staging->copy(b.get_buf(d.constants).buffer.get(), &constants, 0ull, sizeof(constants), false);
-            cmd->wait_sync(get_renderer().staging->flush(true));
+            get_renderer().current_data->staging->copy(b.get_buf(d.constants).buffer.get(), &constants, 0ull,
+                                                       sizeof(constants), false);
+            cmd->wait_sync(get_renderer().current_data->staging->flush(true));
         });
 
     pass::PassInitData pass_data{};
@@ -1766,6 +1770,10 @@ Sync* Renderer::FrameData::get_sync()
 }
 
 void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
+
+void Renderer::FrameData::reset_staging() { 
+	staging->reset(); 
+}
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
 {

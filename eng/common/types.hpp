@@ -7,6 +7,10 @@
 namespace eng
 {
 
+inline constexpr usize KiB = 1024;
+inline constexpr usize MiB = 1024 * 1024;
+inline constexpr usize GiB = 1024 * 1024 * 1024;
+
 template <class... Ts> struct Visitor : Ts...
 {
     using Ts::operator()...;
