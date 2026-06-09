@@ -1,12 +1,9 @@
 .cache
-build
 .vs
 CMakeSettings.json
 compile_commands.json
 assets/models/*
 assets/images/*
-third_party/*
-!third_party/zlib
 *.precompiled
 out/*
 *.engb
