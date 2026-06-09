@@ -17,7 +17,7 @@ using DontLockMutexTag = std::true_type;
 
 /*
   Thread-safe object pool with a free list.
-  First 32 bits are an index which can be used to access associated data.
+  First 32 bits of returned handle are an index which can be used to access associated data.
   Last 32 bits are tag.
  */
 template <typename UserType, typename LockMutex = LockMutexTag> class MutexSlotmap
