@@ -17,10 +17,11 @@ target_compile_definitions(build_header_only
         VMA_STATIC_VULKAN_FUNCTIONS=0
         VMA_DYNAMIC_VULKAN_FUNCTIONS=0
     PUBLIC
-        VK_USE_PLATFORM_WIN32_KHR
+        $<IF:$<STREQUAL:$<PLATFORM_ID>,Windows>, VK_USE_PLATFORM_WIN32_KHR, VK_USE_PLATFORM_XCB_KHR>
         VK_VERSION_1_3
         WIN32_LEAN_AND_MEAN
 )
+
 target_include_directories(build_header_only
     PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party
@@ -28,48 +29,53 @@ target_include_directories(build_header_only
 )
 
 add_executable(eng
-    "app/app.cpp"
     "main.cpp"
+    "app/app.cpp"
 
+    "eng/engine.cpp"  
+	"eng/fs/fs.cpp"
+    "eng/camera.cpp"
+    "eng/scene.cpp"
+	"eng/ui/ui.cpp" 
+    "eng/to_string.cpp" 
+	"eng/ecs/components.cpp"
+    "eng/physics/bvh.cpp"
+    "eng/renderer/renderer.cpp"
+    "eng/renderer/imgui/imgui_renderer.cpp"
+    "eng/renderer/vulkan/to_vk.cpp"
+    "eng/renderer/vulkan/vulkan_backend.cpp" 
+    "eng/renderer/bindlesspool.cpp"
+    "eng/renderer/staging_buffer.cpp" 
+    "eng/renderer/submit_queue.cpp"
+	"eng/renderer/passes/renderpass.cpp"
+	"eng/renderer/rendergraph.cpp"
 	"eng/assets/asset_manager.cpp"
 	"eng/assets/loaders.cpp" 
 	"eng/assets/serialization.cpp"
-    "eng/camera.cpp"
-	"eng/ecs/components.cpp"
-    "eng/engine.cpp"  
-	"eng/fs/fs.cpp"
-    "eng/physics/bvh.cpp"
-    "eng/renderer/bindlesspool.cpp"
-    "eng/renderer/imgui/imgui_renderer.cpp"
-    "eng/renderer/mesh/mesh_renderer.cpp"
-	"eng/renderer/passes/renderpass.cpp"
-    "eng/renderer/renderer.cpp"
-	"eng/renderer/rendergraph.cpp"
-    "eng/renderer/staging_buffer.cpp" 
-    "eng/renderer/submit_queue.cpp"
-    "eng/renderer/vulkan/to_vk.cpp"
-    "eng/renderer/vulkan/vulkan_backend.cpp" 
-    "eng/scene.cpp"
-    "eng/to_string.cpp" 
-	"eng/ui/ui.cpp" 
-)
+ "eng/renderer/mesh/mesh_renderer.cpp")
 
 target_include_directories(eng 
 	PRIVATE 
 	${CMAKE_SOURCE_DIR} 
-	${Vulkan_INCLUDE_DIRS}
 	${CMAKE_SOURCE_DIR}/third_party 
-	${CMAKE_SOURCE_DIR}/third_party/zlib/include/
-	${CMAKE_SOURCE_DIR}/third_party/reproc/reproc++/include
-	${CMAKE_SOURCE_DIR}/third_party/fmt/include
+	${Vulkan_INCLUDE_DIRS} 
 	${CMAKE_SOURCE_DIR}/third_party/fastgltf/include 
+	${CMAKE_SOURCE_DIR}/third_party/fmt/include
+	${CMAKE_SOURCE_DIR}/third_party/reproc/reproc++/include
+	${CMAKE_SOURCE_DIR}/third_party/zlib/include/
 )
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS}/../Lib)
-target_compile_options(eng 
-    PRIVATE 
+if(MSVC)
+    target_compile_options(eng PRIVATE 
         /W4    
-)
+    )
+else()
+    target_compile_options(eng PRIVATE
+        -Wall -Wextra -Werror -Wpedantic
+        -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=unused-lambda-capture
+    )
+endif()
 set_target_properties(eng PROPERTIES 
     RUNTIME_OUTPUT_NAME_DEBUG "${CMAKE_PROJECT_NAME}Debug"
     RUNTIME_OUTPUT_NAME_RELEASE "${CMAKE_PROJECT_NAME}"
@@ -102,44 +108,44 @@ target_compile_definitions(eng
 
 target_precompile_headers(eng
     PRIVATE
-        <vector>
-        <variant>
-        <utility>
-        <unordered_set>
-        <unordered_map>
-        <thread>
-        <string>
-        <span>
-        <shared_mutex>
-        <set>
-        <ranges>
-        <queue>
-        <numeric>
-        <mutex>
-        <memory>
-        <map>
-        <functional>
-        <fstream>
-        <forward_list>
-        <deque>
-        <cstddef>
-        <atomic>
         <algorithm>
+        <atomic>
+        <cstddef>
+        <deque>
+        <forward_list>
+        <fstream>
+        <functional>
+        <map>
+        <memory>
+        <mutex>
+        <numeric>
+        <queue>
+        <ranges>
+        <set>
+        <shared_mutex>
+        <span>
+        <string>
+        <thread>
+        <unordered_map>
+        <unordered_set>
+        <utility>
+        <variant>
+        <vector>
         
-        <fmt/format.h>
+		<volk/volk.h>
+        <vulkan/vulkan.h>
         <glm/glm.hpp>
-        <glm/gtc/matrix_transform.hpp>
+        <glm/mat3x3.hpp>
         <glm/gtc/quaternion.hpp>
+        <glm/gtc/matrix_transform.hpp>
         <glm/gtx/quaternion.hpp>
         <glm/gtx/transform.hpp>
-        <glm/mat3x3.hpp>
-		<volk/volk.h>
+        <imgui/imgui.h>
         <imgui/backends/imgui_impl_glfw.h>
         <imgui/backends/imgui_impl_vulkan.h>
-        <imgui/imgui.h>
-        <vk-bootstrap/src/VkBootstrap.h>
-        <vulkan/vulkan.h>
         <VulkanMemoryAllocator/include/vk_mem_alloc.h>
+        <vk-bootstrap/src/VkBootstrap.h>
+        <fmt/format.h>
         
 		<eng/assets/serialization.hpp>
 		<eng/common/flags.hpp>
@@ -147,15 +153,15 @@ target_precompile_headers(eng
         <eng/common/handleflatset.hpp>
         <eng/common/hash.hpp>
         <eng/common/logger.hpp>
-        <eng/common/scalar_types.hpp>
         <eng/common/sparseset.hpp>
         <eng/common/to_string.hpp>
         <eng/common/types.hpp>
+        <eng/common/scalar_types.hpp>
         <eng/ecs/ecs.hpp>
         <eng/string/stack_string.hpp>
 
-        <eng/renderer/vulkan/to_vk.hpp>
         <eng/renderer/renderer_fwd.hpp>
+        <eng/renderer/vulkan/to_vk.hpp>
 )
 
 add_custom_command(TARGET eng POST_BUILD
