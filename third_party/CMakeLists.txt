@@ -60,7 +60,7 @@ target_compile_definitions(imgui
 )
 
 add_library(imguizmo STATIC
-    "ImGuizmo/ImGuizmo.cpp"
+    "imguizmo/src/imguizmo.cpp"
  )
 target_include_directories(imguizmo
     PRIVATE

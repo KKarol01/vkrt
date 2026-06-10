@@ -8,7 +8,7 @@
 #include <third_party/imgui/imgui_internal.h>
 #include <third_party/imgui/backends/imgui_impl_glfw.h>
 #include <third_party/imgui/backends/imgui_impl_vulkan.h>
-#include <third_party/ImGuizmo/ImGuizmo.h>
+#include <third_party/ImGuizmo/src/ImGuizmo.h>
 #include <eng/renderer/vulkan/vulkan_structs.hpp>
 
 namespace eng
