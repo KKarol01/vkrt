@@ -34,10 +34,6 @@ namespace pass
 struct Pass;
 }
 
-class Renderer;
-
-inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
-
 struct DescriptorResource
 {
     static DescriptorResource sampled_image(const ImageView& view, u32 index = 0)
@@ -679,30 +675,6 @@ struct ScopedTimestampQuery
     ICommandBuffer* cmd{};
 };
 
-// Used for adding passes to the render graph.
-// Essentially divides vector of render passes into segments
-// or partitions, and using the constants from this namespace
-// adds render pass to the end of the corresponding segment.
-// This solves a problem of having to coordinate add everything
-// from one segment BEFORE adding anything ordered after.
-namespace RenderOrder
-{
-// First pass, creation of main textures/targets happens here
-inline constexpr u32 SETUP_TARGETS = 0;
-// Zprepass of the geometry
-inline constexpr u32 Z_PREPASS = 50;
-// Right after prepass, but before any rendering to other buffers happens
-inline constexpr u32 POST_Z = 51;
-// Rendering of opaque/transparent/other passes happens with the use of geometry
-inline constexpr u32 MESH_RENDER = 100;
-// Post processes happen here
-inline constexpr u32 POST = 150;
-// UI happens here, after all rendering had finished
-inline constexpr u32 UI = 200;
-// After UI, but right before present.
-inline constexpr u32 PRESENT = 250;
-}; // namespace RenderOrder
-
 class Renderer
 {
   public:
@@ -815,6 +787,7 @@ class Renderer
     {
         // std::shared_ptr<pass::Pass> reconstruct_normals;
         std::array<std::shared_ptr<pass::Pass>, (int)MeshPassType::LAST_ENUM> mesh_passes{};
+        std::shared_ptr<pass::Pass> downscale_depth;
         std::shared_ptr<pass::Pass> ao;
         std::shared_ptr<pass::Pass> velocity;
     };
@@ -952,7 +925,9 @@ inline std::string to_string(AOMode a)
 }
 // clang-format on
 
-inline IRendererBackend& get_renderer_backend() { return *get_renderer().backend; }
+inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
+inline Renderer::FrameData& get_frame_data() { return *get_renderer().current_data; }
+inline IRendererBackend& get_backend() { return *get_renderer().backend; }
 
 inline StackString<128> get_buffered_name(std::string_view name, i32 offset = 0)
 {

@@ -23,7 +23,6 @@ using RGAccessId = TypedId<RGAccess, u32>;
 struct RGPass
 {
     using PassId = TypedId<RGPass, u64>;
-    using PassOrder = u32;
     enum class Type
     {
         NONE,
@@ -321,13 +320,6 @@ struct RGBuilder
 class RGRenderGraph
 {
   public:
-    struct OrderedPass
-    {
-        bool operator<(const OrderedPass& a) const { return order < a.order; }
-        std::unique_ptr<RGPass> pass;
-        RGPass::PassOrder order{};
-    };
-
     struct ExecutionGroup
     {
         std::vector<RGPass*> passes;
@@ -346,41 +338,35 @@ class RGRenderGraph
     void init(Renderer* r);
 
     template <typename UserType, typename SetupFunc, typename ExecFunc>
-    const UserType& add_pass(const char* name, RGPass::PassOrder order, RGPass::Type type, const SetupFunc& setup_func,
-                             const ExecFunc& exec_func)
+    const UserType& add_pass(const char* name, RGPass::Type type, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        OrderedPass op{};
-        op.pass = std::make_unique<RGUserPass<UserType, ExecFunc>>(name, type, exec_func);
-        op.order = order;
+        RGPass& pass = *passes.emplace_back(std::make_unique<RGUserPass<UserType, ExecFunc>>(name, type, exec_func));
+        ENG_ASSERT(pass.id);
 
-        if(namedpasses.contains(op.pass->id))
+        auto ret = namedpasses.emplace(pass.id, &pass);
+        if(!ret.second)
         {
             ENG_ERROR("Pass \"{}\" was already defined.", name);
             static UserType null_object{};
             return null_object;
         }
 
-        auto it = std::upper_bound(passes.begin(), passes.end(), op);
-        it = passes.insert(it, std::move(op));
-
-        namedpasses[it->pass->id] = &*it->pass;
-
-        RGBuilder pb{ &*it->pass, this };
-        auto* user_data = static_cast<UserType*>(it->pass->get_user_data());
+        RGBuilder pb{ &pass, this };
+        auto* user_data = static_cast<UserType*>(pass.get_user_data());
         std::invoke(setup_func, pb, *user_data);
         return *user_data;
     }
 
     template <typename UserType, typename SetupFunc, typename ExecFunc>
-    const UserType& add_graphics_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
+    const UserType& add_graphics_pass(const char* name, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        return add_pass<UserType>(name, order, RGPass::Type::GRAPHICS, setup_func, exec_func);
+        return add_pass<UserType>(name, RGPass::Type::GRAPHICS, setup_func, exec_func);
     }
 
     template <typename UserType, typename SetupFunc, typename ExecFunc>
-    const UserType& add_compute_pass(const char* name, RGPass::PassOrder order, const SetupFunc& setup_func, const ExecFunc& exec_func)
+    const UserType& add_compute_pass(const char* name, const SetupFunc& setup_func, const ExecFunc& exec_func)
     {
-        return add_pass<UserType>(name, order, RGPass::Type::COMPUTE, setup_func, exec_func);
+        return add_pass<UserType>(name, RGPass::Type::COMPUTE, setup_func, exec_func);
     }
 
     void compile();
@@ -399,7 +385,7 @@ class RGRenderGraph
     std::unordered_map<u64, PersistentStorage> persistent_resources;
     std::vector<RGResource> resources;
     std::vector<RGAccess> accesses;
-    std::vector<OrderedPass> passes;
+    std::vector<std::unique_ptr<RGPass>> passes;
     std::vector<ExecutionGroup> groups;
     std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
 

@@ -61,7 +61,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
     ImGuizmo::BeginFrame();
 
     const auto& impassdata = graph->add_graphics_pass<ImPassData>(
-        "imgui", RenderOrder::UI,
+        "imgui",
         [this](RGBuilder& b, ImPassData& data) {
             auto& r = get_renderer();
 

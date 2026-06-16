@@ -352,12 +352,10 @@ void Renderer::init_pipelines()
         // passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
         // passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
         // passes.ao[(int)AOMode::RTAO] = std::make_shared<pass::RTAO>();
-        passes.mesh_passes[(int)MeshPassType::Z_PREPASS] =
-            std::make_shared<pass::MeshPass>(MeshPassType::Z_PREPASS, RenderOrder::Z_PREPASS);
-        passes.mesh_passes[(int)MeshPassType::OPAQUE] =
-            std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE, RenderOrder::MESH_RENDER);
-        passes.mesh_passes[(int)MeshPassType::WIREFRAME] =
-            std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME, RenderOrder::MESH_RENDER);
+        passes.mesh_passes[(int)MeshPassType::Z_PREPASS] = std::make_shared<pass::MeshPass>(MeshPassType::Z_PREPASS);
+        passes.mesh_passes[(int)MeshPassType::OPAQUE] = std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE);
+        passes.mesh_passes[(int)MeshPassType::WIREFRAME] = std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME);
+        passes.downscale_depth = std::make_shared<pass::DepthDownsample>();
         passes.ao = std::make_shared<pass::SSAO>();
         passes.velocity = std::make_shared<pass::VelocityBuffer>();
     }
@@ -755,7 +753,7 @@ void Renderer::compile_rendergraph()
         RGResourceId final_color;
     };
     const auto import_resources = rgraph->add_graphics_pass<ImportedResources>(
-        "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
+        "SETUP_TARGETS",
         [this](RGBuilder& b, ImportedResources& d) {
             char resname[128]{};
             size_t resnamelen;
@@ -808,15 +806,19 @@ void Renderer::compile_rendergraph()
     pass_data.depth_buffer = import_resources.depth;
     passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
 
-    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
-    // passes.velocity->init(rgraph, pass_data);
+    // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
+    // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
+    //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
+    //  passes.velocity->init(rgraph, pass_data);
 
     pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
+    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    passes.downscale_depth->init(rgraph, pass_data);
+	passes.downscale_depth->get
     // pass_data = {};
     // pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     // passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
@@ -827,7 +829,7 @@ void Renderer::compile_rendergraph()
         RGAccessId output;
     };
     rgraph->add_graphics_pass<CopyToAccum>(
-        "Copy To Accum", RenderOrder::POST,
+        "Copy To Accum",
         [=, this](RGBuilder& b, CopyToAccum& d) {
             d.input = b.copy_source(import_resources.opaque);
             d.output = b.copy_dest(import_resources.final_color);
@@ -854,7 +856,7 @@ void Renderer::compile_rendergraph()
         RGAccessId output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
-        "Copy To Swap", RenderOrder::PRESENT,
+        "Copy To Swap",
         [=, this](RGBuilder& b, CopySwapchainData& data) {
             data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
             data.output = b.import_resource(swapchain->get_image());
@@ -873,7 +875,7 @@ void Renderer::compile_rendergraph()
                                  .filter = ImageFilter::LINEAR });
         });
     rgraph->add_graphics_pass<RGAccessId>(
-        "Present", RenderOrder::PRESENT,
+        "Present",
         [copyswapchaindata](RGBuilder& b, RGAccessId& output) {
             output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
@@ -1771,9 +1773,7 @@ Sync* Renderer::FrameData::get_sync()
 
 void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
 
-void Renderer::FrameData::reset_staging() { 
-	staging->reset(); 
-}
+void Renderer::FrameData::reset_staging() { staging->reset(); }
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
 {

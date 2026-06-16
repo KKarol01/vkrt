@@ -10,7 +10,6 @@ static const uint N_SECTORS = 32u;
 
 uint count_ones(uint value)
 {
-    // Replaced software popcount with native hardware intrinsic for maximum performance
     return countbits(value);
 }
 
@@ -23,9 +22,6 @@ uint update_sectors(float min_horizon, float max_horizon, uint bitfield)
     return bitfield | cur_bitfield;
 }
 
-// =========================================================================
-// HALTON SEQUENCE GENERATOR
-// =========================================================================
 float Halton(uint index, uint base)
 {
     float f = 1.0f;

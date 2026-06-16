@@ -32,7 +32,7 @@ uint update_sectors(float min_horizon, float max_horizon, uint bitfield)
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
 	uint3 dtid = thread_id;
-#if 0
+#if 1
     uint2 dims;
     gOutAOImage.GetDimensions(dims.x, dims.y);
     if (any(thread_id.xy >= dims.xy)) { return; }
