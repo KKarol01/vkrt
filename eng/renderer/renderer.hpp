@@ -648,13 +648,18 @@ enum class SubmitFlags : u32
 
 struct RenderResources
 {
-    Handle<Buffer> constants;
-    Handle<Image> depth;
-    Handle<Image> normals;
-    Handle<Image> velocity;
-    Handle<Image> history_len;
+    RGResourceId constants;
+
+    RGResourceId depth;
+    RGResourceId normals;
+    RGResourceId velocity;
+    RGResourceId history_len;
+    RGResourceId opaque;
+
+    RGResourceId halfres_depth;
+    RGResourceId halfres_normal;
+
     RGResourceId ao;
-    Handle<Image> opaque;
     RGResourceId accum;
     RGResourceId final_color;
 };
@@ -816,7 +821,7 @@ class Renderer
     void init_pipelines();
     void init_perframes();
     void init_bufs();
-    void init_buffered_resources();
+    void init_resolution_dep_resources();
 
     void update();
     void compile_rendergraph();

@@ -48,7 +48,7 @@ add_executable(eng
 	"eng/renderer/rendergraph.cpp"
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
-    "eng/renderer/vulkan/to_vk.cpp"
+    
     "eng/renderer/vulkan/vulkan_backend.cpp" 
     "eng/scene.cpp"
     "eng/to_string.cpp" 

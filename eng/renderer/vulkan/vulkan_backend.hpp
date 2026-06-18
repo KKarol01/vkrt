@@ -155,7 +155,6 @@ struct ImageMetadataVk
 
 struct ImageViewMetadataVk
 {
-    static void init(const ImageView& view, void** out_allocation);
     static void destroy(ImageView& a);
     VkImageView view{};
 };

@@ -3,7 +3,8 @@
 
 struct PushConstants
 {
-    ENG_UINT dstDepthNormalRWTextureIndex;
+    ENG_UINT dstDepthRWTextureIndex;
+    ENG_UINT dstNormalRWTextureIndex;
     ENG_UINT srcDepthTextureIndex;
     ENG_UINT srcNormalTextureIndex;
 };
@@ -14,7 +15,8 @@ void main(uint3 dtid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gidx : 
 {
     Texture2D<float> srcDepthTex = get_gt2(srcDepth, float);
     Texture2D<float4> srcNormalTex = get_gt2(srcNormal, float4);
-    RWTexture2D<float4> dstDepthTex = get_grwt2(dstDepthNormal, float4);
+    RWTexture2D<float> dstDepthTex = get_grwt2(dstDepth, float);
+    RWTexture2D<float4> dstNormalTex = get_grwt2(dstNormal, float4);
     
     uint2 dstDims;
     dstDepthTex.GetDimensions(dstDims.x, dstDims.y);
@@ -50,7 +52,8 @@ void main(uint3 dtid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gidx : 
         }
     }
     
-    dstDepthTex[dtid.xy] = float4(srcNormalTex[normalCoord].xyz, minDepth);
+    dstDepthTex[dtid.xy] = minDepth;
+    dstNormalTex[dtid.xy] = float4(srcNormalTex[normalCoord].xyz, 0.0);
 }
 
 

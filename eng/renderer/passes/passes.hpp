@@ -55,6 +55,7 @@ struct PassInitData
     std::array<RGResourceId, 8> color_buffers;
     RGResourceId depth_buffer;
     std::array<RGResourceId, (int)GBufferType::LAST_ENUM> gbuffer;
+    float resolution_multiplier{ 1.0f };
 };
 
 struct Pass
@@ -704,10 +705,8 @@ struct VelocityBuffer : public Pass
             m_name.c_str(),
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.constants = b.import_resource(r.current_data->render_resources.constants);
-                d.constants = b.read_buffer(d.constants);
-                d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
-                d.prev_constants = b.read_buffer(d.prev_constants);
+                d.constants = b.read_buffer(r.current_data->render_resources.constants);
+                d.prev_constants = b.read_buffer(r.prev_data->render_resources.constants);
                 d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
                 d.out_vel = b.read_write_image(data.gbuffer[(int)GBufferType::VELOCITY]);
             },
@@ -746,34 +745,44 @@ struct DepthDownsample final : public Pass
 
         struct PassOutput
         {
-            RGAccessId dstDepth;
-            RGAccessId srcDepth;
-            RGAccessId srcNormal;
+            RGResourceId out_depth;
+            RGResourceId out_normal;
+            RGAccessId src_depth;
+            RGAccessId src_normal;
         };
-        graph->add_compute_pass<PassOutput>(
+        PassOutput output = graph->add_compute_pass<PassOutput>(
             m_name.c_str(),
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.dstDepth =
-                    b.create_resource("Halfres Depth", Image::init(r.settings.render_resolution.x / 2,
-                                                                   r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
-                                                                   ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT));
-                d.dstDepth = b.write_image(d.dstDepth);
-                d.srcDepth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
-                d.srcNormal = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
+                d.out_depth = b.as_res_id(b.create_resource("Halfres Depth",
+                                                            Image::init(r.settings.render_resolution.x,
+                                                                        r.settings.render_resolution.y, ImageFormat::R16F,
+                                                                        ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
+                d.out_normal =
+                    b.as_res_id(b.create_resource("Halfres Normal",
+                                                  Image::init(r.settings.render_resolution.x,
+                                                              r.settings.render_resolution.y, ImageFormat::R16FG16FB16FA16F,
+                                                              ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
+                d.out_depth = b.as_res_id(b.write_image(d.out_depth));
+                d.out_normal = b.as_res_id(b.write_image(d.out_normal));
+                d.src_depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
+                d.src_normal = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
             },
             [=](RGBuilder& b, const PassOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
                 DescriptorResource resources[]{
-                    DescriptorResource::storage_image(b.get_img(d.dstDepth)),
-                    DescriptorResource::sampled_image(b.get_img(d.srcDepth)),
-                    DescriptorResource::sampled_image(b.get_img(d.srcNormal)),
+                    DescriptorResource::storage_image(b.get_img(d.out_depth)),
+                    DescriptorResource::storage_image(b.get_img(d.out_normal)),
+                    DescriptorResource::sampled_image(b.get_img(d.src_depth)),
+                    DescriptorResource::sampled_image(b.get_img(d.src_normal)),
                 };
                 cmd->bind_resources(1, resources);
                 cmd->bind_pipeline(m_pp.get());
                 cmd->dispatch((r.settings.render_resolution.x / 2 + 7) / 8, (r.settings.render_resolution.y / 2 + 7) / 8, 1);
             });
+        get_frame_data().render_resources.halfres_depth = output.out_depth;
+        get_frame_data().render_resources.halfres_normal = output.out_normal;
     }
 
     Handle<Pipeline> m_pp;
@@ -801,7 +810,7 @@ struct SSAO : public Pass
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         // if(!data.depth_buffer) { return; }
-        if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
+        // if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
         if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
         if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
 
@@ -857,7 +866,7 @@ struct SSAO : public Pass
                 });
         }
 
-        if(!r.prev_data) { return; }
+        // if(!r.prev_data) { return; }
 
         struct PassSSAOOutput
         {
@@ -871,6 +880,7 @@ struct SSAO : public Pass
             RGAccessId history_len;
             RGAccessId history;
             RGAccessId out_color;
+            RGAccessId normal_depth;
 
             RGAccessId prev_constants;
             RGAccessId prev_normals;
@@ -882,12 +892,11 @@ struct SSAO : public Pass
             m_name.c_str(),
             [=, this](RGBuilder& b, PassSSAOOutput& d) {
                 auto& r = get_renderer();
-                d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
-                d.constants = b.import_resource(r.current_data->render_resources.constants);
-                d.constants = b.read_buffer(d.constants);
+                d.depth = b.sample_texture(get_frame_data().render_resources.halfres_depth);
+                d.constants = b.read_buffer(r.current_data->render_resources.constants);
                 d.noise = b.import_resource(m_noise_texture);
                 d.noise = b.sample_texture(d.noise);
-                d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
+                d.normals = b.sample_texture(get_frame_data().render_resources.halfres_normal);
                 d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
                 d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
                 d.history = b.read_write_image(b.create_resource(get_buffered_name("AO History").as_view(),
@@ -896,21 +905,27 @@ struct SSAO : public Pass
                                                                              ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
                                                                  {}, true));
                 d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
-                d.out_color = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
+                // d.out_color = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
+                d.out_color = b.create_resource("AO Output", Image::init(r.settings.render_resolution.x / 2,
+                                                                         r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
+                                                                         ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+                d.out_color = b.read_write_image(d.out_color);
+                r.current_data->render_resources.ao = b.as_res_id(d.out_color);
+                // d.normal_depth = b.read_image(get_frame_data().render_resources.halfres_normal_depth);
 
-                d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
-                d.prev_constants = b.read_buffer(d.prev_constants);
-                d.prev_normals = b.import_resource(r.prev_data->render_resources.normals);
-                d.prev_normals = b.sample_texture(d.prev_normals);
-                d.prev_depth = b.import_resource(r.prev_data->render_resources.depth);
-                d.prev_depth = b.sample_texture(d.prev_depth);
-                d.prev_history_len = b.import_resource(r.prev_data->render_resources.history_len);
-                d.prev_history_len = b.sample_texture(d.prev_history_len);
-                d.prev_history = b.read_image(b.create_resource(get_buffered_name("AO History", -1).as_view(),
-                                                                Image::init(r.settings.render_resolution.x,
-                                                                            r.settings.render_resolution.y,
-                                                                            ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
-                                                                {}, true));
+                // d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
+                // d.prev_constants = b.read_buffer(d.prev_constants);
+                // d.prev_normals = b.import_resource(r.prev_data->render_resources.normals);
+                // d.prev_normals = b.sample_texture(d.prev_normals);
+                // d.prev_depth = b.import_resource(r.prev_data->render_resources.depth);
+                // d.prev_depth = b.sample_texture(d.prev_depth);
+                // d.prev_history_len = b.import_resource(r.prev_data->render_resources.history_len);
+                // d.prev_history_len = b.sample_texture(d.prev_history_len);
+                // d.prev_history = b.read_image(b.create_resource(get_buffered_name("AO History", -1).as_view(),
+                //                                                 Image::init(r.settings.render_resolution.x,
+                //                                                             r.settings.render_resolution.y,
+                //                                                             ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
+                //                                                 {}, true));
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
                 auto& r = get_renderer();
@@ -927,15 +942,15 @@ struct SSAO : public Pass
                     DescriptorResource::storage_image(b.get_img(d.history)),
                     DescriptorResource::storage_image(b.get_img(d.out_color)),
 
-                    DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.prev_depth)),
-                    DescriptorResource::sampled_image(b.get_img(d.prev_normals)),
-                    DescriptorResource::sampled_image(b.get_img(d.prev_history_len)),
-                    DescriptorResource::storage_image(b.get_img(d.prev_history)),
+                    // DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
+                    // DescriptorResource::sampled_image(b.get_img(d.prev_depth)),
+                    // DescriptorResource::sampled_image(b.get_img(d.prev_normals)),
+                    // DescriptorResource::sampled_image(b.get_img(d.prev_history_len)),
+                    // DescriptorResource::storage_image(b.get_img(d.prev_history)),
 
                 };
                 cmd->bind_resources(1, resources);
-                cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
+                cmd->dispatch((r.settings.render_resolution.x / 2 + 7) / 8, (r.settings.render_resolution.y / 2 + 7) / 8, 1);
             });
     }
 

@@ -33,12 +33,13 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 {
 	uint3 dtid = thread_id;
 #if 1
+return;
     uint2 dims;
     gOutAOImage.GetDimensions(dims.x, dims.y);
     if (any(thread_id.xy >= dims.xy)) { return; }
 
     const float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
-    float depth = gDepthTexture.Load(int3(thread_id.xy, 0)).x; 
+    float depth = gDepthTexture.Load(int3(thread_id.xy, 0)); 
 
     if (depth < 1e-5) 
     { 

@@ -140,7 +140,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
             uint indirect = update_sectors(minHorizon, maxHorizon, 0u);
             
             float stepVisibility = float(count_ones(indirect & ~occlusion)) / float(N_SECTORS);
-            lighting += stepVisibility * sampleLight * clamp(dot(normal, sampleHorizon), 0.0, 1.0) * clamp(dot(sampleNormal, -sampleHorizon), 0.0, 1.0);
+            //lighting += stepVisibility * sampleLight * clamp(dot(normal, sampleHorizon), 0.0, 1.0) * clamp(dot(sampleNormal, -sampleHorizon), 0.0, 1.0);
 
             occlusion |= indirect;
         }
@@ -149,18 +149,19 @@ void main(uint3 dtid : SV_DispatchThreadID)
     }
 
     visibility /= n_slices;
-    lighting /= n_slices;
-    float4 current_signal = float4(lighting, visibility);
+    //lighting /= n_slices;
+	    gOutAOImage[dtid.xy].xyz = visibility;
+	    gOutAOImage[dtid.xy].w = 1.0;
+		return;
+    //float4 current_signal = float4(lighting, visibility);
 
-    RWTexture2D<float4> history_tex = get_grwt2(OutHistory, float4);
-    RWTexture2D<float4> prev_history_tex = get_grwt2(PrevHistory, float4);
-    
-    // Note: This relies entirely on stationary camera logic. 
-    // If you plan on moving the camera, you will eventually need the reprojection logic back!
-    float4 history = prev_history_tex[dtid.xy].xyzw * (12.0/16.0) + current_signal * (4.0 / 16.0);
-    history_tex[dtid.xy] = history;
-    
-    gOutAOImage[dtid.xy].xyz = (gOutAOImage[dtid.xy].xyz + history.xyz*10.0) * history.w;
+    //RWTexture2D<float4> history_tex = get_grwt2(OutHistory, float4);
+    //RWTexture2D<float4> prev_history_tex = get_grwt2(PrevHistory, float4);
+    //
+    //float4 history = prev_history_tex[dtid.xy].xyzw * (12.0/16.0) + current_signal * (4.0 / 16.0);
+    //history_tex[dtid.xy] = history;
+    //
+    //gOutAOImage[dtid.xy].xyz = (gOutAOImage[dtid.xy].xyz + history.xyz*10.0) * history.w;
 }
 #if 0
     // =========================================================================

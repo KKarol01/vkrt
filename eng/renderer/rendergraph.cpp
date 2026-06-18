@@ -125,10 +125,9 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
     RGWaitSync* wait_sync{};
     if(auto it = graph->persistent_resources.find(ENG_HASH(resource.name)); it != graph->persistent_resources.end())
     {
-        if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED)
-        {
-            layout = it->second.last_layout;
-        }
+        // i don't think the if is needed, since it's gonna be undefined anyway
+        // if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED){}
+        layout = it->second.last_layout;
         if(it->second.wait_sync.sync) { wait_sync = &it->second.wait_sync; }
     }
 
@@ -255,15 +254,16 @@ RGAccessId RGBuilder::add_access(const RGAccess& a)
     return ret;
 }
 
-RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
-                                      Flags<PipelineAccess> access, std::optional<ImageFormat> format,
-                                      std::optional<ImageViewType> type, Range32u mips, Range32u layers)
+RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                                      std::optional<ImageFormat> format, std::optional<ImageViewType> type,
+                                      std::optional<ImageSwizzle> swizzle, Range32u mips, Range32u layers)
 {
     if(!acc) { return RGAccessId{}; }
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
-        .image_view = ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
+        .image_view =
+            ImageView::init(graph->get_img(acc), format, type, swizzle, mips.offset, mips.size, layers.offset, layers.size),
         .layout = layout,
         .stage = stage,
         .access = access,

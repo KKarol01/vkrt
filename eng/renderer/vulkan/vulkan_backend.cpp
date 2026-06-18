@@ -348,42 +348,6 @@ void ImageMetadataVk::destroy(Image& a)
     a.md.ptr = nullptr;
 }
 
-void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
-{
-    if(!out_allocation)
-    {
-        ENG_ERROR("Out allocation is nullptr");
-        return;
-    }
-
-    if(!view.image)
-    {
-        ENG_ERROR("Invalid image");
-        return;
-    }
-
-    auto& backend = RendererBackendVk::get_instance();
-    auto& img = view.image.get();
-    ENG_ASSERT(img.md.ptr != nullptr);
-
-    const auto src_layer = view.src_subresource / img.mips;
-    const auto src_mip = view.src_subresource % img.mips;
-    const auto dst_layer = view.dst_subresource / img.mips;
-    const auto dst_mip = view.dst_subresource % img.mips;
-    auto vkinfo = vk::VkImageViewCreateInfo{};
-    vkinfo.image = view.image->md.vk()->image;
-    vkinfo.viewType = to_vk(view.type);
-    vkinfo.format = to_vk(view.format);
-    vkinfo.subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip, dst_mip - src_mip + 1, src_layer,
-                                dst_layer - src_layer + 1 };
-
-    auto* md = new ImageViewMetadataVk{};
-    VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
-    if(!md->view) { ENG_ERROR("Could not create image view for image {}", *view.image); }
-    else { set_debug_name(md->view, ENG_FMT("image_{}_view", *view.image)); }
-    *out_allocation = md;
-}
-
 void ImageViewMetadataVk::destroy(ImageView& a)
 {
     if(!a) { return; }
@@ -1312,7 +1276,39 @@ void RendererBackendVk::destroy_image(Image& image) { ImageMetadataVk::destroy(i
 
 void RendererBackendVk::allocate_view(const ImageView& view, void** out_allocation)
 {
-    ImageViewMetadataVk::init(view, out_allocation);
+    if(!out_allocation)
+    {
+        ENG_ERROR("Out allocation is nullptr");
+        return;
+    }
+
+    if(!view.image)
+    {
+        ENG_ERROR("Invalid image");
+        return;
+    }
+
+    auto& backend = RendererBackendVk::get_instance();
+    auto& img = view.image.get();
+    ENG_ASSERT(img.md.ptr != nullptr);
+
+    const auto src_layer = view.src_subresource / img.mips;
+    const auto src_mip = view.src_subresource % img.mips;
+    const auto dst_layer = view.dst_subresource / img.mips;
+    const auto dst_mip = view.dst_subresource % img.mips;
+    auto vkinfo = vk::VkImageViewCreateInfo{};
+    vkinfo.image = view.image->md.vk()->image;
+    vkinfo.viewType = to_vk(view.type);
+    vkinfo.format = to_vk(view.format);
+    vkinfo.components = to_vk(view.swizzle);
+    vkinfo.subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip, dst_mip - src_mip + 1, src_layer,
+                                dst_layer - src_layer + 1 };
+
+    auto* md = new ImageViewMetadataVk{};
+    VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
+    if(!md->view) { ENG_ERROR("Could not create image view for image {}", *view.image); }
+    else { gfx::set_debug_name(md->view, ENG_FMT("image_{}_view", *view.image)); }
+    *out_allocation = md;
 }
 
 void RendererBackendVk::allocate_sampler(Sampler& sampler) { SamplerMetadataVk::init(sampler); }

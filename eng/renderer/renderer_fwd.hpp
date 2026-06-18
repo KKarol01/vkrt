@@ -234,6 +234,17 @@ enum class ImageViewType : u8
     TYPE_3D,
 };
 
+enum class ChannelSwizzle : u8
+{
+    IDENTITY,
+    ZERO,
+    ONE,
+    R,
+    G,
+    B,
+    A
+};
+
 enum class ImageFilter : u8
 {
     NEAREST,
@@ -466,12 +477,6 @@ struct RGResource;
 struct RGAccess;
 struct RGBuilder;
 
-struct MeshInstance;
-struct InstanceBatch;
-struct IndirectDrawParams;
-struct IndirectBatch;
-class MeshRenderData;
-
 } // namespace gfx
 
 ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, u64);
@@ -492,14 +497,30 @@ struct BufferView
     Range64u range{};
 };
 
+struct ImageSwizzle
+{
+    static ImageSwizzle rgba() { return ImageSwizzle{}; }
+    static ImageSwizzle rgb1()
+    {
+        return ImageSwizzle{ ChannelSwizzle::R, ChannelSwizzle::G, ChannelSwizzle::B, ChannelSwizzle::ONE };
+    }
+    static ImageSwizzle a001()
+    {
+        return ImageSwizzle{ ChannelSwizzle::A, ChannelSwizzle::ZERO, ChannelSwizzle::ZERO, ChannelSwizzle::ONE };
+    }
+    auto operator<=>(const ImageSwizzle&) const = default;
+    std::array<ChannelSwizzle, 4> swizzle{};
+};
+
 struct ImageView
 {
     union Metadata {
         ImageViewMetadataVk* vk;
     };
-    static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+    static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {},
+                          std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
                           u32 src_mip = 0u, u32 dst_mip = ~0u, u32 src_layer = 0u, u32 dst_layer = ~0u);
-    auto operator<=>(const ImageView& a) const = default;
+    auto operator<=>(const ImageView&) const = default;
     explicit operator bool() const { return (bool)image; }
     Metadata get_md() const;
     Handle<Image> image;
@@ -507,6 +528,7 @@ struct ImageView
     ImageFormat format{};
     u32 src_subresource{};
     u32 dst_subresource{ ~0u };
+    ImageSwizzle swizzle{};
 };
 
 inline constexpr size_t get_vertex_component_size(VertexComponent comp)

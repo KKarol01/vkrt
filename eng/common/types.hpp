@@ -53,6 +53,7 @@ using Range3D32u = Range_T<glm::u32vec3>;
 using Range3D64i = Range_T<glm::i64vec3>;
 using f32_2 = glm::vec2;
 using i32_3 = glm::i32vec3;
+using u32_2 = glm::u32vec2;
 using u32_3 = glm::u32vec3;
 using Color4f = glm::f32vec4;
 using StringHash = u64;

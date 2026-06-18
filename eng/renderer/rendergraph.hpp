@@ -143,13 +143,15 @@ struct RGBuilder
     RGAccessId create_resource(std::string_view name, Buffer&& a, bool is_persistent = false);
     RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool is_persistent = false);
     RGAccessId add_access(const RGAccess& a);
-    RGAccessId access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                               std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+    RGAccessId access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
+                               Flags<PipelineAccess> access, std::optional<ImageFormat> format = {},
+                               std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u });
     RGAccessId access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
                                Range64u range = { 0ull, ~0ull });
 
-    RGAccessId sample_texture(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+    RGAccessId sample_texture(RGAccessId acc, std::optional<ImageFormat> format = {},
+                              std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
@@ -157,12 +159,13 @@ struct RGBuilder
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::SHADER_READ_BIT;
         const auto layout = ImageLayout::READ_ONLY;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+        return access_resource(acc, layout, stage, access, format, type, swizzle, mips, layers);
     }
-    RGAccessId sample_texture(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+    RGAccessId sample_texture(RGResourceId res, std::optional<ImageFormat> format = {},
+                              std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        return sample_texture(as_acc_id(res), format, type, mips, layers);
+        return sample_texture(as_acc_id(res), format, type, swizzle, mips, layers);
     }
 
     RGAccessId access_depth(RGAccessId acc, std::optional<ImageFormat> format = {})
@@ -190,38 +193,39 @@ struct RGBuilder
     }
 
     RGAccessId read_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                          Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                          std::optional<ImageSwizzle> swizzle = {}, Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_READ_BIT;
         const auto layout = ImageLayout::GENERAL;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+        return access_resource(acc, layout, stage, access, format, type, swizzle, mips, layers);
     }
     RGAccessId read_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                          Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                          std::optional<ImageSwizzle> swizzle = {}, Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        return read_image(as_acc_id(res), format, type, mips, layers);
+        return read_image(as_acc_id(res), format, type, swizzle, mips, layers);
     }
 
     RGAccessId write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                           std::optional<ImageSwizzle> swizzle = {}, Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_WRITE_BIT;
         const auto layout = ImageLayout::GENERAL;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+        return access_resource(acc, layout, stage, access, format, type, swizzle, mips, layers);
     }
     RGAccessId write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+                           std::optional<ImageSwizzle> swizzle = {}, Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        return write_image(as_acc_id(res), format, type, mips, layers);
+        return write_image(as_acc_id(res), format, type, swizzle, mips, layers);
     }
 
-    RGAccessId read_write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+    RGAccessId read_write_image(RGAccessId acc, std::optional<ImageFormat> format = {},
+                                std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
                                 Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
@@ -229,12 +233,13 @@ struct RGBuilder
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
         const auto layout = ImageLayout::GENERAL;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
+        return access_resource(acc, layout, stage, access, format, type, swizzle, mips, layers);
     }
-    RGAccessId read_write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+    RGAccessId read_write_image(RGResourceId res, std::optional<ImageFormat> format = {},
+                                std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
                                 Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
-        return read_write_image(as_acc_id(res), format, type, mips, layers);
+        return read_write_image(as_acc_id(res), format, type, swizzle, mips, layers);
     }
 
     RGAccessId read_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
