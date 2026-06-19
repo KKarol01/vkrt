@@ -1,12 +1,5 @@
 #pragma once
 
-#include <eng/renderer/renderer_fwd.hpp>
-#include <eng/renderer/submit_queue.hpp>
-#include <eng/common/types.hpp>
-#include <eng/common/handle.hpp>
-#include <eng/common/callback.hpp>
-#include <eng/renderer/renderer.hpp>
-
 #include <unordered_map>
 #include <set>
 #include <map>
@@ -15,6 +8,12 @@
 #include <memory>
 #include <optional>
 #include <variant>
+
+#include <eng/common/callback.hpp>
+#include <eng/common/handle.hpp>
+#include <eng/common/types.hpp>
+#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/submit_queue.hpp>
 
 namespace eng
 {

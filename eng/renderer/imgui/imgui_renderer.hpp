@@ -3,8 +3,8 @@
 #include <vector>
 #include <eng/common/handle.hpp>
 #include <eng/common/callback.hpp>
+#include <eng/common/types.hpp>
 #include <eng/renderer/rendergraph.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
 
 struct ImTextureData;
 

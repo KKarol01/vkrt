@@ -1,5 +1,5 @@
 #include "bvh.hpp"
-#include <eng/renderer/renderer_fwd.hpp>
+#include <eng/renderer/types.hpp>
 
 namespace eng
 {

@@ -11,7 +11,6 @@
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/ecs/ecs.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/physics/bvh.hpp>
 #include <eng/common/indexed_hierarchy.hpp>
 

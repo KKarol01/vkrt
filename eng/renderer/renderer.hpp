@@ -3,26 +3,22 @@
 #include <mutex>
 #include <unordered_set>
 #include <glm/glm.hpp>
-#include <eng/engine.hpp>
-#include <eng/common/handle.hpp>
-#include <eng/common/flags.hpp>
-#include <eng/common/types.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
-#include <eng/renderer/rendergraph.hpp>
-#include <eng/renderer/backend.hpp>
-#include <eng/ecs/ecs.hpp>
-#include <eng/common/hash.hpp>
-#include <eng/common/slotmap.hpp>
-#include <eng/common/handleflatset.hpp>
-#include <eng/common/slotallocator.hpp>
-#include <eng/ecs/components.hpp>
 #include <eng/assets/asset_manager.hpp>
 #include <eng/assets/serialization.hpp>
+#include <eng/common/flags.hpp>
+#include <eng/common/handle.hpp>
+#include <eng/common/handleflatset.hpp>
+#include <eng/common/hash.hpp>
+#include <eng/common/slotallocator.hpp>
+#include <eng/common/slotmap.hpp>
+#include <eng/ecs/components.hpp>
+#include <eng/ecs/ecs.hpp>
+#include <eng/engine.hpp>
 #include <eng/fs/fs.hpp>
+#include <eng/renderer/backend.hpp>
 #include <eng/renderer/mesh/mesh_renderer.hpp>
-
-// Windows macro. Expands to '1'. Don't need it, compiles without it. Thanks MS.
-#undef TRANSPARENT
+#include <eng/renderer/rendergraph.hpp>
+#include <eng/renderer/types.hpp>
 
 namespace eng
 {
@@ -33,6 +29,29 @@ namespace pass
 {
 struct Pass;
 }
+
+struct Meshlet
+{
+    i32 vertex_offset;
+    u32 vertex_count;
+    u32 index_offset;
+    u32 index_count;
+    glm::vec4 bounding_sphere{};
+};
+
+struct GeometryDescriptor
+{
+    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
+    size_t get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
+    Flags<GeometryFlags> flags;
+    Flags<VertexComponent> vertex_layout;
+    IndexFormat index_format{};
+    std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
+    std::span<const float> attributes;
+    std::span<const std::byte> indices;
+    std::span<const Meshlet> meshlets; // optional
+    assets::ParsedGeometryReadySignal* signal{};
+};
 
 struct DescriptorResource
 {
@@ -807,7 +826,7 @@ class Renderer
         std::vector<float> attributes;
         std::vector<std::byte> indices;
         std::vector<Meshlet> meshlets;
-        ParsedGeometryReadySignal* geom_ready_signal{};
+        assets::ParsedGeometryReadySignal* geom_ready_signal{};
     };
 
     struct BuildGeometryContext
@@ -945,6 +964,7 @@ inline StackString<128> get_buffered_name(std::string_view name, i32 offset = 0)
 }
 
 } // namespace gfx
+} // namespace eng
 
 // clang-format off
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(*handle); });
@@ -963,8 +983,25 @@ ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(*handle); });
 
-namespace serialization 
+namespace eng
 {
+namespace serialization
+{
+template <> inline constexpr auto get_struct_fields<gfx::Meshlet>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_offset),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_count),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_offset),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_count),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, bounding_sphere));
+}
+template <> inline constexpr auto get_struct_fields<glm::vec4>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, x),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, y),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, z),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, w));
+}
 template <> inline constexpr auto get_struct_fields<gfx::Material>()
 {
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
@@ -982,7 +1019,5 @@ template <> inline constexpr auto get_struct_fields<gfx::Mesh>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, material));
 }
 }
-
-// clang-format on
-
 } // namespace eng
+// clang-format on

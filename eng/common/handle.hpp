@@ -6,10 +6,34 @@
 #include <atomic>
 #include <cassert>
 #include <type_traits>
-#include <eng/common/types.hpp>
+#include <eng/common/scalar_types.hpp>
 
 namespace eng
 {
+
+/**
+Strongly typed integral type. Introduced to avoid bugs when dealing with indices/ids/handles
+from different systems, storages, etc.
+
+Initially all bits are set to 1, and that is an invalid state.
+In it, the id always compares to false.
+
+Dereference operator returns the underlying value.
+*/
+template <typename T, std::integral Storage> struct TypedId
+{
+    using StorageType = Storage;
+    inline static constexpr StorageType INVALID_VALUE = ~StorageType{};
+    constexpr TypedId() = default;
+    constexpr explicit TypedId(StorageType handle) : handle{ handle } {}
+    constexpr StorageType& operator*() { return handle; }
+    constexpr const StorageType& operator*() const { return handle; }
+    constexpr bool operator==(const TypedId& a) const { return (bool)*this && (bool)a && handle == a.handle; }
+    constexpr auto operator<=>(const TypedId& a) const { return handle <=> a.handle; }
+    constexpr explicit operator bool() const { return handle != INVALID_VALUE; }
+    StorageType handle{ INVALID_VALUE };
+};
+
 // Defines the underlying storage for handles, for each type separately.
 // ENG_DEFINE_HANDLE_STORAGE can be used before first use of a handle
 // with a particular type to specify different storage type, such as
@@ -20,9 +44,12 @@ template <typename T> struct HandleStorage
 };
 
 #define ENG_DEFINE_HANDLE_STORAGE(type, storage)                                                                       \
+    namespace eng                                                                                                      \
+    {                                                                                                                  \
     template <> struct HandleStorage<type>                                                                             \
     {                                                                                                                  \
         using storage_type = storage;                                                                                  \
+    };                                                                                                                 \
     }
 
 struct GenerateHandle
@@ -51,15 +78,21 @@ struct Handle : public TypedId<T, StorageType>
 };
 
 #define ENG_DEFINE_HANDLE_ALL_GETTERS(type, body)                                                                      \
+    namespace eng                                                                                                      \
+    {                                                                                                                  \
     template <> struct HandleDispatcher<type>                                                                          \
     {                                                                                                                  \
         type* operator()(const Handle<type>& handle) const body                                                        \
-    };
+    };                                                                                                                 \
+    }
 #define ENG_DEFINE_HANDLE_CONST_GETTERS(type, body)                                                                    \
+    namespace eng                                                                                                      \
+    {                                                                                                                  \
     template <> struct HandleDispatcher<type>                                                                          \
     {                                                                                                                  \
         const type* operator()(const Handle<type>& handle) const body                                                  \
-    };
+    };                                                                                                                 \
+    }
 } // namespace eng
 
 namespace std

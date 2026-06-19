@@ -1,6 +1,6 @@
 #pragma once
 #include <eng/common/flags.hpp>
-#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/types.hpp>
 #include <vulkan/vulkan.h>
 
 namespace eng

@@ -138,8 +138,8 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
             .vertices = vertices,
             .indices = std::as_bytes(std::span{ indices }),
             .signal = ctx.import_settings.test(ImportSettings::KEEP_DATA_BIT)
-                          ? &asset.geometry_data.emplace_back(gfx::ParsedGeometryReadySignal{})
-                          : (gfx::ParsedGeometryReadySignal*)nullptr,
+                          ? &asset.geometry_data.emplace_back(assets::ParsedGeometryReadySignal{})
+                          : (assets::ParsedGeometryReadySignal*)nullptr,
         }));
         if(ctx.import_settings & ImportSettings::KEEP_DATA_BIT)
         {

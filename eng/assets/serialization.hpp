@@ -12,6 +12,7 @@
 #include <eng/fs/fs.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/handle.hpp>
+#include <eng/common/types.hpp>
 #include <eng/string/stack_string.hpp>
 
 namespace eng

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <eng/renderer/renderer_fwd.hpp>
+#include <eng/common/types.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/ecs/components.hpp>
 

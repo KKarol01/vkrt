@@ -233,7 +233,6 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
                    "keep data "
                    "flag when importing?",
                    src.path.string());
-
         return;
     }
 
@@ -314,7 +313,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     u64 image_count;
     deserialize(image_count, src, out_bytes_written);
     dst.images.resize(image_count);
-    gfx::ParsedImageData imgd{};
+    assets::ParsedImageData imgd{};
     auto* mip_cmd = gfx::get_renderer().current_data->cmdpool->begin();
     for(auto i = 0u; i < image_count; ++i)
     {
@@ -362,7 +361,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     u64 geom_count;
     deserialize(geom_count, src, out_bytes_written);
     dst.geometries.resize(geom_count);
-    gfx::ParsedGeometryData geom;
+    assets::ParsedGeometryData geom;
     for(u64 i = 0; i < geom_count; ++i)
     {
         deserialize(geom, src, out_bytes_written);

@@ -1,19 +1,18 @@
 #pragma once
 
-#include <cstdint>
-#include <future>
-#include <optional>
-#include <eng/common/handle.hpp>
-#include <eng/common/flags.hpp>
-#include <eng/common/types.hpp>
-#include <eng/common/hash.hpp>
-#include <eng/assets/serialization.hpp>
-
 // Windows macro. Expands to '2'. Don't need it, compiles without it. Thanks MS.
 #ifdef OPAQUE
 #undef OPAQUE
 #endif
+// Windows macro. Expands to '1'. Don't need it, compiles without it. Thanks MS.
+#ifdef TRANSPARENT
+#undef TRANSPARENT
+#endif
 
+#include <eng/common/logger.hpp>
+#include <eng/common/types.hpp>
+
+// Enums
 namespace eng
 {
 namespace gfx
@@ -405,84 +404,85 @@ enum class DiscardContents : u8
     YES,
 };
 
-class Renderer;
-struct ImageBlockData;
-struct Shader;
-struct DescriptorSet;
-struct DescriptorLayout;
-struct PipelineCreateInfo;
-struct PushRange;
-struct PipelineLayout;
-struct Pipeline;
-struct Geometry;
-struct ShaderEffect;
-struct MeshPassCreateInfo;
-struct MeshPass;
-struct Material;
-struct Mesh;
-struct Meshlet;
-struct GeometryDescriptor;
-struct Buffer;
-struct BufferView;
-struct Image;
-struct ImageView;
-struct ImageMipsLayers;
-struct ImageLayers;
-struct ImageBlit;
-struct ImageCopy;
-struct Sampler;
-struct Texture;
-struct MeshDescriptor;
-struct InstanceSettings;
-struct BLASInstanceSettings;
-struct VsmData;
-struct Swapchain;
-struct DebugGeometry;
-struct DescriptorResource;
-
+// Forward declarations
+class BindlessPool;
 class CommandBufferVk;
 class CommandPoolVk;
-enum class SyncType;
-struct SyncCreateInfo;
-struct Sync;
-class SubmitQueue;
-
+class ICommandBuffer;
+class ICommandPool;
 class ImGuiRenderer;
-class BindlessPool;
+class Renderer;
+class RGRenderGraph;
 class StagingBuffer;
-enum class QueryType : u8;
+class SubmitQueue;
+enum class SyncType;
+struct BLASInstanceSettings;
+struct Buffer;
+struct BufferMetadataVk;
+struct BufferView;
+struct DebugGeometry;
+struct DescriptorLayout;
+struct DescriptorLayoutMetadataVk;
+struct DescriptorResource;
+struct DescriptorSet;
+struct DescriptorSetMetadataVk;
+struct Geometry;
+struct GeometryDescriptor;
+struct GeometryMetadataVk;
+struct IDescriptorSetAllocator;
+struct Image;
+struct ImageBlit;
+struct ImageBlockData;
+struct ImageCopy;
+struct ImageLayers;
+struct ImageMetadataVk;
+struct ImageMipsLayers;
+struct ImageView;
+struct ImageViewMetadataVk;
+struct InstanceSettings;
+struct Material;
+struct Mesh;
+struct MeshDescriptor;
+struct Meshlet;
+struct MeshPass;
+struct MeshPassCreateInfo;
+struct Pipeline;
+struct PipelineCreateInfo;
+struct PipelineLayout;
+struct PipelineLayoutMetadataVk;
+struct PipelineMetadataVk;
+struct PushRange;
+struct QueryPool;
 struct QueryPoolCreateInfo;
 struct QueryPoolMetadataVk;
-struct GeometryMetadataVk;
-struct QueryPool;
-class SubmitQueue;
-struct ImageMetadataVk;
-struct ImageViewMetadataVk;
-struct ShaderMetadataVk;
-struct PipelineMetadataVk;
-struct DescriptorLayoutMetadataVk;
-struct VkDescriptorPoolMetadata;
-struct DescriptorSetMetadataVk;
-struct PipelineLayoutMetadataVk;
-struct SamplerMetadataVk;
-struct BufferMetadataVk;
-struct IDescriptorSetAllocator;
-class ICommandPool;
-class ICommandBuffer;
-struct TimestampQuery;
-struct ScopedTimestampQuery;
-
-class RGRenderGraph;
-struct RGResource;
 struct RGAccess;
 struct RGBuilder;
+struct RGResource;
+struct Sampler;
+struct SamplerMetadataVk;
+struct ScopedTimestampQuery;
+struct Shader;
+struct ShaderEffect;
+struct ShaderMetadataVk;
+struct Swapchain;
+struct Sync;
+struct SyncCreateInfo;
+struct Texture;
+struct TimestampQuery;
+struct VkDescriptorPoolMetadata;
+struct VsmData;
 
 } // namespace gfx
 
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, u64);
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Image, u64);
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Shader, u64);
+} // namespace eng
 
+ENG_DEFINE_HANDLE_STORAGE(gfx::Buffer, u64);
+ENG_DEFINE_HANDLE_STORAGE(gfx::Image, u64);
+ENG_DEFINE_HANDLE_STORAGE(gfx::Shader, u64);
+
+// Shared types (to avoid including renderer.hpp)
+namespace eng
+{
 namespace gfx
 {
 struct BufferView
@@ -530,7 +530,15 @@ struct ImageView
     u32 dst_subresource{ ~0u };
     ImageSwizzle swizzle{};
 };
+} // namespace gfx
+} // namespace eng
 
+// Helper funcs
+namespace eng
+{
+
+namespace gfx
+{
 inline constexpr size_t get_vertex_component_size(VertexComponent comp)
 {
     switch(comp)
@@ -679,51 +687,11 @@ inline ImageViewType get_view_type_from_image(ImageType type)
     }
     }
 }
-
-struct ParsedGeometryData
-{
-    Flags<gfx::VertexComponent> vertex_layout;
-    std::vector<float> positions{};
-    std::vector<float> attributes{};
-    std::vector<u16> indices{};
-    std::vector<gfx::Meshlet> meshlets{};
-};
-using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
-
-struct ParsedImageData
-{
-    StackString<128> name;
-    u32 width{};
-    u32 height{};
-    gfx::ImageFormat format{};
-    std::vector<std::byte> data;
-};
-
-struct Meshlet
-{
-    i32 vertex_offset;
-    u32 vertex_count;
-    u32 index_offset;
-    u32 index_count;
-    glm::vec4 bounding_sphere{};
-};
-
-struct GeometryDescriptor
-{
-    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
-    size_t get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
-    Flags<GeometryFlags> flags;
-    Flags<VertexComponent> vertex_layout;
-    IndexFormat index_format{};
-    std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
-    std::span<const float> attributes;
-    std::span<const std::byte> indices;
-    std::span<const Meshlet> meshlets; // optional
-    ParsedGeometryReadySignal* signal{};
-};
-
 } // namespace gfx
+} // namespace eng
 
+namespace eng
+{
 namespace serialization
 {
 template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
@@ -733,37 +701,6 @@ template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, format),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, src_subresource),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource));
-}
-template <> inline constexpr auto get_struct_fields<gfx::ParsedImageData>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, name),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, width),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, height),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, format),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, data));
-}
-template <> inline constexpr auto get_struct_fields<gfx::ParsedGeometryData>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, vertex_layout),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, positions),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, attributes),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, indices),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, meshlets));
-}
-template <> inline constexpr auto get_struct_fields<gfx::Meshlet>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_offset),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_count),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_offset),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_count),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, bounding_sphere));
-}
-template <> inline constexpr auto get_struct_fields<glm::vec4>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, x),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, y),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, z),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, w));
 }
 } // namespace serialization
 } // namespace eng

@@ -3,10 +3,10 @@
 #include <deque>
 #include <mutex>
 #include <shared_mutex>
+#include <future>
 
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/fs/fs.hpp>
 #include <eng/assets/serialization.hpp>
@@ -23,6 +23,25 @@ struct Node
     u32 transform{ ~0u };
     u32 parent{ ~0u };
     Range32u children{};
+};
+
+struct ParsedGeometryData
+{
+    Flags<gfx::VertexComponent> vertex_layout;
+    std::vector<float> positions{};
+    std::vector<float> attributes{};
+    std::vector<u16> indices{};
+    std::vector<gfx::Meshlet> meshlets{};
+};
+using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
+
+struct ParsedImageData
+{
+    StackString<128> name;
+    u32 width{};
+    u32 height{};
+    gfx::ImageFormat format{};
+    std::vector<std::byte> data;
 };
 
 struct Asset
@@ -43,9 +62,9 @@ struct Asset
     std::vector<Node> nodes;
     std::vector<u32> root_nodes;
 
-    std::deque<gfx::ParsedGeometryReadySignal> geometry_data;
-    std::deque<std::shared_future<gfx::ParsedGeometryData>> geometry_data_futures;
-    std::vector<gfx::ParsedImageData> image_data;
+    std::deque<assets::ParsedGeometryReadySignal> geometry_data;
+    std::deque<std::shared_future<assets::ParsedGeometryData>> geometry_data_futures;
+    std::vector<assets::ParsedImageData> image_data;
 };
 
 class AssetManager
@@ -56,8 +75,7 @@ class AssetManager
 
   private:
     serialization::engb::Container& get_latest_container();
-    std::optional<serialization::engb::List> try_find_list_by_hash(u64 hash,
-                                                                   serialization::engb::Container** out_container = nullptr);
+    std::optional<serialization::engb::List> try_find_list_by_hash(u64 hash, serialization::engb::Container** out_container = nullptr);
 
     std::optional<Asset> try_deserialize_asset(const fs::Path& file_path);
     void serialize_asset_to_enbc_thread(Asset& asset);
@@ -80,6 +98,22 @@ template <> inline constexpr auto get_struct_fields<assets::Node>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, transform),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, parent),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, children));
+}
+template <> inline constexpr auto get_struct_fields<assets::ParsedImageData>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, name),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, width),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, height),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, format),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, data));
+}
+template <> inline constexpr auto get_struct_fields<assets::ParsedGeometryData>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, vertex_layout),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, positions),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, attributes),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, indices),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, meshlets));
 }
 } // namespace serialization
 } // namespace eng

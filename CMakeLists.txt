@@ -148,14 +148,12 @@ target_precompile_headers(eng
         <eng/common/handleflatset.hpp>
         <eng/common/hash.hpp>
         <eng/common/logger.hpp>
-        <eng/common/scalar_types.hpp>
         <eng/common/sparseset.hpp>
         <eng/common/to_string.hpp>
         <eng/common/types.hpp>
         <eng/ecs/ecs.hpp>
         <eng/string/stack_string.hpp>
-
-        <eng/renderer/renderer_fwd.hpp>
+        <eng/renderer/types.hpp>
         <eng/renderer/vulkan/to_vk.hpp>
 )
 

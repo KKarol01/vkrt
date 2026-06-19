@@ -114,10 +114,13 @@ class DirectoryListener
 };
 
 } // namespace fs
+} // namespace eng
 
 ENG_DEFINE_HANDLE_STORAGE(fs::DirectoryListener, uintptr_t);
 ENG_DEFINE_HANDLE_ALL_GETTERS(fs::DirectoryListener, { return reinterpret_cast<fs::DirectoryListener*>(*handle); });
 
+namespace eng
+{
 namespace fs
 {
 

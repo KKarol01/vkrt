@@ -1,15 +1,14 @@
 #include "rendergraph.hpp"
 
-#include <eng/renderer/renderer.hpp>
-#include <eng/renderer/submit_queue.hpp>
-#include <eng/math/align.hpp>
-#include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <unordered_set>
 #include <unordered_map>
 #include <set>
 #include <eng/common/handle.hpp>
 #include <eng/engine.hpp>
+#include <eng/math/align.hpp>
 #include <eng/renderer/set_debug_name.hpp>
+#include <eng/renderer/submit_queue.hpp>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
 
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
 
@@ -515,7 +514,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                         if(res.clear->is_color())
                         {
                             const auto clear = res.clear->get_color().color;
-                            layout_cmd->clear_color(res.as_image().get(), Color4f{ clear.x, clear.y, clear.z, clear.w });
+                            layout_cmd->clear_color(res.as_image().get(), f32_4{ clear.x, clear.y, clear.z, clear.w });
                         }
                         else
                         {

@@ -5,22 +5,21 @@
 #include <array>
 #include <tuple>
 #include <unordered_map>
+
 #include <glm/mat4x3.hpp>
 #include <VulkanMemoryAllocator/include/vk_mem_alloc.h>
-#include <eng/renderer/renderer_fwd.hpp>
+
+#include <eng/common/types.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/handleflatset.hpp>
-
-#include <vulkan/vulkan.h>
+#include <eng/renderer/backend.hpp>
 #include <eng/renderer/vulkan/vulkan_structs.hpp>
 
 namespace eng
 {
-
 namespace gfx
 {
-
 class SubmitQueue;
 class StagingBuffer;
 class BindlessPool;
@@ -281,5 +280,4 @@ class RendererBackendVk : public IRendererBackend
     VkPhysicalDeviceLimits pdev_limits{};
 };
 } // namespace gfx
-
 } // namespace eng

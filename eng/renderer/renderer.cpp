@@ -1,23 +1,25 @@
-#include <meshoptimizer/src/meshoptimizer.h>
 #include <ranges>
 #include <barrier>
 #include <execution>
 #include <algorithm>
-#include "renderer.hpp"
-#include <eng/renderer/staging_buffer.hpp>
-#include <eng/engine.hpp>
-#include <eng/camera.hpp>
-#include <eng/renderer/bindlesspool.hpp>
-#include <eng/renderer/vulkan/to_vk.hpp>
-#include <eng/common/to_string.hpp>
-#include <eng/renderer/imgui/imgui_renderer.hpp>
-#include <eng/ecs/components.hpp>
-#include <eng/fs/fs.hpp>
-#include <eng/renderer/passes/passes.hpp>
-#include <eng/scene.hpp>
-#include <eng/math/align.hpp>
-#include <assets/shaders/common.hlsli>
+#include <meshoptimizer/src/meshoptimizer.h>
 #include <reproc++/run.hpp>
+#include "renderer.hpp"
+#include <eng/camera.hpp>
+#include <eng/common/to_string.hpp>
+#include <eng/ecs/components.hpp>
+#include <eng/engine.hpp>
+#include <eng/fs/fs.hpp>
+#include <eng/math/align.hpp>
+#include <eng/renderer/bindlesspool.hpp>
+#include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/renderer/mesh/mesh_renderer.hpp>
+#include <eng/renderer/passes/passes.hpp>
+#include <eng/renderer/rendergraph.hpp>
+#include <eng/renderer/staging_buffer.hpp>
+#include <eng/renderer/vulkan/to_vk.hpp>
+#include <eng/scene.hpp>
+#include <assets/shaders/common.hlsli>
 
 namespace eng
 {
@@ -764,49 +766,49 @@ void Renderer::compile_rendergraph()
 
     pass::PassInitData pass_data{};
 
-    //pass_data.depth_buffer = import_resources.depth;
-    //passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
+    // pass_data.depth_buffer = import_resources.depth;
+    // passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
 
     // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
     //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
     //  passes.velocity->init(rgraph, pass_data);
 
-    //pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    //pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    //passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
+    // pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
+    // pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    // passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
-    //pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    //pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    //passes.downscale_depth->init(rgraph, pass_data);
+    // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
+    // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    // passes.downscale_depth->init(rgraph, pass_data);
     //// pass_data = {};
     //// pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     //// passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
-    //pass_data = {};
-    //pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    //pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    // pass_data = {};
+    // pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
+    // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
     //// pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
-    //pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    //pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = import_resources.history_len;
-    //pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    //passes.ao->init(rgraph, pass_data);
+    // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
+    // pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = import_resources.history_len;
+    // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
+    // passes.ao->init(rgraph, pass_data);
 
     struct CopyToAccum
     {
         RGAccessId input;
         RGAccessId output;
     };
-    //rgraph->add_graphics_pass<CopyToAccum>(
-    //    "Copy To Accum",
-    //    [=, this](RGBuilder& b, CopyToAccum& d) {
-    //        d.input = b.copy_source(get_frame_data().render_resources.ao);
-    //        d.output = b.copy_dest(import_resources.final_color);
-    //    },
-    //    [this](RGBuilder& b, const CopyToAccum& d) {
-    //        auto* cmd = b.open_cmd_buf();
-    //        cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
-    //    });
+    // rgraph->add_graphics_pass<CopyToAccum>(
+    //     "Copy To Accum",
+    //     [=, this](RGBuilder& b, CopyToAccum& d) {
+    //         d.input = b.copy_source(get_frame_data().render_resources.ao);
+    //         d.output = b.copy_dest(import_resources.final_color);
+    //     },
+    //     [this](RGBuilder& b, const CopyToAccum& d) {
+    //         auto* cmd = b.open_cmd_buf();
+    //         cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
+    //     });
 
     const auto imdata = imgui_renderer->update(rgraph);
 
@@ -1202,11 +1204,11 @@ void Renderer::build_pending_geometries()
                         meshletize_geometry(batch, res.positions, res.attributes, res.indices, res.meshlets);
                         if(batch.geom_ready_signal)
                         {
-                            batch.geom_ready_signal->set_value(ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
-                                                                                   .positions = res.positions,
-                                                                                   .attributes = res.attributes,
-                                                                                   .indices = res.indices,
-                                                                                   .meshlets = res.meshlets });
+                            batch.geom_ready_signal->set_value(assets::ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
+                                                                                           .positions = res.positions,
+                                                                                           .attributes = res.attributes,
+                                                                                           .indices = res.indices,
+                                                                                           .meshlets = res.meshlets });
                         }
                     }
                     else

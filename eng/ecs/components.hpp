@@ -8,8 +8,8 @@
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/logger.hpp>
+#include <eng/common/types.hpp>
 #include <eng/string/stack_string.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/assets/serialization.hpp>
 #include <assets/shaders/common.hlsli>
 

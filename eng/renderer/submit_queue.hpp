@@ -34,7 +34,7 @@ class ICommandBuffer
     virtual void copy(const Image& dst, const Image& src) = 0;
     virtual void blit(const Image& dst, const Image& src, const ImageBlit& blit) = 0;
 
-    virtual void clear_color(const Image& image, const Color4f& color) = 0;
+    virtual void clear_color(const Image& image, const f32_4& color) = 0;
     virtual void clear_depth_stencil(const Image& image, float clear_depth, std::optional<u32> clear_stencil = {}) = 0;
 
     virtual void bind_index(const Buffer& index, u32 offset, VkIndexType type) = 0;
@@ -99,7 +99,7 @@ class CommandBufferVk : public ICommandBuffer
     void blit(const Image& dst, const Image& src, const ImageBlit& blit) override;
 
     // color out/color rw -> clear -> color out/color rw/attachment optimal
-    void clear_color(const Image& image, const Color4f& color) override;
+    void clear_color(const Image& image, const f32_4& color) override;
     // late z /ds rw -> clear -> early z/ds rw/attachment optimal
     void clear_depth_stencil(const Image& image, float clear_depth, std::optional<u32> clear_stencil) override;
 

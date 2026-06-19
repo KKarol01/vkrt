@@ -73,6 +73,6 @@ namespace std
 {
 template <typename T> struct hash<Flags<T>>
 {
-    size_t operator()(const Flags<T>& t) const noexcept { return ENG_HASH(t.flags); }
+    size_t operator()(const Flags<T>& t) const noexcept { return (size_t)t.flags; }
 };
 } // namespace std

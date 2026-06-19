@@ -5,10 +5,11 @@
 #include <string_view>
 #include <memory>
 #include <variant>
+#include <optional>
 #include <eng/common/callback.hpp>
 #include <eng/common/hash.hpp>
+#include <eng/renderer/types.hpp>
 #include <eng/string/stack_string.hpp>
-#include <eng/renderer/renderer_fwd.hpp>
 
 namespace eng
 {
