@@ -115,7 +115,11 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     ENG_ASSERT(container);
     const auto& list = *listopt;
 
-    if(list.version != 0) { ENG_WARN("Asset {} has invalid version {}", file_path.string(), list.version); }
+    if(list.version != 0)
+    {
+        ENG_WARN("Asset {} has invalid version {}", file_path.string(), list.version);
+        return std::nullopt;
+    }
 
     ENG_TIMER_SCOPED("Deserializing {}", file_path.string());
     std::shared_lock lock{ m_engbc_vec_mutex };

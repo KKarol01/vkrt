@@ -26,6 +26,11 @@ template <typename T, typename Field> struct StructField
     using Type = Field;
     Field T::* fieldptr;
 };
+
+#define ENG_SERIALIZATION_STRUCT_VERSION(version)                                                                      \
+    inline static constexpr u8 _eng_s_get_ver() { return version; }
+#define ENG_SERIALIZATION_STRUCT_VERSION_CHECK(Type, version) static_assert(Type::_eng_s_get_ver() == version);
+
 #define ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(Type, field)                                                            \
     StructField { &Type::field }
 
@@ -59,6 +64,8 @@ template <typename T>
 concept MemcpySafe = std::is_arithmetic_v<T> || std::is_same_v<T, std::byte> || std::is_enum_v<T>;
 
 // Forward declare templates so the ones below can be used by those above -- thanks c++
+template <typename T, usize size>
+inline void serialize(std::span<std::byte> dst, const std::array<T, size>& src, usize& out_bytes_written);
 template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, usize& out_bytes_written);
 template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, usize& out_bytes_written);
 template <>
@@ -72,6 +79,8 @@ template <typename T> inline void serialize(std::span<std::byte> dst, const Rang
 template <typename T, typename Storage>
 inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written);
 
+template <typename T, usize size>
+inline void deserialize(std::array<T, size>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, usize& out_bytes_written);
@@ -91,6 +100,12 @@ inline void serialize_fields(std::span<std::byte> dst, const T& src, usize& out_
 {
     constexpr auto fields = get_struct_fields<T>();
     ((serialize(dst, src.*std::get<index>(fields).fieldptr, out_bytes_written)), ...);
+}
+
+template <typename T, usize size>
+inline void serialize(std::span<std::byte> dst, const std::array<T, size>& src, usize& out_bytes_written)
+{
+    serialize(dst, std::span<const T>{ src }, out_bytes_written);
 }
 
 template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, usize& out_bytes_written)
@@ -161,6 +176,12 @@ inline void deserialize_fields(T& dst, std::span<const std::byte> src, usize& ou
 {
     constexpr auto fields = get_struct_fields<T>();
     ((deserialize(dst.*std::get<index>(fields).fieldptr, src, out_bytes_written)), ...);
+}
+
+template <typename T, usize size>
+inline void deserialize(std::array<T, size>& dst, std::span<const std::byte> src, usize& out_bytes_written)
+{
+    deserialize(std::span<T>{ dst }, src, out_bytes_written);
 }
 
 template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, usize& out_bytes_written)
@@ -281,6 +302,7 @@ struct AssetMetadata
 
 struct List
 {
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     u64 custom_hash{};
     u64 content_hash{};
     u64 asset_start{}; // start of asset bytes, skipping metadata from flags, which is left uncompressed
@@ -321,6 +343,7 @@ ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(engb::Container);
 
 template <> inline constexpr auto get_struct_fields<engb::List>()
 {
+    ENG_SERIALIZATION_STRUCT_VERSION_CHECK(engb::List, 0);
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, custom_hash),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, content_hash),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_start),

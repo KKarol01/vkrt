@@ -9,6 +9,7 @@
 #undef TRANSPARENT
 #endif
 
+#include <array>
 #include <eng/common/logger.hpp>
 #include <eng/common/types.hpp>
 
@@ -431,10 +432,6 @@ struct GeometryDescriptor;
 struct GeometryMetadataVk;
 struct IDescriptorSetAllocator;
 struct Image;
-struct ImageBlit;
-struct ImageBlockData;
-struct ImageCopy;
-struct ImageLayers;
 struct ImageMetadataVk;
 struct ImageMipsLayers;
 struct ImageView;
@@ -445,9 +442,7 @@ struct Mesh;
 struct MeshDescriptor;
 struct Meshlet;
 struct MeshPass;
-struct MeshPassCreateInfo;
 struct Pipeline;
-struct PipelineCreateInfo;
 struct PipelineLayout;
 struct PipelineLayoutMetadataVk;
 struct PipelineMetadataVk;
@@ -470,15 +465,14 @@ struct SyncCreateInfo;
 struct Texture;
 struct TimestampQuery;
 struct VkDescriptorPoolMetadata;
-struct VsmData;
 
 } // namespace gfx
 
 } // namespace eng
 
-ENG_DEFINE_HANDLE_STORAGE(gfx::Buffer, u64);
-ENG_DEFINE_HANDLE_STORAGE(gfx::Image, u64);
-ENG_DEFINE_HANDLE_STORAGE(gfx::Shader, u64);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, eng::u64);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Image, eng::u64);
+ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Shader, eng::u64);
 
 // Shared types (to avoid including renderer.hpp)
 namespace eng
@@ -499,6 +493,7 @@ struct BufferView
 
 struct ImageSwizzle
 {
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     static ImageSwizzle rgba() { return ImageSwizzle{}; }
     static ImageSwizzle rgb1()
     {
@@ -514,6 +509,7 @@ struct ImageSwizzle
 
 struct ImageView
 {
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     union Metadata {
         ImageViewMetadataVk* vk;
     };
@@ -530,15 +526,8 @@ struct ImageView
     u32 dst_subresource{ ~0u };
     ImageSwizzle swizzle{};
 };
-} // namespace gfx
-} // namespace eng
 
 // Helper funcs
-namespace eng
-{
-
-namespace gfx
-{
 inline constexpr size_t get_vertex_component_size(VertexComponent comp)
 {
     switch(comp)
@@ -554,7 +543,7 @@ inline constexpr size_t get_vertex_component_size(VertexComponent comp)
     case VertexComponent::UV0_BIT:
         return 2 * sizeof(float);
     }
-    ENG_ERROR("Undefined case");
+    ENG_ASSERT("Undefined case");
     return 0;
 }
 
@@ -597,7 +586,7 @@ inline constexpr size_t get_index_size(IndexFormat format)
     case IndexFormat::U32:
         return 4;
     }
-    ENG_ERROR("Undefined case");
+    ENG_ASSERT("Undefined case");
     return 0;
 }
 
@@ -633,7 +622,7 @@ inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> 
     else if(dstf == IndexFormat::U8 && srcf == IndexFormat::U8) { memcpy(dst.data(), src.data(), src.size_bytes()); }
     else
     {
-        ENG_ERROR("Unhandled case.");
+        ENG_ASSERT("Unhandled case.");
         return 0;
     }
     return ic;
@@ -664,7 +653,7 @@ inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
 
     default:
     {
-        ENG_ERROR("Undefined case");
+        ENG_ASSERT("Undefined case");
         return ImageAspect::NONE;
     }
     }
@@ -682,7 +671,7 @@ inline ImageViewType get_view_type_from_image(ImageType type)
         return ImageViewType::TYPE_3D;
     default:
     {
-        ENG_ERROR("Undefined case");
+        ENG_ASSERT("Undefined case");
         return ImageViewType::NONE;
     }
     }
@@ -694,13 +683,20 @@ namespace eng
 {
 namespace serialization
 {
+template <> inline constexpr auto get_struct_fields<gfx::ImageSwizzle>()
+{
+    ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::ImageSwizzle, 0);
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageSwizzle, swizzle));
+}
 template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
 {
+    ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::ImageView, 0);
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, image),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, type),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, format),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, src_subresource),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource));
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, swizzle));
 }
 } // namespace serialization
 } // namespace eng

@@ -32,6 +32,7 @@ struct Pass;
 
 struct Meshlet
 {
+	ENG_SERIALIZATION_STRUCT_VERSION(0);
     i32 vertex_offset;
     u32 vertex_count;
     u32 index_offset;
@@ -337,6 +338,7 @@ struct MeshPass
 
 struct Material
 {
+	ENG_SERIALIZATION_STRUCT_VERSION(0);
     enum class Mode : u8
     {
         OPAQUE,
@@ -363,6 +365,7 @@ struct Material
 
 struct Mesh
 {
+	ENG_SERIALIZATION_STRUCT_VERSION(0);
     auto operator<=>(const Mesh&) const = default;
     Handle<Geometry> geometry;
     Handle<Material> material;
@@ -989,6 +992,7 @@ namespace serialization
 {
 template <> inline constexpr auto get_struct_fields<gfx::Meshlet>()
 {
+	ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::Meshlet, 0);
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_offset),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_count),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_offset),
@@ -1004,6 +1008,7 @@ template <> inline constexpr auto get_struct_fields<glm::vec4>()
 }
 template <> inline constexpr auto get_struct_fields<gfx::Material>()
 {
+	ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::Material, 0);
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mesh_pass),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mode),
@@ -1015,6 +1020,7 @@ template <> inline constexpr auto get_struct_fields<gfx::Material>()
 }
 template <> inline constexpr auto get_struct_fields<gfx::Mesh>()
 {
+	ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::Mesh, 0);
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, geometry),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, material));
 }

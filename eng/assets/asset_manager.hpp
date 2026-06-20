@@ -18,6 +18,7 @@ namespace assets
 
 struct Node
 {
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     std::string name;
     Range32u meshes{};
     u32 transform{ ~0u };
@@ -27,6 +28,7 @@ struct Node
 
 struct ParsedGeometryData
 {
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     Flags<gfx::VertexComponent> vertex_layout;
     std::vector<float> positions{};
     std::vector<float> attributes{};
@@ -37,6 +39,7 @@ using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
 
 struct ParsedImageData
 {
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     StackString<128> name;
     u32 width{};
     u32 height{};
