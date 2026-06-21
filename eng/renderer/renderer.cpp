@@ -888,26 +888,18 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
-    auto id = buffers.emplace(std::move(buffer));
-    if(!id)
-    {
-        ENG_WARN("Could not create buffer {}", name);
-        return Handle<Buffer>{};
-    }
-    return Handle<Buffer>{ *id };
+    auto h = Handle<Buffer>{ buffers.emplace(std::move(buffer)) };
+    if(!h) { ENG_WARN("Could not create buffer {}", name); }
+    return h;
 }
 
 Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
 {
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
-    auto id = images.emplace(std::move(image));
-    if(!id)
-    {
-        ENG_WARN("Could not create image {}", name);
-        return Handle<Image>{};
-    }
-    return Handle<Image>{ *id };
+    auto h = Handle<Image>{ images.emplace(std::move(image)) };
+    if(!h) { ENG_WARN("Could not create image {}", name); }
+    return h;
 }
 
 void Renderer::queue_destroy(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now)
@@ -1592,13 +1584,12 @@ Handle<Shader> ShaderManager::make_shader(const fs::Path& path)
     auto& file = m_files_map[path];
     if(!file.shader)
     {
-        auto id = m_shader_alloc.emplace(Shader::init(path));
-        if(!id)
+        auto h = Handle<Shader>{ m_shader_alloc.emplace(Shader::init(path)) };
+        if(!h)
         {
             ENG_ASSERT(false, "Failed to create new shader {}", path.string());
             return {};
         }
-        auto h = Handle<Shader>{ *id };
         file.path = path;
         file.shader = h;
         file.hash = 0;

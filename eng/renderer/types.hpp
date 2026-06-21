@@ -470,10 +470,6 @@ struct VkDescriptorPoolMetadata;
 
 } // namespace eng
 
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Buffer, eng::u64);
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Image, eng::u64);
-ENG_DEFINE_HANDLE_STORAGE(eng::gfx::Shader, eng::u64);
-
 // Shared types (to avoid including renderer.hpp)
 namespace eng
 {

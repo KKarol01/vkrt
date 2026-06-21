@@ -185,7 +185,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                     scissor.extent.height = (u32)(clip_max.y - clip_min.y);
                     cmd->set_scissors(&scissor, 1);
 
-                    const auto tid = imcmd->GetTexID();
+                    const u32 tid = imcmd->GetTexID();
                     DescriptorResource bindresources[6]{};
                     bindresources[5] = DescriptorResource::sampled_image(Handle<Image>{ tid });
                     cmd->bind_resources(1, bindresources);

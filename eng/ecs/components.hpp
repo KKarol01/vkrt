@@ -54,7 +54,7 @@ struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> render_meshes;
-    u32 gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
+    u32 gpu_resource{ ~0u }; // renderer sets this when it processed the mesh
 };
 
 struct alignas(16) Light
