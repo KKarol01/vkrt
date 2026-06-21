@@ -141,7 +141,7 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
     return ret;
 }
 
-RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear)
+RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, bool discard, const std::optional<RGClear>& clear)
 {
     if((resource.index() == 0 && !std::get<0>(resource)) || (resource.index() == 1 && !std::get<1>(resource)))
     {
@@ -159,8 +159,10 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
 
     const auto hash = ENG_HASH(res.name);
     auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
-    pr.hash = 0;                                  // imported resources don't need a hash.
+    ENG_ASSERT(pr.hash == 0);
+    // pr.hash = 0;                                  // imported resources don't need a hash.
     pr.native = resource;
+    if(discard) { pr.last_layout = ImageLayout::UNDEFINED; }
 
     return add_resource(std::move(res));
 }

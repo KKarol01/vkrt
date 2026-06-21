@@ -271,23 +271,10 @@ u64 File::get_hash()
 
 bool FileSystem::init()
 {
-    static constexpr int MAX_UP = 3;
-    std::filesystem::path cwd = "./";
-    for(int i = 0; i < MAX_UP; ++i)
-    {
-        const auto found_dir =
-            std::ranges::any_of(std::filesystem::directory_iterator{ cwd }, [](const std::filesystem::directory_entry& e) {
-                return e.exists() && e.is_directory() && e.path().string().ends_with("assets");
-            });
-        if(found_dir)
-        {
-            root_dir_path = cwd;
-            break;
-        }
-        else { cwd += "../"; }
-    }
-    if(root_dir_path.empty()) { ENG_WARN("Could not find correct directory with eng/ and assets/ dirs in it."); }
-    return !root_dir_path.empty();
+    root_dir_path = "./";
+    const auto has_assets_dir = file_exists(make_rel_path("/assets")); 
+    if(!has_assets_dir) { ENG_ERROR("assets folder missing in cwd directory."); }
+    return has_assets_dir;
 }
 
 FilePtr FileSystem::open_file(const Path& path, OpenMode mode)

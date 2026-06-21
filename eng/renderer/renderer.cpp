@@ -35,7 +35,6 @@ bool on_window_resize(float x, float y)
         r.settings.present_resolution = { x, y };
         r.settings.regenerate_swapchain = true;
     }
-    r.init_resolution_dep_resources();
     return true;
 }
 
@@ -402,12 +401,6 @@ void Renderer::init_bufs()
     }
 }
 
-void Renderer::init_resolution_dep_resources()
-{
-    get_engine().camera->update_projection(glm::radians(75.0f), 0.1f, settings.render_resolution.x,
-                                           settings.render_resolution.y);
-}
-
 // void Renderer::init_rgraph_passes()
 //{
 // ENG_ASSERT(rgraph_passes.empty());
@@ -489,10 +482,6 @@ void Renderer::update()
 {
     ENG_TIMER_SCOPED("Renderer update");
 
-    if(settings.override_render_resolution.x != 0 && settings.override_render_resolution.y != 0)
-    {
-        settings.new_render_resolution = settings.override_render_resolution;
-    }
     if(settings.render_resolution != settings.new_render_resolution)
     {
         settings.render_resolution = settings.new_render_resolution;
@@ -510,13 +499,10 @@ void Renderer::update()
         }
         if(settings.present_resolution.x > 0.0f && settings.present_resolution.y > 0.0f)
         {
-            settings.regenerate_swapchain = false;
             swapchain = backend->make_swapchain();
         }
         else { return; }
     }
-
-    if(current_frame == 0) { init_resolution_dep_resources(); }
 
     for(auto* s : current_data->wait_syncs)
     {
@@ -696,6 +682,7 @@ void Renderer::update()
         gq->wait_sync(current_data->swp_sem).present(swapchain);
     }
 
+    settings.regenerate_swapchain = false;
     ++current_frame;
     prev_data = current_data;
     current_data = &frame_datas[current_frame % frame_delay];
@@ -821,7 +808,7 @@ void Renderer::compile_rendergraph()
         "Copy To Swap",
         [=, this](RGBuilder& b, CopySwapchainData& data) {
             data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
-            data.output = b.import_resource(swapchain->get_image());
+            data.output = b.import_resource(swapchain->get_image(), true);
             data.output = b.copy_dest(data.output);
         },
         [this](RGBuilder& pb, const CopySwapchainData& data) {
@@ -910,13 +897,6 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     return Handle<Buffer>{ *id };
 }
 
-void Renderer::queue_destroy(Handle<Buffer> buffer)
-{
-    ENG_ASSERT(buffer);
-    std::scoped_lock lock{ current_data->retired_mutex };
-    current_data->retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
-}
-
 Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
 {
     backend->allocate_image(image, allocate, user_data);
@@ -930,19 +910,35 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
     return Handle<Image>{ *id };
 }
 
-void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
+void Renderer::queue_destroy(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now)
 {
-    ENG_ASSERT(image);
-    if(destroy_now)
+    if(auto* buf = std::get_if<Handle<Buffer>>(&resource))
     {
-        backend->destroy_image(image.get());
-        images.erase(*image);
+        ENG_ASSERT(*buf);
+        if(destroy_now)
+        {
+            backend->destroy_buffer(buf->get());
+            buffers.erase(*(*buf));
+            return;
+        }
+    }
+    else if(auto* img = std::get_if<Handle<Image>>(&resource))
+    {
+        ENG_ASSERT(*img);
+        if(destroy_now)
+        {
+            backend->destroy_image(img->get());
+            images.erase(*(*img));
+            return;
+        }
     }
     else
     {
-        std::scoped_lock lock{ current_data->retired_mutex };
-        current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
+        ENG_ASSERT(false, "Invalid alternative");
+        return;
     }
+
+    current_data->add_retired_resource(resource);
 }
 
 Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
@@ -1736,6 +1732,12 @@ Sync* Renderer::FrameData::get_sync()
 void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
 
 void Renderer::FrameData::reset_staging() { staging->reset(); }
+
+void Renderer::FrameData::add_retired_resource(const RetiredResource::NativeResource& native)
+{
+    std::scoped_lock lock{ retired_mutex };
+    retired_resources.emplace_back(native, get_renderer().current_frame);
+}
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
 {

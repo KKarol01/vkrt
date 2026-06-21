@@ -32,7 +32,7 @@ struct Pass;
 
 struct Meshlet
 {
-	ENG_SERIALIZATION_STRUCT_VERSION(0);
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     i32 vertex_offset;
     u32 vertex_count;
     u32 index_offset;
@@ -42,8 +42,8 @@ struct Meshlet
 
 struct GeometryDescriptor
 {
-    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
-    size_t get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
+    // usize get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
+    usize get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
     Flags<GeometryFlags> flags;
     Flags<VertexComponent> vertex_layout;
     IndexFormat index_format{};
@@ -338,7 +338,7 @@ struct MeshPass
 
 struct Material
 {
-	ENG_SERIALIZATION_STRUCT_VERSION(0);
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     enum class Mode : u8
     {
         OPAQUE,
@@ -365,7 +365,7 @@ struct Material
 
 struct Mesh
 {
-	ENG_SERIALIZATION_STRUCT_VERSION(0);
+    ENG_SERIALIZATION_STRUCT_VERSION(0);
     auto operator<=>(const Mesh&) const = default;
     Handle<Geometry> geometry;
     Handle<Material> material;
@@ -373,7 +373,7 @@ struct Mesh
 
 struct Buffer
 {
-    static constexpr Buffer init(size_t capacity, Flags<BufferUsage> usage)
+    static constexpr Buffer init(usize capacity, Flags<BufferUsage> usage)
     {
         return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = {} };
     }
@@ -384,8 +384,8 @@ struct Buffer
     }
 
     Flags<BufferUsage> usage{};
-    size_t capacity{};
-    size_t size{};
+    usize capacity{};
+    usize size{};
     void* memory{};
     struct Metadata
     {
@@ -732,9 +732,11 @@ class Renderer
 
         struct RetiredResource
         {
-            std::variant<Handle<Buffer>, Handle<Image>> resource;
-            size_t deleted_at_frame{};
+            using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
+            NativeResource resource;
+            usize deleted_at_frame{};
         };
+        void add_retired_resource(const RetiredResource::NativeResource& native);
         std::mutex retired_mutex;
         std::vector<RetiredResource> retired_resources;
     };
@@ -768,10 +770,10 @@ class Renderer
         u32 fwdp_num_tiles{};
 
         IndexFormat index_type{ IndexFormat::U16 };
-        size_t vertex_count{};
-        size_t index_count{};
-        // size_t transform_count{};
-        // size_t light_count{};
+        usize vertex_count{};
+        usize index_count{};
+        // usize transform_count{};
+        // usize light_count{};
 
         Handle<Buffer> geom_blas; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
         Handle<Buffer> geom_tlas_buffer;
@@ -791,7 +793,6 @@ class Renderer
         ImageFormat velocity_format{ ImageFormat::R16FG16F };
         ImageFormat history_len_format{ ImageFormat::R16F };
         f32_2 new_render_resolution{};
-        f32_2 override_render_resolution{};
         f32_2 render_resolution{};
         f32_2 present_resolution{};
 
@@ -843,7 +844,6 @@ class Renderer
     void init_pipelines();
     void init_perframes();
     void init_bufs();
-    void init_resolution_dep_resources();
 
     void update();
     void compile_rendergraph();
@@ -851,13 +851,11 @@ class Renderer
 
     // Creates buffer with optional gpu memory allocation. Thread-safe.
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
-    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
-    void queue_destroy(Handle<Buffer> handle);
     // Creates image with optional gpu memory allocation. Thread-safe.
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
-    void queue_destroy(Handle<Image>& image, bool destroy_now = false);
+    void queue_destroy(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const fs::Path& path, Compilation compilation = Compilation::DEFERRED);
     bool compile_shader(Handle<Shader> shader);
@@ -881,8 +879,8 @@ class Renderer
     Handle<MeshPass> make_mesh_pass(const MeshPass& info);
     // Handle<MeshPass> find_mesh_pass(std::string_view name);
 
-    void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
-    void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
+    void resize_buffer(Handle<Buffer>& handle, usize new_size, bool copy_data);
+    void resize_buffer(Handle<Buffer>& handle, usize upload_size, usize offset, bool copy_data);
 
     // void instance_blas(const BLASInstanceSettings& settingsi);
     // void update_transform(ecs::entity_id entity);
