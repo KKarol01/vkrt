@@ -155,4 +155,6 @@ template <typename UserType, typename LockMutex = LockMutexTag> class MutexSlotm
     std::shared_mutex m_mutex;
 };
 
+template <typename T> using Slotmap = MutexSlotmap<T, DontLockMutexTag>;
+
 } // namespace eng

@@ -140,8 +140,8 @@ struct PersistentStorage
 struct RGBuilder
 {
     RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
-    RGAccessId import_resource(const RGResource::NativeResource& resource, bool discard = false,
-                               const std::optional<RGClear>& clear = {});
+    RGAccessId import_resource(const RGResource::NativeResource& resource,
+                               DiscardContents discard = DiscardContents::NO, const std::optional<RGClear>& clear = {});
     RGAccessId create_resource(std::string_view name, Buffer&& a, bool is_persistent = false);
     RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool is_persistent = false);
     RGAccessId add_access(const RGAccess& a);

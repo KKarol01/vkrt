@@ -1,5 +1,6 @@
 #pragma once
 
+#if 0
 namespace eng
 {
 namespace serialization
@@ -37,3 +38,4 @@ template <typename T> constexpr auto get_struct_fields() { static_assert(false, 
 
 } // namespace serialization
 } // namespace eng
+#endif

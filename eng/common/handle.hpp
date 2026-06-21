@@ -97,11 +97,12 @@ struct Handle : public TypedId<T, StorageType>
 
 namespace std
 {
-
-template <typename T> class hash<::eng::Handle<T>>
+template <typename T, typename Storage> struct hash<eng::TypedId<T, Storage>>
 {
-  public:
-    size_t operator()(const ::eng::Handle<T>& h) const { return *h; }
+    size_t operator()(const eng::TypedId<T, Storage>& a) const { return *a; }
 };
-
+template <typename T> struct hash<eng::Handle<T>>
+{
+    size_t operator()(const eng::Handle<T>& a) const { return *a; }
+};
 } // namespace std

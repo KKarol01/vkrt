@@ -28,7 +28,7 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
 Camera::Camera(float fov_radians, float min_dist)
 {
     const auto* window = get_engine().window;
-    update_projection(fov_radians, min_dist, window->width, window->height);
+    update_projection(fov_radians, min_dist, window->size.x, window->size.y);
 
     double pos[2];
     glfwGetCursorPos(window->window, &pos[0], &pos[1]);

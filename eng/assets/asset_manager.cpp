@@ -13,6 +13,194 @@ namespace eng
 
 using namespace serialization;
 
+namespace serialization
+{
+template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets::Asset& src, size_t& out_bytes_written)
+{
+    if(src.geometry_data.empty())
+    {
+        ENG_ASSERT(false,
+                   "Geometry data for asset {} must not be empty when serializing. Did you forget to provide required "
+                   "keep data "
+                   "flag when importing?",
+                   src.path.string());
+        return;
+    }
+
+    serialize(dst, src.path.string(), out_bytes_written);
+
+    ENG_ASSERT(src.images.size() == src.image_data.size());
+    serialize(dst, src.image_data, out_bytes_written);
+
+    serialize(dst, (u64)src.textures.size(), out_bytes_written);
+    for(auto txt : src.textures)
+    {
+        // store index to image array so it can later be deserialized
+        auto it = std::ranges::find(src.images, txt.image);
+        ENG_ASSERT(it != src.images.end());
+        *txt.image = (u64)std::distance(src.images.begin(), it);
+        ENG_ASSERT(*txt.image < src.images.size());
+        serialize(dst, txt, out_bytes_written);
+    }
+
+    ENG_ASSERT(src.geometries.size() == src.geometry_data.size());
+    serialize(dst, src.geometry_data.size(), out_bytes_written);
+    for(const auto& gdf : src.geometry_data_futures)
+    {
+        const auto& gd = gdf.get();
+        serialize(dst, gd, out_bytes_written);
+    }
+
+    serialize(dst, (u64)src.materials.size(), out_bytes_written);
+    for(const auto& math : src.materials)
+    {
+        auto mat = math.get();
+        // remap image handles to store indices to t.images array, so they can be safely deserialized.
+        if(mat.base_color_texture)
+        {
+            auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
+            *mat.base_color_texture.image = (u64)idx;
+            if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
+        }
+        if(mat.normal_texture)
+        {
+            *mat.normal_texture.image =
+                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
+        }
+        if(mat.metallic_roughness_texture)
+        {
+            *mat.metallic_roughness_texture.image =
+                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
+        }
+        mat.mesh_pass = {}; // ignoring meshpass, as load_material uses default one
+        serialize(dst, mat, out_bytes_written);
+    }
+
+    serialize(dst, (u64)src.meshes.size(), out_bytes_written);
+    for(const auto& meshh : src.meshes)
+    {
+        auto mesh = meshh.get();
+        *mesh.geometry = (u64)std::distance(src.geometries.begin(), std::ranges::find(src.geometries, mesh.geometry));
+        if(mesh.material)
+        {
+            *mesh.material = (u64)std::distance(src.materials.begin(), std::ranges::find(src.materials, mesh.material));
+        }
+        serialize(dst, mesh, out_bytes_written);
+    }
+
+    serialize(dst, src.nodes, out_bytes_written);
+    serialize(dst, src.transforms, out_bytes_written);
+    serialize(dst, src.root_nodes, out_bytes_written);
+}
+
+template <>
+void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+{
+    std::string pathstr;
+    deserialize(pathstr, src, out_bytes_written);
+    dst.path = pathstr;
+    ENG_ASSERT(!dst.path.empty())
+
+    u64 image_count;
+    deserialize(image_count, src, out_bytes_written);
+    dst.images.resize(image_count);
+    assets::ParsedImageData imgd{};
+    auto* mip_cmd = gfx::get_renderer().current_data->cmdpool->begin();
+    for(auto i = 0u; i < image_count; ++i)
+    {
+        // don't use deserialize() here, because it would double the image data for no reason, we can read from the stream
+        u64 pixel_data_size = 0;
+        deserialize(imgd.name, src, out_bytes_written);
+        deserialize(imgd.width, src, out_bytes_written);
+        deserialize(imgd.height, src, out_bytes_written);
+        deserialize(imgd.format, src, out_bytes_written);
+        deserialize(pixel_data_size, src, out_bytes_written);
+        dst.images[i] =
+            gfx::get_renderer().make_image(imgd.name, gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
+                                                                       gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                           gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                       0, 1, gfx::ImageLayout::READ_ONLY));
+        if(!dst.images[i])
+        {
+            ENG_WARN("Failed to create image {}", "EMPTY IMAGE NAME");
+            continue;
+        }
+        else
+        {
+            gfx::get_renderer().staging->copy(dst.images[i].get(), src.data() + out_bytes_written, 0, 0, false,
+                                              gfx::DiscardContents::YES);
+            mip_cmd->generate_mips(dst.images[i].get());
+        }
+        out_bytes_written += pixel_data_size;
+    }
+    gfx::get_renderer().current_data->cmdpool->end(mip_cmd);
+    auto* mip_sync = gfx::get_renderer().current_data->get_sync();
+    mip_cmd->wait_sync(gfx::get_renderer().staging->flush(true), gfx::PipelineStage::TRANSFER_BIT);
+    mip_cmd->signal_sync(mip_sync, gfx::PipelineStage::FRAGMENT_BIT);
+    gfx::get_renderer().gq->with_cmd_buf(mip_cmd).submit();
+    gfx::get_renderer().current_data->wait_syncs.push_back(mip_sync);
+
+    u64 texture_count;
+    deserialize(texture_count, src, out_bytes_written);
+    dst.textures.resize(texture_count);
+    for(auto& txt : dst.textures)
+    {
+        deserialize(txt, src, out_bytes_written);
+        txt.image = dst.images[(u32)*txt.image]; // when serializing, handles are made into indices into this array
+    }
+
+    u64 geom_count;
+    deserialize(geom_count, src, out_bytes_written);
+    dst.geometries.resize(geom_count);
+    assets::ParsedGeometryData geom;
+    for(u64 i = 0; i < geom_count; ++i)
+    {
+        deserialize(geom, src, out_bytes_written);
+        dst.geometries[i] =
+            gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
+                                                                       .vertex_layout = geom.vertex_layout,
+                                                                       .index_format = gfx::IndexFormat::U16,
+                                                                       .vertices = geom.positions,
+                                                                       .attributes = geom.attributes,
+                                                                       .indices = std::as_bytes(std::span{ geom.indices }),
+                                                                       .meshlets = geom.meshlets });
+    }
+
+    u64 material_count;
+    deserialize(material_count, src, out_bytes_written);
+    dst.materials.resize(material_count);
+    gfx::Material mat;
+    for(u64 i = 0; i < material_count; ++i)
+    {
+        deserialize(mat, src, out_bytes_written);
+        if(mat.base_color_texture) { mat.base_color_texture = dst.textures[(u32)*mat.base_color_texture.image]; }
+        if(mat.normal_texture) { mat.normal_texture = dst.textures[(u32)*mat.normal_texture.image]; }
+        if(mat.metallic_roughness_texture)
+        {
+            mat.metallic_roughness_texture = dst.textures[(u32)*mat.metallic_roughness_texture.image];
+        }
+        dst.materials[i] = gfx::get_renderer().make_material(mat);
+    }
+
+    u64 mesh_count = 0;
+    deserialize(mesh_count, src, out_bytes_written);
+    dst.meshes.resize(mesh_count);
+    gfx::Mesh mesh;
+    for(u64 i = 0; i < mesh_count; ++i)
+    {
+        deserialize(mesh, src, out_bytes_written);
+        if(mesh.material) { mesh.material = dst.materials[(u32)*mesh.material]; }
+        if(mesh.geometry) { mesh.geometry = dst.geometries[(u32)*mesh.geometry]; }
+        dst.meshes[i] = gfx::get_renderer().make_mesh(gfx::MeshDescriptor{ mesh.geometry, mesh.material });
+    }
+
+    deserialize(dst.nodes, src, out_bytes_written);
+    deserialize(dst.transforms, src, out_bytes_written);
+    deserialize(dst.root_nodes, src, out_bytes_written);
+}
+
+} // namespace serialization
+
 namespace assets
 {
 
@@ -225,193 +413,5 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
 }
 
 } // namespace assets
-
-namespace serialization
-{
-template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets::Asset& src, size_t& out_bytes_written)
-{
-    if(src.geometry_data.empty())
-    {
-        ENG_ASSERT(false,
-                   "Geometry data for asset {} must not be empty when serializing. Did you forget to provide required "
-                   "keep data "
-                   "flag when importing?",
-                   src.path.string());
-        return;
-    }
-
-    serialize(dst, src.path.string(), out_bytes_written);
-
-    ENG_ASSERT(src.images.size() == src.image_data.size());
-    serialize(dst, src.image_data, out_bytes_written);
-
-    serialize(dst, (u64)src.textures.size(), out_bytes_written);
-    for(auto txt : src.textures)
-    {
-        // store index to image array so it can later be deserialized
-        auto it = std::ranges::find(src.images, txt.image);
-        ENG_ASSERT(it != src.images.end());
-        *txt.image = (u64)std::distance(src.images.begin(), it);
-        ENG_ASSERT(*txt.image < src.images.size());
-        serialize(dst, txt, out_bytes_written);
-    }
-
-    ENG_ASSERT(src.geometries.size() == src.geometry_data.size());
-    serialize(dst, src.geometry_data.size(), out_bytes_written);
-    for(const auto& gdf : src.geometry_data_futures)
-    {
-        const auto& gd = gdf.get();
-        serialize(dst, gd, out_bytes_written);
-    }
-
-    serialize(dst, (u64)src.materials.size(), out_bytes_written);
-    for(const auto& math : src.materials)
-    {
-        auto mat = math.get();
-        // remap image handles to store indices to t.images array, so they can be safely deserialized.
-        if(mat.base_color_texture)
-        {
-            auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
-            *mat.base_color_texture.image = (u64)idx;
-            if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
-        }
-        if(mat.normal_texture)
-        {
-            *mat.normal_texture.image =
-                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
-        }
-        if(mat.metallic_roughness_texture)
-        {
-            *mat.metallic_roughness_texture.image =
-                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
-        }
-        mat.mesh_pass = {}; // ignoring meshpass, as load_material uses default one
-        serialize(dst, mat, out_bytes_written);
-    }
-
-    serialize(dst, (u64)src.meshes.size(), out_bytes_written);
-    for(const auto& meshh : src.meshes)
-    {
-        auto mesh = meshh.get();
-        *mesh.geometry = (u64)std::distance(src.geometries.begin(), std::ranges::find(src.geometries, mesh.geometry));
-        if(mesh.material)
-        {
-            *mesh.material = (u64)std::distance(src.materials.begin(), std::ranges::find(src.materials, mesh.material));
-        }
-        serialize(dst, mesh, out_bytes_written);
-    }
-
-    serialize(dst, src.nodes, out_bytes_written);
-    serialize(dst, src.transforms, out_bytes_written);
-    serialize(dst, src.root_nodes, out_bytes_written);
-}
-
-template <>
-void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> src, size_t& out_bytes_written)
-{
-    std::string pathstr;
-    deserialize(pathstr, src, out_bytes_written);
-    dst.path = pathstr;
-    ENG_ASSERT(!dst.path.empty())
-
-    u64 image_count;
-    deserialize(image_count, src, out_bytes_written);
-    dst.images.resize(image_count);
-    assets::ParsedImageData imgd{};
-    auto* mip_cmd = gfx::get_renderer().current_data->cmdpool->begin();
-    for(auto i = 0u; i < image_count; ++i)
-    {
-        // don't use deserialize() here, because it would double the image data for no reason, we can read from the stream
-        u64 pixel_data_size = 0;
-        deserialize(imgd.name, src, out_bytes_written);
-        deserialize(imgd.width, src, out_bytes_written);
-        deserialize(imgd.height, src, out_bytes_written);
-        deserialize(imgd.format, src, out_bytes_written);
-        deserialize(pixel_data_size, src, out_bytes_written);
-        dst.images[i] =
-            gfx::get_renderer().make_image(imgd.name, gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
-                                                                       gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
-                                                                           gfx::ImageUsage::TRANSFER_SRC_BIT,
-                                                                       0, 1, gfx::ImageLayout::READ_ONLY));
-        if(!dst.images[i])
-        {
-            ENG_WARN("Failed to create image {}", "EMPTY IMAGE NAME");
-            continue;
-        }
-        else
-        {
-            gfx::get_renderer().staging->copy(dst.images[i].get(), src.data() + out_bytes_written, 0, 0, false,
-                                              gfx::DiscardContents::YES);
-            mip_cmd->generate_mips(dst.images[i].get());
-        }
-        out_bytes_written += pixel_data_size;
-    }
-    gfx::get_renderer().current_data->cmdpool->end(mip_cmd);
-    auto* mip_sync = gfx::get_renderer().current_data->get_sync();
-    mip_cmd->wait_sync(gfx::get_renderer().staging->flush(true), gfx::PipelineStage::TRANSFER_BIT);
-    mip_cmd->signal_sync(mip_sync, gfx::PipelineStage::FRAGMENT_BIT);
-    gfx::get_renderer().gq->with_cmd_buf(mip_cmd).submit();
-    gfx::get_renderer().current_data->wait_syncs.push_back(mip_sync);
-
-    u64 texture_count;
-    deserialize(texture_count, src, out_bytes_written);
-    dst.textures.resize(texture_count);
-    for(auto& txt : dst.textures)
-    {
-        deserialize(txt, src, out_bytes_written);
-        txt.image = dst.images[(u32)*txt.image]; // when serializing, handles are made into indices into this array
-    }
-
-    u64 geom_count;
-    deserialize(geom_count, src, out_bytes_written);
-    dst.geometries.resize(geom_count);
-    assets::ParsedGeometryData geom;
-    for(u64 i = 0; i < geom_count; ++i)
-    {
-        deserialize(geom, src, out_bytes_written);
-        dst.geometries[i] =
-            gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
-                                                                       .vertex_layout = geom.vertex_layout,
-                                                                       .index_format = gfx::IndexFormat::U16,
-                                                                       .vertices = geom.positions,
-                                                                       .attributes = geom.attributes,
-                                                                       .indices = std::as_bytes(std::span{ geom.indices }),
-                                                                       .meshlets = geom.meshlets });
-    }
-
-    u64 material_count;
-    deserialize(material_count, src, out_bytes_written);
-    dst.materials.resize(material_count);
-    gfx::Material mat;
-    for(u64 i = 0; i < material_count; ++i)
-    {
-        deserialize(mat, src, out_bytes_written);
-        if(mat.base_color_texture) { mat.base_color_texture = dst.textures[(u32)*mat.base_color_texture.image]; }
-        if(mat.normal_texture) { mat.normal_texture = dst.textures[(u32)*mat.normal_texture.image]; }
-        if(mat.metallic_roughness_texture)
-        {
-            mat.metallic_roughness_texture = dst.textures[(u32)*mat.metallic_roughness_texture.image];
-        }
-        dst.materials[i] = gfx::get_renderer().make_material(mat);
-    }
-
-    u64 mesh_count = 0;
-    deserialize(mesh_count, src, out_bytes_written);
-    dst.meshes.resize(mesh_count);
-    gfx::Mesh mesh;
-    for(u64 i = 0; i < mesh_count; ++i)
-    {
-        deserialize(mesh, src, out_bytes_written);
-        if(mesh.material) { mesh.material = dst.materials[(u32)*mesh.material]; }
-        if(mesh.geometry) { mesh.geometry = dst.geometries[(u32)*mesh.geometry]; }
-        dst.meshes[i] = gfx::get_renderer().make_mesh(gfx::MeshDescriptor{ mesh.geometry, mesh.material });
-    }
-
-    deserialize(dst.nodes, src, out_bytes_written);
-    deserialize(dst.transforms, src, out_bytes_written);
-    deserialize(dst.root_nodes, src, out_bytes_written);
-}
-
-} // namespace serialization
 
 } // namespace eng

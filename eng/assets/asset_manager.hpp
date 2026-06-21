@@ -93,7 +93,7 @@ class AssetManager
 
 namespace serialization
 {
-ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(assets::Asset);
+// ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(assets::Asset); // not needed here, moved up in the source file
 template <> inline constexpr auto get_struct_fields<assets::Node>()
 {
     return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, name),

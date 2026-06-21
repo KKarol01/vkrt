@@ -75,9 +75,9 @@ inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, usize
 template <typename T> inline void serialize(std::span<std::byte> dst, std::span<const T> src, usize& out_bytes_written);
 template <usize size>
 inline void serialize(std::span<std::byte> dst, const StackString<size>& src, usize& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, usize& out_bytes_written);
 template <typename T, typename Storage>
 inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written);
+template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, size_t& out_bytes_written);
 
 template <typename T, usize size>
 inline void deserialize(std::array<T, size>& dst, std::span<const std::byte> src, usize& out_bytes_written);
@@ -90,10 +90,10 @@ template <typename T>
 inline void deserialize(std::span<T> dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <usize size>
 inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T>
-inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
 template <typename T, typename Storage>
 inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, usize& out_bytes_written);
+template <typename T>
+inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
 
 template <typename T, usize... index>
 inline void serialize_fields(std::span<std::byte> dst, const T& src, usize& out_bytes_written, std::index_sequence<index...>)
@@ -159,16 +159,16 @@ inline void serialize(std::span<std::byte> dst, const StackString<size>& src, us
     safe_write(dst.data(), src.c_str(), out_bytes_written, dst.size_bytes(), src.size());
 }
 
-template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, usize& out_bytes_written)
-{
-    serialize(dst, src.offset, out_bytes_written);
-    serialize(dst, src.size, out_bytes_written);
-}
-
 template <typename T, typename Storage>
 inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written)
 {
     serialize(dst, src.handle, out_bytes_written);
+}
+
+template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, size_t& out_bytes_written)
+{
+    safe_write(dst.data(), &src.offset, out_bytes_written, dst.size_bytes(), sizeof(src.offset));
+    safe_write(dst.data(), &src.size, out_bytes_written, dst.size_bytes(), sizeof(src.size));
 }
 
 template <typename T, usize... index>
@@ -242,16 +242,17 @@ inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, 
     safe_read(dst.string.data(), src.data(), out_bytes_written, sz, src.size_bytes());
 }
 
-template <typename T> inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    deserialize(dst.offset, src, out_bytes_written);
-    deserialize(dst.size, src, out_bytes_written);
-}
-
 template <typename T, typename Storage>
 inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     deserialize(dst.handle, src, out_bytes_written);
+}
+
+template <typename T>
+inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+{
+    safe_read(&dst.offset, src.data(), out_bytes_written, sizeof(dst.offset), src.size_bytes());
+    safe_read(&dst.size, src.data(), out_bytes_written, sizeof(dst.size), src.size_bytes());
 }
 
 // clang-format off
@@ -339,7 +340,7 @@ ENG_ENABLE_FLAGS_OPERATORS(ListFlags);
 } // namespace v0
 } // namespace engb
 
-ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(engb::Container);
+// ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(engb::Container);
 
 template <> inline constexpr auto get_struct_fields<engb::List>()
 {

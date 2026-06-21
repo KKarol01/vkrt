@@ -106,7 +106,7 @@ ScopedTimer::~ScopedTimer()
 #endif
 }
 
-Window::Window(float width, float height) : width(width), height(height) {}
+Window::Window(float width, float height) : size((u32)width, (u32)height) {}
 
 Window::~Window()
 {
@@ -115,7 +115,7 @@ Window::~Window()
 
 void Window::init()
 {
-    window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
+    window = glfwCreateWindow((i32)size.x, (i32)size.y, "window title", nullptr, nullptr);
     if(!window) { ENG_ERROR("Could not create glfw window"); }
 }
 
@@ -138,8 +138,7 @@ void Window::on_resize(float w, float h)
         const auto ret = e(w, h);
         assert(ret && "Implement unsubscribing.");
     }
-    width = w;
-    height = h;
+    size = { w, h };
 }
 
 void Window::on_mouse_move(float x, float y)

@@ -134,8 +134,8 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    settings.new_render_resolution = { get_engine().window->width, get_engine().window->height };
-    settings.present_resolution = { get_engine().window->width, get_engine().window->height };
+    settings.new_render_resolution = get_engine().window->size;
+    settings.present_resolution = get_engine().window->size;
     settings.regenerate_swapchain = true;
 
     get_engine().window->add_on_resize(on_window_resize);
@@ -394,8 +394,8 @@ void Renderer::init_bufs()
     }
     {
         const auto* w = get_engine().window;
-        const auto num_tiles_x = (u32)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
-        const auto num_tiles_y = (u32)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
+        const auto num_tiles_x = (u32)std::ceilf(w->size.x / bufs.fwdp_tile_pixels);
+        const auto num_tiles_y = (u32)std::ceilf(w->size.y / bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
         bufs.fwdp_num_tiles = num_tiles;
     }
@@ -753,17 +753,17 @@ void Renderer::compile_rendergraph()
 
     pass::PassInitData pass_data{};
 
-    // pass_data.depth_buffer = import_resources.depth;
-    // passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
+    pass_data.depth_buffer = import_resources.depth;
+    passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
 
     // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
     //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
     //  passes.velocity->init(rgraph, pass_data);
 
-    // pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    // pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    // passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
+    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
+    pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
     // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
     // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
@@ -786,16 +786,16 @@ void Renderer::compile_rendergraph()
         RGAccessId input;
         RGAccessId output;
     };
-    // rgraph->add_graphics_pass<CopyToAccum>(
-    //     "Copy To Accum",
-    //     [=, this](RGBuilder& b, CopyToAccum& d) {
-    //         d.input = b.copy_source(get_frame_data().render_resources.ao);
-    //         d.output = b.copy_dest(import_resources.final_color);
-    //     },
-    //     [this](RGBuilder& b, const CopyToAccum& d) {
-    //         auto* cmd = b.open_cmd_buf();
-    //         cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
-    //     });
+    rgraph->add_graphics_pass<CopyToAccum>(
+        "Copy To Accum",
+        [=, this](RGBuilder& b, CopyToAccum& d) {
+            d.input = b.copy_source(get_frame_data().render_resources.opaque);
+            d.output = b.copy_dest(import_resources.final_color);
+        },
+        [this](RGBuilder& b, const CopyToAccum& d) {
+            auto* cmd = b.open_cmd_buf();
+            cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
+        });
 
     const auto imdata = imgui_renderer->update(rgraph);
 
@@ -808,7 +808,7 @@ void Renderer::compile_rendergraph()
         "Copy To Swap",
         [=, this](RGBuilder& b, CopySwapchainData& data) {
             data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
-            data.output = b.import_resource(swapchain->get_image(), true);
+            data.output = b.import_resource(swapchain->get_image(), DiscardContents::YES);
             data.output = b.copy_dest(data.output);
         },
         [this](RGBuilder& pb, const CopySwapchainData& data) {

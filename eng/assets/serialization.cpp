@@ -8,6 +8,38 @@ namespace eng
 {
 namespace serialization
 {
+
+template <>
+void serialize<engb::Container>(std::span<std::byte> dst, const engb::Container& src, size_t& out_bytes_written)
+{
+    static constexpr const char* MAGIC = "engb";
+    static constexpr u8 VERSION = 0;
+    auto list = src.m_lists_vec;
+    serialize(dst, std::span{ MAGIC, 4 }, out_bytes_written);
+    serialize(dst, VERSION, out_bytes_written);
+    serialize(dst, (u32)list.size(), out_bytes_written);
+    for(auto& l : list)
+    {
+        l.asset_start = engb::HEADER_BYTE_SZ + (src.m_lists_vec.size() * engb::LIST_BYTE_SZ) + 8 + l.asset_start;
+        serialize(dst, l, out_bytes_written);
+    }
+    serialize(dst, src.m_asset_bytes, out_bytes_written);
+}
+
+template <>
+void deserialize<engb::Container>(engb::Container& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+{
+    char magic[4]{};
+    u8 version{};
+    u32 count{};
+    deserialize(std::span{ magic, 4 }, src, out_bytes_written);
+    deserialize(version, src, out_bytes_written);
+    deserialize(count, src, out_bytes_written);
+    dst.m_lists_vec.resize(count);
+    deserialize(std::span{ dst.m_lists_vec }, src, out_bytes_written);
+    deserialize(dst.m_asset_bytes, src, out_bytes_written);
+}
+
 namespace engb
 {
 namespace v0
@@ -139,37 +171,6 @@ size_t Container::get_asset_data(const List& list, std::span<std::byte> out_data
 
 } // namespace v0
 } // namespace engb
-
-template <>
-void serialize<engb::Container>(std::span<std::byte> dst, const engb::Container& src, size_t& out_bytes_written)
-{
-    static constexpr const char* MAGIC = "engb";
-    static constexpr u8 VERSION = 0;
-    auto list = src.m_lists_vec;
-    serialize(dst, std::span{ MAGIC, 4 }, out_bytes_written);
-    serialize(dst, VERSION, out_bytes_written);
-    serialize(dst, (u32)list.size(), out_bytes_written);
-    for(auto& l : list)
-    {
-        l.asset_start = engb::HEADER_BYTE_SZ + (src.m_lists_vec.size() * engb::LIST_BYTE_SZ) + 8 + l.asset_start;
-        serialize(dst, l, out_bytes_written);
-    }
-    serialize(dst, src.m_asset_bytes, out_bytes_written);
-}
-
-template <>
-void deserialize<engb::Container>(engb::Container& dst, std::span<const std::byte> src, size_t& out_bytes_written)
-{
-    char magic[4]{};
-    u8 version{};
-    u32 count{};
-    deserialize(std::span{ magic, 4 }, src, out_bytes_written);
-    deserialize(version, src, out_bytes_written);
-    deserialize(count, src, out_bytes_written);
-    dst.m_lists_vec.resize(count);
-    deserialize(std::span{ dst.m_lists_vec }, src, out_bytes_written);
-    deserialize(dst.m_asset_bytes, src, out_bytes_written);
-}
 
 } // namespace serialization
 } // namespace eng

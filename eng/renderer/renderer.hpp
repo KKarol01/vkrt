@@ -660,7 +660,7 @@ class ShaderManager
     void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
     std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
-    MutexSlotmap<Shader, DontLockMutexTag> m_shader_alloc;
+    Slotmap<Shader> m_shader_alloc;
     std::unordered_map<fs::Path, File> m_files_map;
 };
 
