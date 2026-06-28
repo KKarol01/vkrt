@@ -1613,7 +1613,7 @@ void ShaderManager::process_file_source_change(const fs::Path& modified_path, st
     std::set<SourceFile*> affected_files;
     for(auto& f : m_files_map)
     {
-        if(f.second.include_set.contains(&mod_file))
+        if(f.second.include_set.contains(&mod_file) || f.second.path == modified_path)
         {
             auto was_inserted = affected_files.insert(&f.second).second;
             if(was_inserted)
