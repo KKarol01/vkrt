@@ -163,9 +163,3 @@ add_custom_command(TARGET eng POST_BUILD
         "${CMAKE_SOURCE_DIR}/third_party/zlib/lib/z.exp"
         $<TARGET_FILE_DIR:eng>
 )
-
-add_custom_command(TARGET eng POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-		${CMAKE_SOURCE_DIR}/assets
-		$<TARGET_FILE_DIR:eng>/assets
-)

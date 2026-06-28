@@ -48,8 +48,6 @@ struct Win32DirChangeHandle
 
     void start()
     {
-        m_is_stopped = false;
-
         m_notification = CreateFileW(m_physical_path.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                      NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
         if(!m_notification || m_notification == INVALID_HANDLE_VALUE)
@@ -106,7 +104,7 @@ struct Win32DirChangeHandle
 
                 m_listener->push_paths(paths);
 
-                if(!m_is_stopped)
+                if(!stop_token.stop_requested())
                 {
                     const auto queued = ReadDirectoryChangesW(m_notification, m_buffer, sizeof(m_buffer), true,
                                                               FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, &m_overlap, nullptr);
@@ -120,7 +118,6 @@ struct Win32DirChangeHandle
     void close()
     {
         if(!m_notification) { return; }
-        m_is_stopped = true;
         CancelIoEx(m_notification, &m_overlap);
         SetEvent(m_event);
         if(m_wait_thread.joinable()) { m_wait_thread.join(); }
@@ -138,7 +135,6 @@ struct Win32DirChangeHandle
     OVERLAPPED m_overlap{};
     fs::DirectoryListener* m_listener;
     u32 m_buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128 / sizeof(u32)]{};
-    bool m_is_stopped{};
     std::jthread m_wait_thread;
 };
 #endif
@@ -186,7 +182,7 @@ void File::read(std::byte* dst_bytes, usize dst_size, usize& out_read_bytes, usi
         return;
     }
     if(src_offset != ~0ull) { set_read_head(src_offset); }
-	src_offset = get_read_head();
+    src_offset = get_read_head();
     out_read_bytes = std::min(dst_size, m_size - src_offset);
     m_file.read((char*)dst_bytes, out_read_bytes);
     out_read_bytes = m_file.gcount();
@@ -233,7 +229,7 @@ u64 File::get_hash()
 
 bool FileSystem::init()
 {
-    s_root_dir_path = "./";
+    s_root_dir_path = "../";
     const auto has_assets_dir = file_exists(make_rel_path("/assets"));
     if(!has_assets_dir) { ENG_ERROR("assets folder missing in cwd directory."); }
     return has_assets_dir;

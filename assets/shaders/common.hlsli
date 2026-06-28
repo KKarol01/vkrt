@@ -143,7 +143,7 @@ struct GPUMaterial
     ENG_UINT base_color_factor;
 };
 
-#endif
+#endif 
 
 //
 //  DEFINE CPU/GPU FUNS HERE

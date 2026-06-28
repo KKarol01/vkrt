@@ -904,7 +904,7 @@ class Renderer
 
     ShaderManager m_shader_manager;
     Slotmap<Shader> m_shaders;
-    fs::DirectoryListener* changed_shader_listener{};
+    fs::DirectoryListener* m_shader_listener{};
 
     std::vector<DescriptorLayout> dlayouts;
     std::vector<PipelineLayout> pplayouts;

@@ -140,7 +140,7 @@ void Renderer::init(IRendererBackend* backend)
 
     get_engine().window->add_on_resize(on_window_resize);
 
-    changed_shader_listener = get_engine().fs->make_listener("/assets/shaders");
+    m_shader_listener = get_engine().fs->make_listener("/assets/shaders");
 }
 
 void Renderer::init_helper_geom()
@@ -543,7 +543,10 @@ void Renderer::update()
 
     {
         std::vector<fs::Path> changed_paths;
-        changed_shader_listener->consume_paths(changed_paths);
+        m_shader_listener->consume_paths(changed_paths);
+        std::erase_if(changed_paths,
+                      [](const fs::Path& p) { return p.extension() != ".hlsli" && p.extension() != ".hlsl"; });
+
         std::vector<Handle<Shader>> affected_shaders;
         for(const auto& p : changed_paths)
         {
@@ -953,6 +956,7 @@ Handle<Shader> Renderer::make_shader(const fs::Path& path, const std::vector<Sha
     ENG_ASSERT(h && h->stage != ShaderStage::NONE);
     if(compilation == Compilation::NOW) { compile_shader(h); }
     else { new_shaders.push_back(h); }
+    m_shader_manager.register_shader(h);
     return h;
 }
 
@@ -1047,7 +1051,7 @@ bool Renderer::compile_shader(Shader& shader)
         hlsl_path.c_str(),
         (const char*)nullptr,
     };
-	pcfile->close();
+    pcfile->close();
     get_engine().fs->delete_file(pcpath_str);
     auto [ret, code] = reproc::run(args, opts);
     if(ret != 0) { return false; }
@@ -1067,7 +1071,7 @@ bool Renderer::compile_shader(Shader& shader)
     pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::READ_WRITE_BYTES_CREATE_DISCARD);
     pcfile->write((const std::byte*)&shhash, 8, n_wrote_bytes, 0);
     pcfile->write(pcdata.data(), pcdata.size(), n_wrote_bytes, 8);
-	pcfile->close();
+    pcfile->close();
     pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::TRY_READ_BYTES_BEG);
     return compile_from_bytecode();
 }
@@ -1635,11 +1639,12 @@ void ShaderManager::parse_includes(SourceFile& f)
         fs::Path include_path{ str.begin() + beg + 1, str.begin() + end };
         ENG_ASSERT(!include_path.string().starts_with('/'));
         if(include_path.string().starts_with("assets/")) { include_path = "/" / include_path; }
-        else { include_path = f.path / include_path; }
+        else { include_path = f.path.parent_path() / include_path; }
         ENG_ASSERT(include_path.extension() == ".hlsli");
         auto inc_it = m_files_map.emplace(include_path, SourceFile{ Handle<Shader>{}, include_path, 0, {} });
-        parse_includes(inc_it.first->second);
+        if(inc_it.second) { parse_includes(inc_it.first->second); }
         f.include_set.insert(inc_it.first->second.include_set.begin(), inc_it.first->second.include_set.end());
+        f.include_set.insert(&inc_it.first->second);
     }
 }
 
