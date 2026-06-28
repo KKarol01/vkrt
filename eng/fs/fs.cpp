@@ -7,51 +7,30 @@
 #include <WinBase.h>
 #endif
 
-// static const char* open_mode_to_posix(eng::fs::OpenMode mode)
-//{
-//     switch(mode)
-//     {
-//     case eng::fs::OpenMode::READ_BYTES:
-//     {
-//         return "rb";
-//     }
-//     case eng::fs::OpenMode::WRITE_CREATE_BYTES:
-//     {
-//         return "wb";
-//     }
-//     case eng::fs::OpenMode::READ_WRITE_BYTES:
-//     {
-//         return "r+b";
-//     }
-//     case eng::fs::OpenMode::READ_WRITE_CREATE_BYTES:
-//     {
-//         return "w+b";
-//     }
-//         return "";
-//     }
-// }
-
 static int open_mode_to_ios(eng::fs::OpenMode mode)
 {
     switch(mode)
     {
-    case eng::fs::OpenMode::READ_BYTES:
+    case eng::fs::OpenMode::TRY_READ_BYTES_BEG:
     {
-        return std::ios::binary | std::ios::in;
+        return std::ios::binary | std ::ios::in;
     }
-    case eng::fs::OpenMode::WRITE_CREATE_BYTES:
+    case eng::fs::OpenMode::TRY_READ_WRITE_BYTES_BEG:
+    {
+        return std::ios::binary | std ::ios::in | std::ios::out;
+    }
+    case eng::fs::OpenMode::READ_WRITE_BYTES_CREATE_DISCARD:
+    {
+        return std::ios::binary | std ::ios::in | std::ios::out | std::ios::trunc;
+    }
+    case eng::fs::OpenMode::WRITE_BYTES_CREATE_DISCARD:
     {
         return std::ios::binary | std::ios::out | std::ios::trunc;
     }
-    case eng::fs::OpenMode::READ_WRITE_BYTES:
+    default:
     {
-        return std::ios::binary | std::ios::in | std::ios::out;
-    }
-    case eng::fs::OpenMode::READ_WRITE_CREATE_BYTES:
-    {
-        return std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc;
-    }
         return 0;
+    }
     }
 }
 
@@ -61,7 +40,7 @@ namespace eng
 #ifdef ENG_PLATFORM_WIN32
 struct Win32DirChangeHandle
 {
-    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, Handle<fs::DirectoryListener> listener)
+    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, fs::DirectoryListener* listener)
         : m_virtual_path(virtual_path), m_physical_path(physical_path), m_listener(listener)
     {
     }
@@ -73,14 +52,14 @@ struct Win32DirChangeHandle
 
         m_notification = CreateFileW(m_physical_path.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                      NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
-        if(!m_notification)
+        if(!m_notification || m_notification == INVALID_HANDLE_VALUE)
         {
             ENG_WARN("[WIN32] Failed to attach on_dir_change notification");
             return;
         }
 
         m_event = CreateEventA(NULL, false, false, NULL);
-        if(!m_event)
+        if(m_event == NULL)
         {
             ENG_WARN("[WIN32] Failed to create on_dir_change listener");
             close();
@@ -98,19 +77,15 @@ struct Win32DirChangeHandle
             return;
         }
 
-        m_wait_thread = std::thread{ [this] {
-            while(!m_is_stopped)
+        m_wait_thread = std::jthread{ [this](std::stop_token stop_token) {
+            while(!stop_token.stop_requested())
             {
                 const auto wait_res = WaitForSingleObject(m_event, INFINITE);
-                if(m_is_stopped) { break; }
+                if(stop_token.stop_requested()) { break; }
                 if(wait_res != WAIT_OBJECT_0) { continue; }
                 unsigned long rec_bytes{};
                 const auto getres = GetOverlappedResult(m_notification, &m_overlap, &rec_bytes, false);
-                if(!getres)
-                {
-                    if(m_is_stopped) { break; }
-                    continue;
-                }
+                if(!getres) { continue; }
                 std::vector<fs::Path> paths;
                 paths.reserve(rec_bytes / sizeof(FILE_NOTIFY_INFORMATION));
                 size_t offset = 0;
@@ -161,203 +136,149 @@ struct Win32DirChangeHandle
     HANDLE m_notification{};
     HANDLE m_event{};
     OVERLAPPED m_overlap{};
-    Handle<fs::DirectoryListener> m_listener;
+    fs::DirectoryListener* m_listener;
     u32 m_buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128 / sizeof(u32)]{};
     bool m_is_stopped{};
-    std::thread m_wait_thread;
+    std::jthread m_wait_thread;
 };
 #endif
 
 namespace fs
 {
 
-bool open_mode_is_read(OpenMode mode)
+bool File::open(const fs::Path& path, OpenMode mode)
 {
-    static_assert((int)OpenMode::LAST_ENUM == 5);
-    return mode == OpenMode::READ_BYTES || mode == OpenMode::READ_WRITE_BYTES || mode == OpenMode::READ_WRITE_CREATE_BYTES;
+    ENG_ASSERT(!m_file.is_open());
+    m_path = path;
+    m_mode = mode;
+    m_file = std::fstream{ path.c_str(), open_mode_to_ios(mode) };
+    if(is_open()) { m_size = std::filesystem::file_size(m_path); }
+    return is_open();
 }
 
-bool open_mode_is_write(OpenMode mode)
+bool File::reopen()
 {
-    static_assert((int)OpenMode::LAST_ENUM == 5);
-    return mode == OpenMode::WRITE_CREATE_BYTES || mode == OpenMode::READ_WRITE_BYTES || mode == OpenMode::READ_WRITE_CREATE_BYTES;
-}
-
-File::File(FileSystem* fs, const Path& path, OpenMode mode) : m_fs(fs), m_path(path), m_mode(mode) { open(); }
-
-File::~File() noexcept { close(); }
-
-bool File::is_open() const { return m_file && m_file.is_open(); }
-
-void File::open()
-{
-    if(m_file.is_open()) { return; }
-    if(m_path.empty() || m_mode == OpenMode::NONE) { return; }
-    m_file = std::fstream{ m_path.c_str(), open_mode_to_ios(m_mode) };
-    if(!m_file.is_open()) { return; }
-    if(open_mode_is_read(m_mode))
-    {
-        m_file.seekg(0, std::ios::end);
-        m_size = m_file.tellg();
-        m_file.seekg(0, std::ios::beg);
-    }
+    ENG_ASSERT(!m_path.empty() && m_mode != OpenMode::DONT_OPEN);
+    return open(m_path, m_mode);
 }
 
 void File::close()
 {
-    m_file.close();
+    if(is_open()) { m_file.close(); }
+    // m_path = fs::Path{};
+    // m_mode = OpenMode::DONT_OPEN;
+    m_hash = 0;
     m_size = 0;
-    m_content_hash = {};
 }
 
 void File::flush() { m_file.flush(); }
 
-size_t File::read(std::byte* out_bytes, size_t bytes, size_t offset)
-{
-    if(!m_file.is_open() || !out_bytes) { return 0; }
-    if(!is_read()) { return 0; }
-    if(offset != ~0ull) { m_file.seekg(offset, std::ios::beg); }
-    if(!m_file) { return 0; }
-    m_file.read((char*)out_bytes, bytes);
-    return m_file.gcount();
-}
-
-std::string File::read(size_t bytes, size_t offset)
-{
-    if(!m_file.is_open()) { return {}; }
-    if(!is_read()) { return {}; }
-    if(offset == ~0ull) { offset = m_file.tellg(); }
-    offset = std::min(m_size, offset);
-    bytes = std::min(bytes, m_size - offset);
-    std::string str(bytes, '\0');
-    const auto read_bytes = read((std::byte*)str.data(), bytes, offset);
-    str.resize(read_bytes);
-    return str;
-}
-
-bool File::getline(std::string& str, size_t offset)
-{
-    if(offset != ~0ull) { m_file.seekg(offset, std::ios::beg); }
-    if(!m_file) { return false; }
-    return (bool)std::getline(m_file, str);
-}
-
-size_t File::write(const std::byte* bytes, size_t size, size_t offset, bool flush)
-{
-    if(!m_file || !bytes || size == 0) { return 0; }
-    if(!is_write()) { return 0; }
-    if(offset != ~0ull) { m_file.seekp(offset, std::ios::beg); }
-    if(!m_file) { return 0; }
-    m_file.write((const char*)bytes, size);
-    if(flush) { this->flush(); }
-    return m_file ? size : 0ull;
-}
-
 void File::delete_from_disk()
 {
-    close();
-    m_fs->delete_file(m_path);
+    if(!m_path.empty()) { auto ret = std::filesystem::remove(m_path); }
 }
 
-bool File::eof() const { return m_file.eof(); }
+void File::read(std::byte* dst_bytes, usize dst_size, usize& out_read_bytes, usize src_offset)
+{
+    if(dst_bytes == nullptr || !is_read() || !is_open())
+    {
+        out_read_bytes = 0;
+        return;
+    }
+    if(src_offset != ~0ull) { set_read_head(src_offset); }
+	src_offset = get_read_head();
+    out_read_bytes = std::min(dst_size, m_size - src_offset);
+    m_file.read((char*)dst_bytes, out_read_bytes);
+    out_read_bytes = m_file.gcount();
+}
+
+void File::read(std::string& dst_str, usize max_read_bytes, usize src_offset)
+{
+    dst_str.clear();
+    if(!is_read() || !is_open()) { return; }
+    if(src_offset == ~0ull) { src_offset = get_read_head(); }
+    auto read_bytes = std::min(max_read_bytes, m_size - src_offset);
+    dst_str.resize(read_bytes);
+    read((std::byte*)dst_str.data(), read_bytes, read_bytes, src_offset);
+}
+
+bool File::get_line(std::string& dst_str, usize src_offset)
+{
+    dst_str.clear();
+    if(!is_read() || !is_open()) { return false; }
+    return (bool)std::getline(m_file, dst_str);
+}
+
+void File::write(const std::byte* src_bytes, usize src_size, usize& out_write_bytes, usize dst_offset)
+{
+    out_write_bytes = 0;
+    if(!src_bytes || src_size == 0) { return; }
+    if(dst_offset != ~0ull) { set_write_head(dst_offset); }
+    m_file.write((const char*)src_bytes, src_size);
+    if(m_file.good()) { out_write_bytes = src_size; }
+}
 
 u64 File::get_hash()
 {
-    if(m_content_hash != 0) { return m_content_hash; }
-    m_content_hash = ENG_HASH(read(m_size), 0);
-    set_read_head(0);
-    return m_content_hash;
+    if(m_hash != 0) { return m_hash; }
+    if(is_read() && is_open())
+    {
+        std::string str;
+        read(str);
+        set_read_head(0);
+        m_hash = ENG_HASH(str);
+    }
+    return m_hash;
 }
 
 bool FileSystem::init()
 {
-    root_dir_path = "./";
-    const auto has_assets_dir = file_exists(make_rel_path("/assets")); 
+    s_root_dir_path = "./";
+    const auto has_assets_dir = file_exists(make_rel_path("/assets"));
     if(!has_assets_dir) { ENG_ERROR("assets folder missing in cwd directory."); }
     return has_assets_dir;
 }
 
 FilePtr FileSystem::open_file(const Path& path, OpenMode mode)
 {
-    if(!open_mode_is_write(mode) && !std::filesystem::exists(path)) { return {}; }
-
-    const auto hash = std::hash<Path>{}(path);
-    auto fileit = m_files_map.find(std::make_pair(hash, mode));
-    if(fileit != m_files_map.end())
-    {
-        auto ptr = fileit->second.lock();
-        if(ptr) { return ptr; }
-        else { m_files_map.erase(fileit); }
-    }
-
-    const auto pathstr = path.string();
-    auto tries = 0u;
-
-    auto sharedfile = std::make_shared<File>(this, path, mode);
-    while(!sharedfile->is_open() && tries++ < 10)
-    {
-        ENG_ASSERT(false); // todo: check if this loop ever runs; it was needed because listening for file changes sometimes blocks opening of files...
-        std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
-        *sharedfile = File{ this, path, mode };
-    }
-    if(!sharedfile->is_open()) { return {}; }
-    m_files_map.emplace(std::make_pair(hash, mode), sharedfile);
-    return sharedfile;
+    auto rel_path = make_rel_path(path);
+    auto file = std::shared_ptr<File>{ new File{}, [](File* ptr) {
+                                          ptr->close();
+                                          delete ptr;
+                                      } };
+    file->open(rel_path, mode);
+    return file;
 }
 
 void FileSystem::delete_file(const Path& path)
 {
-    const auto hash = std::hash<Path>{}(path);
-    // todo: i don't like this solution
-    std::vector<decltype(m_files_map.begin())> its;
-    for(auto it = m_files_map.begin(); it != m_files_map.end(); ++it)
-    {
-        if(it->first.first == hash) { its.push_back(it); }
-    }
-    for(auto it : its)
-    {
-        auto ptr = it->second.lock();
-        if(ptr) { ptr->close(); }
-        m_files_map.erase(it);
-    }
-    if(!std::filesystem::remove(path) && std::filesystem::exists(path))
-    {
-        ENG_WARN("Could not remove file {}", path.string());
-    }
+    std::filesystem::remove(path);
+    if(file_exists(path)) { ENG_WARN("Could not remove file {}", path.string()); }
 }
 
 bool fs::FileSystem::file_exists(const Path& path) const { return std::filesystem::exists(path); }
 
-Handle<DirectoryListener> fs::FileSystem::make_listener(std::string_view virtual_path, std::span<std::string_view> extensions)
+DirectoryListener* fs::FileSystem::make_listener(std::string_view virtual_path)
 {
     ENG_ASSERT(virtual_path.size());
-    auto* ptr = &m_dir_listeners_vec.emplace_back();
-    ptr->m_listening_path = virtual_path;
-    ENG_ASSERT(extensions.size());
-    for(auto ext : extensions)
-    {
-        ENG_ASSERT(ext.starts_with('.') && ext.size() > 0 && ext.size() < 16);
-        ptr->m_extension_filter_set.emplace(ext);
-    }
+    auto* dir_listener = &m_dir_listeners_vec.emplace_back();
+    dir_listener->m_listening_path = virtual_path;
     auto physical_path = make_rel_path(virtual_path);
     physical_path = std::filesystem::absolute(physical_path);
-    const auto handle = Handle<DirectoryListener>{ (uintptr_t)ptr };
-    auto listener = std::make_shared<Win32DirChangeHandle>(virtual_path, physical_path, handle);
-    ptr->m_listener = listener;
-    listener->start();
-    return handle;
+    auto listener_impl = new Win32DirChangeHandle{ virtual_path, physical_path, dir_listener };
+    dir_listener->m_impl = listener_impl;
+    listener_impl->start();
+    return dir_listener;
 }
 
 fs::Path fs::FileSystem::make_rel_path(const fs::Path& virtual_path)
 {
-    if(virtual_path.string().starts_with("/")) { return root_dir_path / fs::Path{ virtual_path.string().erase(0, 1) }; }
+    if(virtual_path.string().starts_with("/"))
+    {
+        auto str = virtual_path.string();
+        return s_root_dir_path / fs::Path{ str.begin() + 1, str.end() };
+    }
     return virtual_path;
-}
-
-fs::FilePtr fs::FileSystem::get_asset(const fs::Path& virtual_path, fs::OpenMode mode)
-{
-    const auto _path = make_rel_path(virtual_path);
-    return open_file(_path, mode);
 }
 
 } // namespace fs

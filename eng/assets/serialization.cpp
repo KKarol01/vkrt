@@ -10,7 +10,7 @@ namespace serialization
 {
 
 template <>
-void serialize<engb::Container>(std::span<std::byte> dst, const engb::Container& src, size_t& out_bytes_written)
+void serialize<engb::Container>(std::span<std::byte> dst, const engb::Container& src, usize& out_bytes_written)
 {
     static constexpr const char* MAGIC = "engb";
     static constexpr u8 VERSION = 0;
@@ -27,7 +27,7 @@ void serialize<engb::Container>(std::span<std::byte> dst, const engb::Container&
 }
 
 template <>
-void deserialize<engb::Container>(engb::Container& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+void deserialize<engb::Container>(engb::Container& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     char magic[4]{};
     u8 version{};
@@ -53,31 +53,32 @@ void Container::read_list_section()
 {
     if(!m_file || !m_file->is_read())
     {
-        ENG_WARN("Couldn't open engb file {} for read", m_file ? m_file->path().string() : "<empty path>");
+        ENG_WARN("Couldn't open engb file {} for read", m_file ? m_file->get_path().string() : "<empty path>");
         m_lists_vec.clear();
         return;
     }
 
     // file is empty, no list to be read
-    if(m_file->size() == 0) { return; }
+    if(m_file->get_size() == 0) { return; }
 
     std::byte buf[64];
     static_assert(LIST_BYTE_SZ <= std::size(buf));
-    auto read_bytes = m_file->read(buf, HEADER_BYTE_SZ, 0);
+    usize read_bytes = 0;
+    m_file->read(buf, HEADER_BYTE_SZ, read_bytes, 0);
     if(read_bytes != HEADER_BYTE_SZ)
     {
-        ENG_WARN("Could read engb header ({})", m_file->path().string());
+        ENG_WARN("Could read engb header ({})", m_file->get_path().string());
         return;
     }
     if(std::string_view{ (const char*)buf, 4 } != "engb")
     {
-        ENG_WARN("File is not valid engb file ({})", m_file->path().string());
+        ENG_WARN("File is not valid engb file ({})", m_file->get_path().string());
         return;
     }
 
     if((char)buf[4] != (char)0)
     {
-        ENG_WARN("Engb container {} has invalid version {}", m_file->path().string(), (char)buf[4]);
+        ENG_WARN("Engb container {} has invalid version {}", m_file->get_path().string(), (char)buf[4]);
         return;
     }
 
@@ -87,14 +88,15 @@ void Container::read_list_section()
     for(auto i = 0u; i < num_lists; ++i)
     {
         auto& l = m_lists_vec.emplace_back();
-        const auto file_read = m_file->read(buf, LIST_BYTE_SZ);
-        if(file_read != LIST_BYTE_SZ)
+        usize n_bytes_read = 0;
+        m_file->read(buf, LIST_BYTE_SZ, n_bytes_read);
+        if(n_bytes_read != LIST_BYTE_SZ)
         {
-            ENG_WARN("Failed reading engb container list from file {}", m_file->path().string());
+            ENG_WARN("Failed reading engb container list from file {}", m_file->get_path().string());
             m_lists_vec.clear();
             return;
         }
-        size_t out_bytes_written = 0;
+        usize out_bytes_written = 0;
         serialization::deserialize(l, std::span{ buf }, out_bytes_written);
         ENG_ASSERT(l.version == 0);
     }
@@ -107,7 +109,7 @@ void Container::add_asset(u8 version, u64 custom_hash, Flags<ListFlags> flags, s
     m_lists_vec.emplace_back(custom_hash, ENG_HASH(asset), m_asset_bytes.size(), 0, version, flags);
 
     std::byte buf[64];
-    size_t metadata_bytes = 0;
+    usize metadata_bytes = 0;
     if(flags & ListFlags::CONTENT_COMPRESSED_BIT)
     {
         ENG_ASSERT(metadata.uncompressed_size > 0);
@@ -143,11 +145,12 @@ void Container::serialize()
     }
     const auto total_size_bytes = HEADER_BYTE_SZ + (m_lists_vec.size() * LIST_BYTE_SZ) + 8 + m_asset_bytes.size();
     std::vector<std::byte> data(total_size_bytes);
-    size_t out_bytes_written = 0;
+    usize out_bytes_written = 0;
     serialization::serialize(std::span{ data }, *this, out_bytes_written);
     ENG_ASSERT(total_size_bytes == out_bytes_written);
-    const auto file_bytes_writen = m_file->write(data.data(), out_bytes_written, 0, true);
-    ENG_ASSERT(file_bytes_writen == total_size_bytes);
+    usize n_bytes_written = 0;
+    m_file->write(data.data(), out_bytes_written, n_bytes_written);
+    ENG_ASSERT(n_bytes_written == total_size_bytes);
 }
 
 std::optional<List> Container::get_asset_list(u64 custom_hash) const
@@ -159,14 +162,15 @@ std::optional<List> Container::get_asset_list(u64 custom_hash) const
     return std::nullopt;
 }
 
-size_t Container::get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset) const
+usize Container::get_asset_data(const List& list, std::span<std::byte> out_data, usize src_offset) const
 {
     if(!m_file || !m_file->is_read()) { return 0; }
     if(src_offset >= list.asset_size) { return 0; }
-    const size_t remaining_in_asset = list.asset_size - src_offset;
-    const size_t bytes_to_read = std::min(out_data.size(), remaining_in_asset);
-    const auto file_bytes = m_file->read(out_data.data(), bytes_to_read, list.asset_start + src_offset);
-    return file_bytes;
+    const usize remaining_in_asset = list.asset_size - src_offset;
+    const usize bytes_to_read = std::min(out_data.size(), remaining_in_asset);
+    usize n_bytes_read = 0;
+    m_file->read(out_data.data(), bytes_to_read, n_bytes_read, list.asset_start + src_offset);
+    return n_bytes_read;
 }
 
 } // namespace v0

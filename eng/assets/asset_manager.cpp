@@ -15,7 +15,7 @@ using namespace serialization;
 
 namespace serialization
 {
-template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets::Asset& src, size_t& out_bytes_written)
+template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets::Asset& src, usize& out_bytes_written)
 {
     if(src.geometry_data.empty())
     {
@@ -94,7 +94,7 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
 }
 
 template <>
-void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> src, size_t& out_bytes_written)
+void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> src, usize& out_bytes_written)
 {
     std::string pathstr;
     deserialize(pathstr, src, out_bytes_written);
@@ -222,7 +222,7 @@ void AssetManager::init()
     m_engb_containers_vec.reserve(engb_paths.size());
     for(const auto& p : engb_paths)
     {
-        m_engb_containers_vec.emplace_back(get_engine().fs->open_file(p, fs::OpenMode::READ_WRITE_BYTES));
+        m_engb_containers_vec.emplace_back(get_engine().fs->open_file(p, fs::OpenMode::TRY_READ_WRITE_BYTES_BEG));
     }
 }
 
@@ -266,7 +266,8 @@ serialization::engb::Container& AssetManager::get_latest_container()
 {
     if(m_engb_containers_vec.empty())
     {
-        m_engb_containers_vec.emplace_back(get_engine().fs->get_asset("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
+        m_engb_containers_vec.emplace_back(get_engine().fs->open_file("/assets/assets0.engb",
+                                                                      fs::OpenMode::READ_WRITE_BYTES_CREATE_DISCARD));
     }
     return m_engb_containers_vec.front();
 }
@@ -316,12 +317,13 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     if(list.flags.test(engb::ListFlags::CONTENT_COMPRESSED_BIT))
     {
         std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
-        size_t asset_read_offset = 0;
+        usize asset_read_offset = 0;
         u64 uncompressed_size = 0;
-        container->m_file->read((std::byte*)&uncompressed_size, 8, list.asset_start - 8);
+        usize n_bytes_read = 0;
+        container->m_file->read((std::byte*)&uncompressed_size, 8, n_bytes_read, list.asset_start - 8);
         asset_bytes.reserve(uncompressed_size);
         auto success = compression::zlib_inflate(
-            [&](size_t size) {
+            [&](usize size) {
                 const auto file_read = container->get_asset_data(list, std::span{ file_buf.data(), size }, asset_read_offset);
                 asset_read_offset += file_read;
                 const auto bytes_to_process = std::min(file_read, size);
@@ -346,7 +348,7 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
         }
     }
 
-    size_t read_bytes = 0;
+    usize read_bytes = 0;
     Asset asset{};
     deserialize(asset, std::span{ asset_bytes }, read_bytes);
     return asset;
@@ -365,7 +367,7 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
         signal.wait();
     }
 
-    size_t size = 0;
+    usize size = 0;
     ENG_TIMER_SCOPED("Serializing asset {}", asset.path.string());
     std::vector<std::byte> asset_bytes;
     serialize(std::span{ asset_bytes }, asset, size);
@@ -376,8 +378,8 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
         size = 0;
         serialize(std::span{ asset_bytes }, asset, size);
 
-        size_t bytes_read = 0;
-        size_t bytes_left = asset_bytes.size();
+        usize bytes_read = 0;
+        usize bytes_left = asset_bytes.size();
 
         std::scoped_lock lock{ m_engbc_vec_mutex };
         auto& engbc = get_latest_container();
@@ -386,9 +388,9 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
         engbc.append_asset_bytes(std::span{ asset_bytes }, true);
 
 #if 0
-        size_t bytes_compressed = 0;
+        usize bytes_compressed = 0;
         const auto res = compression::zlib_deflate(
-            [&](size_t size) {
+            [&](usize size) {
                 const auto bytes_to_process = std::min(bytes_left, size);
                 auto span = std::span<const std::byte>{ asset_bytes.data() + bytes_read, bytes_to_process };
                 bytes_read += bytes_to_process;

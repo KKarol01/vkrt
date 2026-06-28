@@ -19,65 +19,59 @@ namespace fs
 {
 
 using Path = ::std::filesystem::path;
-using PathHash = u64;
 
-// Open mode. _BYTES suffix means posix 'b' flag that disables special '\n' handling on windows.
 enum class OpenMode
 {
-    NONE,
-    READ_BYTES,              // read from start, fail on no file
-    WRITE_CREATE_BYTES,      // write from start, always destroy contents, create new on no file
-    READ_WRITE_BYTES,        // read/write from start, error on no file
-    READ_WRITE_CREATE_BYTES, // read/write from start, destroy contents, create new on no file
-    LAST_ENUM,
+    DONT_OPEN,
+    TRY_READ_BYTES_BEG,              // rb
+    TRY_READ_WRITE_BYTES_BEG,        // r+b
+    READ_WRITE_BYTES_CREATE_DISCARD, // w+b
+    WRITE_BYTES_CREATE_DISCARD,      // wb
 };
-
-inline bool open_mode_is_read(OpenMode mode);
-inline bool open_mode_is_write(OpenMode mode);
 
 class FileSystem;
 
 class File
 {
   public:
-    File() = default;
-    File(FileSystem* fs, const Path& path, OpenMode mode);
-    ~File() noexcept;
-    File(File&& o) noexcept { *this = std::move(o); }
-    File& operator=(File&& o) noexcept
-    {
-        m_fs = std::exchange(o.m_fs, nullptr);
-        m_file = std::move(o.m_file);
-        m_size = std::exchange(o.m_size, 0ull);
-        m_path = std::move(o.m_path);
-        m_mode = std::exchange(o.m_mode, OpenMode::NONE);
-        return *this;
-    }
-    bool is_open() const;
-    bool is_read() const { return open_mode_is_read(m_mode); }
-    bool is_write() const { return open_mode_is_write(m_mode); }
-    void open();
+    bool open(const fs::Path& path, OpenMode mode);
+    bool reopen();
     void close();
     void flush();
-    size_t read(std::byte* out_bytes, size_t bytes, size_t offset = ~0ull);
-    std::string read(size_t bytes = ~0ull, size_t offset = ~0ull);
-    bool getline(std::string& str, size_t offset = ~0ull);
-    size_t write(const std::byte* bytes, size_t size, size_t offset = ~0ull, bool flush = false);
-    void set_read_head(size_t pos) { m_file.seekg(pos, std::ios::beg); }
-    void set_write_head(size_t pos) { m_file.seekp(pos, std::ios::beg); }
     void delete_from_disk();
-    bool eof() const;
+
+    void read(std::byte* dst_bytes, usize dst_size, usize& out_read_bytes, usize src_offset = ~0ull);
+    void read(std::string& dst_str, usize max_read_bytes = ~0ull, usize src_offset = ~0ull);
+    bool get_line(std::string& dst_str, usize src_offset = ~0ull);
+    void write(const std::byte* src_bytes, usize src_size, usize& out_write_bytes, usize dst_offset = ~0ull);
+
+    void set_read_head(usize pos) { m_file.seekg(pos, std::fstream::beg); }
+    usize get_read_head() { return (usize)m_file.tellg(); }
+    void set_write_head(usize pos) { m_file.seekp(pos, std::fstream::beg); }
+    usize get_write_head() { return (usize)m_file.tellp(); }
+
+    bool is_open() const { return m_file.is_open(); }
+    bool is_read() const
+    {
+        return m_mode == OpenMode::TRY_READ_BYTES_BEG || m_mode == OpenMode::TRY_READ_WRITE_BYTES_BEG ||
+               m_mode == OpenMode::READ_WRITE_BYTES_CREATE_DISCARD;
+    }
+    bool is_write() const
+    {
+        return m_mode == OpenMode::READ_WRITE_BYTES_CREATE_DISCARD || m_mode == OpenMode::WRITE_BYTES_CREATE_DISCARD;
+    }
+    bool is_eof() const { return m_file.eof(); }
+
     u64 get_hash();
-    auto size() const { return m_size; }
-    const Path& path() const { return m_path; }
+    usize get_size() const { return m_size; }
+    const fs::Path& get_path() const { return m_path; }
 
   private:
-    FileSystem* m_fs{};
+    OpenMode m_mode{ OpenMode::DONT_OPEN };
+    fs::Path m_path;
+    u64 m_hash{};
+    usize m_size{};
     std::fstream m_file;
-    size_t m_size{};
-    Path m_path{};
-    OpenMode m_mode{ OpenMode::NONE };
-    u64 m_content_hash{};
 };
 
 using FilePtr = std::shared_ptr<File>;
@@ -88,45 +82,31 @@ class DirectoryListener
     void push_paths(std::span<fs::Path> paths)
     {
         std::scoped_lock lock{ m_mutex };
-        for(auto& p : paths)
-        {
-            if(!m_extension_filter_set.contains(p.extension().string())) { continue; }
-            m_changed_files_set.insert(std::move(p));
-        }
+        m_changed_files_set.insert(std::make_move_iterator(paths.begin()), std::make_move_iterator(paths.end()));
     }
 
-    void consume_paths(auto&& cb)
+    void consume_paths(std::vector<fs::Path>& out_paths)
     {
         std::scoped_lock lock{ m_mutex };
-        if(m_changed_files_set.empty()) { return; }
-
-        auto vec = std::vector<fs::Path>(std::make_move_iterator(m_changed_files_set.begin()),
-                                         std::make_move_iterator(m_changed_files_set.end()));
-        cb(std::move(vec));
+        out_paths.insert(out_paths.end(), std::make_move_iterator(m_changed_files_set.begin()),
+                         std::make_move_iterator(m_changed_files_set.end()));
         m_changed_files_set.clear();
     }
 
     fs::Path m_listening_path;
-    std::shared_ptr<void> m_listener;
+    void* m_impl{};
     std::unordered_set<fs::Path> m_changed_files_set;
-    std::unordered_set<StackString<16>> m_extension_filter_set;
     std::mutex m_mutex;
 };
-
-} // namespace fs
-} // namespace eng
-
-ENG_DEFINE_HANDLE_STORAGE(fs::DirectoryListener, uintptr_t);
-ENG_DEFINE_HANDLE_ALL_GETTERS(fs::DirectoryListener, { return reinterpret_cast<fs::DirectoryListener*>(*handle); });
-
-namespace eng
-{
-namespace fs
-{
 
 class FileSystem
 {
   public:
+    // From virtual path like '/assets/texture.png' make system relative path like '../../assets/texture.png'
+    static Path make_rel_path(const Path& virtual_path);
+    // Get relative path to the directory where assets are located
+    static Path get_assets_path() { return s_root_dir_path; }
+
     bool init();
 
     // Open a file with system path (relative or absolute)
@@ -137,17 +117,9 @@ class FileSystem
     bool file_exists(const Path& path) const;
 
     // Create recursive listener for file changes
-    Handle<DirectoryListener> make_listener(std::string_view virtual_path, std::span<std::string_view> extensions);
+    DirectoryListener* make_listener(std::string_view virtual_path);
 
-    // From virtual path like '/assets/texture.png' make system relative path like '../../assets/texture.png'
-    Path make_rel_path(const Path& virtual_path);
-    // Open a file after transforing virtual path
-    FilePtr get_asset(const Path& virtual_path, OpenMode mode);
-    // Get relative path to the directory where assets are located
-    Path get_assets_path() const { return root_dir_path; }
-
-    Path root_dir_path;
-    std::map<std::pair<PathHash, OpenMode>, std::weak_ptr<File>> m_files_map;
+    inline static Path s_root_dir_path;
     std::deque<DirectoryListener> m_dir_listeners_vec;
 };
 

@@ -1,4 +1,5 @@
 #pragma once
+#pragma once
 
 #include <mutex>
 #include <unordered_set>
@@ -108,10 +109,16 @@ ImageBlockData get_block_data(ImageFormat format);
 
 struct Shader
 {
+    struct Macro
+    {
+        StackString<64> name;
+        StackString<64> value;
+    };
     auto operator==(const Shader& o) const { return path == o.path; }
-    static Shader init(const fs::Path& path);
+    static Shader init(const fs::Path& path, const std::vector<Macro>& macros = {});
     fs::Path path;
     ShaderStage stage{ ShaderStage::NONE };
+    std::vector<Macro> macros;
     struct Metadata
     {
         ShaderMetadataVk* vk() const { return (ShaderMetadataVk*)ptr; }
@@ -605,7 +612,8 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo,
                              t.line_width, t.shaders, t.bindings, t.attributes));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout, ENG_HASH(t.push_range.stages, t.push_range.size, t.layout));
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
-ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
+ENG_DEFINE_STD_HASH(eng::gfx::Shader::Macro, ENG_HASH(t.name, t.value));
+ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path, std::span{ t.macros }));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));
 ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.mode, t.alpha_cutoff, t.base_color_factor, t.base_color_texture));
 ENG_DEFINE_STD_HASH(eng::gfx::Mesh, ENG_HASH(t.geometry, t.material));
@@ -640,28 +648,22 @@ struct Swapchain
 
 class ShaderManager
 {
-    struct File
+    struct SourceFile
     {
+        Handle<Shader> shader;
         fs::Path path;
         u64 hash{};
-        Handle<Shader> shader;
-        std::set<File*> headers_set;
-        std::set<Handle<Pipeline>> pipelines_set;
+        std::set<SourceFile*> include_set;
     };
 
   public:
-    auto& operator[](this auto& self, Handle<Shader> a) { return self.m_shader_alloc[*a]; }
+    void register_shader(Handle<Shader> shader);
+    void process_file_source_change(const fs::Path& modified_path, std::vector<Handle<Shader>>& out_shaders);
 
-    Handle<Shader> make_shader(const fs::Path& path);
-    void parse_includes(File& f, File* pf);
-    std::vector<Handle<Shader>> get_affected_shaders(const fs::Path& path,
-                                                     std::vector<Handle<Pipeline>>* out_affected_pipelines = nullptr);
-    u64 get_hash(const fs::Path& path);
-    void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
-    std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
+    void parse_includes(SourceFile& f);
+    u64 get_hash(SourceFile& f);
 
-    Slotmap<Shader> m_shader_alloc;
-    std::unordered_map<fs::Path, File> m_files_map;
+    std::unordered_map<fs::Path, SourceFile> m_files_map;
 };
 
 enum class SubmitFlags : u32
@@ -857,7 +859,8 @@ class Renderer
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
     void queue_destroy(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
-    Handle<Shader> make_shader(const fs::Path& path, Compilation compilation = Compilation::DEFERRED);
+    Handle<Shader> make_shader(const fs::Path& path, const std::vector<Shader::Macro>& defines = {},
+                               Compilation compilation = Compilation::DEFERRED);
     bool compile_shader(Handle<Shader> shader);
     bool compile_shader(Shader& shader);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
@@ -898,8 +901,10 @@ class Renderer
     MutexSlotmap<Image> images;
 
     HandleFlatSet<Sampler> samplers;
-    ShaderManager m_shaders;
-    Handle<fs::DirectoryListener> new_shaders_listener;
+
+    ShaderManager m_shader_manager;
+    Slotmap<Shader> m_shaders;
+    fs::DirectoryListener* changed_shader_listener{};
 
     std::vector<DescriptorLayout> dlayouts;
     std::vector<PipelineLayout> pplayouts;
@@ -972,7 +977,7 @@ ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_render
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(*handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().m_shaders[handle]; });
+ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().m_shaders.at(*handle); });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines[*handle]; });
 ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });

@@ -13,6 +13,57 @@
 #include <eng/fs/fs.hpp>
 #include <eng/assets/asset_manager.hpp>
 
+using namespace eng;
+
+// static usize total_mem = 0;
+// static usize peak_total_mem = 0;
+//
+// void* operator new(std::size_t size)
+//{
+//     total_mem += size;
+//     peak_total_mem = std::max(peak_total_mem, total_mem);
+//     return std::malloc(size);
+// }
+//
+// void operator delete(void* ptr) noexcept
+//{
+//     total_mem -= _msize(ptr);
+//     std::free(ptr);
+// }
+//
+// void* operator new[](std::size_t size)
+//{
+//     peak_total_mem = std::max(peak_total_mem, total_mem);
+//     total_mem += size;
+//     return std::malloc(size);
+// }
+//
+// void operator delete[](void* ptr) noexcept
+//{
+//     total_mem -= _msize(ptr);
+//     std::free(ptr);
+// }
+//
+// void* operator new(std::size_t size, std::align_val_t al)
+//{
+//	ENG_ASSERT(false);
+//	return nullptr;
+//     peak_total_mem = std::max(peak_total_mem, total_mem);
+//     return _aligned_malloc(size, (size_t)al);
+// }
+//
+// void operator delete(void* ptr, std::align_val_t al) noexcept { _aligned_free(ptr); }
+//
+// void* operator new[](std::size_t size, std::align_val_t al)
+//{
+//	ENG_ASSERT(false);
+//	return nullptr;
+//     peak_total_mem = std::max(peak_total_mem, total_mem);
+//     return _aligned_malloc(size, (size_t)al);
+// }
+//
+// void operator delete[](void* ptr, std::align_val_t al) noexcept { _aligned_free(ptr); }
+
 static void on_mouse_move(GLFWwindow* window, double px, double py)
 {
     eng::get_engine().window->on_mouse_move(static_cast<float>(px), static_cast<float>(py));
@@ -253,6 +304,7 @@ void Engine::start()
     {
         if(get_time_secs() - last_frame_time >= refresh_rate)
         {
+            // ENG_LOG("Total memory: {} | Peak: {}", (float)total_mem / (float)MiB, peak_total_mem / (float)MiB);
             const float now = get_time_secs();
             on_update.signal();
             camera->update();
