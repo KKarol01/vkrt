@@ -974,7 +974,7 @@ bool Renderer::compile_shader(Handle<Shader> shader)
 
 bool Renderer::compile_shader(Shader& shader)
 {
-    const auto shhash = ENG_HASH(shader);
+    const auto shhash = m_shader_manager.get_hash(shader.path);
     fs::FilePtr shfile = get_engine().fs->open_file(shader.path, fs::OpenMode::TRY_READ_BYTES_BEG);
     const auto pcpath = fs::Path{ shader.path.string() + ".precompiled" };
     fs::FilePtr pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::TRY_READ_BYTES_BEG);
@@ -1662,6 +1662,8 @@ u64 ShaderManager::get_hash(SourceFile& f)
     f.hash = hash;
     return hash;
 }
+
+u64 ShaderManager::get_hash(const fs::Path& path) { return get_hash(m_files_map.at(path)); }
 
 float TimestampQuery::to_ms(const TimestampQuery& q)
 {

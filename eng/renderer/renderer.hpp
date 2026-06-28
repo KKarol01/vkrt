@@ -662,6 +662,7 @@ class ShaderManager
 
     void parse_includes(SourceFile& f);
     u64 get_hash(SourceFile& f);
+    u64 get_hash(const fs::Path& path);
 
     std::unordered_map<fs::Path, SourceFile> m_files_map;
 };
