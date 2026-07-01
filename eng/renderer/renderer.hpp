@@ -2,6 +2,7 @@
 #pragma once
 
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_set>
 #include <glm/glm.hpp>
 #include <eng/assets/asset_manager.hpp>
@@ -662,9 +663,9 @@ class ShaderManager
 
     void parse_includes(SourceFile& f);
     u64 get_hash(SourceFile& f);
-    u64 get_hash(const fs::Path& path);
+    u64 get_hash(hash_t shader_hash);
 
-    std::unordered_map<fs::Path, SourceFile> m_files_map;
+    std::unordered_map<hash_t, SourceFile> m_files_map;
 };
 
 enum class SubmitFlags : u32
@@ -898,8 +899,8 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    MutexSlotmap<Buffer> buffers;
-    MutexSlotmap<Image> images;
+    Slotmap<Buffer> buffers;
+    Slotmap<Image> images;
 
     HandleFlatSet<Sampler> samplers;
 
@@ -927,6 +928,7 @@ class Renderer
     std::vector<ecs::EntityId> new_transforms;
     std::vector<ecs::EntityId> new_lights;
 
+    std::shared_mutex m_make_resource_mutex;
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
     SlotAllocator<u32> gpu_resource_allocator;

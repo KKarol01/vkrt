@@ -889,6 +889,7 @@ void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
 Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate)
 {
+    std::scoped_lock lock{ m_make_resource_mutex };
     u32 order = 0;
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
@@ -896,16 +897,17 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
-    auto h = Handle<Buffer>{ buffers.emplace(std::move(buffer)) };
+    auto h = Handle<Buffer>{ *buffers.emplace(std::move(buffer)) };
     if(!h) { ENG_WARN("Could not create buffer {}", name); }
     return h;
 }
 
 Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
 {
+    std::scoped_lock lock{ m_make_resource_mutex };
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
-    auto h = Handle<Image>{ images.emplace(std::move(image)) };
+    auto h = Handle<Image>{ *images.emplace(std::move(image)) };
     if(!h) { ENG_WARN("Could not create image {}", name); }
     return h;
 }
@@ -952,7 +954,7 @@ Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
 
 Handle<Shader> Renderer::make_shader(const fs::Path& path, const std::vector<Shader::Macro>& defines, Compilation compilation)
 {
-    const auto h = Handle<Shader>{ m_shaders.emplace(Shader::init(path, defines)) };
+    const auto h = Handle<Shader>{ *m_shaders.emplace(Shader::init(path, defines)) };
     ENG_ASSERT(h && h->stage != ShaderStage::NONE);
     if(compilation == Compilation::NOW) { compile_shader(h); }
     else { new_shaders.push_back(h); }
@@ -974,7 +976,7 @@ bool Renderer::compile_shader(Handle<Shader> shader)
 
 bool Renderer::compile_shader(Shader& shader)
 {
-    const auto shhash = m_shader_manager.get_hash(shader.path);
+    const auto shhash = m_shader_manager.get_hash(ENG_HASH(shader));
     fs::FilePtr shfile = get_engine().fs->open_file(shader.path, fs::OpenMode::TRY_READ_BYTES_BEG);
     const auto pcpath = fs::Path{ shader.path.string() + ".precompiled" };
     fs::FilePtr pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::TRY_READ_BYTES_BEG);
@@ -1595,7 +1597,7 @@ void ShaderManager::register_shader(Handle<Shader> shader)
     ENG_ASSERT(shader);
     if(!shader) { return; }
     const auto& sh = shader.get();
-    auto it = m_files_map.emplace(sh.path, SourceFile{});
+    auto it = m_files_map.emplace(ENG_HASH(shader.get()), SourceFile{});
     ENG_ASSERT(it.second, "Shader {} already registered", sh.path.string());
     auto& sf = it.first->second;
     sf.shader = shader;
@@ -1606,22 +1608,15 @@ void ShaderManager::register_shader(Handle<Shader> shader)
 
 void ShaderManager::process_file_source_change(const fs::Path& modified_path, std::vector<Handle<Shader>>& out_shaders)
 {
-    auto it = m_files_map.find(modified_path);
-    if(it == m_files_map.end()) { return; }
-    auto& mod_file = it->second;
-    ENG_ASSERT(mod_file.hash != 0);
-    std::set<SourceFile*> affected_files;
-    for(auto& f : m_files_map)
+    for(auto& [hash, file] : m_files_map)
     {
-        if(f.second.include_set.contains(&mod_file) || f.second.path == modified_path)
+        if(file.path == modified_path ||
+           std::find_if(file.include_set.begin(), file.include_set.end(),
+                        [&modified_path](const SourceFile* f) { return f->path == modified_path; }) != file.include_set.end())
         {
-            auto was_inserted = affected_files.insert(&f.second).second;
-            if(was_inserted)
-            {
-                if(f.second.shader) { out_shaders.push_back(f.second.shader); }
-                f.second.hash = 0;
-                get_hash(f.second);
-            }
+            if(file.shader) { out_shaders.push_back(file.shader); }
+            file.hash = 0;
+            get_hash(file);
         }
     }
 }
@@ -1641,7 +1636,7 @@ void ShaderManager::parse_includes(SourceFile& f)
         if(include_path.string().starts_with("assets/")) { include_path = "/" / include_path; }
         else { include_path = f.path.parent_path() / include_path; }
         ENG_ASSERT(include_path.extension() == ".hlsli");
-        auto inc_it = m_files_map.emplace(include_path, SourceFile{ Handle<Shader>{}, include_path, 0, {} });
+        auto inc_it = m_files_map.emplace(ENG_HASH(include_path), SourceFile{ Handle<Shader>{}, include_path, 0, {} });
         if(inc_it.second) { parse_includes(inc_it.first->second); }
         f.include_set.insert(inc_it.first->second.include_set.begin(), inc_it.first->second.include_set.end());
         f.include_set.insert(&inc_it.first->second);
@@ -1659,11 +1654,12 @@ u64 ShaderManager::get_hash(SourceFile& f)
     auto file = get_engine().fs->open_file(f.path, fs::OpenMode::TRY_READ_BYTES_BEG);
     ENG_ASSERT(file && file->is_open());
     hash = ENG_HASH(hash, file->get_hash());
+    if(f.shader) { hash = ENG_HASH(hash, f.shader.get()); }
     f.hash = hash;
     return hash;
 }
 
-u64 ShaderManager::get_hash(const fs::Path& path) { return get_hash(m_files_map.at(path)); }
+u64 ShaderManager::get_hash(hash_t shader_hash) { return get_hash(m_files_map.at(shader_hash)); }
 
 float TimestampQuery::to_ms(const TimestampQuery& q)
 {

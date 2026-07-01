@@ -14,7 +14,7 @@ FSOutput main(VSOutput vsoutput)
 	
 	GPUEngConstants constants = get_grwb2(GPUEngConstants, pc, 0);
     
-    float4 base_color = float4(1.0, 1.0, 1.0, 1.0);
+    float4 base_color = float4(1.0, 1.0, 1.0, 1.0); 
 	GPUMaterial mat = get_grwb2(GPUMaterial, constants, vsoutput.material_index);
     Texture2D<float4> base_color_tex = gTextures2Dfloat4[NonUniformResourceIndex(mat.base_color_idx)];
     //base_color = base_color_tex.Sample(gSamplerStates[ENG_SAMPLER_LINEAR], vsoutput.uv); 
