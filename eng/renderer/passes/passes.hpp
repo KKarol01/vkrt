@@ -632,7 +632,7 @@ struct MeshPass : public Pass
                 for(auto i = 0; i < std::size(vkcols); ++i)
                 {
                     if(!d.color_buffers[i]) { continue; }
-                    vkcols[i].imageView = b.get_img(d.color_buffers[i]).get_md().vk->view;
+                    vkcols[i].imageView = ((const ImageViewMetadataVk*)b.get_img(d.color_buffers[i]).get_md())->view;
                     vkcols[i].imageLayout = to_vk(b.graph->get_acc(d.color_buffers[i]).layout);
                     vkcols[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     vkcols[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -641,7 +641,7 @@ struct MeshPass : public Pass
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
                 if(d.depth)
                 {
-                    vkdep.imageView = b.graph->get_acc(d.depth).image_view.get_md().vk->view;
+                    vkdep.imageView = ((const ImageViewMetadataVk*)b.graph->get_acc(d.depth).image_view.get_md())->view;
                     vkdep.imageLayout = to_vk(b.graph->get_acc(d.depth).layout);
                     if(m_type == MeshPassType::Z_PREPASS)
                     {
@@ -811,8 +811,8 @@ struct SSAO : public Pass
     {
         // if(!data.depth_buffer) { return; }
         // if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
-        if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
-        if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
+        // if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
+        // if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
 
         auto& r = get_renderer();
 
@@ -898,7 +898,7 @@ struct SSAO : public Pass
                 d.noise = b.sample_texture(d.noise);
                 d.normals = b.sample_texture(get_frame_data().render_resources.halfres_normal);
                 d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
-                d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
+                // d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
                 d.history = b.read_write_image(b.create_resource(get_buffered_name("AO History").as_view(),
                                                                  Image::init(r.settings.render_resolution.x,
                                                                              r.settings.render_resolution.y,
@@ -937,8 +937,8 @@ struct SSAO : public Pass
                     DescriptorResource::sampled_image(b.get_img(d.noise)),
                     DescriptorResource::sampled_image(b.get_img(d.normals)),
                     DescriptorResource::sampled_image(b.get_img(d.opaque)),
-                    DescriptorResource::sampled_image(b.get_img(d.velocity)),
-                    DescriptorResource::storage_image(b.get_img(d.history_len)),
+                    DescriptorResource::sampled_image(b.get_img(d.opaque)), // DescriptorResource::sampled_image(b.get_img(d.velocity)),
+                    DescriptorResource::storage_image(b.get_img(d.history)), // DescriptorResource::storage_image(b.get_img(d.history_len)),
                     DescriptorResource::storage_image(b.get_img(d.history)),
                     DescriptorResource::storage_image(b.get_img(d.out_color)),
 

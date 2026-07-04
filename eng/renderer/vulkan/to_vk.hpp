@@ -842,15 +842,5 @@ inline VkComponentSwizzle to_vk(ChannelSwizzle a)
     }
 }
 
-inline VkComponentMapping to_vk(const ImageSwizzle& swizzle)
-{
-    VkComponentMapping ret{};
-    ret.r = to_vk(swizzle.swizzle[0]);
-    ret.g = to_vk(swizzle.swizzle[1]);
-    ret.b = to_vk(swizzle.swizzle[2]);
-    ret.a = to_vk(swizzle.swizzle[3]);
-    return ret;
-}
-
 } // namespace gfx
 } // namespace eng

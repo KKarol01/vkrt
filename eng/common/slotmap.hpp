@@ -23,6 +23,7 @@ struct SlotHandle
     explicit constexpr operator bool() const { return *this != SlotHandle{}; }
     constexpr auto operator<=>(const SlotHandle&) const = default;
     constexpr SlotHandle inc() const { return SlotHandle{ (u32)index, (u8)(version + 1) }; }
+    static constexpr u32 get_index(u32 value) { return SlotHandle{ value }.index; }
     u32 index : 24 { 0xFFFFF };
     u32 version : 8 { 0xFF };
 };

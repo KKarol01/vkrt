@@ -487,40 +487,20 @@ struct BufferView
     Range64u range{};
 };
 
-struct ImageSwizzle
-{
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
-    static ImageSwizzle rgba() { return ImageSwizzle{}; }
-    static ImageSwizzle rgb1()
-    {
-        return ImageSwizzle{ ChannelSwizzle::R, ChannelSwizzle::G, ChannelSwizzle::B, ChannelSwizzle::ONE };
-    }
-    static ImageSwizzle a001()
-    {
-        return ImageSwizzle{ ChannelSwizzle::A, ChannelSwizzle::ZERO, ChannelSwizzle::ZERO, ChannelSwizzle::ONE };
-    }
-    auto operator<=>(const ImageSwizzle&) const = default;
-    std::array<ChannelSwizzle, 4> swizzle{};
-};
-
 struct ImageView
 {
     ENG_SERIALIZATION_STRUCT_VERSION(0);
-    union Metadata {
-        ImageViewMetadataVk* vk;
-    };
-    static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {},
-                          std::optional<ImageViewType> type = {}, std::optional<ImageSwizzle> swizzle = {},
+    static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                           u32 src_mip = 0u, u32 dst_mip = ~0u, u32 src_layer = 0u, u32 dst_layer = ~0u);
     auto operator<=>(const ImageView&) const = default;
     explicit operator bool() const { return (bool)image; }
-    Metadata get_md() const;
+    void* get_md();
+    const void* get_md() const;
     Handle<Image> image;
     ImageViewType type{};
     ImageFormat format{};
     u32 src_subresource{};
-    u32 dst_subresource{ ~0u };
-    ImageSwizzle swizzle{};
+    u32 dst_subresource{};
 };
 
 // Helper funcs
@@ -679,11 +659,6 @@ namespace eng
 {
 namespace serialization
 {
-template <> inline constexpr auto get_struct_fields<gfx::ImageSwizzle>()
-{
-    ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::ImageSwizzle, 0);
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageSwizzle, swizzle));
-}
 template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
 {
     ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::ImageView, 0);
@@ -691,8 +666,7 @@ template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, type),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, format),
                            ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, src_subresource),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, swizzle));
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource));
 }
 } // namespace serialization
 } // namespace eng

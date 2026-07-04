@@ -51,7 +51,8 @@ class IRendererBackend
     virtual void destroy_buffer(Buffer& buffer) = 0;
     virtual void allocate_image(Image& image, AllocateMemory alloc = AllocateMemory::YES, void* user_data = nullptr) = 0;
     virtual void destroy_image(Image& b) = 0;
-    virtual void allocate_view(const ImageView& view, void** out_allocation) = 0;
+    virtual void allocate_view(ImageView& view, void*& out_md) = 0;
+    virtual void destroy_view(void*& md) = 0;
     virtual void allocate_sampler(Sampler& sampler) = 0;
     virtual void make_shader(Shader& shader) = 0;
     virtual bool compile_shader(const Shader& shader, std::span<const std::byte> bytecode) = 0;
@@ -72,9 +73,6 @@ class IRendererBackend
                                                std::span<const u32> instance_ids, ASRequirements& reqs, ICommandBuffer* cmd,
                                                Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
                                                size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) = 0;
-
-    // Returns cached metadata of image view. If not found, allocates image view in a thread-safe manner.
-    virtual ImageView::Metadata get_md(const ImageView& view) = 0;
 
     virtual size_t get_indirect_indexed_command_size() const = 0;
     virtual void make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count, u32 first_index,

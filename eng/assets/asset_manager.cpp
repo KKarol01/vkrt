@@ -59,18 +59,19 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         if(mat.base_color_texture)
         {
             auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
-            *mat.base_color_texture.image = (u64)idx;
+			if(idx == src.images.size()) { }
+            *mat.base_color_texture.image = idx;
             if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
         }
         if(mat.normal_texture)
         {
             *mat.normal_texture.image =
-                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
+                std::distance(src.images.begin(), std::ranges::find(src.images, mat.normal_texture.image));
         }
         if(mat.metallic_roughness_texture)
         {
             *mat.metallic_roughness_texture.image =
-                (u64)std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
+                std::distance(src.images.begin(), std::ranges::find(src.images, mat.metallic_roughness_texture.image));
         }
         mat.mesh_pass = {}; // ignoring meshpass, as load_material uses default one
         serialize(dst, mat, out_bytes_written);
@@ -146,7 +147,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
     for(auto& txt : dst.textures)
     {
         deserialize(txt, src, out_bytes_written);
-        txt.image = dst.images[(u32)*txt.image]; // when serializing, handles are made into indices into this array
+        txt.image = dst.images[*txt.image]; // when serializing, handles are made into indices into this array
     }
 
     u64 geom_count;

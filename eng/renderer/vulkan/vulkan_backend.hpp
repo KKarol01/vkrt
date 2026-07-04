@@ -139,6 +139,12 @@ struct BufferMetadataVk
     StackString<64> debug_name;
 };
 
+struct ImageViewMetadataVk
+{
+    hash_t view_hash{};
+    VkImageView view{};
+};
+
 struct ImageMetadataVk
 {
     static void init(Image& a, AllocateMemory allocate = AllocateMemory::YES, void* vkimage = nullptr);
@@ -146,16 +152,9 @@ struct ImageMetadataVk
     static void destroy(Image& a);
     VkImage image{};
     VmaAllocation vmaa{};
-    std::shared_mutex views_mutex;
-    std::unordered_map<ImageView, ImageViewMetadataVk> views;
     bool is_aliased{};
     StackString<64> debug_name;
-};
-
-struct ImageViewMetadataVk
-{
-    static void destroy(ImageView& a);
-    VkImageView view{};
+    std::vector<ImageViewMetadataVk*> views;
 };
 
 struct SamplerMetadataVk
@@ -223,7 +222,8 @@ class RendererBackendVk : public IRendererBackend
     void destroy_buffer(Buffer& buffer) override;
     void allocate_image(Image& image, AllocateMemory allocate = AllocateMemory::YES, void* user_data = nullptr) override;
     void destroy_image(Image& image) override;
-    void allocate_view(const ImageView& view, void** out_allocation) override;
+    void allocate_view(ImageView& view, void*& out_md) override;
+	void destroy_view(void*& md) override;
     void allocate_sampler(Sampler& sampler) override;
     void make_shader(Shader& shader) override;
     bool compile_shader(const Shader& shader, std::span<const std::byte> bytecode) override;
@@ -244,8 +244,6 @@ class RendererBackendVk : public IRendererBackend
                                        std::span<const u32> instance_ids, ASRequirements& reqs, ICommandBuffer* cmd,
                                        Buffer* tlas_buffer, size_t tlas_offset, Buffer* scratch_buffer,
                                        size_t scratch_offset, Buffer* instances_buffer, size_t instances_offset) override;
-
-    ImageView::Metadata get_md(const ImageView& view) override;
 
     size_t get_indirect_indexed_command_size() const override;
     void make_indirect_indexed_command(void* out, u32 index_count, u32 instance_count, u32 first_index,

@@ -256,16 +256,15 @@ RGAccessId RGBuilder::add_access(const RGAccess& a)
     return ret;
 }
 
-RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                                      std::optional<ImageFormat> format, std::optional<ImageViewType> type,
-                                      std::optional<ImageSwizzle> swizzle, Range32u mips, Range32u layers)
+RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
+                                      Flags<PipelineAccess> access, std::optional<ImageFormat> format,
+                                      std::optional<ImageViewType> type, Range32u mips, Range32u layers)
 {
     if(!acc) { return RGAccessId{}; }
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
-        .image_view =
-            ImageView::init(graph->get_img(acc), format, type, swizzle, mips.offset, mips.size, layers.offset, layers.size),
+        .image_view = ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
         .layout = layout,
         .stage = stage,
         .access = access,

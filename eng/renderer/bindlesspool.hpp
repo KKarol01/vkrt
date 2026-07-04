@@ -56,6 +56,8 @@ class IDescriptorSetAllocator
     virtual ~IDescriptorSetAllocator() = default;
 
     virtual void bind_resources(u32 slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) = 0;
+    virtual void on_resource_destroyed(Handle<Buffer> buffer) = 0;
+    virtual void on_resource_destroyed(Handle<Image> image) = 0;
 
     virtual u32 get_bindless(const DescriptorResource& view) { return ~0u; }
 
@@ -67,23 +69,13 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 {
     using SlotAllocatorType = SlotAllocator<u32>;
 
-    struct Slot
-    {
-        bool operator==(const Slot& s) const
-        {
-            return std::tie(view, vkptr, allocator) == std::tie(s.view, s.vkptr, s.allocator);
-        }
-        std::variant<BufferView, ImageView, TopAccelerationStructure> view;
-        u32 value{ ~0u };
-        const void* vkptr{};
-        SlotAllocatorType* allocator{};
-    };
-
   public:
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
     ~DescriptorSetAllocatorBindlessVk() override = default;
 
     void bind_resources(u32 slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) override;
+    void on_resource_destroyed(Handle<Buffer> buffer) override;
+    void on_resource_destroyed(Handle<Image> image) override;
 
     u32 get_bindless(const DescriptorResource& view) override;
 
@@ -117,9 +109,9 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     SlotAllocatorType sampled_image_slots;
     SlotAllocatorType tlas_slots;
 
-    std::unordered_map<u32, std::vector<Slot>> image_views;
-    std::unordered_map<u32, std::vector<Slot>> buffer_views;
-    std::unordered_map<uintptr_t, std::vector<Slot>> tlas_views;
+    std::unordered_map<Handle<Buffer>, std::pair<SlotAllocatorType*, u32>> m_buffer_views_set;
+    std::unordered_multimap<uintptr_t, std::tuple<DescriptorType, SlotAllocatorType*, u32>> m_image_views_set;
+    std::unordered_map<uintptr_t, u32> m_tlas_map;
 };
 
 } // namespace gfx

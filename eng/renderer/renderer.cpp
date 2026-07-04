@@ -528,12 +528,14 @@ void Renderer::update()
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
+                descriptor_allocator->on_resource_destroyed(*buf);
                 backend->destroy_buffer(buf->get());
                 buffers.erase(buf->handle);
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
+                descriptor_allocator->on_resource_destroyed(*img);
                 backend->destroy_image(img->get());
                 images.erase(img->handle);
             }
@@ -773,21 +775,21 @@ void Renderer::compile_rendergraph()
     pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
-    // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    // passes.downscale_depth->init(rgraph, pass_data);
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
+    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    passes.downscale_depth->init(rgraph, pass_data);
     //// pass_data = {};
     //// pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     //// passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
     // pass_data = {};
-    // pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
+    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
     //// pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
     // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     // pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = import_resources.history_len;
     // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // passes.ao->init(rgraph, pass_data);
+    passes.ao->init(rgraph, pass_data);
 
     struct CopyToAccum
     {
@@ -1791,7 +1793,7 @@ std::vector<glm::vec3> Renderer::DebugGeomBuffers::expand_into_vertices()
 }
 
 ImageView ImageView::init(Handle<Image> image, std::optional<ImageFormat> format, std::optional<ImageViewType> type,
-                          std::optional<ImageSwizzle> swizzle, u32 src_mip, u32 dst_mip, u32 src_layer, u32 dst_layer)
+                          u32 src_mip, u32 dst_mip, u32 src_layer, u32 dst_layer)
 {
     ENG_ASSERT(image);
     Image& img = image.get();
@@ -1799,20 +1801,32 @@ ImageView ImageView::init(Handle<Image> image, std::optional<ImageFormat> format
     if(!type) { type = get_view_type_from_image(img.type); }
     if(dst_mip == ~0u) { dst_mip = img.mips - 1; }
     if(dst_layer == ~0u) { dst_layer = img.layers - 1; }
-    if(!swizzle)
-    {
-        swizzle = { ChannelSwizzle::IDENTITY, ChannelSwizzle::IDENTITY, ChannelSwizzle::IDENTITY, ChannelSwizzle::IDENTITY };
-    }
     ImageView view{ .image = image,
                     .type = *type,
                     .format = *format,
                     .src_subresource = img.mips * src_layer + src_mip,
-                    .dst_subresource = img.mips * dst_layer + dst_mip,
-                    .swizzle = swizzle->swizzle };
+                    .dst_subresource = img.mips * dst_layer + dst_mip };
     return view;
 }
 
-ImageView::Metadata ImageView::get_md() const { return get_renderer().backend->get_md(*this); }
+void* ImageView::get_md() { return image->get_view_md(*this); }
+
+const void* ImageView::get_md() const { return const_cast<ImageView*>(this)->get_md(); }
+
+void* Image::get_view_md(ImageView& view)
+{
+    auto* imgmd = (ImageMetadataVk*)md.ptr;
+    const auto hash = ENG_HASH(view);
+    auto it = std::find_if(imgmd->views.begin(), imgmd->views.end(),
+                           [hash](const ImageViewMetadataVk* md) { return md->view_hash == hash; });
+    if(it != imgmd->views.end()) { return (void*)*it; }
+    void* viewmdalloc{};
+    get_backend().allocate_view(view, viewmdalloc);
+    auto*& viewmd = imgmd->views.emplace_back((ImageViewMetadataVk*)viewmdalloc);
+    viewmd->view_hash = hash;
+
+    return (void*)viewmd;
+}
 
 } // namespace gfx
 } // namespace eng

@@ -435,6 +435,8 @@ struct Image
                mips == a.mips && layers == a.layers && usage == a.usage && layout == a.layout;
     }
 
+    void* get_view_md(ImageView& view);
+
     ImageType type{ ImageType::TYPE_2D };
     ImageFormat format{};
     u32 width{};

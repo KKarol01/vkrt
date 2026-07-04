@@ -112,7 +112,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
             const auto& img = builder.graph->get_img(data.output).get();
 
             vk::VkRenderingAttachmentInfo r_col_atts[1]{};
-            r_col_atts[0].imageView = builder.graph->get_acc(data.output).image_view.get_md().vk->view;
+            r_col_atts[0].imageView = ((const ImageViewMetadataVk*)builder.graph->get_acc(data.output).image_view.get_md())->view;
             r_col_atts[0].imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
             r_col_atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             r_col_atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;

@@ -100,6 +100,30 @@ void DescriptorSetAllocatorBindlessVk::bind_resources(u32 slot, std::span<const 
     }
 }
 
+void DescriptorSetAllocatorBindlessVk::on_resource_destroyed(Handle<Buffer> buffer)
+{
+    auto it = m_buffer_views_set.find(buffer);
+    if(it != m_buffer_views_set.end())
+    {
+        it->second.first->erase(it->second.second);
+        m_buffer_views_set.erase(it);
+    }
+}
+
+void DescriptorSetAllocatorBindlessVk::on_resource_destroyed(Handle<Image> image)
+{
+    auto* imgmd = (ImageMetadataVk*)image->md.ptr;
+    for(const auto* v : imgmd->views)
+    {
+        auto it = m_image_views_set.equal_range(v->view_hash);
+        for(auto vit = it.first; vit != it.second; ++vit)
+        {
+            std::get<SlotAllocatorType*>(vit->second)->erase(std::get<u32>(vit->second));
+        }
+        m_image_views_set.erase(v->view_hash);
+    }
+}
+
 u32 DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResource& view) { return bind_resource(view); }
 
 void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
@@ -122,67 +146,47 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
 
 u32 DescriptorSetAllocatorBindlessVk::bind_resource(const DescriptorResource& desc)
 {
-    Slot slot{};
-    slot.allocator = &get_slot_allocator(desc.type);
-
-    std::vector<Slot>* found_slots{};
+    auto& alloc = get_slot_allocator(desc.type);
 
     if(desc.is_buffer())
     {
         ENG_ASSERT(desc.as_buffer().buffer);
-        slot.view = desc.as_buffer();
-        slot.vkptr = desc.as_buffer().buffer->md.vk()->buffer;
-        auto it = buffer_views.find(*desc.as_buffer().buffer);
-        if(it != buffer_views.end()) { found_slots = &it->second; }
+        auto it = m_buffer_views_set.find(desc.as_buffer().buffer);
+        if(it != m_buffer_views_set.end()) { return it->second.second; }
+
+        auto ret = m_buffer_views_set.emplace(desc.as_buffer().buffer, std::make_pair(&alloc, *alloc.allocate()));
+        write_descriptor(desc.type, &desc.as_buffer(), ret.first->second.second);
+        return ret.first->second.second;
     }
     else if(desc.is_image())
     {
         ENG_ASSERT(desc.as_image().image);
-        slot.view = desc.as_image();
-        slot.vkptr = desc.as_image().image->md.vk()->image;
-        auto it = image_views.find(*desc.as_image().image);
-        if(it != image_views.end()) { found_slots = &it->second; }
+        auto* viewmd = (const ImageViewMetadataVk*)desc.as_image().get_md();
+        auto eqit = m_image_views_set.equal_range(viewmd->view_hash);
+        for(auto it = eqit.first; it != eqit.second; ++it)
+        {
+            if(std::get<DescriptorType>(it->second) == desc.type) { return std::get<u32>(it->second); }
+        }
+
+        auto it = m_image_views_set.emplace(std::piecewise_construct, std::forward_as_tuple(viewmd->view_hash),
+                                            std::forward_as_tuple(desc.type, &alloc, *alloc.allocate()));
+        write_descriptor(desc.type, &desc.as_image(), std::get<u32>(it->second));
+        return std::get<u32>(it->second);
     }
     else if(desc.is_tlas())
     {
-        slot.view = desc.as_tlas();
-        slot.vkptr = (VkAccelerationStructureKHR)desc.as_tlas();
-        auto it = tlas_views.find((uintptr_t)desc.as_tlas());
-        if(it != tlas_views.end()) { found_slots = &it->second; }
+        auto it = m_tlas_map.find((uintptr_t)desc.as_tlas());
+        if(it != m_tlas_map.end()) { return it->second; }
+
+        auto res = m_tlas_map.emplace((uintptr_t)desc.as_tlas(), *alloc.allocate());
+        write_descriptor(desc.type, &desc.as_image(), res.first->second);
+        return res.first->first;
     }
     else
     {
         ENG_WARN("Unknown descriptor type {}", desc.resource.index());
         return ~0u;
     }
-
-    if(found_slots && found_slots->size())
-    {
-        if((*found_slots)[0].vkptr != slot.vkptr)
-        {
-            for(auto& s : *found_slots)
-            {
-                s.allocator->erase(SlotAllocatorType::Slot{ s.value });
-            }
-            found_slots->clear();
-        }
-        else
-        {
-            auto it = std::find(found_slots->begin(), found_slots->end(), slot);
-            if(it != found_slots->end()) { return it->value; }
-        }
-    }
-
-    slot.value = *slot.allocator->allocate();
-    const auto* view = desc.is_buffer()  ? (void*)&desc.as_buffer()
-                       : desc.is_image() ? (void*)&desc.as_image()
-                       : desc.is_tlas()  ? (void*)&desc.as_tlas()
-                                         : nullptr;
-    write_descriptor(desc.type, view, slot.value);
-    if(desc.is_buffer()) { buffer_views[*desc.as_buffer().buffer].push_back(slot); }
-    else if(desc.is_image()) { image_views[*desc.as_image().image].push_back(slot); }
-    else if(desc.is_tlas()) { tlas_views[(uintptr_t)desc.as_tlas()].push_back(slot); }
-    return slot.value;
 }
 
 void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, const void* view, u32 slot)
@@ -202,7 +206,7 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     if(type == DescriptorType::STORAGE_BUFFER)
     {
         auto* info = &buf_writes.emplace_back();
-        const auto& engview = *(BufferView*)view;
+        const auto& engview = *(const BufferView*)view;
         info->buffer = engview.buffer->md.vk()->buffer;
         info->offset = engview.range.offset;
         info->range = engview.range.size;
@@ -213,7 +217,7 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
         auto* info = &img_writes.emplace_back();
         const auto& engview = *(const ImageView*)view;
         info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        info->imageView = engview.get_md().vk->view;
+        info->imageView = ((const ImageViewMetadataVk*)engview.get_md())->view;
         info->sampler = {};
         write.pImageInfo = info;
     }
@@ -222,7 +226,7 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
         auto* info = &img_writes.emplace_back();
         const auto& engview = *(const ImageView*)view;
         info->imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-        info->imageView = engview.get_md().vk->view;
+        info->imageView = ((const ImageViewMetadataVk*)engview.get_md())->view;
         info->sampler = {};
         write.pImageInfo = info;
     }
