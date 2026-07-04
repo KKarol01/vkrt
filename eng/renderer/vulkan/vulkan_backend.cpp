@@ -1159,6 +1159,8 @@ void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
         return;
     }
 
+    buffer.usage |= gfx::BufferUsage::CPU_ACCESS;
+
     auto* md = new BufferMetadataVk{};
     buffer.md.ptr = md;
     const auto cpu_map = buffer.usage.test(gfx::BufferUsage::CPU_ACCESS);

@@ -807,6 +807,28 @@ void Renderer::compile_rendergraph()
             cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
         });
 
+    struct ApplyAO
+    {
+        RGAccessId input;
+        RGAccessId ao;
+    };
+    rgraph->add_graphics_pass<ApplyAO>(
+        "Apply AOO",
+        [=, this](RGBuilder& b, ApplyAO& d) {
+            d.input = b.read_write_image(get_frame_data().render_resources.final_color);
+            d.ao = b.sample_texture(get_frame_data().render_resources.ao);
+        },
+        [this](RGBuilder& b, const ApplyAO& d) {
+            auto* cmd = b.open_cmd_buf();
+            DescriptorResource dres[]{
+                DescriptorResource::storage_image(b.get_img(d.input)),
+                DescriptorResource::sampled_image(b.get_img(d.ao)),
+            };
+            cmd->bind_pipeline(settings.apply_ao_pipeline.get());
+            cmd->bind_resources(1, dres);
+            cmd->dispatch((settings.render_resolution.x + 7) / 8, (settings.render_resolution.y + 7) / 8, 1);
+        });
+
     const auto imdata = imgui_renderer->update(rgraph);
 
     struct CopySwapchainData

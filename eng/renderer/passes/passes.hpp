@@ -754,14 +754,13 @@ struct DepthDownsample final : public Pass
             m_name.c_str(),
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.out_depth = b.as_res_id(b.create_resource("Halfres Depth",
-                                                            Image::init(r.settings.render_resolution.x,
-                                                                        r.settings.render_resolution.y, ImageFormat::R16F,
-                                                                        ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
+                d.out_depth = b.as_res_id(b.create_resource(
+                    "Halfres Depth", Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
+                                                 ImageFormat::R16F, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
                 d.out_normal =
                     b.as_res_id(b.create_resource("Halfres Normal",
-                                                  Image::init(r.settings.render_resolution.x,
-                                                              r.settings.render_resolution.y, ImageFormat::R16FG16FB16FA16F,
+                                                  Image::init(r.settings.render_resolution.x / 2,
+                                                              r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
                                                               ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
                 d.out_depth = b.as_res_id(b.write_image(d.out_depth));
                 d.out_normal = b.as_res_id(b.write_image(d.out_normal));
@@ -809,6 +808,7 @@ struct SSAO : public Pass
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
+
         // if(!data.depth_buffer) { return; }
         // if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
         // if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }

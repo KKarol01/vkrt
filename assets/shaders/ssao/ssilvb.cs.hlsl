@@ -57,16 +57,14 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const float depth = gDepthTexture.SampleLevel(gSamplerNearest, thread_uv, 0).x;
     const float3 position = depth_to_view_pos(dtid.xy, dims, depth);
     
-    // 1. Fetch World Space Normal for history rejection
     const float3 world_normal = get_gt(Normal).SampleLevel(gSamplerNearest, thread_uv, 0).xyz;
-    // 2. Transform and normalize View Space Normal for SSIL raymarching
     const float3 normal = normalize(mul(consts.view, float4(world_normal, 0.0)).xyz);
     
     const float3 camera = normalize(-position);
     
     const float sample_radius = 8.0;
     const float n_slices = 4.0;
-    const float n_samples = 32.0;    
+    const float n_samples = 16.0;    
     const float hitThickness = 0.15;
     
     float proj_radius = (sample_radius * consts.proj[0][0]) / -position.z;
@@ -74,22 +72,17 @@ void main(uint3 dtid : SV_DispatchThreadID)
     
     float sliceRotation = ENG_TWO_PI / n_slices;
     
-    // =========================================================================
-    // SPATIOTEMPORAL JITTER (HALTON + IGN)
-    // =========================================================================
-    
-    // Halton sequence is 1-based (passing 0 returns 0, which we want to avoid)
-    uint halton_index = (consts.frame_index % 16) + 1;
+    //uint halton_index = (consts.frame_index % 8) + 1;
     
     // Base 2 for rotation, Base 3 for step offset
-    float2 halton = float2(Halton(halton_index, 2), Halton(halton_index, 3));
+    //float2 halton = float2(Halton(halton_index, 2), Halton(halton_index, 3));
     
     // Base spatial noise
     float spatial_jitter = IGN(int(dtid.x), int(dtid.y));
     
     // Combine and wrap in [-0.5, 0.5]
-    float slice_jitter = frac(spatial_jitter + halton.x) - 0.5f;
-    float step_jitter  = frac(spatial_jitter + halton.y) - 0.5f;
+    float slice_jitter = spatial_jitter;
+    float step_jitter  = spatial_jitter; 
     
     for (float slice = 0; slice < n_slices + 0.5; slice += 1.0) 
     {
@@ -119,13 +112,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
             
             float sampleDepth = gDepthTexture.SampleLevel(gSamplerNearest, sampleUV, 0).x;
             float3 samplePosition = depth_to_view_pos(uint2(sampleUV * dims), dims, sampleDepth);
-            float3 sampleNormal = mul(consts.view, float4(get_gt(Normal).SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
-            float3 sampleLight = get_gt(Color).SampleLevel(gSamplerLinear, sampleUV, 0).xyz;
-            
             float3 sampleDistance = samplePosition - position;
             float sampleLength = length(sampleDistance);
             
-            if(sampleLength < 1e-5) { continue; }
+			if(sampleLength < 1e-5) { continue; }
             
             float3 sampleHorizon = sampleDistance / sampleLength;
             
@@ -138,9 +128,15 @@ void main(uint3 dtid : SV_DispatchThreadID)
             float minHorizon = min(frontBackHorizon.x, frontBackHorizon.y);
             float maxHorizon = max(frontBackHorizon.x, frontBackHorizon.y);
             uint indirect = update_sectors(minHorizon, maxHorizon, 0u);
-            
+             
+			uint new_bits = indirect & ~occlusion;
+            if(new_bits == 0u) { continue; } // nice perf gain (~1ms)
+			 
+			float3 sampleNormal = mul(consts.view, float4(get_gt(Normal).SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
+			float3 sampleLight = get_gt(Color).SampleLevel(gSamplerNearest, sampleUV, 0).xyz;
+			
             float stepVisibility = float(count_ones(indirect & ~occlusion)) / float(N_SECTORS);
-            //lighting += stepVisibility * sampleLight * clamp(dot(normal, sampleHorizon), 0.0, 1.0) * clamp(dot(sampleNormal, -sampleHorizon), 0.0, 1.0);
+            lighting += stepVisibility * sampleLight * clamp(dot(normal, sampleHorizon), 0.0, 1.0) * clamp(dot(sampleNormal, -sampleHorizon), 0.0, 1.0);
 
             occlusion |= indirect;
         }
@@ -149,10 +145,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
     }
 
     visibility /= n_slices;
-    //lighting /= n_slices;
-	    gOutAOImage[dtid.xy].xyz = visibility;
-	    gOutAOImage[dtid.xy].w = 1.0;
-		return;
+    lighting /= n_slices;
+	gOutAOImage[dtid.xy] = float4(lighting.xyz, visibility);
+	return;
     //float4 current_signal = float4(lighting, visibility);
 
     //RWTexture2D<float4> history_tex = get_grwt2(OutHistory, float4);

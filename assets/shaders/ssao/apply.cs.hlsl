@@ -14,11 +14,13 @@ struct PushConstants
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
     RWTexture2D<float4> in_out_color = gRWTextures2Dfloat4[pc.ColorTextureIndex];
-    RWTexture2D<float4> in_ao = gRWTextures2Dfloat4[pc.AOTextureIndex];
+    Texture2D<float4> in_ao = gTextures2Dfloat4[pc.AOTextureIndex];
 	
     uint2 dims;
-    in_ao.GetDimensions(dims.x, dims.y);
+    in_out_color.GetDimensions(dims.x, dims.y);
     if(any(thread_id.xy >= dims.xy)) { return; } 
 	
-    in_out_color[thread_id.xy] = in_out_color[thread_id.xy] * pow(in_ao[thread_id.xy], 1.0);
+	float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
+	float4 ao = in_ao.SampleLevel(gSamplerNearest, uv, 0);
+    in_out_color[thread_id.xy] = (in_out_color[thread_id.xy]+ float4(ao.rgb * 3, 0.0)) * pow(ao.w, 1.0);
 }
