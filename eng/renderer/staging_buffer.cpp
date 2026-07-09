@@ -14,47 +14,104 @@ namespace eng
 namespace gfx
 {
 
-void StagingBuffer::init(SubmitQueue* queue, usize capacity)
+StagingBufferAllocatorRingBuffer::StagingBufferAllocatorRingBuffer(BufferView buffer, Sync* sync)
+    : IStagingBufferAllocator(buffer, sync)
+{
+}
+
+StagingBufferAllocation StagingBufferAllocatorRingBuffer::allocate_at_most(usize req_size, usize min_req_size)
+{
+    if(req_size == 0 || min_req_size > m_size || min_req_size > req_size) { return {}; }
+    if(!m_allocs.empty() && m_sync->get_next_signal_value() == m_allocs.front().fence_value) { return {}; }
+
+    reclaim_space_non_blocking();
+
+    const usize aligned_req = align_up2(req_size, ALIGNMENT);
+
+    usize available = get_contiguous_memory_available_from_offset(m_tail);
+
+    while(available < min_req_size)
+    {
+        if(!m_is_full && m_head <= m_tail && min_req_size < (m_size - m_tail))
+        {
+            m_tail = 0;
+            m_is_full = m_tail == m_head;
+        }
+        else { reclaim_space_blocking(); }
+        available = get_contiguous_memory_available_from_offset(m_tail);
+    }
+
+    const usize actual_aligned = std::min(aligned_req, available);
+    const usize alloc_offset = m_tail;
+
+    m_tail += actual_aligned;
+    if(m_tail == m_size) { m_tail = 0; }
+    if(m_tail == m_head) { m_is_full = true; }
+
+    const u64 fence_value = m_sync->get_next_signal_value();
+
+    if(!m_allocs.empty() && m_allocs.back().fence_value == fence_value) { m_allocs.back().tail = m_tail; }
+    else { m_allocs.push_back(InFlightAlloc{ .fence_value = fence_value, .tail = m_tail }); }
+
+    return StagingBufferAllocation{
+        .ptr = (u8*)m_ptr + alloc_offset,
+        .offset = alloc_offset,
+        .size = std::min(req_size, actual_aligned),
+        .actual_size = actual_aligned,
+    };
+}
+
+void StagingBufferAllocatorRingBuffer::reclaim_space_non_blocking()
+{
+    if(m_allocs.empty()) { return; }
+    while(!m_allocs.empty() && m_sync->wait_cpu(0, m_allocs.front().fence_value))
+    {
+        m_head = m_allocs.front().tail;
+        m_is_full = false;
+        m_allocs.pop_front();
+    }
+    if(m_allocs.empty())
+    {
+        m_head = 0;
+        m_tail = 0;
+        m_is_full = false;
+    }
+}
+
+void StagingBufferAllocatorRingBuffer::reclaim_space_blocking()
+{
+    ENG_ASSERT(!m_allocs.empty());
+    m_sync->wait_cpu(~0ull, m_allocs.front().fence_value);
+    reclaim_space_non_blocking();
+}
+
+usize StagingBufferAllocatorRingBuffer::get_contiguous_memory_available_from_offset(usize offset)
+{
+    if(m_is_full) { return 0; }
+    if(offset < m_head) { return m_head - offset; }
+    return m_size - offset;
+}
+
+void StagingBuffer::init(SubmitQueue* queue, IStagingBufferAllocator* allocator)
 {
     auto& r = get_renderer();
-    ENG_ASSERT(queue != nullptr);
-
-    ENG_ASSERT(capacity != 0);
-    m_capacity = capacity;
-
-    const auto alloc_size = align_up2(capacity, ALIGNMENT);
-    m_buf = Buffer::init(alloc_size, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT | BufferUsage::CPU_ACCESS);
-    r.backend->allocate_buffer(m_buf);
-    r.backend->set_debug_name(m_buf, "staging buffer");
-    ENG_ASSERT(m_buf.memory);
-
-    this->m_queue = queue;
-
-    m_ctx_vec.resize(r.frame_delay);
-    for(auto i = 0u; i < r.frame_delay; ++i)
-    {
-        m_ctx_vec[i].pool = queue->make_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
-    }
-    m_sync = r.make_sync(SyncCreateInfo{ SyncType::TIMELINE_SEMAPHORE, 0, "staging sync" });
+    ENG_ASSERT(queue != nullptr && allocator != nullptr);
+    m_queue = queue;
+    m_allocator = allocator;
 }
 
 Sync* StagingBuffer::flush(bool signal_sync)
 {
-    Sync* out_signal_sync{};
-    if(signal_sync)
+    Sync* out_signal_sync = m_allocator->m_sync;
+    m_queue->signal_sync(out_signal_sync, PipelineStage::TRANSFER_BIT);
+    if(m_cmd)
     {
-        out_signal_sync = m_sync;
-        m_queue->signal_sync(out_signal_sync, PipelineStage::TRANSFER_BIT);
+        get_frame_data().cmdpool->end(m_cmd);
+        m_queue->with_cmd_buf(m_cmd);
+        signal_sync = true;
+        m_cmd = nullptr;
     }
-    if(!get_context().cmd)
-    {
-        if(signal_sync) { m_queue->submit(); }
-        return out_signal_sync;
-    }
-    get_context().pool->end(get_context().cmd);
-    m_queue->with_cmd_buf(get_context().cmd);
-    m_queue->submit();
-    get_context().cmd = nullptr;
+    if(signal_sync) { m_queue->submit(); }
     return out_signal_sync;
 }
 
@@ -64,7 +121,7 @@ void StagingBuffer::reset()
 {
     ENG_TIMER_SCOPED("Staging reset");
     flush_wait();
-    m_head = 0;
+    m_allocator->reset();
 }
 
 void StagingBuffer::copy(Buffer& dst, const Buffer& src, size_t dst_offset, Range64u src_range, bool insert_barrier)
@@ -95,9 +152,14 @@ void StagingBuffer::copy(Buffer& dst, const void* const src, size_t dst_offset, 
     while(uploaded < src_size)
     {
         const auto upload_size = src_size - uploaded;
-        auto alloc = partial_allocate(upload_size);
-        memcpy(get_alloc_mem(alloc), (const std::byte*)src + uploaded, alloc.size);
-        get_cmd()->copy(dst, m_buf, dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
+        auto alloc = m_allocator->allocate_at_most(upload_size);
+        if(!alloc)
+        {
+            flush(false);
+            continue;
+        }
+        memcpy(alloc.ptr, (const std::byte*)src + uploaded, alloc.size);
+        get_cmd()->copy(dst, m_allocator->m_buffer.get(), dst_offset + uploaded, Range64u{ alloc.offset, alloc.size });
         uploaded += alloc.size;
     }
     ENG_ASSERT(uploaded == src_size);
@@ -155,15 +217,17 @@ size_t StagingBuffer::copy(Image& dst, const void* const src, u32 layer, u32 mip
     {
         const size_t remaining_bytes = src_bytes - bytes_uploaded;
         const size_t block_rows_uploaded = bytes_uploaded / row_bytes;
-        auto alloc = partial_allocate(remaining_bytes);
-        if(alloc.size < row_bytes)
+        auto alloc = m_allocator->allocate_at_most(remaining_bytes, row_bytes);
+        if(!alloc)
         {
-            reset();
+            flush(false);
             continue;
         }
+        ENG_ASSERT(alloc.size >= row_bytes);
+
         const size_t block_rows_allocated = alloc.size / row_bytes;
         const size_t usable_bytes = block_rows_allocated * row_bytes;
-        memcpy(get_alloc_mem(alloc), (const std::byte*)src + bytes_uploaded, usable_bytes);
+        memcpy(alloc.ptr, (const std::byte*)src + bytes_uploaded, usable_bytes);
         const glm::i32vec3 copy_offset = { offset.x, offset.y + i32(block_rows_uploaded * block_data.texel_extent.y),
                                            offset.z };
         const u32 texel_rows_uploaded = block_rows_uploaded * block_data.texel_extent.y;
@@ -180,7 +244,7 @@ size_t StagingBuffer::copy(Image& dst, const void* const src, u32 layer, u32 mip
         copy.imageOffset = { copy_offset.x, copy_offset.y, copy_offset.z };
         copy.imageExtent = { copy_extent.x, copy_extent.y, copy_extent.z };
 
-        get_cmd()->copy(dst, m_buf, &copy, 1);
+        get_cmd()->copy(dst, m_allocator->m_buffer.get(), &copy, 1);
 
         bytes_uploaded += usable_bytes;
     }
@@ -203,46 +267,10 @@ void StagingBuffer::barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_
                        PipelineAccess::TRANSFER_RW, src_layout, dst_layout, range);
 }
 
-StagingBuffer::Allocation StagingBuffer::partial_allocate(size_t size)
-{
-    const auto aligned_size = align_up2(size, ALIGNMENT);
-    while(true)
-    {
-        const auto free_space = get_free_space();
-        const auto actual_size = std::min(aligned_size, free_space);
-        if(actual_size < ALIGNMENT)
-        {
-            reset();
-            continue;
-        }
-        Allocation alloc{ .offset = m_head, .size = std::min(size, actual_size), .real_size = actual_size };
-        m_head += alloc.real_size;
-        ENG_ASSERT(m_head % ALIGNMENT == 0);
-        return alloc;
-    }
-}
-
-StagingBuffer::Context& StagingBuffer::get_context()
-{
-    auto& ctx = m_ctx_vec[get_renderer().current_frame % get_renderer().frame_delay];
-    if(m_last_frame != get_renderer().current_frame)
-    {
-        m_last_frame = get_renderer().current_frame;
-        ctx.pool->reset(); // can safely assume all the transactions during that frame must have had completed (render graph waits for the semaphore)
-    }
-    return ctx;
-}
-
 ICommandBuffer* StagingBuffer::get_cmd()
 {
-    auto& ctx = get_context();
-    if(!ctx.cmd) { ctx.cmd = ctx.pool->begin(); }
-    return ctx.cmd;
-}
-
-void* StagingBuffer::get_alloc_mem(const Allocation& alloc) const
-{
-    return (void*)((char*)m_buf.memory + alloc.offset);
+    if(!m_cmd) { m_cmd = get_frame_data().cmdpool->begin(); }
+    return m_cmd;
 }
 
 void StagingBuffer::prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,

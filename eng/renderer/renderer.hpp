@@ -732,6 +732,7 @@ class Renderer
         std::vector<Sync*> wait_syncs;
 
         void reset_staging();
+		Sync* staging_sync{};
         StagingBuffer* staging{}; // small data staging to avoid stutters when big fills up
 
         RenderResources render_resources;

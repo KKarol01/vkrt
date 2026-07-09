@@ -21,26 +21,83 @@ namespace gfx
 {
 inline static constexpr auto STAGING_APPEND = ~0ull;
 
+struct StagingBufferAllocation
+{
+    constexpr operator bool() const { return ptr != nullptr; }
+    void* ptr{};         // pointer to the start of the allocation
+    usize offset{};      // offset from the start of the buffer's memory
+    usize size{};        // usable user data size for ie. memcpy
+    usize actual_size{}; // actual size of the block (block can be bigger than user memory for example)
+};
+
+class IStagingBufferAllocator
+{
+  public:
+    IStagingBufferAllocator(BufferView buffer, Sync* sync)
+        : m_buffer(buffer.buffer), m_ptr(buffer.buffer->memory), m_size(buffer.buffer->capacity), m_sync(sync)
+    {
+
+        ENG_ASSERT(m_ptr);
+    }
+    virtual ~IStagingBufferAllocator() noexcept = default;
+    // May fail or return smaller size than requested. If fails or size smaller than requested, call reset, and try again.
+    virtual StagingBufferAllocation allocate_at_most(usize req_size, usize min_req_size = 1) = 0;
+    virtual void reset() = 0;
+
+    inline static constexpr usize ALIGNMENT = 256;
+    Handle<Buffer> m_buffer;
+    void* m_ptr{};
+    usize m_size{};
+    Sync* m_sync{};
+};
+
+class StagingBufferAllocatorLinear : public IStagingBufferAllocator
+{
+  public:
+    StagingBufferAllocatorLinear(BufferView buffer, Sync* sync);
+    ~StagingBufferAllocatorLinear() override = default;
+
+    StagingBufferAllocation allocate_at_most(usize req_size, usize min_req_size = 1) override;
+    void reset() override { m_head = 0; }
+
+    void reclaim_space_non_blocking();
+    void reclaim_space_blocking();
+    usize get_contiguous_memory_available_from_offset(usize offset);
+
+    usize m_head{}; // gpu read pos
+};
+
+class StagingBufferAllocatorRingBuffer : public IStagingBufferAllocator
+{
+    struct InFlightAlloc
+    {
+        u64 fence_value{};
+        usize tail{};
+    };
+
+  public:
+    StagingBufferAllocatorRingBuffer(BufferView buffer, Sync* sync);
+    ~StagingBufferAllocatorRingBuffer() override = default;
+
+    StagingBufferAllocation allocate_at_most(usize req_size, usize min_req_size = 1) override;
+    void reset() override { /* noop */ }
+
+    void reclaim_space_non_blocking();
+    void reclaim_space_blocking();
+    usize get_contiguous_memory_available_from_offset(usize offset);
+
+    usize m_head{}; // gpu read pos
+    usize m_tail{}; // cpu write pos
+    bool m_is_full{};
+    std::deque<InFlightAlloc> m_allocs;
+};
+
 class StagingBuffer
 {
     static constexpr size_t ALIGNMENT = 256ull;
 
-    struct Allocation
-    {
-        size_t offset{};    // offset from the start of the buffer's memory
-        size_t size{};      // may be less_eq than real_size, if user requested size not multiple of alignment
-        size_t real_size{}; // not min'd down to user req size, if alloc happened to be bigger
-    };
-
-    // double buffered context so each frame cmd pool can be reset and cmd bufs reused.
-    struct Context
-    {
-        ICommandPool* pool{};
-        ICommandBuffer* cmd{};
-    };
-
   public:
-    void init(SubmitQueue* queue, usize capacity);
+    void init(SubmitQueue* queue, IStagingBufferAllocator* allocator);
     // Flushes pending transactions. Optionally returns signal sync.
     Sync* flush(bool signal_sync);
     // Flushes and waits on the cpu until completion.
@@ -78,29 +135,17 @@ class StagingBuffer
     void barrier(Image& dst, ImageLayout src_layout, ImageLayout dst_layout, const ImageMipsLayers& range = {});
 
   private:
-    size_t get_free_space() const { return m_capacity - m_head; }
-    // Always succeeds, but may not allocate entire size due to lack of space.
-    Allocation partial_allocate(size_t size);
-    // Get current double buffered context
-    Context& get_context();
     // Get command buffer. If recently flushed, cmd is nullptr, so this function optionally begins a new one.
     ICommandBuffer* get_cmd();
-
-    void* get_alloc_mem(const Allocation& alloc) const;
 
     void prepare_image(const Image* dst, const Image* src, bool discard_dst, bool finished,
                        ImageMipsLayers dst_range = { { 0u, ~0u }, { 0u, ~0u } },
                        ImageMipsLayers src_range = { { 0u, ~0u }, { 0u, ~0u } });
     bool translate_dst_offset(const Buffer& dst, size_t& offset, size_t size);
 
-    usize m_capacity;
+    ICommandBuffer* m_cmd{};
     SubmitQueue* m_queue{};
-    Buffer m_buf;
-    std::vector<Context> m_ctx_vec;
-    std::deque<Allocation> m_alloc_vec;
-    u64 m_last_frame{};
-    size_t m_head{};
-    Sync* m_sync{};
+    IStagingBufferAllocator* m_allocator{};
 };
 } // namespace gfx
 } // namespace eng

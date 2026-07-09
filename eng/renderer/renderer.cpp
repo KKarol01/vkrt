@@ -122,7 +122,11 @@ void Renderer::init(IRendererBackend* backend)
 
     gq = backend->get_queue(QueueType::GRAPHICS);
     staging = new StagingBuffer{};
-    staging->init(gq, 64 * MiB);
+
+    staging->init(gq, new StagingBufferAllocatorRingBuffer{
+                          BufferView::init(make_buffer("global staging", Buffer::init(62 * MiB, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT |
+                                                                                                    BufferUsage::CPU_ACCESS))),
+                          make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, "global staging sync" }) });
     rgraph = new RGRenderGraph{};
     rgraph->init(this);
 
@@ -373,8 +377,14 @@ void Renderer::init_perframes()
         frame_datas[i].ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         frame_datas[i].swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         frame_datas[i].timestamp_pool = backend->make_query_pool({ QueryType::TIMESTAMP, 1024 });
+
+        frame_datas[i].staging_sync = make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("staging sync") });
         frame_datas[i].staging = new StagingBuffer{};
-        frame_datas[i].staging->init(gq, 1 * MiB);
+        frame_datas[i].staging->init(
+            gq, new StagingBufferAllocatorRingBuffer{
+                    BufferView::init(make_buffer("frame staging", Buffer::init(1 * MiB, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT |
+                                                                                            BufferUsage::CPU_ACCESS))),
+                    frame_datas[i].staging_sync });
     }
 }
 
