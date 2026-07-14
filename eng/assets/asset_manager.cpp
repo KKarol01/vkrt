@@ -13,6 +13,7 @@ namespace eng
 
 using namespace serialization;
 
+#if 0
 namespace serialization
 {
 template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets::Asset& src, usize& out_bytes_written)
@@ -59,7 +60,7 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
         if(mat.base_color_texture)
         {
             auto idx = std::distance(src.images.begin(), std::ranges::find(src.images, mat.base_color_texture.image));
-			if(idx == src.images.size()) { }
+            if(idx == src.images.size()) {}
             *mat.base_color_texture.image = idx;
             if(idx == src.images.size()) { mat.base_color_texture.image = {}; }
         }
@@ -201,6 +202,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
 }
 
 } // namespace serialization
+#endif
 
 namespace assets
 {
@@ -321,7 +323,11 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
         usize asset_read_offset = 0;
         u64 uncompressed_size = 0;
         usize n_bytes_read = 0;
-        container->m_file->read((std::byte*)&uncompressed_size, 8, n_bytes_read, list.asset_start - 8);
+
+        // Add N_HEADER_BYTES to convert payload-relative offset to absolute file offset
+        const u64 meta_offset = serialization::engb::v0::N_HEADER_BYTES + list.asset_start - sizeof(u64);
+        container->m_file->read(reinterpret_cast<std::byte*>(&uncompressed_size), sizeof(u64), n_bytes_read, meta_offset);
+
         asset_bytes.reserve(uncompressed_size);
         auto success = compression::zlib_inflate(
             [&](usize size) {
@@ -349,9 +355,9 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
         }
     }
 
-    usize read_bytes = 0;
     Asset asset{};
-    deserialize(asset, std::span{ asset_bytes }, read_bytes);
+    serialization::Context ctx(std::span{ asset_bytes }, 0);
+    asset.deserialize(ctx);
     return asset;
 }
 
@@ -368,28 +374,31 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
         signal.wait();
     }
 
-    usize size = 0;
     ENG_TIMER_SCOPED("Serializing asset {}", asset.path.string());
-    std::vector<std::byte> asset_bytes;
-    serialize(std::span{ asset_bytes }, asset, size);
 
-    if(size > 0)
+    // empty context to calc the size required.
+    serialization::Context ctx{std::span<std::byte>{}, 0};
+    asset.serialize(ctx);
+    const usize required_size = ctx.m_offset;
+
+    if(required_size > 0)
     {
-        asset_bytes.resize(size);
-        size = 0;
-        serialize(std::span{ asset_bytes }, asset, size);
-
-        usize bytes_read = 0;
-        usize bytes_left = asset_bytes.size();
+        // 2. Real serialization pass
+        std::vector<std::byte> asset_bytes(required_size);
+        serialization::Context ctx(std::span{ asset_bytes }, 0);
+        asset.serialize(ctx);
+        ENG_ASSERT(ctx.m_offset == required_size);
 
         std::scoped_lock lock{ m_engbc_vec_mutex };
         auto& engbc = get_latest_container();
-        // engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
-        engbc.add_asset(0, ENG_HASH(asset.path.string()), {}, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
-        engbc.append_asset_bytes(std::span{ asset_bytes }, true);
 
 #if 0
-        usize bytes_compressed = 0;
+        // Clean streaming compression implementation
+        engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {}, 
+                        engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
+        
+        usize bytes_read = 0;
+        usize bytes_left = asset_bytes.size();
         const auto res = compression::zlib_deflate(
             [&](usize size) {
                 const auto bytes_to_process = std::min(bytes_left, size);
@@ -399,12 +408,14 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
                 return span;
             },
             [&](std::span<const std::byte> data) {
-                bytes_compressed += data.size();
                 engbc.append_asset_bytes(data, false);
             });
 
         ENG_ASSERT(res, "Zlib compression failed {}", asset.path.string());
         engbc.append_asset_bytes({}, true);
+#else
+        engbc.add_asset(0, ENG_HASH(asset.path.string()), {}, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
+        engbc.append_asset_bytes(std::span{ asset_bytes }, true);
 #endif
     }
 
@@ -412,7 +423,192 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
     asset.geometry_data_futures.resize(0);
     asset.image_data.resize(0);
 
-    ENG_LOG("Serializing asset {} finished. Written {} bytes.", asset.path.string(), size);
+    ENG_LOG("Serializing asset {} finished. Written {} bytes.", asset.path.string(), required_size);
+}
+
+void Asset::serialize(serialization::Context& ctx) const
+{
+    if(geometry_data.empty())
+    {
+        ENG_ASSERT(false,
+                   "Geometry data for asset {} must not be empty when serializing. Did you forget to provide required "
+                   "keep data flag when importing?",
+                   path.string());
+        return;
+    }
+
+    const std::string path_str = path.string();
+    ctx.serialize(path_str);
+
+    ENG_ASSERT(images.size() == image_data.size());
+    ctx.serialize(image_data);
+
+    const u64 tex_count = textures.size();
+    ctx.serialize(tex_count);
+    for(auto txt : textures)
+    {
+        auto it = std::ranges::find(images, txt.image);
+        ENG_ASSERT(it != images.end());
+        *txt.image = (u64)std::distance(images.begin(), it);
+        ENG_ASSERT(*txt.image < images.size());
+        ctx.serialize(txt);
+    }
+
+    ENG_ASSERT(geometries.size() == geometry_data.size());
+    const u64 geom_count = geometry_data_futures.size();
+    ctx.serialize(geom_count);
+    for(const auto& gdf : geometry_data_futures)
+    {
+        const auto& gd = gdf.get();
+        ctx.serialize(gd);
+    }
+
+    const u64 mat_count = materials.size();
+    ctx.serialize(mat_count);
+    for(const auto& math : materials)
+    {
+        auto mat = math.get();
+        if(mat.base_color_texture)
+        {
+            auto idx = std::distance(images.begin(), std::ranges::find(images, mat.base_color_texture.image));
+            *mat.base_color_texture.image = idx;
+            if(idx == images.size()) { mat.base_color_texture.image = {}; }
+        }
+        if(mat.normal_texture)
+        {
+            *mat.normal_texture.image = std::distance(images.begin(), std::ranges::find(images, mat.normal_texture.image));
+        }
+        if(mat.metallic_roughness_texture)
+        {
+            *mat.metallic_roughness_texture.image =
+                std::distance(images.begin(), std::ranges::find(images, mat.metallic_roughness_texture.image));
+        }
+        mat.mesh_pass = {};
+        ctx.serialize(mat);
+    }
+
+    const u64 mesh_count = meshes.size();
+    ctx.serialize(mesh_count);
+    for(const auto& meshh : meshes)
+    {
+        auto mesh = meshh.get();
+        *mesh.geometry = (u64)std::distance(geometries.begin(), std::ranges::find(geometries, mesh.geometry));
+        if(mesh.material)
+        {
+            *mesh.material = (u64)std::distance(materials.begin(), std::ranges::find(materials, mesh.material));
+        }
+        ctx.serialize(mesh);
+    }
+
+    ctx.serialize(nodes);
+    ctx.serialize(transforms);
+    ctx.serialize(root_nodes);
+}
+
+void Asset::deserialize(serialization::Context& ctx)
+{
+    std::string pathstr;
+    ctx.deserialize(pathstr);
+    path = pathstr;
+    ENG_ASSERT(!path.empty());
+
+    u64 image_count = 0;
+    ctx.deserialize(image_count);
+    images.resize(image_count);
+    assets::ParsedImageData imgd{};
+    auto* mip_cmd = gfx::get_renderer().current_data->cmdpool->begin();
+    for(auto i = 0u; i < image_count; ++i)
+    {
+        u64 pixel_data_size = 0;
+        ctx.deserialize(imgd.name);
+        ctx.deserialize(imgd.width);
+        ctx.deserialize(imgd.height);
+        ctx.deserialize(imgd.format);
+        ctx.deserialize(pixel_data_size);
+
+        images[i] = gfx::get_renderer().make_image(imgd.name, gfx::Image::init(imgd.width, imgd.height, 0, imgd.format,
+                                                                               gfx::ImageUsage::SAMPLED_BIT | gfx::ImageUsage::TRANSFER_DST_BIT |
+                                                                                   gfx::ImageUsage::TRANSFER_SRC_BIT,
+                                                                               0, 1, gfx::ImageLayout::READ_ONLY));
+        if(!images[i])
+        {
+            ENG_WARN("Failed to create image {}", imgd.name.empty() ? "EMPTY IMAGE NAME" : imgd.name.as_view());
+            ctx.m_offset += pixel_data_size;
+            continue;
+        }
+        else
+        {
+            // Zero-copy read directly from the streaming context buffer
+            gfx::get_renderer().staging->copy(images[i].get(), ctx.m_bytes.data() + ctx.m_offset, 0, 0, false,
+                                              gfx::DiscardContents::YES);
+            mip_cmd->generate_mips(images[i].get());
+        }
+        ctx.m_offset += pixel_data_size;
+    }
+    gfx::get_renderer().current_data->cmdpool->end(mip_cmd);
+    auto* mip_sync = gfx::get_renderer().current_data->get_sync();
+    mip_cmd->wait_sync(gfx::get_renderer().staging->flush(true), gfx::PipelineStage::TRANSFER_BIT);
+    mip_cmd->signal_sync(mip_sync, gfx::PipelineStage::FRAGMENT_BIT);
+    gfx::get_renderer().gq->with_cmd_buf(mip_cmd).submit();
+    gfx::get_renderer().current_data->wait_syncs.push_back(mip_sync);
+
+    u64 texture_count = 0;
+    ctx.deserialize(texture_count);
+    textures.resize(texture_count);
+    for(auto& txt : textures)
+    {
+        ctx.deserialize(txt);
+        txt.image = images[(u32)*txt.image];
+    }
+
+    u64 geom_count = 0;
+    ctx.deserialize(geom_count);
+    geometries.resize(geom_count);
+    assets::ParsedGeometryData geom;
+    for(u64 i = 0; i < geom_count; ++i)
+    {
+        ctx.deserialize(geom);
+        geometries[i] =
+            gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
+                                                                       .vertex_layout = geom.vertex_layout,
+                                                                       .index_format = gfx::IndexFormat::U16,
+                                                                       .vertices = geom.positions,
+                                                                       .attributes = geom.attributes,
+                                                                       .indices = std::as_bytes(std::span{ geom.indices }),
+                                                                       .meshlets = geom.meshlets });
+    }
+
+    u64 material_count = 0;
+    ctx.deserialize(material_count);
+    materials.resize(material_count);
+    gfx::Material mat;
+    for(u64 i = 0; i < material_count; ++i)
+    {
+        ctx.deserialize(mat);
+        if(mat.base_color_texture) { mat.base_color_texture = textures[(u32)*mat.base_color_texture.image]; }
+        if(mat.normal_texture) { mat.normal_texture = textures[(u32)*mat.normal_texture.image]; }
+        if(mat.metallic_roughness_texture)
+        {
+            mat.metallic_roughness_texture = textures[(u32)*mat.metallic_roughness_texture.image];
+        }
+        materials[i] = gfx::get_renderer().make_material(mat);
+    }
+
+    u64 mesh_count = 0;
+    ctx.deserialize(mesh_count);
+    meshes.resize(mesh_count);
+    gfx::Mesh mesh;
+    for(u64 i = 0; i < mesh_count; ++i)
+    {
+        ctx.deserialize(mesh);
+        if(mesh.material) { mesh.material = materials[(u32)*mesh.material]; }
+        if(mesh.geometry) { mesh.geometry = geometries[(u32)*mesh.geometry]; }
+        meshes[i] = gfx::get_renderer().make_mesh(gfx::MeshDescriptor{ mesh.geometry, mesh.material });
+    }
+
+    ctx.deserialize(nodes);
+    ctx.deserialize(transforms);
+    ctx.deserialize(root_nodes);
 }
 
 } // namespace assets

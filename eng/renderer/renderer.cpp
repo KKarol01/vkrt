@@ -524,7 +524,7 @@ void Renderer::update()
     current_data->cmdpool->reset();
     current_data->reset_syncs();
     current_data->reset_queries();
-    current_data->reset_staging();
+    //current_data->reset_staging();
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -1735,8 +1735,6 @@ Sync* Renderer::FrameData::get_sync()
 }
 
 void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
-
-void Renderer::FrameData::reset_staging() { staging->reset(); }
 
 void Renderer::FrameData::add_retired_resource(const RetiredResource::NativeResource& native)
 {

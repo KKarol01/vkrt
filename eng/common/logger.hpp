@@ -27,8 +27,8 @@
 #define ENG_ASSERT(expr, ...)                                                                                          \
     if((bool)(expr) == false)                                                                                          \
     {                                                                                                                  \
-        ENG_BREAKPOINT();                                                                                              \
         __VA_OPT__(ENG_LOG(__VA_ARGS__));                                                                              \
+        ENG_BREAKPOINT();                                                                                              \
     }
 #else
 #define ENG_ASSERT(expr, ...)                                                                                          \

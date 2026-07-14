@@ -15,8 +15,9 @@ struct PushConstants
 struct VSOutput
 {
 	float4 position : SV_Position;
-	float4 normal : NORMAL0;
+	float3 normal : NORMAL0;
 	float2 uv : TEXCOORD0;
+	float3 wpos : TEXCOORD1;
 	nointerpolation uint material_index : TEXCOORD5;
 };
 

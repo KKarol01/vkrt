@@ -1,0 +1,4 @@
+CompileFlags:
+	CompilationDatabase: out
+Completion: 
+	HeaderInsertion: Never

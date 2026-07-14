@@ -12,8 +12,9 @@ VSOutput main(VSInput vsinput)
 	GPUInstanceId instanceid = get_grwb2(GPUInstanceId, pc, vsinput.instance_index);
 	
     VSOutput vsoutput;
-	vsoutput.position = mul(constants.proj_view, float4(get_grwb2(GPUVertexPosition, constants, vsinput.vertex_index).pos.xyz, 1.0));
-	vsoutput.normal = float4(get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).normal.xyz, 0.0);
+	vsoutput.wpos = get_grwb2(GPUVertexPosition, constants, vsinput.vertex_index).pos.xyz;
+	vsoutput.position = mul(constants.proj_view, float4(vsoutput.wpos, 1.0));
+	vsoutput.normal = get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).normal.xyz;
 	vsoutput.uv = get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).uv.xy;
 	vsoutput.material_index = instanceid.mati;
     

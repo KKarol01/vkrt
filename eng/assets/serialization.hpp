@@ -21,264 +21,187 @@ namespace eng
 namespace serialization
 {
 
+class Context;
+
+template <typename T>
+concept IsMemcpySafe = std::is_arithmetic_v<T> || std::is_same_v<T, std::byte> || std::is_enum_v<T>;
+template <typename T>
+concept ImplementsSerialize = requires(const T& ct, T& t, Context& c) {
+    ct.serialize(c);
+    t.deserialize(c);
+};
+template <typename T>
+concept ImplementsGetStructFields = !ImplementsSerialize<T> && requires { T::get_struct_fields(); };
+
 template <typename T, typename Field> struct StructField
 {
     using Type = Field;
     Field T::* fieldptr;
 };
 
-#define ENG_SERIALIZATION_STRUCT_VERSION(version)                                                                      \
-    inline static constexpr u8 _eng_s_get_ver() { return version; }
-#define ENG_SERIALIZATION_STRUCT_VERSION_CHECK(Type, version) static_assert(Type::_eng_s_get_ver() == version);
-
-#define ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(Type, field)                                                            \
-    StructField { &Type::field }
-
-// For declaring custom functions to serialize/deserialize a type
-#define ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(Type)                                                               \
-    template <> void serialize<Type>(std::span<std::byte> dst, const Type& src, usize& out_bytes_written);             \
-    template <> void deserialize<Type>(Type & dst, std::span<const std::byte> src, usize & out_bytes_written);
-
-// Specialize this function with ENG_SERIALIZATION_REGISTER_FIELDS for a type that you want to be automatically serialized.
-template <typename T> inline constexpr auto get_struct_fields() { static_assert(false, "Specialize this function."); }
-
-inline void safe_write(void* dst, const void* src, usize& out_bytes_written, usize dst_size, usize src_size)
+class Context
 {
-    if(dst && src && out_bytes_written + src_size <= dst_size)
+  public:
+    constexpr Context() = default;
+    constexpr Context(std::span<std::byte> bytes, usize offset) : m_bytes(bytes), m_offset(offset) {}
+
+    void safe_write(const void* src, usize src_size)
     {
-        std::memcpy((char*)dst + out_bytes_written, src, src_size);
+        if(src && m_offset + src_size <= m_bytes.size()) { std::memcpy(m_bytes.data() + m_offset, src, src_size); }
+        m_offset += src_size;
     }
-    out_bytes_written += src_size;
-}
 
-inline void safe_read(void* dst, const void* src, usize& out_bytes_written, usize dst_size, usize src_size)
-{
-    if(dst && src && out_bytes_written + dst_size <= src_size)
+    void safe_read(void* dst, usize dst_size)
     {
-        std::memcpy(dst, (const char*)src + out_bytes_written, dst_size);
+        if(dst && m_offset + dst_size <= m_bytes.size()) { std::memcpy(dst, m_bytes.data() + m_offset, dst_size); }
+        m_offset += dst_size;
     }
-    out_bytes_written += dst_size;
-}
 
-template <typename T>
-concept MemcpySafe = std::is_arithmetic_v<T> || std::is_same_v<T, std::byte> || std::is_enum_v<T>;
-
-// Forward declare templates so the ones below can be used by those above -- thanks c++
-template <typename T, usize size>
-inline void serialize(std::span<std::byte> dst, const std::array<T, size>& src, usize& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, usize& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, usize& out_bytes_written);
-template <>
-inline void serialize<std::string>(std::span<std::byte> dst, const std::string& src, usize& out_bytes_written);
-template <typename T>
-inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, usize& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, std::span<const T> src, usize& out_bytes_written);
-template <usize size>
-inline void serialize(std::span<std::byte> dst, const StackString<size>& src, usize& out_bytes_written);
-template <typename T, typename Storage>
-inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written);
-template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, size_t& out_bytes_written);
-
-template <typename T, usize size>
-inline void deserialize(std::array<T, size>& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T>
-inline void deserialize(std::vector<T>& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T>
-inline void deserialize(std::span<T> dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <usize size>
-inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T, typename Storage>
-inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, usize& out_bytes_written);
-template <typename T>
-inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written);
-
-template <typename T, usize... index>
-inline void serialize_fields(std::span<std::byte> dst, const T& src, usize& out_bytes_written, std::index_sequence<index...>)
-{
-    constexpr auto fields = get_struct_fields<T>();
-    ((serialize(dst, src.*std::get<index>(fields).fieldptr, out_bytes_written)), ...);
-}
-
-template <typename T, usize size>
-inline void serialize(std::span<std::byte> dst, const std::array<T, size>& src, usize& out_bytes_written)
-{
-    serialize(dst, std::span<const T>{ src }, out_bytes_written);
-}
-
-template <typename T> inline void serialize(std::span<std::byte> dst, const T& src, usize& out_bytes_written)
-{
-    if constexpr(MemcpySafe<T>) { safe_write(dst.data(), &src, out_bytes_written, dst.size_bytes(), sizeof(T)); }
-    else
+    template <IsMemcpySafe T> void serialize(const T& val) { safe_write(&val, sizeof(T)); }
+    template <IsMemcpySafe T> void deserialize(T& val) { safe_read(&val, sizeof(T)); }
+    template <ImplementsSerialize T> void serialize(const T& val) { val.serialize(*this); }
+    template <ImplementsSerialize T> void deserialize(T& val) { val.deserialize(*this); }
+    template <ImplementsGetStructFields T> void serialize(const T& val)
     {
-        constexpr auto fields = get_struct_fields<T>();
+        constexpr auto fields = T::get_struct_fields();
         using TupleType = typename std::decay_t<decltype(fields)>;
-        serialize_fields(dst, src, out_bytes_written, std::make_index_sequence<std::tuple_size_v<TupleType>>{});
+        serialize_struct_fields(val, fields, std::make_index_sequence<std::tuple_size_v<TupleType>>{});
     }
-}
-
-template <typename T> inline void serialize(std::span<std::byte> dst, const Flags<T>& src, usize& out_bytes_written)
-{
-    serialize(dst, src.flags, out_bytes_written);
-}
-
-template <> inline void serialize(std::span<std::byte> dst, const std::string& src, usize& out_bytes_written)
-{
-    serialize(dst, (u64)src.length(), out_bytes_written);
-    serialize(dst, std::span{ src.data(), src.length() }, out_bytes_written);
-}
-
-template <typename T>
-inline void serialize(std::span<std::byte> dst, const std::vector<T>& src, usize& out_bytes_written)
-{
-    serialize(dst, src.size(), out_bytes_written);
-    serialize(dst, std::span{ src }, out_bytes_written);
-}
-
-template <typename T> inline void serialize(std::span<std::byte> dst, std::span<const T> src, usize& out_bytes_written)
-{
-    if constexpr(MemcpySafe<T>)
+    template <ImplementsGetStructFields T> void deserialize(T& val)
     {
-        safe_write(dst.data(), src.data(), out_bytes_written, dst.size_bytes(), src.size_bytes());
+        constexpr auto fields = T::get_struct_fields();
+        using TupleType = typename std::decay_t<decltype(fields)>;
+        deserialize_struct_fields(val, fields, std::make_index_sequence<std::tuple_size_v<TupleType>>{});
     }
-    else
+
+    void serialize(const std::string& str)
     {
-        for(const auto& e : src)
+        const u64 length = static_cast<u64>(str.size());
+        safe_write(&length, sizeof(u64));
+        safe_write(str.data(), length);
+    }
+    void deserialize(std::string& str)
+    {
+        u64 length = 0;
+        safe_read(&length, sizeof(u64));
+        str.resize(static_cast<usize>(length));
+        safe_read(str.data(), static_cast<usize>(length));
+    }
+
+    template <typename T> void serialize(const std::vector<T>& vec)
+    {
+        const u64 count = static_cast<u64>(vec.size());
+        safe_write(&count, sizeof(u64));
+        serialize(std::span{ vec });
+    }
+    template <typename T> void deserialize(std::vector<T>& vec)
+    {
+        u64 count = 0;
+        safe_read(&count, sizeof(u64));
+        vec.resize(static_cast<usize>(count));
+        deserialize(std::span{ vec });
+    }
+
+    template <typename T> void serialize(std::span<const T> src)
+    {
+        if constexpr(IsMemcpySafe<T>) { safe_write(src.data(), src.size_bytes()); }
+        else
         {
-            serialize(dst, e, out_bytes_written);
+            for(const auto& e : src)
+            {
+                serialize(e);
+            }
         }
     }
-}
-
-template <usize size>
-inline void serialize(std::span<std::byte> dst, const StackString<size>& src, usize& out_bytes_written)
-{
-    serialize(dst, (u64)src.size(), out_bytes_written);
-    safe_write(dst.data(), src.c_str(), out_bytes_written, dst.size_bytes(), src.size());
-}
-
-template <typename T, typename Storage>
-inline void serialize(std::span<std::byte> dst, const Handle<T, Storage>& src, usize& out_bytes_written)
-{
-    serialize(dst, src.handle, out_bytes_written);
-}
-
-template <typename T> inline void serialize(std::span<std::byte> dst, const Range_T<T>& src, size_t& out_bytes_written)
-{
-    safe_write(dst.data(), &src.offset, out_bytes_written, dst.size_bytes(), sizeof(src.offset));
-    safe_write(dst.data(), &src.size, out_bytes_written, dst.size_bytes(), sizeof(src.size));
-}
-
-template <typename T, usize... index>
-inline void deserialize_fields(T& dst, std::span<const std::byte> src, usize& out_bytes_written, std::index_sequence<index...>)
-{
-    constexpr auto fields = get_struct_fields<T>();
-    ((deserialize(dst.*std::get<index>(fields).fieldptr, src, out_bytes_written)), ...);
-}
-
-template <typename T, usize size>
-inline void deserialize(std::array<T, size>& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    deserialize(std::span<T>{ dst }, src, out_bytes_written);
-}
-
-template <typename T> inline void deserialize(T& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    if constexpr(MemcpySafe<T>) { safe_read(&dst, src.data(), out_bytes_written, sizeof(T), src.size()); }
-    else
+    template <typename T> void deserialize(std::span<T> dst)
     {
-        constexpr auto fields = get_struct_fields<T>();
-        using TupleType = typename std::decay_t<decltype(fields)>;
-        deserialize_fields(dst, src, out_bytes_written, std::make_index_sequence<std::tuple_size_v<TupleType>>{});
-    }
-}
-
-template <typename T> inline void deserialize(Flags<T>& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    deserialize(dst.flags, src, out_bytes_written);
-}
-
-template <> inline void deserialize(std::string& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    u64 size;
-    deserialize(size, src, out_bytes_written);
-    dst.resize(size);
-    deserialize(std::span{ dst.data(), size }, src, out_bytes_written);
-}
-
-template <typename T>
-inline void deserialize(std::vector<T>& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    u64 size;
-    deserialize(size, src, out_bytes_written);
-    dst.resize(size);
-    deserialize(std::span{ dst.data(), dst.size() }, src, out_bytes_written);
-}
-
-template <typename T>
-inline void deserialize(std::span<T> dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    if constexpr(MemcpySafe<T>)
-    {
-        safe_read(dst.data(), src.data(), out_bytes_written, dst.size_bytes(), src.size_bytes());
-    }
-    else
-    {
-        for(auto& e : dst)
+        if constexpr(IsMemcpySafe<T>) { safe_read(dst.data(), dst.size_bytes()); }
+        else
         {
-            deserialize(e, src, out_bytes_written);
+            for(auto& e : dst)
+            {
+                deserialize(e);
+            }
         }
     }
-}
 
-template <usize size>
-inline void deserialize(StackString<size>& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    u64 sz;
-    deserialize(sz, src, out_bytes_written);
-    dst.resize(sz);
-    safe_read(dst.string.data(), src.data(), out_bytes_written, sz, src.size_bytes());
-}
+    template <typename SourceType, typename FieldsTuple, usize... indices>
+    void serialize_struct_fields(const SourceType& src, const FieldsTuple& tuple, std::index_sequence<indices...>)
+    {
+        auto serialize_field = [this](const auto& field) { this->serialize(field); };
+        ((serialize_field(src.*std::get<indices>(tuple).fieldptr)), ...);
+    }
+    template <typename DestType, typename FieldsTuple, usize... indices>
+    void deserialize_struct_fields(DestType& dst, const FieldsTuple& tuple, std::index_sequence<indices...>)
+    {
+        auto deserialize_field = [this](auto& field) { this->deserialize(field); };
+        ((deserialize_field(dst.*std::get<indices>(tuple).fieldptr)), ...);
+    }
 
-template <typename T, typename Storage>
-inline void deserialize(Handle<T, Storage>& dst, std::span<const std::byte> src, usize& out_bytes_written)
-{
-    deserialize(dst.handle, src, out_bytes_written);
-}
+    void serialize(const glm::vec4& vec) { safe_write(&vec, sizeof(vec)); }
+    void deserialize(glm::vec4& vec) { safe_read(&vec, sizeof(vec)); }
+    template <usize Length> void serialize(const StackString<Length>& str)
+    {
+        const u64 sz = static_cast<u64>(str.size());
+        serialize(sz);
+        safe_write(str.c_str(), sz);
+    }
+    template <usize Length> void deserialize(StackString<Length>& str)
+    {
+        u64 sz = 0;
+        deserialize(sz);
+        str.resize(static_cast<usize>(sz));
+        safe_read(str.string.data(), static_cast<usize>(sz));
+    }
+    template <typename T> void serialize(const Flags<T>& flags) { serialize(flags.flags); }
+    template <typename T> void deserialize(Flags<T>& flags) { deserialize(flags.flags); }
+    template <typename T, typename Storage> void serialize(const Handle<T, Storage>& handle)
+    {
+        serialize(handle.handle);
+    }
+    template <typename T, typename Storage> void deserialize(Handle<T, Storage>& handle) { deserialize(handle.handle); }
+    template <typename T> void serialize(const Range_T<T>& range)
+    {
+        serialize(range.offset);
+        serialize(range.size);
+    }
+    template <typename T> void deserialize(Range_T<T>& range)
+    {
+        deserialize(range.offset);
+        deserialize(range.size);
+    }
 
-template <typename T>
-inline void deserialize(Range_T<T>& dst, std::span<const std::byte> src, size_t& out_bytes_written)
-{
-    safe_read(&dst.offset, src.data(), out_bytes_written, sizeof(dst.offset), src.size_bytes());
-    safe_read(&dst.size, src.data(), out_bytes_written, sizeof(dst.size), src.size_bytes());
-}
+    std::span<std::byte> m_bytes;
+    usize m_offset{};
+};
 
 // clang-format off
 /*
 .enbg custom asset byte container format
 
-- 2026.04.20
+- 2026.07.12
 The format for this is as follows:
 {
-4B magic number 'engb',
-1B container spec version,
-4B item count in the list of assets in this container,
-[
-	{
-		8B custom hash for lookup	- usually from virtual path like '/assets/models/model/scene.gltf'
-		8B content hash				- hash of the contents
-		8B asset start				- offset from the beginning of the container to the start of the asset
-		8B asset byte size			- asset byte size (excludes all metadata from flags, offset from it to get them)
-		1B version number			- version of the byte representation of the contents in the container
-		1B flags					- flags describing the properties of the content
-	} : LIST_ITEM, ...] : LIST,
+	4B magic number 'engb',
+	1B container spec version,
+	3B Padding,
+	8B Jump offset to list item count (list section),
 	[
-		{ [if compressed: 8B size before compression], asset_0_bytes }, 
-		...,
-		(n-1) asset bytes
+		[ optional metadata ]			- e.g., 8B uncompressed size if CONTENT_COMPRESSED_BIT is set
+		[ asset bytes ]					- Pointed to by asset_start (metadata lives immediately before this pointer)
 	] : ASSET BYTES,
+
+	4B item count in the list of assets in this container,
+	[
+		{
+			8B custom hash for lookup	- usually from virtual path like '/assets/models/model/scene.gltf'
+			8B content hash				- hash of the contents
+			8B asset start				- Payload-relative offset to the asset bytes (Add N_HEADER_BYTES to get absolute file offset)
+			8B asset byte size			- asset byte size (excludes all metadata from flags, offset from it to get them)
+			1B version number			- version of the byte representation of the contents in the container
+			1B flags					- flags describing the properties of the content
+		} : LIST_ITEM
+	] : LIST,
 } : .ENGB CONTAINER SPEC
 */
 // clang-format on
@@ -287,13 +210,14 @@ namespace engb
 inline namespace v0
 {
 
-inline static constexpr usize HEADER_BYTE_SZ = 4 + 1 + 4;
-inline static constexpr usize LIST_BYTE_SZ = 4 * 8 + 2 * 1;
+inline static constexpr usize N_HEADER_BYTES = 4 + 1 + 3 + 8;
+inline static constexpr usize N_LIST_BYTES = 4 * 8 + 2 * 1;
 
 enum class ListFlags : u8
 {
     CONTENT_COMPRESSED_BIT = 1 << 0, // use zlib to decompress
 };
+ENG_ENABLE_FLAGS_OPERATORS(ListFlags);
 
 // Uncompressed header just before actual asset bytes
 struct AssetMetadata
@@ -303,10 +227,15 @@ struct AssetMetadata
 
 struct List
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &List::custom_hash }, serialization::StructField{ &List::content_hash },
+                               serialization::StructField{ &List::asset_start }, serialization::StructField{ &List::asset_size },
+                               serialization::StructField{ &List::version }, serialization::StructField{ &List::flags });
+    }
     u64 custom_hash{};
     u64 content_hash{};
-    u64 asset_start{}; // start of asset bytes, skipping metadata from flags, which is left uncompressed
+    u64 asset_start{}; // start of asset bytes, skipping metadata from flags, which is left uncompressed; does not include N_HEADER_BYTES
     u64 asset_size{}; // this probably could be calculated from total file size or next_item_list_asset_start - this_item_list_asset_start
     u8 version{};
     Flags<ListFlags> flags{};
@@ -324,7 +253,9 @@ struct Container
     // for streaming compressed data later for the currently added asset, see asset_manager.cpp. set finished on last append to recalc hash.
     void append_asset_bytes(std::span<const std::byte> bytes, bool finished);
 
-    void serialize();
+    void write_to_file();
+    void serialize(serialization::Context& ctx) const;
+    void deserialize(serialization::Context& ctx);
 
     std::optional<List> get_asset_list(u64 custom_hash) const;
     usize get_asset_data(const List& list, std::span<std::byte> out_data, usize src_offset) const;
@@ -335,24 +266,7 @@ struct Container
     bool m_modified{ false };
 };
 
-ENG_ENABLE_FLAGS_OPERATORS(ListFlags);
-
 } // namespace v0
 } // namespace engb
-
-// ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(engb::Container);
-
-template <> inline constexpr auto get_struct_fields<engb::List>()
-{
-    ENG_SERIALIZATION_STRUCT_VERSION_CHECK(engb::List, 0);
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, custom_hash),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, content_hash),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_start),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, asset_size),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, version),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(engb::List, flags));
-}
-
 } // namespace serialization
-
 } // namespace eng

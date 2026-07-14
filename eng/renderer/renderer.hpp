@@ -34,7 +34,14 @@ struct Pass;
 
 struct Meshlet
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &Meshlet::vertex_offset },
+                               serialization::StructField{ &Meshlet::vertex_count },
+                               serialization::StructField{ &Meshlet::index_offset },
+                               serialization::StructField{ &Meshlet::index_count },
+                               serialization::StructField{ &Meshlet::bounding_sphere });
+    }
     i32 vertex_offset;
     u32 vertex_count;
     u32 index_offset;
@@ -346,7 +353,15 @@ struct MeshPass
 
 struct Material
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &Material::name }, serialization::StructField{ &Material::mesh_pass },
+                               serialization::StructField{ &Material::mode }, serialization::StructField{ &Material::alpha_cutoff },
+                               serialization::StructField{ &Material::base_color_factor },
+                               serialization::StructField{ &Material::base_color_texture },
+                               serialization::StructField{ &Material::normal_texture },
+                               serialization::StructField{ &Material::metallic_roughness_texture });
+    }
     enum class Mode : u8
     {
         OPAQUE,
@@ -373,7 +388,10 @@ struct Material
 
 struct Mesh
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &Mesh::geometry }, serialization::StructField{ &Mesh::material });
+    }
     auto operator<=>(const Mesh&) const = default;
     Handle<Geometry> geometry;
     Handle<Material> material;
@@ -731,8 +749,7 @@ class Renderer
         std::vector<Sync*> available_syncs;
         std::vector<Sync*> wait_syncs;
 
-        void reset_staging();
-		Sync* staging_sync{};
+        Sync* staging_sync{};
         StagingBuffer* staging{}; // small data staging to avoid stutters when big fills up
 
         RenderResources render_resources;
@@ -994,45 +1011,4 @@ ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts[*handle]; });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
 ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(*handle); });
-
-namespace eng
-{
-namespace serialization
-{
-template <> inline constexpr auto get_struct_fields<gfx::Meshlet>()
-{
-	ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::Meshlet, 0);
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_offset),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_count),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_offset),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_count),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, bounding_sphere));
-}
-template <> inline constexpr auto get_struct_fields<glm::vec4>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, x),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, y),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, z),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, w));
-}
-template <> inline constexpr auto get_struct_fields<gfx::Material>()
-{
-	ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::Material, 0);
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mesh_pass),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mode),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, alpha_cutoff),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_factor),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_texture),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, normal_texture),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, metallic_roughness_texture));
-}
-template <> inline constexpr auto get_struct_fields<gfx::Mesh>()
-{
-	ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::Mesh, 0);
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, geometry),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, material));
-}
-}
-} // namespace eng
 // clang-format on

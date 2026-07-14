@@ -489,9 +489,15 @@ struct BufferView
 
 struct ImageView
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
     static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                           u32 src_mip = 0u, u32 dst_mip = ~0u, u32 src_layer = 0u, u32 dst_layer = ~0u);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &ImageView::image }, serialization::StructField{ &ImageView::type },
+                               serialization::StructField{ &ImageView::format },
+                               serialization::StructField{ &ImageView::src_subresource },
+                               serialization::StructField{ &ImageView::dst_subresource });
+    }
     auto operator<=>(const ImageView&) const = default;
     explicit operator bool() const { return (bool)image; }
     void* get_md();
@@ -653,22 +659,6 @@ inline ImageViewType get_view_type_from_image(ImageType type)
     }
 }
 } // namespace gfx
-} // namespace eng
-
-namespace eng
-{
-namespace serialization
-{
-template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
-{
-    ENG_SERIALIZATION_STRUCT_VERSION_CHECK(gfx::ImageView, 0);
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, image),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, type),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, format),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, src_subresource),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource));
-}
-} // namespace serialization
 } // namespace eng
 
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));

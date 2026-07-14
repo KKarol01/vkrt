@@ -113,6 +113,13 @@ struct GPUVertexPosition
     ENG_FLOAT3 pos;
 };
 
+struct GPUVertexAttribute
+{
+    ENG_FLOAT3 normal;
+    ENG_FLOAT4 tangent;
+    ENG_FLOAT2 uv;
+};
+
 struct IndexedIndirectDrawCommand
 {
     ENG_UINT indexCount;
@@ -120,13 +127,6 @@ struct IndexedIndirectDrawCommand
     ENG_UINT firstIndex;
     ENG_INT vertexOffset;
     ENG_UINT firstInstance;
-};
-
-struct GPUVertexAttribute
-{
-    ENG_FLOAT3 normal;
-    ENG_FLOAT4 tangent;
-    ENG_FLOAT2 uv;
 };
 
 struct GPUInstanceId

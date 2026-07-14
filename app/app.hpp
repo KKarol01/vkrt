@@ -10,5 +10,5 @@ class App
     void on_init();
     void on_update();
 };
-
+  
 } // namespace app

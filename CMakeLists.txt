@@ -67,9 +67,11 @@ target_include_directories(eng
 )
 target_compile_features(eng PRIVATE cxx_std_23)
 target_link_directories(eng PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS}/../Lib)
-target_compile_options(eng PRIVATE 
-	/W4    
-)
+if(MSVC)
+	target_compile_options(eng PRIVATE 
+		/W4    
+	)
+endif()
 
 set_target_properties(eng PROPERTIES 
     RUNTIME_OUTPUT_NAME_DEBUG "${CMAKE_PROJECT_NAME}Debug"

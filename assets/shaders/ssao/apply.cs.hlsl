@@ -22,5 +22,6 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 	
 	float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
 	float4 ao = in_ao.SampleLevel(gSamplerNearest, uv, 0);
-    in_out_color[thread_id.xy] = (in_out_color[thread_id.xy]+ float4(ao.rgb * 3, 0.0)) * pow(ao.w, 1.0);
+    in_out_color[thread_id.xy] = (in_out_color[thread_id.xy] + float4(ao.rgb, 0.0)) * pow(ao.w, 1.0);
+    //in_out_color[thread_id.xy] = (float4(ao.rgb * 5.0, 1.0)) * pow(ao.w, 2.0);
 }

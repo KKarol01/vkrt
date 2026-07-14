@@ -18,7 +18,12 @@ namespace assets
 
 struct Node
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &Node::name }, serialization::StructField{ &Node::meshes },
+                               serialization::StructField{ &Node::transform }, serialization::StructField{ &Node::parent },
+                               serialization::StructField{ &Node::children });
+    }
     std::string name;
     Range32u meshes{};
     u32 transform{ ~0u };
@@ -28,7 +33,14 @@ struct Node
 
 struct ParsedGeometryData
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &ParsedGeometryData::vertex_layout },
+                               serialization::StructField{ &ParsedGeometryData::positions },
+                               serialization::StructField{ &ParsedGeometryData::attributes },
+                               serialization::StructField{ &ParsedGeometryData::indices },
+                               serialization::StructField{ &ParsedGeometryData::meshlets });
+    }
     Flags<gfx::VertexComponent> vertex_layout;
     std::vector<float> positions{};
     std::vector<float> attributes{};
@@ -39,7 +51,14 @@ using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
 
 struct ParsedImageData
 {
-    ENG_SERIALIZATION_STRUCT_VERSION(0);
+    static constexpr auto get_struct_fields()
+    {
+        return std::make_tuple(serialization::StructField{ &ParsedImageData::name },
+                               serialization::StructField{ &ParsedImageData::width },
+                               serialization::StructField{ &ParsedImageData::height },
+                               serialization::StructField{ &ParsedImageData::format },
+                               serialization::StructField{ &ParsedImageData::data });
+    }
     StackString<128> name;
     u32 width{};
     u32 height{};
@@ -54,6 +73,9 @@ struct Asset
     Asset& operator=(const Asset&) = delete;
     Asset(Asset&&) noexcept = default;
     Asset& operator=(Asset&&) noexcept = default;
+
+    void serialize(serialization::Context& ctx) const;
+    void deserialize(serialization::Context& ctx);
 
     fs::Path path;
     std::vector<Handle<gfx::Image>> images;
@@ -90,33 +112,4 @@ class AssetManager
 };
 
 } // namespace assets
-
-namespace serialization
-{
-// ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(assets::Asset); // not needed here, moved up in the source file
-template <> inline constexpr auto get_struct_fields<assets::Node>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, name),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, meshes),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, transform),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, parent),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::Node, children));
-}
-template <> inline constexpr auto get_struct_fields<assets::ParsedImageData>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, name),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, width),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, height),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, format),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedImageData, data));
-}
-template <> inline constexpr auto get_struct_fields<assets::ParsedGeometryData>()
-{
-    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, vertex_layout),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, positions),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, attributes),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, indices),
-                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(assets::ParsedGeometryData, meshlets));
-}
-} // namespace serialization
 } // namespace eng

@@ -18,12 +18,36 @@
         "rhs": "Windows"
       }
     },
+	{
+      "name": "windows-llvm",
+      "description": "Target Windows with the llvm development environment.",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang.exe",
+        "CMAKE_CXX_COMPILER": "clang++.exe"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
     {
       "name": "x64-Debug",
       "displayName": "x64 Debug",
       "description": "Target Windows (64-bit) with the Visual Studio development environment. (Debug)",
       "inherits": "windows-base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+	{
+      "name": "x64-Debug-LLVM",
+      "displayName": "x64 Debug LLVM",
+      "description": "Target Windows (64-bit) with the LLVM development environment. (Debug)",
+      "inherits": "windows-llvm",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
     },
     {
       "name": "x64-Release",
@@ -37,6 +61,10 @@
 	{
 	  "name": "Win64Debug",
     "configurePreset": "x64-Debug"
+	},
+	{
+	  "name": "Win64DebugLLVM",
+	  "configurePreset": "x64-Debug-LLVM"
 	},
 	{
 	  "name": "Win64Release",
