@@ -32,6 +32,13 @@ struct PushConstants
 #define gNormalTexture gTextures2Dfloat4[pc.NormalTextureIndex]
 #define gColorTexture gTextures2Dfloat4[pc.ColorTextureIndex]
 #define gOutAOImage gRWTextures2Dfloat4[pc.OutColorRWTextureIndex]
+#define gVelocityTexture    gTextures2Dfloat2[pc.VelocityTextureIndex]
+#define gOutHistoryTexture  gRWTextures2Dfloat4[pc.OutHistoryRWTextureIndex]
+#define gOutHistoryLen      gRWTextures2Dfloat[pc.OutHistoryLenRWTextureIndex]
+#define gPrevHistoryTexture gRWTextures2Dfloat4[pc.PrevHistoryRWTextureIndex]
+#define gPrevHistoryLen     gRWTextures2Dfloat[pc.PrevHistoryLenTextureIndex]
+#define gPrevDepthTexture   gTextures2Dfloat[pc.PrevDepthTextureIndex]
+#define gPrevNormalTexture  gTextures2Dfloat4[pc.PrevNormalTextureIndex]
 
 /*
 Generated with:

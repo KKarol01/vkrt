@@ -192,6 +192,9 @@ ENG_INLINE ENG_FLOAT4 unpack_unorm4x8(ENG_UINT rgba)
 #define get_gt2(type, format) gTextures2D##format[NonUniformResourceIndex(pc.type##TextureIndex)]
 #define get_grwt2(type, format) gRWTextures2D##format[NonUniformResourceIndex(pc.type##RWTextureIndex)]
 
+#define eng_get_pc_rw_buf(type, index) gRWBuffers[NonUniformResourceIndex(pc.type##BufferIndex)].Load<type>(index * sizeof(type))
+#define eng_get_rw_buf(type, bufidx, index) gRWBuffers[NonUniformResourceIndex(bufidx)].Load<type>(index * sizeof(type))
+
 #endif
 
 #if 0

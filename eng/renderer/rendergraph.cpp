@@ -119,26 +119,48 @@ class GPUTransientAllocator
 
 RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
 {
+    if(graph->resources.size() >= ~RGRESOURCEID_PERSISTENT_MASK)
+    {
+        ENG_ASSERT(false, "Too many resources");
+        return RGAccessId{};
+    }
+
     ENG_ASSERT(!clear);
     auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
     RGWaitSync* wait_sync{};
-    if(auto it = graph->persistent_resources.find(ENG_HASH(resource.name)); it != graph->persistent_resources.end())
+    RGResourceId resource_id{ (u32)graph->resources.size() };
+
+    if(resource.is_persistent)
     {
+        auto& p = graph->persistent_resources.at(ENG_HASH(resource.name));
         // i don't think the if is needed, since it's gonna be undefined anyway
         // if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED){}
-        layout = it->second.last_layout;
-        if(it->second.wait_sync.sync) { wait_sync = &it->second.wait_sync; }
+        layout = p.last_layout;
+        if(p.wait_sync.sync) { wait_sync = &p.wait_sync; }
+        resource_id.handle |= (p.persistent_index << 20);
     }
 
     graph->resources.push_back(resource);
-    const auto ret = add_access(RGAccess{ .resource = RGResourceId{ (u32)graph->resources.size() - 1 },
-                                          .prev_access = {},
-                                          .buffer_view = {},
-                                          .layout = layout,
-                                          .stage = {},
-                                          .access = {},
-                                          .wait_sync = wait_sync });
+
+    const auto ret = add_access(RGAccess{
+        .resource = resource_id, .prev_access = {}, .buffer_view = {}, .layout = layout, .stage = {}, .access = {}, .wait_sync = wait_sync });
     return ret;
+}
+
+RGAccessId RGBuilder::import_resource(RGResourceId id, const std::optional<RGClear>& clear)
+{
+    if(!id || (*id & RGRESOURCEID_PERSISTENT_MASK) == 0)
+    {
+        ENG_WARN("Trying to import non persistent resource {}", *id);
+        return RGAccessId{};
+    }
+    auto it = graph->indexed_persistent_resources.find(graph->extract_persistent_idx(id));
+    if(it == graph->indexed_persistent_resources.end())
+    {
+        ENG_WARN("Cannot import resource {} -- it does not exist", *id);
+        return RGAccessId{};
+    }
+    return import_resource(it->second->native, DiscardContents::NO, clear);
 }
 
 RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, DiscardContents discard,
@@ -160,19 +182,17 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
 
     const auto hash = ENG_HASH(res.name);
     auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
-    ENG_ASSERT(pr.hash == 0);
-    // pr.hash = 0;                                  // imported resources don't need a hash.
     pr.native = resource;
     if(discard == DiscardContents::YES) { pr.last_layout = ImageLayout::UNDEFINED; }
 
     return add_resource(std::move(res));
 }
 
-RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool persistent)
+RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool is_persistent)
 {
     ENG_ASSERT(!name.empty());
-    const bool is_aliased = !persistent && !graph->memory_aliasing_disabled;
-    RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
+    const bool is_aliased = !is_persistent && !graph->memory_aliasing_disabled;
+    RGResource::NativeResource native = [this, &a, &name, is_persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
             const auto namehash = ENG_HASH(name);
@@ -188,25 +208,27 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool pe
                 else { return it->second.native; }
             }
             auto native_handle = get_renderer().make_buffer(name, std::move(a));
-            if(persistent)
+            if(is_persistent)
             {
-                auto res = graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
-                                                               std::forward_as_tuple(objecthash, native_handle));
+                auto res = graph->persistent_resources.emplace(
+                    std::piecewise_construct, std::forward_as_tuple(namehash),
+                    std::forward_as_tuple(objecthash, (u32)graph->indexed_persistent_resources.size() + 1, native_handle));
                 ENG_ASSERT(res.second, "Name conflict with resource {} in pass {}", name, pass->name.as_view());
+                graph->indexed_persistent_resources[res.first->second.persistent_index] = &res.first->second;
             }
             return native_handle;
         }
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_renderer().make_buffer(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource{ name, native, persistent, is_aliased });
+    return add_resource(RGResource{ name, native, is_persistent, is_aliased });
 }
 
-RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
+RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool is_persistent)
 {
     ENG_ASSERT(!name.empty());
-    const bool is_aliased = !persistent && !graph->memory_aliasing_disabled;
-    RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
+    const bool is_aliased = !is_persistent && !graph->memory_aliasing_disabled;
+    RGResource::NativeResource native = [this, &a, &name, is_persistent, is_aliased]() -> RGResource::NativeResource {
         if(!is_aliased)
         {
             const auto namehash = ENG_HASH(name);
@@ -222,17 +244,20 @@ RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const st
                 else { return it->second.native; }
             }
             auto native_handle = get_renderer().make_image(name, std::move(a));
-            if(persistent)
+            if(is_persistent)
             {
-                graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
-                                                    std::forward_as_tuple(objecthash, native_handle));
+                auto res = graph->persistent_resources.emplace(
+                    std::piecewise_construct, std::forward_as_tuple(namehash),
+                    std::forward_as_tuple(objecthash, (u32)graph->indexed_persistent_resources.size() + 1, native_handle));
+                ENG_ASSERT(res.second, "Name conflict with resource {} in pass {}", name, pass->name.as_view());
+                graph->indexed_persistent_resources[res.first->second.persistent_index] = &res.first->second;
             }
             return native_handle;
         }
         const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
         return get_renderer().make_image(name, std::move(a), allocation_mode);
     }();
-    return add_resource(RGResource{ name, native, persistent, is_aliased, clear });
+    return add_resource(RGResource{ name, native, is_persistent, is_aliased, clear });
 }
 
 RGAccessId RGBuilder::add_access(const RGAccess& a)
@@ -260,7 +285,11 @@ RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<
                                       Flags<PipelineAccess> access, std::optional<ImageFormat> format,
                                       std::optional<ImageViewType> type, Range32u mips, Range32u layers)
 {
-    if(!acc) { return RGAccessId{}; }
+    if(!acc)
+    {
+        ENG_WARN("Accessing invalid resource");
+        return RGAccessId{};
+    }
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
@@ -273,7 +302,11 @@ RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<
 
 RGAccessId RGBuilder::access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
 {
-    if(!acc) { return RGAccessId{}; }
+    if(!acc)
+    {
+        ENG_WARN("Accessing invalid resource");
+        return RGAccessId{};
+    }
     return add_access(RGAccess{
         .resource = graph->get_acc(acc).resource,
         .prev_access = acc,
@@ -562,7 +595,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
                 // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
                 if(res.last_access == accid)
                 {
-                    if(!res.is_persistent) { free_resource(res); }
+                    if(!res.is_persistent) { queue_destroy_resource(res); }
                     else
                     {
                         if(auto it = persistent_resources.find(ENG_HASH(res.name)); it != persistent_resources.end())
@@ -592,20 +625,11 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
     return sems[0];
 }
 
-void RGRenderGraph::free_resource(RGResource& res)
+void RGRenderGraph::queue_destroy_resource(RGResource& res)
 {
     ENG_ASSERT(!res.is_persistent);
     auto& r = get_renderer();
-    if(res.is_buffer())
-    {
-        auto h = res.as_buffer();
-        r.queue_destroy(h);
-    }
-    else
-    {
-        auto h = res.as_image();
-        r.queue_destroy(h);
-    }
+    r.queue_destroy(res.native);
 }
 
 void RGDebugData::build(RGRenderGraph* rg)

@@ -524,7 +524,7 @@ void Renderer::update()
     current_data->cmdpool->reset();
     current_data->reset_syncs();
     current_data->reset_queries();
-    //current_data->reset_staging();
+    // current_data->reset_staging();
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -722,7 +722,7 @@ void Renderer::compile_rendergraph()
     };
 
     const auto import_resources = rgraph->add_graphics_pass<ImportedResources>(
-        "SETUP_TARGETS",
+        "Setup Targets",
         [this](RGBuilder& b, ImportedResources& d) {
             auto& rr = current_data->render_resources;
 
@@ -735,7 +735,7 @@ void Renderer::compile_rendergraph()
             d.depth = b.as_res_id(b.create_resource(get_buffered_name("Depth"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT), RGClear::depth_stencil(0.0), true));
             d.velocity = b.as_res_id(b.create_resource(get_buffered_name("Velocity"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
             d.history_len = b.as_res_id(b.create_resource(get_buffered_name("History Length"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
-            d.final_color = b.as_res_id(b.create_resource("Final Color", Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
+            d.final_color = b.as_res_id(b.create_resource(get_buffered_name("Final Color"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
             // clang-format on
 
             rr.constants = d.constants;
@@ -796,7 +796,7 @@ void Renderer::compile_rendergraph()
     pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
     //// pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
-    // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
     // pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = import_resources.history_len;
     // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
     passes.ao->init(rgraph, pass_data);
@@ -823,12 +823,13 @@ void Renderer::compile_rendergraph()
         RGAccessId ao;
     };
     rgraph->add_graphics_pass<ApplyAO>(
-        "Apply AOO",
+        "Apply AO",
         [=, this](RGBuilder& b, ApplyAO& d) {
             d.input = b.read_write_image(get_frame_data().render_resources.final_color);
             d.ao = b.sample_texture(get_frame_data().render_resources.ao);
         },
         [this](RGBuilder& b, const ApplyAO& d) {
+            if(!d.ao) { return; } // only during first frame, where there is no previous frame data yet.
             auto* cmd = b.open_cmd_buf();
             DescriptorResource dres[]{
                 DescriptorResource::storage_image(b.get_img(d.input)),

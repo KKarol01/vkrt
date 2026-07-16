@@ -754,14 +754,16 @@ struct DepthDownsample final : public Pass
             m_name.c_str(),
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.out_depth = b.as_res_id(b.create_resource(
-                    "Halfres Depth", Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
-                                                 ImageFormat::R16F, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
-                d.out_normal =
-                    b.as_res_id(b.create_resource("Halfres Normal",
-                                                  Image::init(r.settings.render_resolution.x / 2,
-                                                              r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
-                                                              ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT)));
+                d.out_depth = b.as_res_id(b.create_resource(get_buffered_name("Halfres Depth"),
+                                                            Image::init(r.settings.render_resolution.x / 2,
+                                                                        r.settings.render_resolution.y / 2, ImageFormat::R16F,
+                                                                        ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                                            {}, true));
+                d.out_normal = b.as_res_id(b.create_resource(get_buffered_name("Halfres Normal"),
+                                                             Image::init(r.settings.render_resolution.x / 2,
+                                                                         r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
+                                                                         ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                                             {}, true));
                 d.out_depth = b.as_res_id(b.write_image(d.out_depth));
                 d.out_normal = b.as_res_id(b.write_image(d.out_normal));
                 d.src_depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
@@ -808,12 +810,6 @@ struct SSAO : public Pass
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
-
-        // if(!data.depth_buffer) { return; }
-        // if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
-        // if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
-        // if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
-
         auto& r = get_renderer();
 
         m_name = to_string(r.settings.gfx_settings.ao_mode);
@@ -866,89 +862,99 @@ struct SSAO : public Pass
                 });
         }
 
-        // if(!r.prev_data) { return; }
+        if(!r.prev_data) { return; }
 
         struct PassSSAOOutput
         {
-            RGAccessId depth;
+            // Current Frame Inputs
             RGAccessId constants;
+            RGAccessId depth;
             RGAccessId noise;
             RGAccessId normals;
-            RGAccessId settings;
-            RGAccessId opaque;
+            RGAccessId color;
             RGAccessId velocity;
-            RGAccessId history_len;
-            RGAccessId history;
-            RGAccessId out_color;
-            RGAccessId normal_depth;
 
             RGAccessId prev_constants;
-            RGAccessId prev_normals;
             RGAccessId prev_depth;
+            RGAccessId prev_normals;
             RGAccessId prev_history_len;
             RGAccessId prev_history;
+
+            RGAccessId out_history_len;
+            RGAccessId out_history;
+            RGAccessId out_color;
         };
         graph->add_compute_pass<PassSSAOOutput>(
             m_name.c_str(),
             [=, this](RGBuilder& b, PassSSAOOutput& d) {
                 auto& r = get_renderer();
-                d.depth = b.sample_texture(get_frame_data().render_resources.halfres_depth);
-                d.constants = b.read_buffer(r.current_data->render_resources.constants);
-                d.noise = b.import_resource(m_noise_texture);
-                d.noise = b.sample_texture(d.noise);
-                d.normals = b.sample_texture(get_frame_data().render_resources.halfres_normal);
-                d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
-                // d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
-                d.history = b.read_write_image(b.create_resource(get_buffered_name("AO History").as_view(),
-                                                                 Image::init(r.settings.render_resolution.x,
-                                                                             r.settings.render_resolution.y,
-                                                                             ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
-                                                                 {}, true));
-                d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
-                // d.out_color = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
-                d.out_color = b.create_resource("AO Output", Image::init(r.settings.render_resolution.x / 2,
-                                                                         r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
-                                                                         ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
-                d.out_color = b.read_write_image(d.out_color);
-                r.current_data->render_resources.ao = b.as_res_id(d.out_color);
-                // d.normal_depth = b.read_image(get_frame_data().render_resources.halfres_normal_depth);
+                const u32 half_x = r.settings.render_resolution.x / 2;
+                const u32 half_y = r.settings.render_resolution.y / 2;
 
-                // d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
-                // d.prev_constants = b.read_buffer(d.prev_constants);
-                // d.prev_normals = b.import_resource(r.prev_data->render_resources.normals);
-                // d.prev_normals = b.sample_texture(d.prev_normals);
-                // d.prev_depth = b.import_resource(r.prev_data->render_resources.depth);
-                // d.prev_depth = b.sample_texture(d.prev_depth);
-                // d.prev_history_len = b.import_resource(r.prev_data->render_resources.history_len);
-                // d.prev_history_len = b.sample_texture(d.prev_history_len);
-                // d.prev_history = b.read_image(b.create_resource(get_buffered_name("AO History", -1).as_view(),
-                //                                                 Image::init(r.settings.render_resolution.x,
-                //                                                             r.settings.render_resolution.y,
-                //                                                             ImageFormat::R16FG16FB16FA16F, ImageUsage::STORAGE_BIT),
-                //                                                 {}, true));
+                d.constants = b.read_buffer(r.current_data->render_resources.constants);
+                d.depth = b.sample_texture(get_frame_data().render_resources.halfres_depth);
+                d.noise = b.sample_texture(b.import_resource(m_noise_texture));
+                d.normals = b.sample_texture(get_frame_data().render_resources.halfres_normal);
+                d.color = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
+                d.velocity = d.normals; //b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
+
+                d.prev_constants = b.read_buffer(b.import_resource(r.prev_data->render_resources.constants));
+                d.prev_depth = b.sample_texture(b.import_resource(r.prev_data->render_resources.halfres_depth));
+                d.prev_normals = b.sample_texture(b.import_resource(r.prev_data->render_resources.halfres_normal));
+
+                d.prev_history_len = b.read_image(b.create_resource(get_buffered_name("AO History Len", -1).as_view(),
+                                                                    Image::init(half_x, half_y, ImageFormat::R16F,
+                                                                                ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
+                                                                    {}, true));
+
+                d.prev_history = b.read_image(b.create_resource(get_buffered_name("AO History", -1).as_view(),
+                                                                Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
+                                                                            ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
+                                                                {}, true));
+
+                d.out_history_len =
+                    b.read_write_image(b.create_resource(get_buffered_name("AO History Len").as_view(),
+                                                         Image::init(half_x, half_y, ImageFormat::R16F,
+                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
+                                                         {}, true));
+
+                d.out_history =
+                    b.read_write_image(b.create_resource(get_buffered_name("AO History").as_view(),
+                                                         Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
+                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
+                                                         {}, true));
+
+                d.out_color =
+                    b.read_write_image(b.create_resource("AO Output",
+                                                         Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
+                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT)));
+
+                r.current_data->render_resources.ao = b.as_res_id(d.out_color);
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
                 cmd->bind_pipeline(m_pp_arr[(int)r.settings.gfx_settings.ao_mode].get());
+
+                // MUST strictly match the field order of `struct PushConstants` in your HLSL header!
                 DescriptorResource resources[]{
                     DescriptorResource::storage_buffer(b.get_buf(d.constants)),
                     DescriptorResource::sampled_image(b.get_img(d.depth)),
                     DescriptorResource::sampled_image(b.get_img(d.noise)),
                     DescriptorResource::sampled_image(b.get_img(d.normals)),
-                    DescriptorResource::sampled_image(b.get_img(d.opaque)),
-                    DescriptorResource::sampled_image(b.get_img(d.opaque)), // DescriptorResource::sampled_image(b.get_img(d.velocity)),
-                    DescriptorResource::storage_image(b.get_img(d.history)), // DescriptorResource::storage_image(b.get_img(d.history_len)),
-                    DescriptorResource::storage_image(b.get_img(d.history)),
+                    DescriptorResource::sampled_image(b.get_img(d.color)),
+                    DescriptorResource::sampled_image(b.get_img(d.velocity)),
+                    DescriptorResource::storage_image(b.get_img(d.out_history_len)),
+                    DescriptorResource::storage_image(b.get_img(d.out_history)),
                     DescriptorResource::storage_image(b.get_img(d.out_color)),
 
-                    // DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
-                    // DescriptorResource::sampled_image(b.get_img(d.prev_depth)),
-                    // DescriptorResource::sampled_image(b.get_img(d.prev_normals)),
-                    // DescriptorResource::sampled_image(b.get_img(d.prev_history_len)),
-                    // DescriptorResource::storage_image(b.get_img(d.prev_history)),
-
+                    DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
+                    DescriptorResource::sampled_image(b.get_img(d.prev_depth)),
+                    DescriptorResource::sampled_image(b.get_img(d.prev_normals)),
+                    DescriptorResource::storage_image(b.get_img(d.prev_history_len)),
+                    DescriptorResource::storage_image(b.get_img(d.prev_history)),
                 };
+
                 cmd->bind_resources(1, resources);
                 cmd->dispatch((r.settings.render_resolution.x / 2 + 7) / 8, (r.settings.render_resolution.y / 2 + 7) / 8, 1);
             });

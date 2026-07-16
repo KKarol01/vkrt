@@ -25,22 +25,22 @@
 #endif
 
 // https://www.shadertoy.com/view/WlSSWc
-// static float halton(int i, int b)
-//{
-//    /* Creates a halton sequence of values between 0 and 1.
-//        https://en.wikipedia.org/wiki/Halton_sequence
-//        Used for jittering based on a constant set of 2D points. */
-//    float f = 1.0;
-//    float r = 0.0;
-//    while(i > 0)
-//    {
-//        f = f / float(b);
-//        r = r + f * float(i % b);
-//        i = i / b;
-//    }
-//
-//    return r;
-//}
+static float halton(int i, int b)
+{
+    /* Creates a halton sequence of values between 0 and 1.
+        https://en.wikipedia.org/wiki/Halton_sequence
+        Used for jittering based on a constant set of 2D points. */
+    float f = 1.0;
+    float r = 0.0;
+    while(i > 0)
+    {
+        f = f / float(b);
+        r = r + f * float(i % b);
+        i = i / b;
+    }
+
+    return r;
+}
 
 namespace eng
 {
@@ -1159,7 +1159,7 @@ void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
         return;
     }
 
-    //buffer.usage |= gfx::BufferUsage::CPU_ACCESS;
+    // buffer.usage |= gfx::BufferUsage::CPU_ACCESS;
 
     auto* md = new BufferMetadataVk{};
     buffer.md.ptr = md;

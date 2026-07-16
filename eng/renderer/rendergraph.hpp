@@ -19,6 +19,7 @@ namespace gfx
 struct RGDebugData;
 class GPUTransientAllocator;
 using RGResourceId = TypedId<RGResource, u32>;
+inline static constexpr u32 RGRESOURCEID_PERSISTENT_MASK = 0xFFF00000;
 using RGAccessId = TypedId<RGAccess, u32>;
 
 struct RGPass
@@ -130,6 +131,7 @@ struct RGAccess
 struct PersistentStorage
 {
     u64 hash{};
+	u32 persistent_index{};
     RGResource::NativeResource native;
     RGWaitSync wait_sync{};
     ImageLayout last_layout{ ImageLayout::UNDEFINED };
@@ -140,6 +142,7 @@ struct PersistentStorage
 struct RGBuilder
 {
     RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
+    RGAccessId import_resource(RGResourceId id, const std::optional<RGClear>& clear = {});
     RGAccessId import_resource(const RGResource::NativeResource& resource,
                                DiscardContents discard = DiscardContents::NO, const std::optional<RGClear>& clear = {});
     RGAccessId create_resource(std::string_view name, Buffer&& a, bool is_persistent = false);
@@ -330,8 +333,10 @@ class RGRenderGraph
     // utility funcs for easy access to resources
     RGAccess& get_acc(RGAccessId a) { return accesses[*a]; }
     RGAccess& get_acc(RGResourceId a) { return get_acc(get_res(a).last_access); }
-    RGResource& get_res(RGResourceId a) { return resources[*a]; }
-    RGResource& get_res(RGAccessId a) { return resources[*get_acc(a).resource]; }
+    static constexpr u32 extract_idx(RGResourceId id) { return *id & ~RGRESOURCEID_PERSISTENT_MASK; }
+    static constexpr u32 extract_persistent_idx(RGResourceId id) { return (*id & RGRESOURCEID_PERSISTENT_MASK) >> 20; }
+    RGResource& get_res(RGResourceId a) { return resources[extract_idx(a)]; }
+    RGResource& get_res(RGAccessId a) { return resources[extract_idx(get_acc(a).resource)]; }
     Handle<Buffer> get_buf(RGAccessId a) { return get_res(a).as_buffer(); }
     Handle<Buffer> get_buf(RGResourceId a) { return get_res(a).as_buffer(); }
     Handle<Image> get_img(RGAccessId a) { return get_res(a).as_image(); }
@@ -375,7 +380,7 @@ class RGRenderGraph
 
     Sync* execute(Sync** wait_syncs = nullptr, u32 wait_count = 0);
 
-    void free_resource(RGResource& res);
+    void queue_destroy_resource(RGResource& res);
 
     SubmitQueue* queue{};
     ICommandPool* cmd_pools[2]{};
@@ -385,6 +390,8 @@ class RGRenderGraph
     RGDebugData* m_debug_datas_arr[2]{};
 
     std::unordered_map<u64, PersistentStorage> persistent_resources;
+    std::unordered_map<u32, PersistentStorage*> indexed_persistent_resources; // use RGResource that has highest bit set
+
     std::vector<RGResource> resources;
     std::vector<RGAccess> accesses;
     std::vector<std::unique_ptr<RGPass>> passes;
