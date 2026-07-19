@@ -72,8 +72,8 @@ struct Pass
 //{
 //     struct PassData
 //     {
-//         RGAccessId constants;
-//         RGAccessId depth;
+//         RGResourceId constants;
+//         RGResourceId depth;
 //         RGResourceId out_normals;
 //     };
 //
@@ -107,14 +107,14 @@ struct Pass
 //             [this](RGBuilder& b, const PassData& d) {
 //                 if(!d.out_normals) { return; }
 //                 const auto& r = get_renderer();
-//                 const auto& normals_img = b.graph->get_img(b.as_acc_id(d.out_normals));
+//                 const auto& normals_img = b.b.get_img(b.as_acc_id(d.out_normals));
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(pipeline.get());
 //
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_normals)).image_view)
+//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(b.as_acc_id(d.out_normals)).image_view)
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((normals_img->width + 7) / 8, (normals_img->height + 7) / 8, 1);
@@ -129,12 +129,12 @@ struct Pass
 //{
 //     struct PassData
 //     {
-//         RGAccessId constants;
-//         RGAccessId settings;
-//         RGAccessId depth;
-//         RGAccessId normals;
-//         RGAccessId samples;
-//         RGAccessId noise;
+//         RGResourceId constants;
+//         RGResourceId settings;
+//         RGResourceId depth;
+//         RGResourceId normals;
+//         RGResourceId samples;
+//         RGResourceId noise;
 //         RGResourceId out_ao;
 //     };
 //
@@ -187,18 +187,18 @@ struct Pass
 //             [this](RGBuilder& b, const PassData& d) {
 //                 if(!d.out_ao) { return; }
 //                 const auto& r = get_renderer();
-//                 const auto& out_img = b.graph->get_img(b.as_acc_id(d.out_ao));
+//                 const auto& out_img = b.b.get_img(b.as_acc_id(d.out_ao));
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(ao_pipeline.get());
 //
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.normals).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.samples).buffer_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.noise).image_view)
+//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
+//                     DescriptorResource::storage_buffer(b.get_acc(d.settings).buffer_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.normals).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(b.as_acc_id(d.out_ao)).image_view),
+//                     DescriptorResource::storage_buffer(b.get_acc(d.samples).buffer_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.noise).image_view)
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
@@ -206,7 +206,7 @@ struct Pass
 //
 //         struct BlurData
 //         {
-//             RGAccessId in_ao;
+//             RGResourceId in_ao;
 //             RGResourceId out_blur;
 //         };
 //
@@ -225,10 +225,10 @@ struct Pass
 //                 if(!blur_pipeline) { return; }
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(blur_pipeline.get());
-//                 const auto img = b.graph->get_img(d.in_ao);
+//                 const auto img = b.b.get_img(d.in_ao);
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.in_ao).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.out_blur).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
@@ -304,12 +304,12 @@ struct Pass
 //{
 //     struct PassData
 //     {
-//         RGAccessId constants;
-//         RGAccessId settings;
-//         RGAccessId depth;
-//         RGAccessId normals;
-//         RGAccessId samples;
-//         RGAccessId noise;
+//         RGResourceId constants;
+//         RGResourceId settings;
+//         RGResourceId depth;
+//         RGResourceId normals;
+//         RGResourceId samples;
+//         RGResourceId noise;
 //         RGResourceId out_ao;
 //     };
 //
@@ -360,17 +360,17 @@ struct Pass
 //             [this](RGBuilder& b, const PassData& d) {
 //                 if(!d.out_ao) { return; }
 //                 const auto& r = get_renderer();
-//                 const auto& out_img = b.graph->get_img(b.as_acc_id(d.out_ao));
+//                 const auto& out_img = b.b.get_img(b.as_acc_id(d.out_ao));
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(ao_pipeline.get());
 //
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.normals).image_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.noise).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
+//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
+//                     DescriptorResource::storage_buffer(b.get_acc(d.settings).buffer_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.normals).image_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.noise).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(b.as_acc_id(d.out_ao)).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
@@ -378,7 +378,7 @@ struct Pass
 //
 //         struct BlurData
 //         {
-//             RGAccessId in_ao;
+//             RGResourceId in_ao;
 //             RGResourceId out_blur;
 //         };
 //
@@ -397,10 +397,10 @@ struct Pass
 //                 if(!blur_pipeline) { return; }
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(blur_pipeline.get());
-//                 const auto img = b.graph->get_img(d.in_ao);
+//                 const auto img = b.b.get_img(d.in_ao);
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.in_ao).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.out_blur).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
@@ -474,11 +474,11 @@ struct Pass
 //
 //     struct PassData
 //     {
-//         RGAccessId constants;
-//         RGAccessId depth;
-//         RGAccessId normals;
+//         RGResourceId constants;
+//         RGResourceId depth;
+//         RGResourceId normals;
 //         RGResourceId out_ao;
-//         RGAccessId settings;
+//         RGResourceId settings;
 //     };
 //
 //     void init(RGRenderGraph* graph, const PassInitData& data) override
@@ -505,12 +505,12 @@ struct Pass
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(pipeline.get());
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
-//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
-//                     DescriptorResource::sampled_image(b.graph->get_acc(d.normals).image_view),
+//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
+//                     DescriptorResource::storage_buffer(b.get_acc(d.settings).buffer_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
+//                     DescriptorResource::sampled_image(b.get_acc(d.normals).image_view),
 //                     DescriptorResource::acceleration_struct(get_renderer().bufs.geom_tlas),
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_ao).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.out_ao).image_view),
 //                 };
 //                 cmd->bind_resources(0, resources);
 //                 cmd->dispatch((res.x + 7) / 8, (res.y + 7) / 8, 1);
@@ -518,7 +518,7 @@ struct Pass
 //
 //         struct BlurData
 //         {
-//             RGAccessId in_ao;
+//             RGResourceId in_ao;
 //             RGResourceId out_blur;
 //         };
 //
@@ -537,10 +537,10 @@ struct Pass
 //                 if(!blur_pipeline) { return; }
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(blur_pipeline.get());
-//                 const auto img = b.graph->get_img(d.in_ao);
+//                 const auto img = b.b.get_img(d.in_ao);
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
-//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.in_ao).image_view),
+//                     DescriptorResource::storage_image(b.get_acc(d.out_blur).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
@@ -570,15 +570,15 @@ struct MeshPass : public Pass
 {
     struct PassData
     {
-        RGAccessId constants;
-        RGAccessId positions;
-        RGAccessId attributes;
-        RGAccessId indices;
-        RGAccessId instances;
-        RGAccessId indirect;
+        RGResourceId constants;
+        RGResourceId positions;
+        RGResourceId attributes;
+        RGResourceId indices;
+        RGResourceId instances;
+        RGResourceId indirect;
 
-        RGAccessId color_buffers[8]{};
-        RGAccessId depth;
+        RGResourceId color_buffers[8]{};
+        RGResourceId depth;
     };
 
     MeshPass(MeshPassType type) : Pass(ENG_FMT("Mesh Pass {}", to_string(type))), m_type(type) {}
@@ -596,9 +596,6 @@ struct MeshPass : public Pass
                 const auto& settings = r.settings;
                 const auto mesh_setup = r.mesh_renderer.setup(m_type, b);
                 if(!mesh_setup.indirect) { return; }
-
-                const auto resolution = settings.render_resolution;
-                const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
 
                 for(auto i = 0u; i < data.color_buffers.size(); ++i)
                 {
@@ -633,7 +630,7 @@ struct MeshPass : public Pass
                 {
                     if(!d.color_buffers[i]) { continue; }
                     vkcols[i].imageView = ((const ImageViewMetadataVk*)b.get_img(d.color_buffers[i]).get_md())->view;
-                    vkcols[i].imageLayout = to_vk(b.graph->get_acc(d.color_buffers[i]).layout);
+                    vkcols[i].imageLayout = to_vk(b.get_acc(d.color_buffers[i]).layout);
                     vkcols[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     vkcols[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
                 }
@@ -641,8 +638,8 @@ struct MeshPass : public Pass
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
                 if(d.depth)
                 {
-                    vkdep.imageView = ((const ImageViewMetadataVk*)b.graph->get_acc(d.depth).image_view.get_md())->view;
-                    vkdep.imageLayout = to_vk(b.graph->get_acc(d.depth).layout);
+                    vkdep.imageView = ((const ImageViewMetadataVk*)b.get_acc(d.depth).image_view.get_md())->view;
+                    vkdep.imageLayout = to_vk(b.get_acc(d.depth).layout);
                     if(m_type == MeshPassType::Z_PREPASS)
                     {
                         vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -690,16 +687,16 @@ struct VelocityBuffer : public Pass
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
-        if(!data.gbuffer[(int)GBufferType::DEPTH] || !data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
+        if(!get_renderer().prev_data) { return; }
         if(!get_renderer().prev_data->render_resources.constants) { return; }
-        return;
+        if(!data.gbuffer[(int)GBufferType::DEPTH] || !data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
 
         struct PassOutput
         {
-            RGAccessId constants;
-            RGAccessId prev_constants;
-            RGAccessId depth;
-            RGAccessId out_vel;
+            RGResourceId constants;
+            RGResourceId prev_constants;
+            RGResourceId depth;
+            RGResourceId out_vel;
         };
         graph->add_compute_pass<PassOutput>(
             m_name.c_str(),
@@ -742,41 +739,55 @@ struct DepthDownsample final : public Pass
     {
         if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
         if(!data.gbuffer[(int)GBufferType::NORMAL]) { return; }
+        if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
 
         struct PassOutput
         {
             RGResourceId out_depth;
             RGResourceId out_normal;
-            RGAccessId src_depth;
-            RGAccessId src_normal;
+            RGResourceId out_velocity;
+            RGResourceId src_depth;
+            RGResourceId src_normal;
+            RGResourceId src_velocity;
         };
         PassOutput output = graph->add_compute_pass<PassOutput>(
             m_name.c_str(),
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.out_depth = b.as_res_id(b.create_resource(get_buffered_name("Halfres Depth"),
-                                                            Image::init(r.settings.render_resolution.x / 2,
-                                                                        r.settings.render_resolution.y / 2, ImageFormat::R16F,
-                                                                        ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                                            {}, true));
-                d.out_normal = b.as_res_id(b.create_resource(get_buffered_name("Halfres Normal"),
-                                                             Image::init(r.settings.render_resolution.x / 2,
-                                                                         r.settings.render_resolution.y / 2, ImageFormat::R16FG16FB16FA16F,
-                                                                         ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                                             {}, true));
-                d.out_depth = b.as_res_id(b.write_image(d.out_depth));
-                d.out_normal = b.as_res_id(b.write_image(d.out_normal));
+                d.out_depth =
+                    b.create_resource(get_buffered_name("Halfres Depth"),
+                                      Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
+                                                  ImageFormat::R16F, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                      {}, true);
+                d.out_normal =
+                    b.create_resource(get_buffered_name("Halfres Normal"),
+                                      Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
+                                                  ImageFormat::R16FG16FB16FA16F, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                      {}, true);
+                d.out_velocity =
+                    b.create_resource(get_buffered_name("Halfres Velocity"),
+                                      Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
+                                                  r.settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
+                                      {}, true);
+
+                d.out_depth = b.write_image(d.out_depth);
+                d.out_normal = b.write_image(d.out_normal);
+                d.out_velocity = b.write_image(d.out_velocity);
                 d.src_depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
                 d.src_normal = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
+                d.src_velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
             },
             [=](RGBuilder& b, const PassOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
+
                 DescriptorResource resources[]{
                     DescriptorResource::storage_image(b.get_img(d.out_depth)),
                     DescriptorResource::storage_image(b.get_img(d.out_normal)),
+                    DescriptorResource::storage_image(b.get_img(d.out_velocity)),
                     DescriptorResource::sampled_image(b.get_img(d.src_depth)),
                     DescriptorResource::sampled_image(b.get_img(d.src_normal)),
+                    DescriptorResource::sampled_image(b.get_img(d.src_velocity)),
                 };
                 cmd->bind_resources(1, resources);
                 cmd->bind_pipeline(m_pp.get());
@@ -784,6 +795,7 @@ struct DepthDownsample final : public Pass
             });
         get_frame_data().render_resources.halfres_depth = output.out_depth;
         get_frame_data().render_resources.halfres_normal = output.out_normal;
+        get_frame_data().render_resources.halfres_velocity = output.out_velocity;
     }
 
     Handle<Pipeline> m_pp;
@@ -835,8 +847,8 @@ struct SSAO : public Pass
                 r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
             struct NoiseOutput
             {
-                RGAccessId noise_buf;
-                RGAccessId out_noise_img;
+                RGResourceId noise_buf;
+                RGResourceId out_noise_img;
             };
             graph->add_compute_pass<NoiseOutput>(
                 "SSAO Generate Noise",
@@ -867,22 +879,22 @@ struct SSAO : public Pass
         struct PassSSAOOutput
         {
             // Current Frame Inputs
-            RGAccessId constants;
-            RGAccessId depth;
-            RGAccessId noise;
-            RGAccessId normals;
-            RGAccessId color;
-            RGAccessId velocity;
+            RGResourceId constants;
+            RGResourceId depth;
+            RGResourceId noise;
+            RGResourceId normals;
+            RGResourceId color;
+            RGResourceId velocity;
 
-            RGAccessId prev_constants;
-            RGAccessId prev_depth;
-            RGAccessId prev_normals;
-            RGAccessId prev_history_len;
-            RGAccessId prev_history;
+            RGResourceId prev_constants;
+            RGResourceId prev_depth;
+            RGResourceId prev_normals;
+            RGResourceId prev_history_len;
+            RGResourceId prev_history;
 
-            RGAccessId out_history_len;
-            RGAccessId out_history;
-            RGAccessId out_color;
+            RGResourceId out_history_len;
+            RGResourceId out_history;
+            RGResourceId out_color;
         };
         graph->add_compute_pass<PassSSAOOutput>(
             m_name.c_str(),
@@ -896,7 +908,7 @@ struct SSAO : public Pass
                 d.noise = b.sample_texture(b.import_resource(m_noise_texture));
                 d.normals = b.sample_texture(get_frame_data().render_resources.halfres_normal);
                 d.color = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
-                d.velocity = d.normals; //b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
+                d.velocity = b.sample_texture(get_frame_data().render_resources.halfres_velocity);
 
                 d.prev_constants = b.read_buffer(b.import_resource(r.prev_data->render_resources.constants));
                 d.prev_depth = b.sample_texture(b.import_resource(r.prev_data->render_resources.halfres_depth));
@@ -929,7 +941,7 @@ struct SSAO : public Pass
                                                          Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
                                                                      ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT)));
 
-                r.current_data->render_resources.ao = b.as_res_id(d.out_color);
+                r.current_data->render_resources.ao = d.out_color;
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
                 auto& r = get_renderer();

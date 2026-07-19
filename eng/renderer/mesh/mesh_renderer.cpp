@@ -111,7 +111,7 @@ MeshRenderer::SetupPassData MeshRenderer::setup(MeshPassType type, RGBuilder& b)
 void MeshRenderer::draw(MeshPassType type, ICommandBuffer& cmd)
 {
     const auto& pass = m_pass_datas_arr[(int)type];
-    const auto cmd_size = get_renderer().backend->get_indirect_indexed_command_size();
+    const auto cmd_size = get_backend().get_indirect_indexed_command_size();
     cmd.bind_index(get_renderer().bufs.indices.get(), 0ull, VK_INDEX_TYPE_UINT16);
     u32 batch_idx = 0;
     for(const auto& batch : pass.batches_vec)
@@ -169,7 +169,7 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
     pass.batches_vec.clear();
     pass.batches_vec.reserve(vec.size());
     PassData::InstanceBatch* pb{};
-    std::vector<std::byte> cmds(groups.size() * get_renderer().backend->get_indirect_indexed_command_size());
+    std::vector<std::byte> cmds(groups.size() * get_backend().get_indirect_indexed_command_size());
     u32 cmdoff{};
     std::vector<GPUInstanceId> gpuinstanceids;
     gpuinstanceids.reserve(vec.size());
@@ -184,9 +184,9 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
         else { ++pass.batches_vec.back().command_count; }
 
         const auto& meshlet = get_renderer().meshlets[fi.meshlet];
-        get_renderer().backend->make_indirect_indexed_command(cmds.data() + cmdoff * get_renderer().backend->get_indirect_indexed_command_size(),
-                                                              meshlet.index_count, g.size, meshlet.index_offset,
-                                                              meshlet.vertex_offset, g.offset);
+        get_backend().make_indirect_indexed_command(cmds.data() + cmdoff * get_backend().get_indirect_indexed_command_size(),
+                                                    meshlet.index_count, g.size, meshlet.index_offset,
+                                                    meshlet.vertex_offset, g.offset);
         for(auto i = 0u; i < g.size; ++i)
         {
             gpuinstanceids.push_back(GPUInstanceId{

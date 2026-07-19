@@ -117,12 +117,12 @@ class GPUTransientAllocator
     std::deque<Allocation> allocations;
 };
 
-RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
+RGResourceId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
 {
-    if(graph->resources.size() >= ~RGRESOURCEID_PERSISTENT_MASK)
+    if(graph->resources.size() >= RGRESOURCEID_PERSISTENT_BIT)
     {
         ENG_ASSERT(false, "Too many resources");
-        return RGAccessId{};
+        return RGResourceId{};
     }
 
     ENG_ASSERT(!clear);
@@ -130,41 +130,40 @@ RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::option
     RGWaitSync* wait_sync{};
     RGResourceId resource_id{ (u32)graph->resources.size() };
 
-    if(resource.is_persistent)
+    if(resource.is_persistent())
     {
-        auto& p = graph->persistent_resources.at(ENG_HASH(resource.name));
+        auto& p = *resource.persistent;
         // i don't think the if is needed, since it's gonna be undefined anyway
         // if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED){}
         layout = p.last_layout;
         if(p.wait_sync.sync) { wait_sync = &p.wait_sync; }
-        resource_id.handle |= (p.persistent_index << 20);
+        resource_id = p.id;
     }
+    else { graph->resources.push_back(resource); }
 
-    graph->resources.push_back(resource);
-
-    const auto ret = add_access(RGAccess{
+    add_access(RGAccess{
         .resource = resource_id, .prev_access = {}, .buffer_view = {}, .layout = layout, .stage = {}, .access = {}, .wait_sync = wait_sync });
-    return ret;
+    return resource_id;
 }
 
-RGAccessId RGBuilder::import_resource(RGResourceId id, const std::optional<RGClear>& clear)
+RGResourceId RGBuilder::import_resource(RGResourceId id, DiscardContents discard, const std::optional<RGClear>& clear)
 {
-    if(!id || (*id & RGRESOURCEID_PERSISTENT_MASK) == 0)
+    if(!RGRenderGraph::is_persistent(id))
     {
         ENG_WARN("Trying to import non persistent resource {}", *id);
-        return RGAccessId{};
+        return RGResourceId{};
     }
-    auto it = graph->indexed_persistent_resources.find(graph->extract_persistent_idx(id));
-    if(it == graph->indexed_persistent_resources.end())
+    const auto idx = RGRenderGraph::extract_idx(id);
+    if(graph->persistent_resources.size() <= idx)
     {
-        ENG_WARN("Cannot import resource {} -- it does not exist", *id);
-        return RGAccessId{};
+        ENG_WARN("Index out of range {}", *id);
+        return RGResourceId{};
     }
-    return import_resource(it->second->native, DiscardContents::NO, clear);
+    return add_resource(graph->persistent_resources[idx].resource, clear);
 }
 
-RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, DiscardContents discard,
-                                      const std::optional<RGClear>& clear)
+RGResourceId RGBuilder::import_resource(const RGResource::NativeResource& resource, DiscardContents discard,
+                                        const std::optional<RGClear>& clear)
 {
     if((resource.index() == 0 && !std::get<0>(resource)) || (resource.index() == 1 && !std::get<1>(resource)))
     {
@@ -174,158 +173,134 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
 
     const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
                                  [&resource](const auto& e) { return e.native == resource; });
-    if(it != graph->resources.end()) { return it->last_access; }
+    if(it != graph->resources.end()) { return RGResourceId{ (u32)std::distance(graph->resources.begin(), it) }; }
 
-    auto res = RGResource{ "", resource, true, false, clear };
-    if(res.is_buffer()) { res.name = get_renderer().backend->get_debug_name(res.as_buffer().get()); }
-    else { res.name = get_renderer().backend->get_debug_name(res.as_image().get()); }
-
-    const auto hash = ENG_HASH(res.name);
-    auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
-    pr.native = resource;
-    if(discard == DiscardContents::YES) { pr.last_layout = ImageLayout::UNDEFINED; }
+    auto res = RGResource{ "", resource, nullptr, false, true, clear };
+    if(res.is_buffer()) { res.name = get_backend().get_debug_name(res.as_buffer().get()); }
+    else { res.name = get_backend().get_debug_name(res.as_image().get()); }
 
     return add_resource(std::move(res));
 }
 
-RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool is_persistent)
+RGResourceId RGBuilder::create_resource(std::string_view name, RGNativeResourceVariant&& a,
+                                        const std::optional<RGClear>& clear, bool is_persistent)
 {
     ENG_ASSERT(!name.empty());
     const bool is_aliased = !is_persistent && !graph->memory_aliasing_disabled;
-    RGResource::NativeResource native = [this, &a, &name, is_persistent, is_aliased]() -> RGResource::NativeResource {
-        if(!is_aliased)
+
+    RGResource::NativeResource native;
+    const hash_t name_hash = ENG_HASH(name);
+    const hash_t object_hash = ENG_HASH(a);
+    const AllocateMemory allocate_memory = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
+    RGPersistentResource* found_persistent{};
+
+    if(!is_aliased)
+    {
+        auto prit = std::find_if(graph->persistent_resources.begin(), graph->persistent_resources.end(),
+                                 [name_hash](const RGPersistentResource& pr) { return pr.name_hash == name_hash; });
+        if(prit != graph->persistent_resources.end())
         {
-            const auto namehash = ENG_HASH(name);
-            const auto objecthash = ENG_HASH(a);
-            if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
+            found_persistent = &*prit;
+            // check if object hash changed (for example resolution might have changed)
+            if(prit->object_hash != object_hash) { get_renderer().queue_destroy(prit->resource.native); }
+            else
             {
-                if(it->second.hash != objecthash)
-                {
-                    // object has changed -- for example image resolution might have changed -- recreate
-                    get_renderer().queue_destroy(*std::get_if<Handle<Buffer>>(&it->second.native));
-                    graph->persistent_resources.erase(it);
-                }
-                else { return it->second.native; }
+                auto res = prit->resource;
+                res.clear = clear;
+                return add_resource(res);
             }
-            auto native_handle = get_renderer().make_buffer(name, std::move(a));
-            if(is_persistent)
-            {
-                auto res = graph->persistent_resources.emplace(
-                    std::piecewise_construct, std::forward_as_tuple(namehash),
-                    std::forward_as_tuple(objecthash, (u32)graph->indexed_persistent_resources.size() + 1, native_handle));
-                ENG_ASSERT(res.second, "Name conflict with resource {} in pass {}", name, pass->name.as_view());
-                graph->indexed_persistent_resources[res.first->second.persistent_index] = &res.first->second;
-            }
-            return native_handle;
         }
-        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
-        return get_renderer().make_buffer(name, std::move(a), allocation_mode);
-    }();
-    return add_resource(RGResource{ name, native, is_persistent, is_aliased });
+    }
+
+    if(std::get_if<0>(&a)) { native = get_renderer().make_buffer(name, std::move(std::get<0>(a)), allocate_memory); }
+    else if(std::get_if<1>(&a))
+    {
+        native = get_renderer().make_image(name, std::move(std::get<1>(a)), allocate_memory);
+    }
+    else
+    {
+        ENG_ASSERT(false);
+        return RGResourceId{};
+    }
+
+    RGResource resource{ name, native, nullptr, is_aliased, is_persistent, clear };
+    if(is_persistent)
+    {
+        if(found_persistent == nullptr)
+        {
+            found_persistent = &graph->persistent_resources.emplace_back();
+            found_persistent->id = RGResourceId{ ((u32)graph->persistent_resources.size() - 1) | RGRESOURCEID_PERSISTENT_BIT };
+        }
+        found_persistent->name_hash = name_hash;
+        found_persistent->object_hash = object_hash;
+        resource.persistent = found_persistent;
+        found_persistent->resource = resource;
+    }
+
+    return add_resource(resource);
 }
 
-RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool is_persistent)
+RGResourceId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool is_persistent)
 {
-    ENG_ASSERT(!name.empty());
-    const bool is_aliased = !is_persistent && !graph->memory_aliasing_disabled;
-    RGResource::NativeResource native = [this, &a, &name, is_persistent, is_aliased]() -> RGResource::NativeResource {
-        if(!is_aliased)
-        {
-            const auto namehash = ENG_HASH(name);
-            const auto objecthash = ENG_HASH(a);
-            if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
-            {
-                if(it->second.hash != objecthash)
-                {
-                    // object has changed -- for example image resolution might have changed -- recreate
-                    get_renderer().queue_destroy(*std::get_if<Handle<Image>>(&it->second.native));
-                    graph->persistent_resources.erase(it);
-                }
-                else { return it->second.native; }
-            }
-            auto native_handle = get_renderer().make_image(name, std::move(a));
-            if(is_persistent)
-            {
-                auto res = graph->persistent_resources.emplace(
-                    std::piecewise_construct, std::forward_as_tuple(namehash),
-                    std::forward_as_tuple(objecthash, (u32)graph->indexed_persistent_resources.size() + 1, native_handle));
-                ENG_ASSERT(res.second, "Name conflict with resource {} in pass {}", name, pass->name.as_view());
-                graph->indexed_persistent_resources[res.first->second.persistent_index] = &res.first->second;
-            }
-            return native_handle;
-        }
-        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
-        return get_renderer().make_image(name, std::move(a), allocation_mode);
-    }();
-    return add_resource(RGResource{ name, native, is_persistent, is_aliased, clear });
+    return create_resource(name, RGNativeResourceVariant{ std::in_place_index<0>, std::move(a) }, {}, is_persistent);
 }
 
-RGAccessId RGBuilder::add_access(const RGAccess& a)
+RGResourceId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool is_persistent)
 {
-    const bool already_contains_resource = std::any_of(pass->accesses.begin(), pass->accesses.end(), [this, &a](RGAccessId id) {
-        auto& acc = graph->get_acc(id);
-        return !acc.is_first_access() && acc.resource == a.resource;
-    });
-    if(already_contains_resource)
+    return create_resource(name, RGNativeResourceVariant{ std::in_place_index<1>, std::move(a) }, clear, is_persistent);
+}
+
+void RGBuilder::add_access(const RGAccess& a)
+{
+    if(auto it = pass->res_to_acc.find(a.resource); it != pass->res_to_acc.end() && !get_acc(it->second).is_first_access())
     {
         ENG_WARN("Pass \"{}\" already references this resource (\"{}\")", pass->name.as_view(),
                  graph->get_res(a.resource).name.as_view());
-        return {};
+        return;
     }
 
+    const auto accid = RGAccessId{ (u32)graph->accesses.size() };
     graph->accesses.push_back(a);
-    const auto ret = RGAccessId{ (u32)graph->accesses.size() - 1 };
-    graph->get_res(ret).last_access = ret;
-    pass->accesses.push_back(ret);
+    pass->res_to_acc[a.resource] = accid;
+    graph->get_res(a.resource).last_access = accid;
     pass->stage_mask |= a.stage;
-    return ret;
 }
 
-RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
-                                      Flags<PipelineAccess> access, std::optional<ImageFormat> format,
-                                      std::optional<ImageViewType> type, Range32u mips, Range32u layers)
+RGResourceId RGBuilder::access_resource(RGResourceId res, ImageLayout layout, Flags<PipelineStage> stage,
+                                        Flags<PipelineAccess> access, std::optional<ImageFormat> format,
+                                        std::optional<ImageViewType> type, Range32u mips, Range32u layers)
 {
-    if(!acc)
+    if(!res)
     {
         ENG_WARN("Accessing invalid resource");
-        return RGAccessId{};
+        return RGResourceId{};
     }
-    return add_access(RGAccess{
-        .resource = graph->get_acc(acc).resource,
-        .prev_access = acc,
-        .image_view = ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
+    add_access(RGAccess{
+        .resource = res,
+        .prev_access = graph->get_res(res).last_access,
+        .image_view = ImageView::init(graph->get_img(res), format, type, mips.offset, mips.size, layers.offset, layers.size),
         .layout = layout,
         .stage = stage,
         .access = access,
     });
+    return res;
 }
 
-RGAccessId RGBuilder::access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
+RGResourceId RGBuilder::access_resource(RGResourceId res, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
 {
-    if(!acc)
+    if(!res)
     {
         ENG_WARN("Accessing invalid resource");
-        return RGAccessId{};
+        return RGResourceId{};
     }
-    return add_access(RGAccess{
-        .resource = graph->get_acc(acc).resource,
-        .prev_access = acc,
-        .buffer_view = BufferView::init(graph->get_buf(acc), range.offset, range.size),
+    add_access(RGAccess{
+        .resource = res,
+        .prev_access = graph->get_res(res).last_access,
+        .buffer_view = BufferView::init(graph->get_buf(res), range.offset, range.size),
         .stage = stage,
         .access = access,
     });
-}
-
-RGResourceId RGBuilder::as_res_id(RGAccessId acc) const
-{
-    if(!acc) { return {}; }
-    return graph->get_acc(acc).resource;
-}
-
-RGAccessId RGBuilder::as_acc_id(RGResourceId res) const
-{
-    if(!res) { return {}; }
-    return graph->get_res(res).last_access;
+    return res;
 }
 
 const RGAccess& RGBuilder::get_acc(RGAccessId acc) const
@@ -337,7 +312,7 @@ const RGAccess& RGBuilder::get_acc(RGAccessId acc) const
 const RGAccess& RGBuilder::get_acc(RGResourceId res) const
 {
     ENG_ASSERT(res);
-    return graph->get_acc(res);
+    return get_acc(pass->res_to_acc.at(res));
 }
 
 const BufferView& RGBuilder::get_buf(RGAccessId acc) const { return get_acc(acc).buffer_view; }
@@ -388,13 +363,13 @@ void RGRenderGraph::compile()
     allocator->reset_pages();
 
     const auto group_passes = [this] {
-        const auto get_earliest_group_for_pass = [this](const std::vector<RGAccessId>& accesses) -> u32 {
-            return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& val) {
-                return std::max(max, [this, &val] {
-                    const auto& acc = get_acc(val);
+        const auto get_earliest_group_for_pass = [this](const std::map<RGResourceId, RGAccessId>& accesses) -> u32 {
+            return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& rg_acc_pair) {
+                return std::max(max, [this, &rg_acc_pair] {
+                    const auto& acc = get_acc(rg_acc_pair.second);
                     // access just created the resource, we can start right away.
                     if(acc.is_first_access()) { return 0u; }
-                    const auto& res = get_res(val);
+                    const auto& res = get_res(rg_acc_pair.second);
                     // if current access is a write, we need to wait for previous reads and writes.
                     if(acc.is_write() || passes_serialized)
                     {
@@ -415,10 +390,10 @@ void RGRenderGraph::compile()
                 }());
             });
         };
-        const auto update_resource_accesses = [this](const std::vector<RGAccessId>& accesses, u32 last_group) {
-            std::for_each(accesses.begin(), accesses.end(), [this, last_group](RGAccessId a) {
-                const auto& acc = get_acc(a);
-                auto& res = get_res(a);
+        const auto update_resource_accesses = [this](const std::map<RGResourceId, RGAccessId>& accesses, u32 last_group) {
+            std::for_each(accesses.begin(), accesses.end(), [this, last_group](const auto& res_acc_pair) {
+                const auto& acc = get_acc(res_acc_pair.second);
+                auto& res = get_res(res_acc_pair.second);
                 if(acc.is_read()) { res.last_read_group = last_group; }
                 if(acc.is_write()) { res.last_write_group = last_group; }
             });
@@ -428,10 +403,10 @@ void RGRenderGraph::compile()
         u32 last_gid = 0;
         for(auto& p : passes)
         {
-            const auto gid = get_earliest_group_for_pass(p->accesses);
+            const auto gid = get_earliest_group_for_pass(p->res_to_acc);
             last_gid = std::max(last_gid, gid);
             groups[gid].passes.push_back(&*p);
-            update_resource_accesses(p->accesses, gid);
+            update_resource_accesses(p->res_to_acc, gid);
         }
         groups.resize(last_gid + 1);
     };
@@ -439,7 +414,7 @@ void RGRenderGraph::compile()
         // Allocate memory from transient allocator for resources to be used during execution
         std::set<RGResourceId> alive_res_set;
         std::set<RGResourceId> res_to_remove;
-        const auto remove_unused_res = [this, &res_to_remove, &alive_res_set] {
+        const auto free_transient_mem_from_dead_res_in_prev_group = [this, &res_to_remove, &alive_res_set] {
             for(auto e : res_to_remove)
             {
                 auto& res = get_res(e);
@@ -451,20 +426,17 @@ void RGRenderGraph::compile()
         };
         for(auto& g : groups)
         {
-            remove_unused_res(); // remove from previous group
+            free_transient_mem_from_dead_res_in_prev_group();
             for(auto* p : g.passes)
             {
-                for(const auto& ra : p->accesses)
+                for(const auto& [rr, ra] : p->res_to_acc)
                 {
                     auto& acc = get_acc(ra);
                     auto& res = get_res(ra);
                     if(!res.is_aliased) { continue; }
                     auto insertion = alive_res_set.insert(acc.resource);
-                    if(!insertion.second)
-                    {
-                        if(res.last_access == ra) { res_to_remove.insert(acc.resource); }
-                        continue;
-                    }
+                    if(res.last_access == ra) { res_to_remove.insert(acc.resource); }
+                    if(!insertion.second) { continue; }
                     // insertion happened, this resource has never had memory bound to it during this frame
                     RendererMemoryRequirements reqs;
                     void* alloc;
@@ -472,23 +444,23 @@ void RGRenderGraph::compile()
                     size_t offset;
                     if(res.is_buffer())
                     {
-                        get_renderer().backend->get_memory_requirements(res.as_buffer().get(), reqs);
+                        get_backend().get_memory_requirements(res.as_buffer().get(), reqs);
                         alloc = allocator->allocate(reqs);
                         allocator->get_offset_and_base(alloc, base, offset);
-                        get_renderer().backend->bind_aliasable_memory(res.as_buffer().get(), base, offset);
+                        get_backend().bind_aliasable_memory(res.as_buffer().get(), base, offset);
                     }
                     else
                     {
-                        get_renderer().backend->get_memory_requirements(res.as_image().get(), reqs);
+                        get_backend().get_memory_requirements(res.as_image().get(), reqs);
                         alloc = allocator->allocate(reqs);
                         allocator->get_offset_and_base(alloc, base, offset);
-                        get_renderer().backend->bind_aliasable_memory(res.as_image().get(), base, offset);
+                        get_backend().bind_aliasable_memory(res.as_image().get(), base, offset);
                     }
                     res.alloc = alloc;
                 }
             }
         }
-        remove_unused_res();
+        free_transient_mem_from_dead_res_in_prev_group();
     };
 
     group_passes();
@@ -526,7 +498,7 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
         for(const auto* p : g.passes)
         {
             gstages |= p->stage_mask;
-            for(const auto pa : p->accesses)
+            for(const auto [pr, pa] : p->res_to_acc)
             {
                 auto& acc = get_acc(pa);
                 const auto& res = get_res(pa);
@@ -587,26 +559,20 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
             p->cmd->write_timestamp(p->query->pool, PipelineStage::ALL, p->query->index + 1);
             cmd_pools[0]->end(p->cmd);
             queue->with_cmd_buf(p->cmd);
-            for(auto accid : p->accesses)
+            for(const auto& [res_id, acc_id] : p->res_to_acc)
             {
-                auto& acc = get_acc(accid);
-                auto& res = get_res(accid);
-                // todo: maybe pool handles here? renderer already does that, soo...
-                // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
-                if(res.last_access == accid)
+                auto& acc = get_acc(acc_id);
+                auto& res = get_res(acc_id);
+                if(res.last_access == acc_id)
                 {
-                    if(!res.is_persistent) { queue_destroy_resource(res); }
-                    else
+                    if(!res.is_external) { queue_destroy_resource(res); }
+                    else if(res.is_persistent())
                     {
-                        if(auto it = persistent_resources.find(ENG_HASH(res.name)); it != persistent_resources.end())
+                        auto& pr = *res.persistent;
+                        pr.last_layout = acc.layout;
+                        if(res.last_write_group != ~0u)
                         {
-                            auto& pr = it->second;
-                            pr.last_layout = acc.layout;
-                            if(res.last_write_group != ~0u)
-                            {
-                                // only add for resources that are not read-only
-                                pr.wait_sync = { sems[0], sems[0]->get_current_wait_value() };
-                            }
+                            pr.wait_sync = { sems[0], sems[0]->get_current_wait_value() };
                         }
                     }
                 }
@@ -617,17 +583,25 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
         queue->submit();
     }
 
+    for(auto& pr : persistent_resources)
+    {
+        pr.resource.last_access = {};
+        pr.resource.last_read_group = ~0u;
+        pr.resource.last_write_group = ~0u;
+        pr.resource.alloc = nullptr;
+    }
+
     resources.clear();
     accesses.clear();
     passes.clear();
-    namedpasses.clear();
+    // namedpasses.clear();
 
     return sems[0];
 }
 
 void RGRenderGraph::queue_destroy_resource(RGResource& res)
 {
-    ENG_ASSERT(!res.is_persistent);
+    ENG_ASSERT(!res.is_persistent());
     auto& r = get_renderer();
     r.queue_destroy(res.native);
 }
@@ -641,7 +615,7 @@ void RGDebugData::build(RGRenderGraph* rg)
         dr.name = r.name.c_str();
         // if(r.is_buffer()) { dr.resource = r.as_buffer().get(); }
         // else { dr.resource = r.as_image().get(); }
-        dr.persistent = r.is_persistent;
+        dr.persistent = r.is_persistent();
         dr.aliased_memory = r.is_aliased;
     }
     for(const auto& g : rg->groups)
@@ -650,7 +624,7 @@ void RGDebugData::build(RGRenderGraph* rg)
         for(const auto& p : g.passes)
         {
             auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {}, p->query });
-            for(const auto& pa : p->accesses)
+            for(const auto& [pr, pa] : p->res_to_acc)
             {
                 const auto& pacc = rg->get_acc(pa);
                 const auto& pres = rg->get_res(pa);

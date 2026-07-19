@@ -704,6 +704,7 @@ struct RenderResources
 
     RGResourceId halfres_depth;
     RGResourceId halfres_normal;
+    RGResourceId halfres_velocity;
 
     RGResourceId ao;
     RGResourceId accum;

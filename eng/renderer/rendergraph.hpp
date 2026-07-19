@@ -18,9 +18,11 @@ namespace gfx
 
 struct RGDebugData;
 class GPUTransientAllocator;
+struct RGPersistentResource;
 using RGResourceId = TypedId<RGResource, u32>;
-inline static constexpr u32 RGRESOURCEID_PERSISTENT_MASK = 0xFFF00000;
+inline static constexpr u32 RGRESOURCEID_PERSISTENT_BIT = 0x80000000;
 using RGAccessId = TypedId<RGAccess, u32>;
+using RGNativeResourceVariant = std::variant<Buffer, Image>;
 
 struct RGPass
 {
@@ -41,7 +43,7 @@ struct RGPass
     PassId id; // hash of name
     StackString<64> name;
     Type type{ Type::NONE };
-    std::vector<RGAccessId> accesses;
+    std::map<RGResourceId, RGAccessId> res_to_acc;
     Flags<PipelineStage> stage_mask{}; // accumulated access stages for barrier/semaphore
     ICommandBuffer* cmd{};             // if not null, needs to be executed
     TimestampQuery* query{};
@@ -85,11 +87,13 @@ struct RGClear
 struct RGResource
 {
     using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
-    RGResource(std::string_view name, const NativeResource& native, bool is_persistent, bool is_aliased,
-               const std::optional<RGClear>& clear = {})
-        : name(name), native(native), is_persistent(is_persistent), is_aliased(is_aliased), clear(clear)
+    RGResource() = default;
+    RGResource(std::string_view name, const NativeResource& native, RGPersistentResource* persistent, bool is_aliased,
+               bool is_external = false, const std::optional<RGClear>& clear = {})
+        : name(name), native(native), persistent(persistent), is_aliased(is_aliased), is_external(is_external), clear(clear)
     {
     }
+    bool is_persistent() const { return persistent != nullptr; }
     bool is_buffer() const { return native.index() == 0; }
     Handle<Buffer> as_buffer() const { return std::get<0>(native); }
     Handle<Image> as_image() const { return std::get<1>(native); }
@@ -98,9 +102,10 @@ struct RGResource
     RGAccessId last_access{};
     u32 last_read_group{ ~0u };
     u32 last_write_group{ ~0u };
-    bool is_persistent{};
+    RGPersistentResource* persistent{};
     bool is_aliased{};
-    void* alloc{}; // from transient allocator if not persistent
+    bool is_external{}; // imported or created persistent
+    void* alloc{};      // from transient allocator if not persistent
     std::optional<RGClear> clear;
 };
 
@@ -128,187 +133,145 @@ struct RGAccess
     RGWaitSync* wait_sync{}; // optionally links to persistent storage if importing from previous frame which might not have yet finished
 };
 
-struct PersistentStorage
+struct RGPersistentResource
 {
-    u64 hash{};
-	u32 persistent_index{};
-    RGResource::NativeResource native;
+    hash_t name_hash{};
+    hash_t object_hash{};
+    RGResourceId id{};
+    RGResource resource;
     RGWaitSync wait_sync{};
     ImageLayout last_layout{ ImageLayout::UNDEFINED };
-    // Flags<PipelineStage> last_stage{};
-    // Flags<PipelineAccess> last_access{};
 };
 
 struct RGBuilder
 {
-    RGAccessId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
-    RGAccessId import_resource(RGResourceId id, const std::optional<RGClear>& clear = {});
-    RGAccessId import_resource(const RGResource::NativeResource& resource,
-                               DiscardContents discard = DiscardContents::NO, const std::optional<RGClear>& clear = {});
-    RGAccessId create_resource(std::string_view name, Buffer&& a, bool is_persistent = false);
-    RGAccessId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {}, bool is_persistent = false);
-    RGAccessId add_access(const RGAccess& a);
-    RGAccessId access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                               std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                               Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u });
-    RGAccessId access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
-                               Range64u range = { 0ull, ~0ull });
+    RGResourceId add_resource(const RGResource& resource, const std::optional<RGClear>& clear = {});
+    RGResourceId import_resource(RGResourceId id, DiscardContents discard = DiscardContents::NO,
+                                 const std::optional<RGClear>& clear = {});
+    RGResourceId import_resource(const RGResource::NativeResource& resource,
+                                 DiscardContents discard = DiscardContents::NO, const std::optional<RGClear>& clear = {});
+    RGResourceId create_resource(std::string_view name, RGNativeResourceVariant&& a,
+                                 const std::optional<RGClear>& clear = {}, bool is_persistent = false);
+    RGResourceId create_resource(std::string_view name, Buffer&& a, bool is_persistent = false);
+    RGResourceId create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear = {},
+                                 bool is_persistent = false);
+    void add_access(const RGAccess& a);
+    RGResourceId access_resource(RGResourceId acc, ImageLayout layout, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                                 std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                 Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u });
+    RGResourceId access_resource(RGResourceId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                                 Range64u range = { 0ull, ~0ull });
 
-    RGAccessId sample_texture(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                              Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    RGResourceId sample_texture(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::SHADER_READ_BIT;
         const auto layout = ImageLayout::READ_ONLY;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
-    }
-    RGAccessId sample_texture(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                              Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-    {
-        return sample_texture(as_acc_id(res), format, type, mips, layers);
+        return access_resource(res, layout, stage, access, format, type, mips, layers);
     }
 
-    RGAccessId access_depth(RGAccessId acc, std::optional<ImageFormat> format = {})
+    RGResourceId access_depth(RGResourceId res, std::optional<ImageFormat> format = {})
     {
         const auto stage = PipelineStage::EARLY_Z_BIT | PipelineStage::LATE_Z_BIT;
         const auto access = PipelineAccess::DS_RW;
         const auto layout = ImageLayout::ATTACHMENT;
-        return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
-    }
-    RGAccessId access_depth(RGResourceId res, std::optional<ImageFormat> format = {})
-    {
-        return access_depth(as_acc_id(res), format);
+        return access_resource(res, layout, stage, access, format, ImageViewType::TYPE_2D);
     }
 
-    RGAccessId access_color(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
+    RGResourceId access_color(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
     {
         const auto stage = PipelineStage::COLOR_OUT_BIT;
         const auto access = PipelineAccess::COLOR_RW_BIT;
         const auto layout = ImageLayout::ATTACHMENT;
-        return access_resource(acc, layout, stage, access, format, ImageViewType::TYPE_2D);
-    }
-    RGAccessId access_color(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {})
-    {
-        return access_color(as_acc_id(res), format, type);
+        return access_resource(res, layout, stage, access, format, ImageViewType::TYPE_2D);
     }
 
-    RGAccessId read_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                          Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    RGResourceId read_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                            Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_READ_BIT;
         const auto layout = ImageLayout::GENERAL;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
-    }
-    RGAccessId read_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                          Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-    {
-        return read_image(as_acc_id(res), format, type, mips, layers);
+        return access_resource(res, layout, stage, access, format, type, mips, layers);
     }
 
-    RGAccessId write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    RGResourceId write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
+                             Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_WRITE_BIT;
         const auto layout = ImageLayout::GENERAL;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
-    }
-    RGAccessId write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                           Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-    {
-        return write_image(as_acc_id(res), format, type, mips, layers);
+        return access_resource(res, layout, stage, access, format, type, mips, layers);
     }
 
-    RGAccessId read_write_image(RGAccessId acc, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
+    RGResourceId read_write_image(RGResourceId res, std::optional<ImageFormat> format = {},
+                                  std::optional<ImageViewType> type = {}, Range32u mips = { 0u, ~0u },
+                                  Range32u layers = { 0u, ~0u })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
         const auto layout = ImageLayout::GENERAL;
-        return access_resource(acc, layout, stage, access, format, type, mips, layers);
-    }
-    RGAccessId read_write_image(RGResourceId res, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
-                                Range32u mips = { 0u, ~0u }, Range32u layers = { 0u, ~0u })
-    {
-        return read_write_image(as_acc_id(res), format, type, mips, layers);
+        return access_resource(res, layout, stage, access, format, type, mips, layers);
     }
 
-    RGAccessId read_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
+    RGResourceId read_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::VERTEX_BIT | PipelineStage::FRAGMENT_BIT
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_READ_BIT;
-        return access_resource(acc, stage, access, range);
-    }
-    RGAccessId read_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
-    {
-        return read_buffer(as_acc_id(res), range);
+        return access_resource(res, stage, access, range);
     }
 
-    RGAccessId write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
+    RGResourceId write_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::ALL
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
-        return access_resource(acc, stage, access, range);
-    }
-    RGAccessId write_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
-    {
-        return write_buffer(as_acc_id(res), range);
+        return access_resource(res, stage, access, range);
     }
 
-    RGAccessId read_write_buffer(RGAccessId acc, Range64u range = { 0ull, ~0ull })
+    RGResourceId read_write_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
     {
         const auto stage = pass->is_graphics()  ? PipelineStage::ALL
                            : pass->is_compute() ? PipelineStage::COMPUTE_BIT
                                                 : PipelineStage::NONE;
         const auto access = PipelineAccess::STORAGE_RW;
-        return access_resource(acc, stage, access, range);
-    }
-    RGAccessId read_write_buffer(RGResourceId res, Range64u range = { 0ull, ~0ull })
-    {
-        return read_write_buffer(as_acc_id(res), range);
+        return access_resource(res, stage, access, range);
     }
 
-    RGAccessId copy_source(RGAccessId acc)
+    RGResourceId copy_source(RGResourceId res)
     {
-        return access_resource(acc, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
+        return access_resource(res, ImageLayout::TRANSFER_SRC, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_READ_BIT);
     }
-    RGAccessId copy_source(RGResourceId res) { return copy_source(as_acc_id(res)); }
 
-    RGAccessId copy_dest(RGAccessId acc)
+    RGResourceId copy_dest(RGResourceId res)
     {
-        return access_resource(acc, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT);
+        return access_resource(res, ImageLayout::TRANSFER_DST, PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT);
     }
-    RGAccessId copy_dest(RGResourceId res) { return copy_dest(as_acc_id(res)); }
 
-    RGAccessId read_index(RGAccessId acc)
+    RGResourceId read_index(RGResourceId res)
     {
         ENG_ASSERT(pass->is_graphics());
-        return access_resource(acc, PipelineStage::VERTEX_INPUT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+        return access_resource(res, PipelineStage::VERTEX_INPUT_BIT, PipelineAccess::INDIRECT_READ_BIT);
     }
-    RGAccessId read_index(RGResourceId res) { return read_index(as_acc_id(res)); }
 
-    RGAccessId read_indirect(RGAccessId acc)
+    RGResourceId read_indirect(RGResourceId res)
     {
         ENG_ASSERT(pass->is_graphics());
-        return access_resource(acc, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
+        return access_resource(res, PipelineStage::INDIRECT_BIT, PipelineAccess::INDIRECT_READ_BIT);
     }
-    RGAccessId read_indirect(RGResourceId res) { return read_indirect(as_acc_id(res)); }
 
-    RGResourceId as_res_id(RGAccessId acc) const;
-    RGAccessId as_acc_id(RGResourceId res) const;
     const RGAccess& get_acc(RGAccessId acc) const;
     const RGAccess& get_acc(RGResourceId res) const;
     const BufferView& get_buf(RGAccessId acc) const;
@@ -331,15 +294,17 @@ class RGRenderGraph
     };
 
     // utility funcs for easy access to resources
+    static constexpr bool is_persistent(RGResourceId id) { return id && (*id & RGRESOURCEID_PERSISTENT_BIT) != 0; }
+    static constexpr u32 extract_idx(RGResourceId id) { return *id & ~RGRESOURCEID_PERSISTENT_BIT; }
+    RGResource& get_res(RGResourceId a)
+    {
+        ENG_ASSERT(a);
+        return is_persistent(a) ? persistent_resources[extract_idx(a)].resource : resources[extract_idx(a)];
+    }
+    RGResource& get_res(RGAccessId a) { return get_res(get_acc(a).resource); }
     RGAccess& get_acc(RGAccessId a) { return accesses[*a]; }
     RGAccess& get_acc(RGResourceId a) { return get_acc(get_res(a).last_access); }
-    static constexpr u32 extract_idx(RGResourceId id) { return *id & ~RGRESOURCEID_PERSISTENT_MASK; }
-    static constexpr u32 extract_persistent_idx(RGResourceId id) { return (*id & RGRESOURCEID_PERSISTENT_MASK) >> 20; }
-    RGResource& get_res(RGResourceId a) { return resources[extract_idx(a)]; }
-    RGResource& get_res(RGAccessId a) { return resources[extract_idx(get_acc(a).resource)]; }
-    Handle<Buffer> get_buf(RGAccessId a) { return get_res(a).as_buffer(); }
     Handle<Buffer> get_buf(RGResourceId a) { return get_res(a).as_buffer(); }
-    Handle<Image> get_img(RGAccessId a) { return get_res(a).as_image(); }
     Handle<Image> get_img(RGResourceId a) { return get_res(a).as_image(); }
 
     void init(Renderer* r);
@@ -349,14 +314,6 @@ class RGRenderGraph
     {
         RGPass& pass = *passes.emplace_back(std::make_unique<RGUserPass<UserType, ExecFunc>>(name, type, exec_func));
         ENG_ASSERT(pass.id);
-
-        auto ret = namedpasses.emplace(pass.id, &pass);
-        if(!ret.second)
-        {
-            ENG_ERROR("Pass \"{}\" was already defined.", name);
-            static UserType null_object{};
-            return null_object;
-        }
 
         RGBuilder pb{ &pass, this };
         auto* user_data = static_cast<UserType*>(pass.get_user_data());
@@ -389,14 +346,13 @@ class RGRenderGraph
     GPUTransientAllocator* allocator{};
     RGDebugData* m_debug_datas_arr[2]{};
 
-    std::unordered_map<u64, PersistentStorage> persistent_resources;
-    std::unordered_map<u32, PersistentStorage*> indexed_persistent_resources; // use RGResource that has highest bit set
-
+    std::deque<RGPersistentResource> persistent_resources;
     std::vector<RGResource> resources;
+
     std::vector<RGAccess> accesses;
     std::vector<std::unique_ptr<RGPass>> passes;
     std::vector<ExecutionGroup> groups;
-    std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
+    // std::unordered_map<RGPass::PassId, RGPass*> namedpasses;
 
     bool passes_serialized{};
     bool memory_aliasing_disabled{};

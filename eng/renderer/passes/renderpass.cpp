@@ -123,7 +123,7 @@ void IndirectBatch::draw(const Callback<void(const IndirectDrawParams&)>& draw_c
     {
         const auto& batch = batches[i];
         const auto cntoff = sizeof(u32) * i;
-        const auto cmdsize = get_renderer().backend->get_indirect_indexed_command_size();
+        const auto cmdsize = get_backend().get_indirect_indexed_command_size();
         const auto cmdoff = cmdsize * cmdoffacc + cmds_view.range.offset;
         draw_callback(IndirectDrawParams{
             .draw = &batch,

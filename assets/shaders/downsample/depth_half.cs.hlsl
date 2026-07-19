@@ -5,8 +5,10 @@ struct PushConstants
 {
     ENG_UINT dstDepthRWTextureIndex;
     ENG_UINT dstNormalRWTextureIndex;
+	ENG_UINT dstVelocityRWTextureIndex;
     ENG_UINT srcDepthTextureIndex;
     ENG_UINT srcNormalTextureIndex;
+	ENG_UINT srcVelocityTextureIndex;
 };
 [[vk::push_constant]] PushConstants pc;
 
@@ -15,8 +17,11 @@ void main(uint3 dtid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gidx : 
 {
     Texture2D<float> srcDepthTex = get_gt2(srcDepth, float);
     Texture2D<float4> srcNormalTex = get_gt2(srcNormal, float4);
+	Texture2D<float2> srcVelocityTex = get_gt2(srcVelocity, float2);
+	
     RWTexture2D<float> dstDepthTex = get_grwt2(dstDepth, float);
     RWTexture2D<float4> dstNormalTex = get_grwt2(dstNormal, float4);
+	RWTexture2D<float2> dstVelocityTex = get_grwt2(dstVelocity, float2);
     
     uint2 dstDims;
     dstDepthTex.GetDimensions(dstDims.x, dstDims.y);
@@ -54,6 +59,7 @@ void main(uint3 dtid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gidx : 
     
     dstDepthTex[dtid.xy] = minDepth;
     dstNormalTex[dtid.xy] = float4(srcNormalTex[normalCoord].xyz, 0.0);
+	dstVelocityTex[dtid.xy] = srcVelocityTex[normalCoord].xy;
 }
 
 

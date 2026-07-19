@@ -727,15 +727,15 @@ void Renderer::compile_rendergraph()
             auto& rr = current_data->render_resources;
 
             // clang-format off
-			d.constants = b.as_res_id(b.create_resource(get_buffered_name("Constants"), Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), true));
-            d.constants = b.as_res_id(b.write_buffer(d.constants));
+			d.constants = b.create_resource(get_buffered_name("Constants"), Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), true);
+            d.constants = b.write_buffer(d.constants);
 
-            d.opaque = b.as_res_id(b.create_resource(get_buffered_name("Opaque"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),RGClear::color(), true));
-            d.normals = b.as_res_id(b.create_resource(get_buffered_name("Opaque Normals"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
-            d.depth = b.as_res_id(b.create_resource(get_buffered_name("Depth"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT), RGClear::depth_stencil(0.0), true));
-            d.velocity = b.as_res_id(b.create_resource(get_buffered_name("Velocity"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
-            d.history_len = b.as_res_id(b.create_resource(get_buffered_name("History Length"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
-            d.final_color = b.as_res_id(b.create_resource(get_buffered_name("Final Color"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true));
+            d.opaque = b.create_resource(get_buffered_name("Opaque"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),RGClear::color(), true);
+            d.normals = b.create_resource(get_buffered_name("Opaque Normals"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
+            d.depth = b.create_resource(get_buffered_name("Depth"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT), RGClear::depth_stencil(0.0), true);
+            d.velocity = b.create_resource(get_buffered_name("Velocity"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
+            d.history_len = b.create_resource(get_buffered_name("History Length"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
+            d.final_color = b.create_resource(get_buffered_name("Final Color"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
             // clang-format on
 
             rr.constants = d.constants;
@@ -776,10 +776,9 @@ void Renderer::compile_rendergraph()
     pass_data.depth_buffer = import_resources.depth;
     passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
 
-    // pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
-    //  passes.velocity->init(rgraph, pass_data);
+    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
+    passes.velocity->init(rgraph, pass_data);
 
     pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
     pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
@@ -787,24 +786,15 @@ void Renderer::compile_rendergraph()
 
     pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
     pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    passes.downscale_depth->init(rgraph, pass_data);
-    //// pass_data = {};
-    //// pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    //// passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
-
-    // pass_data = {};
-    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    // pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    //// pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
     pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    // pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = import_resources.history_len;
-    // pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    passes.ao->init(rgraph, pass_data);
+    passes.downscale_depth->init(rgraph, pass_data);
 
+    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
+    passes.ao->init(rgraph, pass_data);
     struct CopyToAccum
     {
-        RGAccessId input;
-        RGAccessId output;
+        RGResourceId input;
+        RGResourceId output;
     };
     rgraph->add_graphics_pass<CopyToAccum>(
         "Copy To Accum",
@@ -819,8 +809,8 @@ void Renderer::compile_rendergraph()
 
     struct ApplyAO
     {
-        RGAccessId input;
-        RGAccessId ao;
+        RGResourceId input;
+        RGResourceId ao;
     };
     rgraph->add_graphics_pass<ApplyAO>(
         "Apply AO",
@@ -844,8 +834,8 @@ void Renderer::compile_rendergraph()
 
     struct CopySwapchainData
     {
-        RGAccessId input;
-        RGAccessId output;
+        RGResourceId input;
+        RGResourceId output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
         "Copy To Swap",
@@ -854,10 +844,10 @@ void Renderer::compile_rendergraph()
             data.output = b.import_resource(swapchain->get_image(), DiscardContents::YES);
             data.output = b.copy_dest(data.output);
         },
-        [this](RGBuilder& pb, const CopySwapchainData& data) {
-            auto* cmd = pb.open_cmd_buf();
-            auto& dsti = pb.graph->get_img(data.output).get();
-            const auto& srci = pb.graph->get_img(data.input).get();
+        [this](RGBuilder& b, const CopySwapchainData& data) {
+            auto* cmd = b.open_cmd_buf();
+            auto& dsti = b.get_img(data.output).image.get();
+            const auto& srci = b.get_img(data.input).image.get();
             cmd->wait_sync(current_data->acq_sem, PipelineStage::TRANSFER_BIT);
             cmd->blit(dsti, srci,
                       ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
@@ -866,9 +856,9 @@ void Renderer::compile_rendergraph()
                                  .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
                                  .filter = ImageFilter::LINEAR });
         });
-    rgraph->add_graphics_pass<RGAccessId>(
+    rgraph->add_graphics_pass<RGResourceId>(
         "Present",
-        [copyswapchaindata](RGBuilder& b, RGAccessId& output) {
+        [copyswapchaindata](RGBuilder& b, RGResourceId& output) {
             output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
         [this](RGBuilder& b, auto& data) {
@@ -1699,8 +1689,8 @@ u64 ShaderManager::get_hash(hash_t shader_hash) { return get_hash(m_files_map.at
 float TimestampQuery::to_ms(const TimestampQuery& q)
 {
     u64 results[2];
-    get_renderer().backend->get_query_pool_results(q.pool, q.index, 2, &results);
-    return (float)(((double)(results[1] - results[0])) * get_renderer().backend->limits.timestampPeriodNs * 1e-6);
+    get_backend().get_query_pool_results(q.pool, q.index, 2, &results);
+    return (float)(((double)(results[1] - results[0])) * get_backend().limits.timestampPeriodNs * 1e-6);
 }
 
 ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffer* cmd) : cmd(cmd)

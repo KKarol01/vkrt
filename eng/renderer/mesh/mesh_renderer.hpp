@@ -46,10 +46,10 @@ class MeshRenderer
 
     struct SetupPassData
     {
-        RGAccessId constants;
-        RGAccessId indirect;
-        RGAccessId index;
-        RGAccessId gpuinstances;
+        RGResourceId constants;
+        RGResourceId indirect;
+        RGResourceId index;
+        RGResourceId gpuinstances;
     };
 
     struct BuildPassResult
