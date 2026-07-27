@@ -881,7 +881,7 @@ class Renderer
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
-    void queue_destroy(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now = false);
+    void queue_destroy_in_n_frames(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
     Handle<Shader> make_shader(const fs::Path& path, const std::vector<Shader::Macro>& defines = {},
                                Compilation compilation = Compilation::DEFERRED);

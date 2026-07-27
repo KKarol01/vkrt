@@ -397,7 +397,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     ENG_ASSERT(a.images.size() == a.views.size());
     for(auto i = 0u; i < a.images.size(); ++i)
     {
-        get_renderer().queue_destroy(a.images[i], true);
+        get_renderer().queue_destroy_in_n_frames(a.images[i], true);
     }
     delete &md;
     a = Swapchain{};

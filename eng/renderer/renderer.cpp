@@ -946,7 +946,7 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
     return h;
 }
 
-void Renderer::queue_destroy(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now)
+void Renderer::queue_destroy_in_n_frames(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now)
 {
     if(auto* buf = std::get_if<Handle<Buffer>>(&resource))
     {
@@ -1340,7 +1340,7 @@ void Renderer::build_pending_blases()
     }
 
     auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
-    queue_destroy(blas_scratch); // destroy later in frame_delay frames
+    queue_destroy_in_n_frames(blas_scratch); // destroy later in frame_delay frames
 
     auto* cmd = current_data->cmdpool->begin();
     cmd->wait_sync(staging->flush(true), PipelineStage::AS_BUILD_BIT);
@@ -1376,12 +1376,12 @@ void Renderer::build_pending_blases()
                        std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
     {
         auto tlas_scratch = make_buffer("tlas scratch", Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
-        queue_destroy(tlas_scratch); // destroy later in frame_delay frames
+        queue_destroy_in_n_frames(tlas_scratch); // destroy later in frame_delay frames
         bufs.geom_tlas_buffer =
             make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
         auto instances = make_buffer("Tlas blas instances",
                                      Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT));
-        queue_destroy(instances);
+        queue_destroy_in_n_frames(instances);
         bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
                                             std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
                                             &bufs.geom_tlas_buffer.get(), 0, &tlas_scratch.get(), 0, &instances.get(), 0);
@@ -1529,7 +1529,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
 
     auto dsth = make_buffer(backend->get_debug_name(handle.get()), Buffer::init(new_size, handle->usage));
     if(copy_data) { staging->copy(dsth.get(), handle.get(), 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
-    queue_destroy(handle);
+    queue_destroy_in_n_frames(handle);
     handle = dsth;
 }
 

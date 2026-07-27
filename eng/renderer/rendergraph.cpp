@@ -202,7 +202,7 @@ RGResourceId RGBuilder::create_resource(std::string_view name, RGNativeResourceV
         {
             found_persistent = &*prit;
             // check if object hash changed (for example resolution might have changed)
-            if(prit->object_hash != object_hash) { get_renderer().queue_destroy(prit->resource.native); }
+            if(prit->object_hash != object_hash) { get_renderer().queue_destroy_in_n_frames(prit->resource.native); }
             else
             {
                 auto res = prit->resource;
@@ -603,7 +603,7 @@ void RGRenderGraph::queue_destroy_resource(RGResource& res)
 {
     ENG_ASSERT(!res.is_persistent());
     auto& r = get_renderer();
-    r.queue_destroy(res.native);
+    r.queue_destroy_in_n_frames(res.native);
 }
 
 void RGDebugData::build(RGRenderGraph* rg)

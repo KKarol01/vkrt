@@ -836,7 +836,7 @@ struct SSAO : public Pass
             size_t tex_sz = 8;
             auto buf = r.make_buffer("SSAO Temp Noise", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
                                                                      BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
-            r.queue_destroy(buf);
+            r.queue_destroy_in_n_frames(buf);
             auto* bufptr = (float*)buf->memory;
             for(auto i = 0; i < tex_sz * tex_sz * 2; ++i)
             {
