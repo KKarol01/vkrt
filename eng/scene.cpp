@@ -22,7 +22,7 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
 {
     ENG_ASSERT(asset.root_nodes.size() > 0);
 
-    const auto recursive_instance = [&asset](const auto& self, const assets::Node& node, ecs::EntityId parent_entity) -> ecs::EntityId {
+    const auto instance_recursively = [&asset](const auto& self, const assets::Node& node, ecs::EntityId parent_entity) -> ecs::EntityId {
         auto* ecs = get_engine().ecs;
         auto e = ecs->create();
         ecs->add_components<ecsc::Node>(e, ecsc::Node{ .name = node.name });
@@ -54,12 +54,12 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
         for(auto rn : asset.root_nodes)
         {
             const auto& node = asset.nodes[rn];
-            recursive_instance(recursive_instance, node, e);
+            instance_recursively(instance_recursively, node, e);
         }
     }
     else if(asset.root_nodes.size() == 1)
     {
-        e = recursive_instance(recursive_instance, asset.nodes[asset.root_nodes[0]], ecs::EntityId{});
+        e = instance_recursively(instance_recursively, asset.nodes[asset.root_nodes[0]], ecs::EntityId{});
     }
 
     scene.push_back(e);

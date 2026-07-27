@@ -356,7 +356,7 @@ void SwapchainMetadataVk::init(Swapchain& a)
     a.metadata = md;
 
     const auto image_usage_flags = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT;
-    const auto image_format = ImageFormat::R8G8B8A8_SRGB;
+    const auto image_format = get_renderer().settings.present_format;
     auto& backend = RendererBackendVk::get_instance();
     auto vkswpinfo = vk::VkSwapchainCreateInfoKHR{};
     vkswpinfo.surface = backend.window_surface;

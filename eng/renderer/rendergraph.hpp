@@ -366,6 +366,7 @@ struct RGDebugData
         // std::variant<Buffer, Image> resource;
         bool persistent{};
         bool aliased_memory{};
+		bool is_external{};
     };
     struct Access
     {

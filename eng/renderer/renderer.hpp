@@ -477,7 +477,7 @@ struct ImageMipsLayers
     Range32u layers{};
 };
 
-struct ImageLayers
+struct ImageMipLayers
 {
     u32 mip{};
     Range32u layers{};
@@ -485,8 +485,8 @@ struct ImageLayers
 
 struct ImageBlit
 {
-    ImageLayers srclayers{};
-    ImageLayers dstlayers{};
+    ImageMipLayers srclayers{};
+    ImageMipLayers dstlayers{};
     Range3D32i srcrange{};
     Range3D32i dstrange{};
     ImageFilter filter{ ImageFilter::LINEAR };
@@ -494,8 +494,8 @@ struct ImageBlit
 
 struct ImageCopy
 {
-    ImageLayers srclayers{};
-    ImageLayers dstlayers{};
+    ImageMipLayers srclayers{};
+    ImageMipLayers dstlayers{};
     i32_3 srcoffset{};
     i32_3 dstoffset{};
     u32_3 extent{};
@@ -812,11 +812,12 @@ class Renderer
 
     struct Settings
     {
-        ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
+        ImageFormat color_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat normal_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         ImageFormat velocity_format{ ImageFormat::R16FG16F };
         ImageFormat history_len_format{ ImageFormat::R16F };
+        ImageFormat present_format{ ImageFormat::R8G8B8A8_SRGB };
         f32_2 new_render_resolution{};
         f32_2 render_resolution{};
         f32_2 present_resolution{};

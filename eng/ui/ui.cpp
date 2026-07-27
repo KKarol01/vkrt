@@ -250,12 +250,23 @@ class DebugPanel : public Panel
 
         if(ImGui::TreeNodeEx("Resources", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            if(ImGui::BeginTable("ResourcesTable", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+
+            if(ImGui::BeginTable("ResourcesTable", 2,
+                                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
+                                 ImVec2{ ImGui::GetContentRegionMax().x, 200.0f }))
             {
-                ImGui::TableSetupColumn("Name");
-                ImGui::TableSetupColumn("Persistent");
-                ImGui::TableSetupColumn("Aliased");
-                ImGui::TableHeadersRow();
+                ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+                ImGui::TableNextColumn();
+                ImGui::TableHeader("Name");
+                ImGui::TableNextColumn();
+                ImGui::TableHeader("P A E");
+				ImGui::SameLine();
+				ImGui::Text("asdf");
+                if(ImGui::IsItemHovered() && ImGui::BeginTooltip())
+                {
+                    ImGui::Text("Persistent Aliased External");
+                    ImGui::EndTooltip();
+                }
 
                 for(const auto& res : rgdd.resources)
                 {
@@ -263,9 +274,11 @@ class DebugPanel : public Panel
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(res.name.c_str());
                     ImGui::TableNextColumn();
-                    ImGui::Text(res.persistent ? "Yes" : "No");
-                    ImGui::TableNextColumn();
-                    ImGui::Text(res.aliased_memory ? "Yes" : "No");
+                    char descriptor[]{ 'N', ' ', 'N', ' ', 'N', '\0' };
+                    if(res.persistent) { descriptor[0] = 'Y'; }
+                    if(res.aliased_memory) { descriptor[2] = 'Y'; }
+                    if(res.is_external) { descriptor[4] = 'Y'; }
+                    ImGui::Text(descriptor);
                 }
                 ImGui::EndTable();
             }

@@ -609,15 +609,28 @@ void RGRenderGraph::queue_destroy_resource(RGResource& res)
 void RGDebugData::build(RGRenderGraph* rg)
 {
     clear();
-    for(const auto& r : rg->resources)
+    std::unordered_map<u32, u32> id_to_idx;
+
+    for(u32 i = 0; i < rg->resources.size(); ++i)
     {
+        id_to_idx[i] = (u32)resources.size();
         auto& dr = resources.emplace_back();
-        dr.name = r.name.c_str();
-        // if(r.is_buffer()) { dr.resource = r.as_buffer().get(); }
-        // else { dr.resource = r.as_image().get(); }
-        dr.persistent = r.is_persistent();
-        dr.aliased_memory = r.is_aliased;
+        dr.name = rg->resources[i].name.c_str();
+        dr.persistent = false;
+        dr.aliased_memory = rg->resources[i].is_aliased;
+        dr.is_external = rg->resources[i].is_external;
     }
+
+    for(u32 i = 0; i < rg->persistent_resources.size(); ++i)
+    {
+        id_to_idx[i | RGRESOURCEID_PERSISTENT_BIT] = (u32)resources.size();
+        auto& dr = resources.emplace_back();
+        dr.name = rg->persistent_resources[i].resource.name.c_str();
+        dr.persistent = true;
+        dr.aliased_memory = false;
+        dr.is_external = rg->persistent_resources[i].resource.is_external;
+    }
+
     for(const auto& g : rg->groups)
     {
         auto& dg = groups.emplace_back();
@@ -627,8 +640,10 @@ void RGDebugData::build(RGRenderGraph* rg)
             for(const auto& [pr, pa] : p->res_to_acc)
             {
                 const auto& pacc = rg->get_acc(pa);
-                const auto& pres = rg->get_res(pa);
-                dp.accesses.push_back(Access{ *pacc.resource, pacc.stage, pacc.access, pacc.layout, pres.last_access == pa });
+                const auto& pres = rg->get_res(pr);
+
+                u32 mapped_idx = id_to_idx.at(*pr);
+                dp.accesses.push_back(Access{ mapped_idx, pacc.stage, pacc.access, pacc.layout, pres.last_access == pa });
             }
         }
     }

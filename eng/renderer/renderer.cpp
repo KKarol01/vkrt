@@ -733,7 +733,7 @@ void Renderer::compile_rendergraph()
             d.opaque = b.create_resource(get_buffered_name("Opaque"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),RGClear::color(), true);
             d.normals = b.create_resource(get_buffered_name("Opaque Normals"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
             d.depth = b.create_resource(get_buffered_name("Depth"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT), RGClear::depth_stencil(0.0), true);
-            d.velocity = b.create_resource(get_buffered_name("Velocity"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
+            d.velocity = b.create_resource(get_buffered_name("Velocity"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), RGClear::color(), true);
             d.history_len = b.create_resource(get_buffered_name("History Length"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
             d.final_color = b.create_resource(get_buffered_name("Final Color"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
             // clang-format on
@@ -800,11 +800,20 @@ void Renderer::compile_rendergraph()
         "Copy To Accum",
         [=, this](RGBuilder& b, CopyToAccum& d) {
             d.input = b.copy_source(get_frame_data().render_resources.opaque);
+            // d.input = b.copy_source(get_frame_data().render_resources.velocity);
             d.output = b.copy_dest(import_resources.final_color);
         },
         [this](RGBuilder& b, const CopyToAccum& d) {
             auto* cmd = b.open_cmd_buf();
+            const auto& srci = b.get_img(d.input).image.get();
+            const auto& dsti = b.get_img(d.output).image.get();
             cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
+            // cmd->blit(b.get_img(d.output).image.get(), b.get_img(d.input).image.get(),
+            //           ImageBlit{ .srclayers = { 0, { 0, 1 } },
+            //                      .dstlayers = { 0, { 0, 1 } },
+            //                      .srcrange = { { 0, 0, 0 }, { srci.width, srci.height, 1 } },
+            //                      .dstrange = { { 0, 0, 0 }, { dsti.width, dsti.height, 1 } },
+            //                      .filter = ImageFilter::NEAREST });
         });
 
     struct ApplyAO
@@ -850,8 +859,8 @@ void Renderer::compile_rendergraph()
             const auto& srci = b.get_img(data.input).image.get();
             cmd->wait_sync(current_data->acq_sem, PipelineStage::TRANSFER_BIT);
             cmd->blit(dsti, srci,
-                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
-                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
+                      ImageBlit{ .srclayers = ImageMipLayers{ 0, { 0, 1 } },
+                                 .dstlayers = ImageMipLayers{ 0, { 0, 1 } },
                                  .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
                                  .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
                                  .filter = ImageFilter::LINEAR });
