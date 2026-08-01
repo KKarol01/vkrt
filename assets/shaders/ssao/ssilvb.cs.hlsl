@@ -214,5 +214,4 @@ void main(uint3 dtid : SV_DispatchThreadID)
     gOutHistoryLen[dtid.xy] = history_len;
     gOutHistoryTexture[dtid.xy] = final_val;
 	gOutAOImage[dtid.xy] = final_val;
-	//gOutAOImage[dtid.xy].rgb *= 20.0;
 }
