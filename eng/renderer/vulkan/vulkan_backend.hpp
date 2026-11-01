@@ -10,7 +10,6 @@
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/common/hash.hpp>
 #include <eng/common/handle.hpp>
-#include <eng/common/handleflatset.hpp>
 
 #include <vulkan/vulkan.h>
 #include <eng/renderer/vulkan/vulkan_structs.hpp>
@@ -23,7 +22,6 @@ namespace gfx
 
 class SubmitQueue;
 class StagingBuffer;
-class BindlessPool;
 struct Sync;
 struct SyncCreateInfo;
 

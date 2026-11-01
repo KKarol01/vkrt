@@ -1,10 +1,12 @@
 #pragma once
 
-#include <eng/renderer/renderer.hpp>
+#include <eng/renderer/renderer.hpp> // PipelineLayout::MAX_SETS
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
 #include <vulkan/vulkan.h>
+#include <atomic>
 #include <cstdint>
+#include <string>
 #include <vector>
 #include <deque>
 
@@ -12,11 +14,6 @@ namespace eng
 {
 namespace gfx
 {
-class CommandPoolVk;
-struct DescriptorSetVk;
-class IDescriptorSetAllocator;
-struct DescriptorResource;
-struct QueryPoolMetadataVk;
 
 class ICommandBuffer
 {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/common/types.hpp>
 #include <eng/common/handle.hpp>

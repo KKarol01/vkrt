@@ -12,7 +12,6 @@ struct GLFWwindow;
 namespace eng
 {
 
-struct Window;
 class Camera;
 class Scene;
 

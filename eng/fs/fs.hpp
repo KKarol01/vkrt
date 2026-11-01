@@ -113,14 +113,6 @@ class DirectoryListener
     std::mutex m_mutex;
 };
 
-} // namespace fs
-
-ENG_DEFINE_HANDLE_STORAGE(fs::DirectoryListener, uintptr_t);
-ENG_DEFINE_HANDLE_ALL_GETTERS(fs::DirectoryListener, { return reinterpret_cast<fs::DirectoryListener*>(*handle); });
-
-namespace fs
-{
-
 class FileSystem
 {
   public:
@@ -134,7 +126,8 @@ class FileSystem
     bool file_exists(const Path& path) const;
 
     // Create recursive listener for file changes
-    Handle<DirectoryListener> make_listener(std::string_view virtual_path, std::span<std::string_view> extensions);
+    // Returned pointer stays valid for the lifetime of the FileSystem.
+    DirectoryListener* make_listener(std::string_view virtual_path, std::span<std::string_view> extensions);
 
     // From virtual path like '/assets/texture.png' make system relative path like '../../assets/texture.png'
     Path make_rel_path(const Path& virtual_path);

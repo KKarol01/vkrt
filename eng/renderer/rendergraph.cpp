@@ -162,6 +162,12 @@ RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource
     const auto hash = ENG_HASH(res.name);
     auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
     pr.hash = 0;                                  // imported resources don't need a hash.
+    if(pr.native != resource)
+    {
+        // same name, but a different (recreated) resource -- previous layout and syncs don't apply to it.
+        pr.wait_sync = {};
+        pr.last_layout = ImageLayout::UNDEFINED;
+    }
     pr.native = resource;
 
     return add_resource(std::move(res));

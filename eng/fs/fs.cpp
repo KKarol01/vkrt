@@ -61,7 +61,7 @@ namespace eng
 #ifdef ENG_PLATFORM_WIN32
 struct Win32DirChangeHandle
 {
-    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, Handle<fs::DirectoryListener> listener)
+    Win32DirChangeHandle(const fs::Path& virtual_path, const fs::Path& physical_path, fs::DirectoryListener* listener)
         : m_virtual_path(virtual_path), m_physical_path(physical_path), m_listener(listener)
     {
     }
@@ -161,7 +161,7 @@ struct Win32DirChangeHandle
     HANDLE m_notification{};
     HANDLE m_event{};
     OVERLAPPED m_overlap{};
-    Handle<fs::DirectoryListener> m_listener;
+    fs::DirectoryListener* m_listener{};
     u32 m_buffer[sizeof(FILE_NOTIFY_INFORMATION) * 128 / sizeof(u32)]{};
     bool m_is_stopped{};
     std::thread m_wait_thread;
@@ -341,7 +341,7 @@ void FileSystem::delete_file(const Path& path)
 
 bool fs::FileSystem::file_exists(const Path& path) const { return std::filesystem::exists(path); }
 
-Handle<DirectoryListener> fs::FileSystem::make_listener(std::string_view virtual_path, std::span<std::string_view> extensions)
+fs::DirectoryListener* fs::FileSystem::make_listener(std::string_view virtual_path, std::span<std::string_view> extensions)
 {
     ENG_ASSERT(virtual_path.size());
     auto* ptr = &m_dir_listeners_vec.emplace_back();
@@ -354,11 +354,10 @@ Handle<DirectoryListener> fs::FileSystem::make_listener(std::string_view virtual
     }
     auto physical_path = make_rel_path(virtual_path);
     physical_path = std::filesystem::absolute(physical_path);
-    const auto handle = Handle<DirectoryListener>{ (uintptr_t)ptr };
-    auto listener = std::make_shared<Win32DirChangeHandle>(virtual_path, physical_path, handle);
+    auto listener = std::make_shared<Win32DirChangeHandle>(virtual_path, physical_path, ptr);
     ptr->m_listener = listener;
     listener->start();
-    return handle;
+    return ptr;
 }
 
 fs::Path fs::FileSystem::make_rel_path(const fs::Path& virtual_path)

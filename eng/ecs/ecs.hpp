@@ -17,7 +17,6 @@
 #include <eng/common/types.hpp>
 #include "traits.hpp"
 #include <eng/common/sparseset.hpp>
-#include <eng/common/slotmap.hpp>
 #include <eng/common/slotallocator.hpp>
 #include <eng/common/indexed_hierarchy.hpp>
 #include <eng/common/logger.hpp>

@@ -132,7 +132,6 @@ add_executable(eng
     "eng/renderer/bindlesspool.cpp"
     "eng/renderer/staging_buffer.cpp" 
     "eng/renderer/submit_queue.cpp"
-	"eng/renderer/passes/renderpass.cpp"
 	"eng/renderer/rendergraph.cpp"
 	"eng/assets/asset_manager.cpp"
 	"eng/assets/loaders.cpp" 
@@ -235,7 +234,8 @@ target_precompile_headers(eng
 		<eng/assets/serialization.hpp>
 		<eng/common/flags.hpp>
         <eng/common/handle.hpp>
-        <eng/common/handleflatset.hpp>
+        <eng/common/pool.hpp>
+        <eng/common/uniquepool.hpp>
         <eng/common/hash.hpp>
         <eng/common/logger.hpp>
         <eng/common/sparseset.hpp>

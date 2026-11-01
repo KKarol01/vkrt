@@ -33,7 +33,6 @@ bool on_window_resize(float x, float y)
         r.settings.present_resolution = { x, y };
         r.settings.regenerate_swapchain = true;
     }
-    r.init_buffered_resources();
     return true;
 }
 
@@ -538,6 +537,8 @@ void Renderer::update()
         settings.render_resolution = settings.new_render_resolution;
         get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.render_resolution.x,
                                                settings.render_resolution.y);
+        // images sized to render resolution must follow it; frame 0 creates them below.
+        if(current_frame > 0) { init_buffered_resources(); }
     }
 
     if(settings.regenerate_swapchain)
@@ -582,14 +583,16 @@ void Renderer::update()
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
+                if(descriptor_allocator) { descriptor_allocator->release(*buf); }
                 backend->destroy_buffer(buf->get());
-                buffers.erase(Slotmap<Buffer, 1024>::SlotId{ buf->handle });
+                buffers.erase(*buf);
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
+                if(descriptor_allocator) { descriptor_allocator->release(*img); }
                 backend->destroy_image(img->get());
-                images.erase(Slotmap<Image, 1024>::SlotId{ img->handle });
+                images.erase(*img);
             }
         }
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
@@ -672,7 +675,7 @@ void Renderer::update()
                     .base_color_idx = descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)),
                     .base_color_factor = e->base_color_factor,
                 };
-                staging->copy(bufs.materials.get(), &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+                staging->copy(bufs.materials.get(), &gpumat, e.index() * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
         }
@@ -935,13 +938,9 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
-    auto it = buffers.emplace(std::move(buffer));
-    if(!it)
-    {
-        ENG_WARN("Could not create buffer {}", name);
-        return Handle<Buffer>{};
-    }
-    return Handle<Buffer>{ *it };
+    const auto handle = buffers.emplace(std::move(buffer));
+    if(!handle) { ENG_WARN("Could not create buffer {}", name); }
+    return handle;
 }
 
 void Renderer::queue_destroy(Handle<Buffer> buffer)
@@ -955,13 +954,9 @@ Handle<Image> Renderer::make_image(std::string_view name, Image&& image, Allocat
 {
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
-    auto it = images.emplace(std::move(image));
-    if(!it)
-    {
-        ENG_WARN("Could not create image {}", name);
-        return Handle<Image>{};
-    }
-    return Handle<Image>{ *it };
+    const auto handle = images.emplace(std::move(image));
+    if(!handle) { ENG_WARN("Could not create image {}", name); }
+    return handle;
 }
 
 void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
@@ -969,8 +964,9 @@ void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
     ENG_ASSERT(image);
     if(destroy_now)
     {
+        if(descriptor_allocator) { descriptor_allocator->release(image); }
         backend->destroy_image(image.get());
-        images.erase(*image);
+        images.erase(image);
     }
     else
     {
@@ -1114,16 +1110,14 @@ Handle<DescriptorLayout> Renderer::make_layout(const DescriptorLayout& info)
 {
     DescriptorLayout layout = info;
     backend->compile_layout(layout);
-    dlayouts.push_back(std::move(layout));
-    return Handle<DescriptorLayout>{ (u32)dlayouts.size() - 1 };
+    return dlayouts.emplace(std::move(layout));
 }
 
 Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 {
     PipelineLayout layout = info;
     backend->compile_layout(layout);
-    pplayouts.push_back(std::move(layout));
-    return Handle<PipelineLayout>{ (u32)pplayouts.size() - 1 };
+    return pplayouts.emplace(std::move(layout));
 }
 
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compilation compilation)
@@ -1135,17 +1129,15 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compila
         // with bindless, all pipeline layout should be the same
         ENG_ASSERT(p.info.layout == settings.common_layout);
     }
-    const auto it = std::ranges::find(pipelines, p);
-    const auto found_handle = it != pipelines.end();
+    const auto found_handle = pipelines.find_if([&p](const Pipeline& e) { return e == p; });
     if(!found_handle)
     {
-        auto handle = Handle<Pipeline>{ (Handle<Pipeline>::StorageType)pipelines.size() };
-        pipelines.push_back(std::move(p));
+        const auto handle = pipelines.emplace(std::move(p));
         if(compilation == Compilation::DEFERRED) { new_pipelines.push_back(handle); }
         else { compile_pipeline(handle); }
         return handle;
     }
-    return Handle<Pipeline>{ (Handle<Pipeline>::StorageType)std::distance(pipelines.begin(), it) };
+    return found_handle;
 }
 
 void Renderer::compile_pipeline(Handle<Pipeline> pipeline)
@@ -1189,17 +1181,15 @@ Handle<Material> Renderer::make_material(const Material& desc)
     Material mat = desc;
     if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpasses[(int)MeshPassType::OPAQUE]; }
     if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.white_texture); }
-    materials.push_back(std::move(mat));
-    const auto handle = Handle<Material>{ (u32)materials.size() - 1 };
+    const auto handle = materials.emplace(std::move(mat));
     new_materials.push_back(handle);
     return handle;
 }
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
-    const auto ret_handle = Handle<Geometry>{ (u32)geometries.size() };
+    const auto ret_handle = geometries.emplace();
     new_geometries.add_descriptor(ret_handle, batch);
-    geometries.emplace_back();
     return ret_handle;
 }
 
@@ -1485,11 +1475,7 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
 Handle<Mesh> Renderer::make_mesh(const MeshDescriptor& batch)
 {
     Mesh mesh{ .geometry = batch.geometry, .material = batch.material };
-    const auto found_it = std::find(meshes.begin(), meshes.end(), mesh);
-    if(found_it != meshes.end()) { return Handle<Mesh>{ (u32)std::distance(meshes.begin(), found_it) }; }
-    const u32 idx = meshes.size();
-    meshes.push_back(mesh);
-    return Handle<Mesh>{ idx };
+    return meshes.insert(mesh).handle;
 }
 
 void Renderer::make_blas(Handle<Geometry> geom)
@@ -1500,8 +1486,7 @@ void Renderer::make_blas(Handle<Geometry> geom)
 
 Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
 {
-    shader_effects.push_back(info);
-    return Handle<ShaderEffect>{ (u32)shader_effects.size() - 1 };
+    return shader_effects.emplace(info);
 }
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
@@ -1630,13 +1615,12 @@ Handle<Shader> ShaderManager::make_shader(const fs::Path& path)
     auto& file = m_files_map[path];
     if(!file.shader)
     {
-        auto id = m_shader_alloc.emplace(Shader::init(path));
-        if(!id)
+        auto h = m_shader_alloc.emplace(Shader::init(path));
+        if(!h)
         {
             ENG_ASSERT(false, "Failed to create new shader {}", path.string());
             return {};
         }
-        auto h = Handle<Shader>{ *id };
         file.path = path;
         file.shader = h;
         file.hash = 0;

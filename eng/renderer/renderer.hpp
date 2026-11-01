@@ -12,11 +12,9 @@
 #include <eng/renderer/backend.hpp>
 #include <eng/ecs/ecs.hpp>
 #include <eng/common/hash.hpp>
-#include <eng/common/slotmap.hpp>
-#include <eng/common/handleflatset.hpp>
+#include <eng/common/pool.hpp>
+#include <eng/common/uniquepool.hpp>
 #include <eng/common/slotallocator.hpp>
-#include <eng/ecs/components.hpp>
-#include <eng/assets/asset_manager.hpp>
 #include <eng/assets/serialization.hpp>
 #include <eng/fs/fs.hpp>
 #include <eng/renderer/mesh/mesh_renderer.hpp>
@@ -425,36 +423,6 @@ struct Image
     } md;
 };
 
-struct ImageMipsLayers
-{
-    Range32u mips{};
-    Range32u layers{};
-};
-
-struct ImageLayers
-{
-    u32 mip{};
-    Range32u layers{};
-};
-
-struct ImageBlit
-{
-    ImageLayers srclayers{};
-    ImageLayers dstlayers{};
-    Range3D32i srcrange{};
-    Range3D32i dstrange{};
-    ImageFilter filter{ ImageFilter::LINEAR };
-};
-
-struct ImageCopy
-{
-    ImageLayers srclayers{};
-    ImageLayers dstlayers{};
-    i32_3 srcoffset{};
-    i32_3 dstoffset{};
-    u32_3 extent{};
-};
-
 struct Sampler
 {
     static Sampler init(ImageFilter filtering, ImageAddressing addressing)
@@ -632,7 +600,7 @@ class ShaderManager
     };
 
   public:
-    auto& operator[](this auto& self, Handle<Shader> a) { return self.m_shader_alloc[*a]; }
+    auto* try_get(this auto& self, Handle<Shader> a) { return self.m_shader_alloc.try_get(a); }
 
     Handle<Shader> make_shader(const fs::Path& path);
     void parse_includes(File& f, File* pf);
@@ -642,7 +610,7 @@ class ShaderManager
     void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
     std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
-    Slotmap<Shader, 16, 8> m_shader_alloc;
+    Pool<Shader> m_shader_alloc;
     std::unordered_map<fs::Path, File> m_files_map;
 };
 
@@ -893,23 +861,23 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer, 16, 64> buffers;
-    Slotmap<Image, 16, 64> images;
+    Pool<Buffer> buffers;
+    Pool<Image> images;
 
-    HandleFlatSet<Sampler> samplers;
+    UniquePool<Sampler> samplers;
     ShaderManager m_shaders;
-    Handle<fs::DirectoryListener> new_shaders_listener;
+    fs::DirectoryListener* new_shaders_listener{};
 
-    std::vector<DescriptorLayout> dlayouts;
-    std::vector<PipelineLayout> pplayouts;
-    std::vector<Pipeline> pipelines;
+    Pool<DescriptorLayout> dlayouts;
+    Pool<PipelineLayout> pplayouts;
+    Pool<Pipeline> pipelines;
 
-    std::vector<Geometry> geometries;
+    Pool<Geometry> geometries;
     std::vector<Meshlet> meshlets;
-    std::vector<Material> materials;
-    std::vector<Mesh> meshes;
-    std::vector<ShaderEffect> shader_effects;
-    HandleFlatSet<MeshPass> mesh_passes;
+    Pool<Material> materials;
+    UniquePool<Mesh> meshes;
+    Pool<ShaderEffect> shader_effects;
+    UniquePool<MeshPass> mesh_passes;
     MeshRenderer mesh_renderer;
 
     BuildGeometryContext new_geometries;
@@ -954,21 +922,18 @@ inline IRendererBackend& get_renderer_backend() { return *get_renderer().backend
 } // namespace gfx
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(Slotmap<eng::gfx::Buffer, 1024>::SlotId{*handle}); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(Slotmap<eng::gfx::Image, 1024>::SlotId{*handle}); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().m_shaders[handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
-//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
-//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
-//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(*handle); });
+ENG_HANDLE_POOL(eng::gfx::Buffer, ::eng::gfx::get_renderer().buffers);
+ENG_HANDLE_POOL(eng::gfx::Image, ::eng::gfx::get_renderer().images);
+ENG_HANDLE_POOL(eng::gfx::Geometry, ::eng::gfx::get_renderer().geometries);
+ENG_HANDLE_POOL(eng::gfx::Mesh, ::eng::gfx::get_renderer().meshes);
+ENG_HANDLE_POOL(eng::gfx::Shader, ::eng::gfx::get_renderer().m_shaders);
+ENG_HANDLE_POOL(eng::gfx::Pipeline, ::eng::gfx::get_renderer().pipelines);
+ENG_HANDLE_POOL(eng::gfx::Material, ::eng::gfx::get_renderer().materials);
+ENG_HANDLE_POOL(eng::gfx::Sampler, ::eng::gfx::get_renderer().samplers);
+ENG_HANDLE_CONST_POOL(eng::gfx::DescriptorLayout, ::eng::gfx::get_renderer().dlayouts);
+ENG_HANDLE_CONST_POOL(eng::gfx::PipelineLayout, ::eng::gfx::get_renderer().pplayouts);
+ENG_HANDLE_POOL(eng::gfx::MeshPass, ::eng::gfx::get_renderer().mesh_passes);
+ENG_HANDLE_CONST_POOL(eng::gfx::ShaderEffect, ::eng::gfx::get_renderer().shader_effects);
 
 namespace serialization 
 {

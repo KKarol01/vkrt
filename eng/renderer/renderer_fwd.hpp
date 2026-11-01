@@ -1,12 +1,20 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <future>
 #include <optional>
+#include <span>
+#include <utility>
+#include <vector>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
 #include <eng/common/hash.hpp>
+#include <eng/common/logger.hpp>
+#include <eng/string/stack_string.hpp>
 #include <eng/assets/serialization.hpp>
 
 // Windows macro. Expands to '2'. Don't need it, compiles without it. Thanks MS.
@@ -398,7 +406,6 @@ enum class DiscardContents : u8
 class Renderer;
 struct ImageBlockData;
 struct Shader;
-struct DescriptorSet;
 struct DescriptorLayout;
 struct PipelineCreateInfo;
 struct PushRange;
@@ -406,7 +413,6 @@ struct PipelineLayout;
 struct Pipeline;
 struct Geometry;
 struct ShaderEffect;
-struct MeshPassCreateInfo;
 struct MeshPass;
 struct Material;
 struct Mesh;
@@ -416,62 +422,48 @@ struct Buffer;
 struct BufferView;
 struct Image;
 struct ImageView;
-struct ImageMipsLayers;
-struct ImageLayers;
-struct ImageBlit;
-struct ImageCopy;
 struct Sampler;
-struct Texture;
 struct MeshDescriptor;
 struct InstanceSettings;
 struct BLASInstanceSettings;
-struct VsmData;
 struct Swapchain;
 struct DebugGeometry;
 struct DescriptorResource;
+class MeshRenderer;
 
+class ICommandBuffer;
+class ICommandPool;
 class CommandBufferVk;
 class CommandPoolVk;
 enum class SyncType;
 struct SyncCreateInfo;
 struct Sync;
 class SubmitQueue;
+struct QueryPoolCreateInfo;
+struct QueryPool;
+struct TimestampQuery;
+struct ScopedTimestampQuery;
 
 class ImGuiRenderer;
-class BindlessPool;
 class StagingBuffer;
-enum class QueryType : u8;
-struct QueryPoolCreateInfo;
+class IDescriptorSetAllocator;
+struct DescriptorSetVk;
+
 struct QueryPoolMetadataVk;
 struct GeometryMetadataVk;
-struct QueryPool;
-class SubmitQueue;
 struct ImageMetadataVk;
 struct ImageViewMetadataVk;
 struct ShaderMetadataVk;
 struct PipelineMetadataVk;
 struct DescriptorLayoutMetadataVk;
-struct VkDescriptorPoolMetadata;
-struct DescriptorSetMetadataVk;
 struct PipelineLayoutMetadataVk;
 struct SamplerMetadataVk;
 struct BufferMetadataVk;
-struct IDescriptorSetAllocator;
-class ICommandPool;
-class ICommandBuffer;
-struct TimestampQuery;
-struct ScopedTimestampQuery;
 
 class RGRenderGraph;
 struct RGResource;
 struct RGAccess;
 struct RGBuilder;
-
-struct MeshInstance;
-struct InstanceBatch;
-struct IndirectDrawParams;
-struct IndirectBatch;
-class MeshRenderData;
 
 struct BufferView
 {
@@ -500,6 +492,36 @@ struct ImageView
     ImageFormat format{};
     u32 src_subresource{};
     u32 dst_subresource{ ~0u };
+};
+
+struct ImageMipsLayers
+{
+    Range32u mips{};
+    Range32u layers{};
+};
+
+struct ImageLayers
+{
+    u32 mip{};
+    Range32u layers{};
+};
+
+struct ImageBlit
+{
+    ImageLayers srclayers{};
+    ImageLayers dstlayers{};
+    Range3D32i srcrange{};
+    Range3D32i dstrange{};
+    ImageFilter filter{ ImageFilter::LINEAR };
+};
+
+struct ImageCopy
+{
+    ImageLayers srclayers{};
+    ImageLayers dstlayers{};
+    i32_3 srcoffset{};
+    i32_3 dstoffset{};
+    u32_3 extent{};
 };
 
 inline constexpr size_t get_vertex_component_size(VertexComponent comp)

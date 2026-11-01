@@ -59,6 +59,10 @@ class IDescriptorSetAllocator
 
     virtual u32 get_bindless(const DescriptorResource& view) { return ~0u; }
 
+    // Frees descriptors of a resource that is about to be destroyed.
+    virtual void release(Handle<Buffer> buffer) {}
+    virtual void release(Handle<Image> image) {}
+
     virtual void flush(CommandBufferVk* cmd) = 0;
     // virtual void reset() = 0;
 };
@@ -87,10 +91,14 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 
     u32 get_bindless(const DescriptorResource& view) override;
 
+    void release(Handle<Buffer> buffer) override;
+    void release(Handle<Image> image) override;
+
     void flush(CommandBufferVk* cmd) override;
 
   private:
     u32 bind_resource(const DescriptorResource& desc);
+    void release_slots(std::unordered_map<u32, std::vector<Slot>>& views, u32 key);
     void write_descriptor(DescriptorType type, const void* view, u32 slot);
     SlotAllocatorType& get_slot_allocator(DescriptorType type)
     {

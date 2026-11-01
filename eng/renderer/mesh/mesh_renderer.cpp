@@ -191,7 +191,7 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
         for(auto i = 0u; i < g.size; ++i)
         {
             gpuinstanceids.push_back(GPUInstanceId{
-                .cmdi = cmdoff, .resi = g.offset, .insti = g.offset + i, .mati = *vec[g.offset + i].material });
+                .cmdi = cmdoff, .resi = g.offset, .insti = g.offset + i, .mati = vec[g.offset + i].material.index() });
         }
         ++cmdoff;
     }

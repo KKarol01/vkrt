@@ -17,7 +17,7 @@ template <class... Ts> struct Visitor : Ts...
  from different systems, storages, etc.
 
  Initially all bits are set to 1, and that is an invalid state.
- In it, the id always compares to false.
+ In it, the id converts to false. Two invalid ids compare equal.
 
  Dereference operator returns the underlying value.
  */
@@ -29,8 +29,8 @@ template <typename T, std::integral Storage> struct TypedId
     constexpr explicit TypedId(StorageType handle) : handle{ handle } {}
     constexpr StorageType& operator*() { return handle; }
     constexpr const StorageType& operator*() const { return handle; }
-    constexpr bool operator==(const TypedId& a) const { return (bool)*this && (bool)a && handle == a.handle; }
-    constexpr auto operator<=>(const TypedId& a) const { return handle <=> a.handle; }
+    constexpr bool operator==(const TypedId& a) const = default;
+    constexpr auto operator<=>(const TypedId& a) const = default;
     constexpr explicit operator bool() const { return handle != INVALID_VALUE; }
     StorageType handle{ INVALID_VALUE };
 };

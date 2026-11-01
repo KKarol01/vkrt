@@ -102,6 +102,21 @@ void DescriptorSetAllocatorBindlessVk::bind_resources(u32 slot, std::span<const 
 
 u32 DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResource& view) { return bind_resource(view); }
 
+void DescriptorSetAllocatorBindlessVk::release(Handle<Buffer> buffer) { release_slots(buffer_views, *buffer); }
+
+void DescriptorSetAllocatorBindlessVk::release(Handle<Image> image) { release_slots(image_views, *image); }
+
+void DescriptorSetAllocatorBindlessVk::release_slots(std::unordered_map<u32, std::vector<Slot>>& views, u32 key)
+{
+    auto it = views.find(key);
+    if(it == views.end()) { return; }
+    for(auto& s : it->second)
+    {
+        s.allocator->erase(SlotAllocatorType::Slot{ s.value });
+    }
+    views.erase(it);
+}
+
 void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
 {
     if(writes.size() > 0)
