@@ -43,7 +43,7 @@ void MeshRenderData::build()
     });
 
     std::vector<GPUInstanceId> insts;
-    std::vector<IndexedIndirectDrawCommand> cmds;
+    std::vector<GPUIndexedIndirectDrawCommand> cmds;
     std::vector<u32> counts;
     insts.reserve(built_instances.size());
     cmds.reserve(built_instances.size());
@@ -66,7 +66,7 @@ void MeshRenderData::build()
         {
             prev_meshlet = inst.meshlet_index;
             const auto& mlt = r.meshlets[inst.meshlet_index];
-            cmds.push_back(IndexedIndirectDrawCommand{ .indexCount = mlt.index_count,
+            cmds.push_back(GPUIndexedIndirectDrawCommand{ .indexCount = mlt.index_count,
                                                        .instanceCount = 0,
                                                        .firstIndex = mlt.index_offset,
                                                        .vertexOffset = mlt.vertex_offset,

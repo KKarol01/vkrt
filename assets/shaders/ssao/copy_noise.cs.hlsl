@@ -1,23 +1,15 @@
-#include "assets/shaders/common.hlsli"
+#include "ssao.shared.hlsli"
 
-struct PushConstants
-{
-    ENG_UINT NoiseBufferIndex;
-    ENG_UINT OutNoiseRWTextureIndex;
-};
-[[vk::push_constant]] PushConstants pc;
+ENG_PUSH_CONSTANTS(GPUSSAOCopyNoiseParams)
 
 [numthreads(8, 8, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
+    RWTexture2D<float2> out_noise = pc.out_noise.get();
     uint2 outsize;
-    gRWTextures2Dfloat2[pc.OutNoiseRWTextureIndex].GetDimensions(outsize.x, outsize.y);
+    out_noise.GetDimensions(outsize.x, outsize.y);
     
-    if (any(thread_id.xy >= outsize))
-    {
-        return;
-    }
+    if (any(thread_id.xy >= outsize)) { return; }
  
-    uint noiseidx = (thread_id.y * outsize.x + thread_id.x) * 2;
-    gRWTextures2Dfloat2[pc.OutNoiseRWTextureIndex][thread_id.xy] = gRWBuffers[pc.NoiseBufferIndex].Load<float2>((noiseidx) * sizeof(float));
+    out_noise[thread_id.xy] = pc.noise.load(thread_id.y * outsize.x + thread_id.x);
 }

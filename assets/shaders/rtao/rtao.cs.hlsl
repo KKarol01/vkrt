@@ -1,12 +1,14 @@
-#include "common.hlsli"
+#include "assets/shaders/ssao/ssao.shared.hlsli"
 #include "assets/shaders/util.hlsli"
+
+ENG_PUSH_CONSTANTS(GPUAOParams)
 
 #define LOCAL_SIZE 8
 #define NUM_RAYS 64
 
 float3 get_camera_pos()
 {
-    return get_grwb(GPUEngConstants, 0).cam_pos;
+    return pc.engine.load().cam_pos;
 }
 
 float IGN(float2 pixel)
@@ -48,13 +50,19 @@ float3x3 make_tbn(float3 n)
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
-    Texture2D<float> in_depth = gTextures2Dfloat[pc.DepthTextureIndex];
-    Texture2D<float4> in_normal = gTexture2Ds[pc.NormalTextureIndex];
-    RWTexture2D<float4> out_image = gRWTextures2Dfloat4[pc.AORWTextureIndex];
+    const GPUEngConstants consts = pc.engine.load();
+    Texture2D<float> in_depth = pc.depth.get();
+    Texture2D<float4> in_normal = pc.normal.get();
+    RWTexture2D<float4> out_image = pc.out_ao.get();
 
     uint2 size;
     out_image.GetDimensions(size.x, size.y);
     if(any(thread_id.xy >= size)) return;
+    if(!pc.scene.is_valid())
+    {
+        out_image[thread_id.xy] = float4(1.0, 1.0, 1.0, 1.0); // no TLAS: unoccluded
+        return;
+    }
 
     float2 uv = (float2(thread_id.xy) + 0.5) / float2(size);
 
@@ -66,14 +74,11 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 		return; 
 	}
 	
-    float3 pos_v = unproject_inf_revz_depth(float3(uv*2.0 - 1.0, depth));
+    float3 pos_v = unproject_inf_revz_depth(consts.proj, float3(uv*2.0 - 1.0, depth));
 
-    // 2. Get normal (assume view-space)
-    float3 normal_v = normalize(in_normal[thread_id.xy].xyz);
-
-    // 3. Convert to world space
-    float3 pos_w = mul(get_grwb(GPUEngConstants, 0).inv_view, float4(pos_v, 1)).xyz;
-    float3 normal_w = normalize(mul((float3x3)get_grwb(GPUEngConstants, 0).inv_view, normal_v));
+    // 2. Convert to world space (gbuffer normal is already world-space)
+    float3 pos_w = mul(consts.inv_view, float4(pos_v, 1)).xyz;
+    float3 normal_w = normalize(in_normal.Load(int3(thread_id.xy, 0)).xyz);
 
     float3x3 tbn = make_tbn(normal_w);
 
@@ -91,11 +96,11 @@ void main(uint3 thread_id : SV_DispatchThreadID)
         RayDesc ray;
         ray.Origin    = pos_w;
         ray.Direction = ray_dir;
-        ray.TMin      = get_grwb(GPUEngAOSettings, 0).bias;
-        ray.TMax      = get_grwb(GPUEngAOSettings, 0).radius;
+        ray.TMin      = pc.ao.bias;
+        ray.TMax      = pc.ao.radius;
 
         RayQuery<RAY_FLAG_FORCE_OPAQUE> q;
-        q.TraceRayInline(gTLASs[pc.SceneTlasIndex], RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
+        q.TraceRayInline(pc.scene.get(), RAY_FLAG_FORCE_OPAQUE, 0xFF, ray);
 
         q.Proceed();
 

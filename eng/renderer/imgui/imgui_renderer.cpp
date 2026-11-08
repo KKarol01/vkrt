@@ -1,5 +1,6 @@
 #include "imgui_renderer.hpp"
 #include <eng/renderer/renderer.hpp>
+#include <assets/shaders/imgui/imgui.shared.hlsli>
 #include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/staging_buffer.hpp>
@@ -126,20 +127,11 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
             cmd->bind_index(index_buffer.get(), 0, VK_INDEX_TYPE_UINT16);
             cmd->bind_pipeline(pipeline.get());
-            {
-                float scale[2];
-                scale[0] = 2.0f / draw_data->DisplaySize.x;
-                scale[1] = 2.0f / draw_data->DisplaySize.y;
-                float translate[2];
-                translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
-                translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
-                cmd->push_constants(ShaderStage::ALL, scale, { 0, 8 });
-                cmd->push_constants(ShaderStage::ALL, translate, { 8, 8 });
-            }
-
-            DescriptorResource set0[5]{};
-            set0[4] = DescriptorResource::storage_buffer(vertex_buffer);
-            cmd->bind_resources(0, set0);
+            GPUImGuiParams params{};
+            params.scale = { 2.0f / draw_data->DisplaySize.x, 2.0f / draw_data->DisplaySize.y };
+            params.translate = { -1.0f - draw_data->DisplayPos.x * params.scale.x,
+                                 -1.0f - draw_data->DisplayPos.y * params.scale.y };
+            params.vertices = get_bindless_storage_buffer_index(vertex_buffer);
 
             cmd->begin_rendering(rendering_info);
             {
@@ -186,9 +178,8 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
                     cmd->set_scissors(&scissor, 1);
 
                     const auto tid = (u32)imcmd->GetTexID();
-                    DescriptorResource bindresources[6]{};
-                    bindresources[5] = DescriptorResource::sampled_image(Handle<Image>{ tid });
-                    cmd->bind_resources(1, bindresources);
+                    params.texture = get_bindless_sampled_image_index(Handle<Image>{ tid });
+                    cmd->push_constants(params);
                     cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
                                       imcmd->VtxOffset + global_vtx_offset, 0);
                 }

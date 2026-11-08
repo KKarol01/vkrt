@@ -331,7 +331,7 @@ ICommandBuffer* RGBuilder::open_cmd_buf()
     pass->query->index = get_renderer().current_data->timestamp_pool->allocate_queries(2);
     pass->cmd->reset_query_indices(pass->query->pool, pass->query->index, 2);
     pass->cmd->write_timestamp(pass->query->pool, PipelineStage::ALL, pass->query->index);
-    gfx::set_debug_name(((CommandBufferVk*)pass->cmd)->cmd, pass->name.as_view());
+    gfx::set_debug_name(((CommandBufferVk*)pass->cmd)->m_cmd, pass->name.as_view());
     return pass->cmd;
 }
 

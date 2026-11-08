@@ -1,4 +1,7 @@
-#include "common.hlsli"
+#include "ssao.shared.hlsli"
+#include "assets/shaders/util.hlsli"
+
+ENG_PUSH_CONSTANTS(GPUAOParams)
 #define LOCAL_SIZE 8
 
 static const uint N_SECTORS = 32u;
@@ -27,9 +30,13 @@ uint update_sectors(float min_horizon, float max_horizon, uint bitfield)
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
+    const GPUEngConstants consts = pc.engine.load();
+    Texture2D<float> depth_tex = pc.depth.get();
+    Texture2D<float4> normal_tex = pc.normal.get();
+    Texture2D<float4> color_tex = pc.color.get();
+    RWTexture2D<float4> out_ao = pc.out_ao.get();
 	uint2 dims;
-    gOutAOImage.GetDimensions(dims.x, dims.y);
-	const GPUEngConstants consts = get_grwb(GPUEngConstants, 0);
+    out_ao.GetDimensions(dims.x, dims.y);
     float2 thread_uv = (float2(dtid.xy) + 0.5f) / float2(dims.xy);
 	
     if(any(dtid.xy >= dims)) { return; }
@@ -39,9 +46,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
 	float2 frontBackHorizon = 0.0;
     const float2 aspect = dims.yx / dims.x;
     
-    const float depth = gDepthTexture.SampleLevel(gSamplerNearest, thread_uv, 0).x;
-    const float3 position = depth_to_view_pos(dtid.xy, dims, depth);
-	const float3 normal = mul(consts.view, float4(get_gt(Normal).SampleLevel(gSamplerNearest, thread_uv, 0).xyz, 0.0)).xyz;
+    const float depth = depth_tex.SampleLevel(gSamplerNearest, thread_uv, 0).x;
+    const float3 position = depth_to_view_pos(consts.proj, dtid.xy, dims, depth);
+	const float3 normal = mul(consts.view, float4(normal_tex.SampleLevel(gSamplerNearest, thread_uv, 0).xyz, 0.0)).xyz;
     const float3 camera = normalize(-position);
     
     const float sample_radius = 8.0;
@@ -78,10 +85,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
 			
 			if(any(sampleUV < 0.0) || any(sampleUV > 1.0)) { continue; }
 			
-			float sampleDepth = gDepthTexture.SampleLevel(gSamplerNearest, sampleUV, 0).x;
-			float3 samplePosition = depth_to_view_pos(uint2(sampleUV * dims), dims, sampleDepth);
-			float3 sampleNormal = mul(consts.view, float4(get_gt(Normal).SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
-			float3 sampleLight = get_gt(Color).SampleLevel(gSamplerLinear, sampleUV, 0).xyz;
+			float sampleDepth = depth_tex.SampleLevel(gSamplerNearest, sampleUV, 0).x;
+			float3 samplePosition = depth_to_view_pos(consts.proj, uint2(sampleUV * dims), dims, sampleDepth);
+			float3 sampleNormal = mul(consts.view, float4(normal_tex.SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
+			float3 sampleLight = color_tex.SampleLevel(gSamplerLinear, sampleUV, 0).xyz;
 			
 			float3 sampleDistance = samplePosition - position;
 			float sampleLength = length(sampleDistance);
@@ -115,14 +122,14 @@ void main(uint3 dtid : SV_DispatchThreadID)
     
     float4 current_signal = float4(lighting, visibility);
 
-	//gOutAOImage[dtid.xy] *= 0.5;
+	//out_ao[dtid.xy] *= 0.5;
 
     // =========================================================================
     // SPATIOTEMPORAL ACCUMULATION
     // =========================================================================
     
     // // 1. fetch velocity and reproject
-    // Texture2D<float2> tex_velocity = get_gt(Velocity, float2);
+    // Texture2D<float2> tex_velocity = pc.velocity.get();
     // float2 velocity = tex_velocity.SampleLevel(gSamplerNearest, thread_uv, 0);
     // float2 prev_uv = thread_uv - velocity;
     
@@ -144,7 +151,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
         // float3 prev_normal = mul(consts.prev_view, float4(tex_prev_normal.SampleLevel(gSamplerNearest, prev_uv, 0).xyz, 0.0)).xyz;
         
         // // Unproject the history depth to view space
-        // float3 prev_pos = unproject_inf_revz_depth(float3(prev_uv * 2.0f - 1.0f, prev_depth_val));
+        // float3 prev_pos = unproject_inf_revz_depth(consts.proj, float3(prev_uv * 2.0f - 1.0f, prev_depth_val));
         
         // // Compare view-space Z distance (e.g., 0.2 meters threshold)
         // if (abs(position.z - prev_pos.z) > 0.2f) 
@@ -182,6 +189,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
     // }
     
     // // Write out final blended result and history length
-    // gOutAOImage[dtid.xy] = output_signal;
+    // out_ao[dtid.xy] = output_signal;
     // out_history_len[dtid.xy] = history_length;
 }

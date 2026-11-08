@@ -3,6 +3,8 @@
 #include <random>
 #include <type_traits>
 #include <eng/renderer/renderer.hpp>
+#include <assets/shaders/ssao/ssao.shared.hlsli>
+#include <assets/shaders/velocity/velocity.shared.hlsli>
 #include <eng/renderer/vulkan/vulkan_backend.hpp> // todo: remove this
 #include <eng/engine.hpp>
 #include <eng/renderer/rendergraph.hpp>
@@ -316,7 +318,7 @@ struct Pass
 //     GTAO() : Pass("GTAO", RenderOrder::POST_Z)
 //     {
 //         auto& r = get_renderer();
-//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
+//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/gtao.cs.hlsl" }));
 //         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
@@ -660,15 +662,15 @@ struct MeshPass : public Pass
                 vkrinfo.layerCount = 1;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (u32)render_res.x, (u32)render_res.y } };
-                DescriptorResource shaderresources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::storage_buffer(b.get_buf(d.instances)),
+                const GPUMeshPassParams params{
+                    .engine = get_bindless_storage_buffer_index(b.get_buf(d.constants)),
+                    .instances = get_bindless_storage_buffer_index(b.get_buf(d.instances)),
                 };
                 auto* cmd = b.open_cmd_buf();
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
-                cmd->bind_resources(0, shaderresources);
+                cmd->push_constants(params);
                 r.mesh_renderer.draw(m_type, *cmd);
                 cmd->end_rendering();
             });
@@ -707,21 +709,21 @@ struct VelocityBuffer : public Pass
                 auto& r = get_renderer();
                 d.constants = b.import_resource(r.current_data->render_resources.constants);
                 d.constants = b.read_buffer(d.constants);
-                // d.prev_constants = b.read_buffer(r.prev_data->render_resources.constants);
+                d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
+                d.prev_constants = b.read_buffer(d.prev_constants);
                 d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
                 d.out_vel = b.read_write_image(data.gbuffer[(int)GBufferType::VELOCITY]);
             },
             [=](RGBuilder& b, const PassOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
-                DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.depth)),
-                    DescriptorResource::storage_image(b.get_img(d.out_vel)),
-                };
-                cmd->bind_resources(1, resources);
                 cmd->bind_pipeline(m_pp.get());
+                cmd->push_constants(GPUVelocityParams{
+                    .engine = get_bindless_storage_buffer_index(b.get_buf(d.constants)),
+                    .prev_engine = get_bindless_storage_buffer_index(b.get_buf(d.prev_constants)),
+                    .depth = get_bindless_sampled_image_index(b.get_img(d.depth)),
+                    .out_velocity = get_bindless_storage_image_index(b.get_img(d.out_vel)),
+                });
                 cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
             });
     }
@@ -739,7 +741,7 @@ struct SSAO : public Pass
         m_pp_arr[(int)AOMode::SSAO] =
             r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::GTAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/gtao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::RTAO] =
             r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::SSILVB] =
@@ -799,12 +801,11 @@ struct SSAO : public Pass
                     auto& r = get_renderer();
                     auto* cmd = b.open_cmd_buf();
 
-                    DescriptorResource resources[]{
-                        DescriptorResource::storage_buffer(b.get_buf(d.noise_buf)),
-                        DescriptorResource::storage_image(b.get_img(d.out_noise_img)),
-                    };
                     cmd->bind_pipeline(copypp.get());
-                    cmd->bind_resources(1, resources);
+                    cmd->push_constants(GPUSSAOCopyNoiseParams{
+                        .noise = get_bindless_storage_buffer_index(b.get_buf(d.noise_buf)),
+                        .out_noise = get_bindless_storage_image_index(b.get_img(d.out_noise_img)),
+                    });
                     ENG_ASSERT(tex_sz == 8);
                     cmd->dispatch(1, 1, 1);
                     r.destroy_pipeline(copypp);
@@ -860,17 +861,20 @@ struct SSAO : public Pass
             [this](RGBuilder& b, const PassSSAOOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
-                cmd->bind_pipeline(m_pp_arr[(int)r.settings.gfx_settings.ao_mode].get());
-                DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.depth)),
-                    DescriptorResource::sampled_image(b.get_img(d.noise)),
-                    DescriptorResource::sampled_image(b.get_img(d.normals)),
-                    DescriptorResource::sampled_image(b.get_img(d.opaque)),
-                    DescriptorResource::sampled_image(b.get_img(d.velocity)),
-                    DescriptorResource::storage_image(b.get_img(d.out_ao)),
+                const auto& gfx = r.settings.gfx_settings;
+                GPUAOParams params{
+                    .engine = get_bindless_storage_buffer_index(b.get_buf(d.constants)),
+                    .ao = gfx.ao_settings,
+                    .depth = get_bindless_sampled_image_index(b.get_img(d.depth)),
+                    .noise = get_bindless_sampled_image_index(b.get_img(d.noise)),
+                    .normal = get_bindless_sampled_image_index(b.get_img(d.normals)),
+                    .color = get_bindless_sampled_image_index(b.get_img(d.opaque)),
+                    .velocity = get_bindless_sampled_image_index(b.get_img(d.velocity)),
+                    .out_ao = get_bindless_storage_image_index(b.get_img(d.out_ao)),
                 };
-                cmd->bind_resources(1, resources);
+                if(r.settings.gfx_settings.ao_mode == AOMode::RTAO) { params.scene = get_bindless_tlas_index(r.bufs.geom_tlas); }
+                cmd->push_constants(params);
+                cmd->bind_pipeline(m_pp_arr[(int)gfx.ao_mode].get());
                 cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
             });
     }

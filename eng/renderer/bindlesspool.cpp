@@ -3,7 +3,7 @@
 #include <eng/renderer/submit_queue.hpp>
 #include <eng/renderer/vulkan/vulkan_backend.hpp>
 #include <eng/renderer/vulkan/vulkan_structs.hpp>
-#include <assets/shaders/common.hlsli>
+#include <assets/shaders/bindless.hlsli>
 #include <eng/renderer/vulkan/to_vk.hpp>
 
 namespace eng
@@ -78,28 +78,6 @@ DescriptorSetAllocatorBindlessVk::DescriptorSetAllocatorBindlessVk(const Pipelin
     set = pool.allocate(layout0, 0);
 }
 
-void DescriptorSetAllocatorBindlessVk::bind_resources(u32 slot, std::span<const DescriptorResource> descriptors,
-                                                      const PipelineLayout& layout)
-{
-    slot = 0; // slot 0, because bindless requires all pipeline layouts to be the same and have one descriptor layout/descriptor table
-    if(layout.layout.size() != 1)
-    {
-        ENG_ASSERT(false, "Invalid slot index {}", slot);
-        return;
-    }
-    const auto& setlayout = layout.layout[slot].get();
-    for(auto i = 0u; i < descriptors.size(); ++i)
-    {
-        const auto& desc = descriptors[i];
-        if(!desc) { continue; }
-        const auto binding = i;
-        ENG_ASSERT(desc.index != ~0u); // if index > 0, binding should be saved and all with index > 0 be treated as one binding of an array
-        u32 bindless_index = bind_resource(desc);
-        push_values[binding] = bindless_index;
-        push_ranges.push_back({ binding, 1 });
-    }
-}
-
 u32 DescriptorSetAllocatorBindlessVk::get_bindless(const DescriptorResource& view) { return bind_resource(view); }
 
 void DescriptorSetAllocatorBindlessVk::release(Handle<Buffer> buffer) { release_slots(buffer_views, *buffer); }
@@ -125,13 +103,9 @@ void DescriptorSetAllocatorBindlessVk::flush(CommandBufferVk* cmd)
         writes.clear();
         buf_writes.clear();
         img_writes.clear();
+        tlas_writes.clear();
+        tlas_handles.clear();
     }
-    for(const auto& range : push_ranges)
-    {
-        cmd->push_constants(ShaderStage::ALL, &push_values[range.offset],
-                            { (u32)(range.offset * sizeof(u32)), (u32)(range.size * sizeof(u32)) });
-    }
-    push_ranges.clear();
     cmd->bind_sets(&set, 1);
 }
 
@@ -244,10 +218,10 @@ void DescriptorSetAllocatorBindlessVk::write_descriptor(DescriptorType type, con
     else if(type == DescriptorType::ACCELERATION_STRUCTURE)
     {
         auto* info = &tlas_writes.emplace_back();
-        const auto& engview = *(const VkAccelerationStructureKHR*)view;
+        auto* handle = &tlas_handles.emplace_back(*(const VkAccelerationStructureKHR*)view);
         info->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
         info->accelerationStructureCount = 1;
-        info->pAccelerationStructures = &engview;
+        info->pAccelerationStructures = handle;
         write.pNext = info;
     }
     else

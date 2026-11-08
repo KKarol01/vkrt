@@ -1,4 +1,7 @@
-#include "common.hlsli"
+#include "ssao.shared.hlsli"
+#include "assets/shaders/util.hlsli"
+
+ENG_PUSH_CONSTANTS(GPUAOParams)
 
 #define LOCAL_SIZE 8
 
@@ -30,16 +33,17 @@ float GTAO(
 	float2 noise
 ) 
 {
+    const float4x4 proj = pc.engine.load().proj;
     const float NUM_SAMPLES = 8.0;
     const float NUM_DIRECTIONS = 8.0;
-	float3 pos_v = unproject_inf_revz_depth(uv, depthTex); 
+	float3 pos_v = unproject_inf_revz_depth(proj, uv, depthTex); 
 	float3 view_v = normalize(-pos_v);
 	
     float2 scaling = float2(
-		get_grwb(GPUEngConstants, 0).proj[0][0],
-		get_grwb(GPUEngConstants, 0).proj[1][1]) / -pos_v.z;
+		proj[0][0],
+		proj[1][1]) / -pos_v.z;
 	//noise.xy *= scaling;
-	scaling *= get_grwb(GPUEngAOSettings, 0).radius;
+	scaling *= pc.ao.radius;
 	
 	
 	float visibility = 0.0;
@@ -68,7 +72,7 @@ float GTAO(
 			{
 				float s = (k + noise.y) / NUM_SAMPLES;
 				float2 sample_uv = uv + (side * 2.0 - 1.0) * s * scaling * float2(omega.x, omega.y);
-				float3 sample_pos = unproject_inf_revz_depth(sample_uv, depthTex);
+				float3 sample_pos = unproject_inf_revz_depth(proj, sample_uv, depthTex);
 				float3 delta = sample_pos - pos_v;
 				//if(delta.z >= 0.5) { continue; }
 				const float thickness = 0.5;
@@ -92,20 +96,20 @@ float GTAO(
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
-    Texture2D<float> in_depth = gTextures2Dfloat[pc.DepthTextureIndex];
-	RWTexture2D<float4> in_normal = gRWTextures2Dfloat4[pc.NormalRWTextureIndex];
-	Texture2D<float4> in_noise = gTexture2Ds[pc.NoiseTextureIndex];
-	RWTexture2D<float4> out_ao = gRWTextures2Dfloat4[pc.AORWTextureIndex];
+    Texture2D<float> in_depth = pc.depth.get();
+	Texture2D<float4> in_normal = pc.normal.get();
+	RWTexture2D<float4> out_ao = pc.out_ao.get();
+	const GPUEngConstants consts = pc.engine.load();
 	
 	uint2 out_size;
 	out_ao.GetDimensions(out_size.x, out_size.y);
 	if(any(thread_id.xy >= out_size)) { return; }
 	
 	const float2 uv = float2(thread_id.xy + 0.5) / float2(out_size.xy);
-	const float3 normal_v = in_normal[thread_id.xy].xyz;
-	const float3 pos_v = unproject_inf_revz_depth(uv, in_depth);
+	const float3 normal_v = normalize(mul(consts.view, float4(in_normal.Load(int3(thread_id.xy, 0)).xyz, 0.0)).xyz);
+	const float3 pos_v = unproject_inf_revz_depth(consts.proj, uv, in_depth);
 	float2 noise = IGN2D(thread_id.xy); 
-	const float gtao = GTAO(in_depth, in_normal[thread_id.xy].xyz, gSamplerStates[ENG_SAMPLER_NEAREST], uv, noise);
+	const float gtao = GTAO(in_depth, normal_v, gSamplerStates[ENG_SAMPLER_NEAREST], uv, noise);
 	
 	out_ao[thread_id.xy] = float4(gtao.xxx, 1.0);
 } 

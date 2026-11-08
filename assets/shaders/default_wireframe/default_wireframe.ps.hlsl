@@ -1,4 +1,4 @@
-#include "common.hlsli"
+#include "default_wireframe.shared.hlsli"
 
 float4 main(VS_OUT input) : SV_Target0
 {

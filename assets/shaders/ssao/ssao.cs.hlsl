@@ -1,4 +1,7 @@
-#include "common.hlsli"
+#include "ssao.shared.hlsli"
+#include "assets/shaders/util.hlsli"
+
+ENG_PUSH_CONSTANTS(GPUAOParams)
 
 static const uint LOCAL_SIZE = 8;
 static const uint SAMPLE_COUNT = 64;
@@ -31,18 +34,24 @@ uint update_sectors(float min_horizon, float max_horizon, uint bitfield)
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)
 {
+    const GPUEngConstants consts = pc.engine.load();
+    Texture2D<float> depth_tex = pc.depth.get();
+    Texture2D<float2> noise_tex = pc.noise.get();
+    Texture2D<float4> normal_tex = pc.normal.get();
+    Texture2D<float4> color_tex = pc.color.get();
+    RWTexture2D<float4> out_ao = pc.out_ao.get();
 	uint3 dtid = thread_id;
 #if 0
     uint2 dims;
-    gOutAOImage.GetDimensions(dims.x, dims.y);
+    out_ao.GetDimensions(dims.x, dims.y);
     if (any(thread_id.xy >= dims.xy)) { return; }
 
     const float2 uv = (float2(thread_id.xy) + 0.5) / float2(dims);
-    float depth = gDepthTexture.Load(int3(thread_id.xy, 0)).x; 
+    float depth = depth_tex.Load(int3(thread_id.xy, 0)).x; 
 
     if (depth < 1e-5) 
     { 
-        gOutAOImage[thread_id.xy] = float4(1.0, 1.0, 1.0, 1.0); 
+        out_ao[thread_id.xy] = float4(1.0, 1.0, 1.0, 1.0); 
         return; 
     }
 
@@ -50,17 +59,17 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     const float radius = 0.8; //in_ao_settings.Radius;
     const float bias = 0.01; //in_ao_settings.Bias;
 
-    float3 vs_pos = depth_to_view_pos(thread_id.xy, dims, depth);
-    float3 normal = calculate_normal_from_depth(int2(thread_id.xy), int2(dims), gDepthTexture);
+    float3 vs_pos = depth_to_view_pos(consts.proj, thread_id.xy, dims, depth);
+    float3 normal = calculate_normal_from_depth(consts.proj, int2(thread_id.xy), int2(dims), depth_tex);
 
     float2 noise_scale = float2(dims) / 4.0; 
-    float3 random_vec = float3(gNoiseTexture.SampleLevel(gSamplerStates[ENG_SAMPLER_LINEAR], uv * noise_scale, 0).rg, 0.0);
+    float3 random_vec = float3(noise_tex.SampleLevel(gSamplerStates[ENG_SAMPLER_LINEAR], uv * noise_scale, 0).rg, 0.0);
 
     float3 tangent = normalize(random_vec - normal * dot(random_vec, normal));
     float3 bitangent = cross(normal, tangent);
     float3x3 TBN = float3x3(tangent, bitangent, normal);
 
-    const float4x4 proj = get_grwb(GPUEngConstants, 0).proj;
+    const float4x4 proj = consts.proj;
     float occlusion = 0.0;
     
     for (uint i = 0; i < SAMPLE_COUNT; ++i)
@@ -89,7 +98,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
         if (any(offset_uv < 0.0) || any(offset_uv > 1.0)) { continue; }
 
         uint2 offset_coord = uint2(offset_uv * float2(dims));
-        float sample_depth = gDepthTexture.Load(int3(offset_coord, 0)).x;
+        float sample_depth = depth_tex.Load(int3(offset_coord, 0)).x;
         
         float scene_vs_z = -proj[2][3] / sample_depth;
 
@@ -98,12 +107,11 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     }
 
     float ao_factor = 1.0 - (occlusion / float(SAMPLE_COUNT));
-    gOutAOImage[thread_id.xy] = float4(ao_factor.xxx, 1.0);
-    //gOutAOImage[thread_id.xy] = float4(normal.xyz, 1.0);
+    out_ao[thread_id.xy] = float4(ao_factor.xxx, 1.0);
+    //out_ao[thread_id.xy] = float4(normal.xyz, 1.0);
 #else
 	uint2 dims;
-    gOutAOImage.GetDimensions(dims.x, dims.y);
-	const GPUEngConstants consts = get_grwb(GPUEngConstants, 0);
+    out_ao.GetDimensions(dims.x, dims.y);
     float2 thread_uv = (float2(dtid.xy) + 0.5f) / float2(dims.xy);
 	
     if(any(dtid.xy >= dims)) { return; }
@@ -113,9 +121,9 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 	float2 frontBackHorizon = 0.0;
     const float2 aspect = dims.yx / dims.x;
     
-    const float depth = gDepthTexture.SampleLevel(gSamplerNearest, thread_uv, 0).x;
-    const float3 position = depth_to_view_pos(dtid.xy, dims, depth);
-	const float3 normal = mul(consts.view, float4(get_gt(Normal).SampleLevel(gSamplerNearest, thread_uv, 0).xyz, 0.0)).xyz;
+    const float depth = depth_tex.SampleLevel(gSamplerNearest, thread_uv, 0).x;
+    const float3 position = depth_to_view_pos(consts.proj, dtid.xy, dims, depth);
+	const float3 normal = mul(consts.view, float4(normal_tex.SampleLevel(gSamplerNearest, thread_uv, 0).xyz, 0.0)).xyz;
     const float3 camera = normalize(-position);
     
     const float sample_radius = 8.0;
@@ -152,10 +160,10 @@ void main(uint3 thread_id : SV_DispatchThreadID)
 			
 			if(any(sampleUV < 0.0) || any(sampleUV > 1.0)) { continue; }
 			
-			float sampleDepth = gDepthTexture.SampleLevel(gSamplerNearest, sampleUV, 0).x;
-			float3 samplePosition = depth_to_view_pos(uint2(sampleUV * dims), dims, sampleDepth);
-			float3 sampleNormal = mul(consts.view, float4(get_gt(Normal).SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
-			float3 sampleLight = get_gt(Color).SampleLevel(gSamplerLinear, sampleUV, 0).xyz;
+			float sampleDepth = depth_tex.SampleLevel(gSamplerNearest, sampleUV, 0).x;
+			float3 samplePosition = depth_to_view_pos(consts.proj, uint2(sampleUV * dims), dims, sampleDepth);
+			float3 sampleNormal = mul(consts.view, float4(normal_tex.SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
+			float3 sampleLight = color_tex.SampleLevel(gSamplerLinear, sampleUV, 0).xyz;
 			
 			float3 sampleDistance = samplePosition - position;
 			float sampleLength = length(sampleDistance);
@@ -185,7 +193,7 @@ void main(uint3 thread_id : SV_DispatchThreadID)
     lighting /= n_slices;
     
     // Output AO to R Channel, and optional lighting inside GBA channels if needed
-    //gOutAOImage[dtid.xy] *= float4(visibility.xxx, 1.0);
-    gOutAOImage[dtid.xy] += float4(lighting.xyz, 1.0)*0.0; 
+    //out_ao[dtid.xy] *= float4(visibility.xxx, 1.0);
+    out_ao[dtid.xy] += float4(lighting.xyz, 1.0)*0.0; 
 #endif
 }

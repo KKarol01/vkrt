@@ -1520,7 +1520,7 @@ void RendererBackendVk::make_blas(Geometry& geom, ASRequirements& reqs, ICommand
         align_up2(vk_build_info.scratchData.deviceAddress, props.min_acceleration_structure_scratch_offset_alignment);
     ENG_ASSERT(vk_build_info.scratchData.deviceAddress % props.min_acceleration_structure_scratch_offset_alignment == 0);
 
-    auto vkcmd = ((CommandBufferVk*)cmd)->cmd;
+    auto vkcmd = ((CommandBufferVk*)cmd)->m_cmd;
     const VkAccelerationStructureBuildRangeInfoKHR* const vp_vk_build_ranges[]{ vk_build_ranges.data() };
     vkCmdBuildAccelerationStructuresKHR(vkcmd, 1, &vk_build_info, vp_vk_build_ranges);
 }
@@ -1598,7 +1598,7 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
     vk_build_info.scratchData.deviceAddress =
         align_up2(vk_build_info.scratchData.deviceAddress, props.min_acceleration_structure_scratch_offset_alignment);
 
-    auto vkcmd = ((CommandBufferVk*)cmd)->cmd;
+    auto vkcmd = ((CommandBufferVk*)cmd)->m_cmd;
     vk::VkAccelerationStructureBuildRangeInfoKHR tlas_range_info{};
     tlas_range_info.primitiveCount = vk_prim_counts[0];
     const VkAccelerationStructureBuildRangeInfoKHR* const vp_vk_build_ranges[]{ &tlas_range_info };

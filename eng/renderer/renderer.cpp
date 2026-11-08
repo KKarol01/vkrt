@@ -25,6 +25,35 @@ namespace eng
 namespace gfx
 {
 
+u32 get_bindless_storage_buffer_index(const BufferView& view)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(view)) };
+}
+u32 get_bindless_storage_buffer_index(Handle<Buffer> buffer)
+{
+    return get_bindless_storage_buffer_index(BufferView::init(buffer));
+}
+u32 get_bindless_sampled_image_index(const ImageView& view)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::sampled_image(view)) };
+}
+u32 get_bindless_sampled_image_index(Handle<Image> image)
+{
+    return get_bindless_sampled_image_index(ImageView::init(image));
+}
+u32 get_bindless_storage_image_index(const ImageView& view)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::storage_image(view)) };
+}
+u32 get_bindless_storage_image_index(Handle<Image> image)
+{
+    return get_bindless_storage_image_index(ImageView::init(image));
+}
+u32 get_bindless_tlas_index(TopAccelerationStructure tlas)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::acceleration_struct(tlas)) };
+}
+
 bool on_window_resize(float x, float y)
 {
     auto& r = get_renderer();
@@ -672,7 +701,7 @@ void Renderer::update()
             if(backend->caps.supports_bindless)
             {
                 GPUMaterial gpumat{
-                    .base_color_idx = descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)),
+                    .base_color = get_bindless_sampled_image_index(e->base_color_texture),
                     .base_color_factor = e->base_color_factor,
                 };
                 staging->copy(bufs.materials.get(), &gpumat, e.index() * sizeof(gpumat), sizeof(gpumat));
@@ -781,12 +810,9 @@ void Renderer::compile_rendergraph()
             auto* c = get_engine().camera;
             GPUEngConstants constants{};
 
-            constants.GPUVertexPositionBufferIndex =
-                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.positions));
-            constants.GPUVertexAttributeBufferIndex =
-                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.attributes));
-            constants.GPUMaterialBufferIndex =
-                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.materials));
+            constants.vertex_positions = get_bindless_storage_buffer_index(bufs.positions);
+            constants.vertex_attributes = get_bindless_storage_buffer_index(bufs.attributes);
+            constants.materials = get_bindless_storage_buffer_index(bufs.materials);
             constants.view = c->get_view();
             constants.proj = c->get_projection();
             constants.proj_view = c->get_projection() * c->get_view();
@@ -1484,10 +1510,7 @@ void Renderer::make_blas(Handle<Geometry> geom)
     new_blases.push_back(geom);
 }
 
-Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
-{
-    return shader_effects.emplace(info);
-}
+Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info) { return shader_effects.emplace(info); }
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
 

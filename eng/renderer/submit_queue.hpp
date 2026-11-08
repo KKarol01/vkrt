@@ -9,6 +9,9 @@
 #include <string>
 #include <vector>
 #include <deque>
+#include <array>
+#include <cstring>
+#include <type_traits>
 
 namespace eng
 {
@@ -36,9 +39,15 @@ class ICommandBuffer
 
     virtual void bind_index(const Buffer& index, u32 offset, VkIndexType type) = 0;
     virtual void bind_pipeline(const Pipeline& pipeline) = 0;
-    virtual void bind_resources(u32 slot, std::span<DescriptorResource> resources) = 0;
 
     virtual void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range) = 0;
+
+    template <typename T> void push_constants(const T& params)
+    {
+        static_assert(std::is_trivially_copyable_v<T>);
+        static_assert(sizeof(T) <= PushRange::MAX_PUSH_BYTES, "Params struct does not fit in push constants");
+        push_constants(ShaderStage::ALL, &params, { 0u, (u32)sizeof(T) });
+    }
 
     virtual void set_viewports(const VkViewport* viewports, u32 count) = 0;
     virtual void set_scissors(const VkRect2D* scissors, u32 count) = 0;
@@ -72,13 +81,13 @@ class ICommandBuffer
         bool wait{}; // or signal
     };
     std::vector<SyncDep> sync_deps;
-    std::array<std::span<DescriptorResource>, PipelineLayout::MAX_SETS> descs_to_bind;
 };
 
 class CommandBufferVk : public ICommandBuffer
 {
   public:
-    CommandBufferVk(VkCommandBuffer cmd, IDescriptorSetAllocator* setalloc) : cmd(cmd), descriptor_allocator(setalloc)
+    CommandBufferVk(VkCommandBuffer cmd, IDescriptorSetAllocator* setalloc)
+        : m_cmd(cmd), m_descriptor_allocator(setalloc)
     {
     }
     ~CommandBufferVk() override = default;
@@ -103,8 +112,8 @@ class CommandBufferVk : public ICommandBuffer
     void bind_index(const Buffer& index, u32 offset, VkIndexType type) override;
     void bind_pipeline(const Pipeline& pipeline) override;
     void bind_sets(const void* sets, u32 count = 1);
-    void bind_resources(u32 slot, std::span<DescriptorResource> resources) override;
 
+    using ICommandBuffer::push_constants;
     void push_constants(Flags<ShaderStage> stages, const void* const values, Range32u range) override;
 
     void set_viewports(const VkViewport* viewports, u32 count) override;
@@ -126,10 +135,12 @@ class CommandBufferVk : public ICommandBuffer
     void reset_query_indices(QueryPool* pool, u32 query_index, u32 count) override;
     void write_timestamp(QueryPool* pool, Flags<PipelineStage> stage, u32 index) override;
 
-    VkCommandBuffer cmd{};
-    const Pipeline* current_pipeline{};
-    IDescriptorSetAllocator* descriptor_allocator{};
-    bool rebind_desc_sets{ true };
+    VkCommandBuffer m_cmd{};
+    const Pipeline* m_current_pipeline{};
+    IDescriptorSetAllocator* m_descriptor_allocator{};
+    std::array<std::byte, PushRange::MAX_PUSH_BYTES> m_push_data{};
+    u32 m_push_start{ ~0u };
+    u32 m_push_end{ 0u };
 };
 
 class ICommandPool

@@ -18,6 +18,7 @@
 #include <eng/assets/serialization.hpp>
 #include <eng/fs/fs.hpp>
 #include <eng/renderer/mesh/mesh_renderer.hpp>
+#include <assets/shaders/common.hlsli>
 
 // Windows macro. Expands to '1'. Don't need it, compiles without it. Thanks MS.
 #undef TRANSPARENT
@@ -79,6 +80,15 @@ struct DescriptorResource
     DescriptorType type{};
     u32 index{ ~0u };
 };
+
+// Allocate (or reuse) a slot in the bindless table for the resource. The descriptor write happens at the next draw/dispatch.
+u32 get_bindless_storage_buffer_index(const BufferView& view);
+u32 get_bindless_storage_buffer_index(Handle<Buffer> buffer);
+u32 get_bindless_sampled_image_index(const ImageView& view);
+u32 get_bindless_sampled_image_index(Handle<Image> image);
+u32 get_bindless_storage_image_index(const ImageView& view);
+u32 get_bindless_storage_image_index(Handle<Image> image);
+u32 get_bindless_tlas_index(TopAccelerationStructure tlas);
 
 struct ImageBlockData
 {
@@ -747,6 +757,7 @@ class Renderer
     struct GraphicsSettings
     {
         AOMode ao_mode{ AOMode::SSILVB };
+        GPUEngAOSettings ao_settings{ .radius = 1.0f, .bias = 0.01f };
     };
 
     struct Settings

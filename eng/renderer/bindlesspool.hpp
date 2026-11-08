@@ -55,14 +55,13 @@ class IDescriptorSetAllocator
   public:
     virtual ~IDescriptorSetAllocator() = default;
 
-    virtual void bind_resources(u32 slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) = 0;
-
     virtual u32 get_bindless(const DescriptorResource& view) { return ~0u; }
 
     // Frees descriptors of a resource that is about to be destroyed.
     virtual void release(Handle<Buffer> buffer) {}
     virtual void release(Handle<Image> image) {}
 
+    // Writes pending descriptors and binds the descriptor table(s) on cmd.
     virtual void flush(CommandBufferVk* cmd) = 0;
     // virtual void reset() = 0;
 };
@@ -87,8 +86,6 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
     DescriptorSetAllocatorBindlessVk(const PipelineLayout& global_bindless_layout);
     ~DescriptorSetAllocatorBindlessVk() override = default;
 
-    void bind_resources(u32 slot, std::span<const DescriptorResource> descriptors, const PipelineLayout& layout) override;
-
     u32 get_bindless(const DescriptorResource& view) override;
 
     void release(Handle<Buffer> buffer) override;
@@ -112,13 +109,12 @@ class DescriptorSetAllocatorBindlessVk : public IDescriptorSetAllocator
 
     DescriptorPoolVk pool{};
     DescriptorSetVk set{};
-    std::array<u32, PushRange::MAX_PUSH_BYTES / sizeof(u32)> push_values;
-    std::vector<Range32u> push_ranges;
 
     std::vector<VkWriteDescriptorSet> writes;
     std::deque<VkDescriptorBufferInfo> buf_writes;
     std::deque<VkDescriptorImageInfo> img_writes;
     std::deque<VkWriteDescriptorSetAccelerationStructureKHR> tlas_writes;
+    std::deque<VkAccelerationStructureKHR> tlas_handles;
 
     SlotAllocatorType storage_buffer_slots;
     SlotAllocatorType storage_image_slots;
