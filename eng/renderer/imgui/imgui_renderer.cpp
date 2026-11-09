@@ -98,11 +98,9 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
 
             const auto out_res =
                 f32_2{ get_renderer().settings.present_resolution.x, get_renderer().settings.present_resolution.y };
-            data.output = b.create_resource("imgui output",
-                                            Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT),
-                                            RGClear::color());
-            data.output = b.access_color(data.output);
-            get_renderer().current_data->render_resources.final_color = b.as_res_id(data.output);
+            data.output = b.access_color(b.create_resource(
+                "imgui output", Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT),
+                RGClear::color()));
         },
         [this](RGBuilder& builder, const ImPassData& data) {
             auto& r = get_renderer();
@@ -113,7 +111,7 @@ ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
             const auto& img = builder.graph->get_img(data.output).get();
 
             vk::VkRenderingAttachmentInfo r_col_atts[1]{};
-            r_col_atts[0].imageView = builder.graph->get_acc(data.output).image_view.get_md().vk->view;
+            r_col_atts[0].imageView = builder.get_img(data.output).get_md().vk->view;
             r_col_atts[0].imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
             r_col_atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             r_col_atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;

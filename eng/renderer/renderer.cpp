@@ -395,7 +395,6 @@ void Renderer::init_perframes()
 {
     static_assert(frame_delay == 2);
     current_data = &frame_datas[0];
-    prev_data = &frame_datas[1];
     for(auto i = 0u; i < frame_delay; ++i)
     {
         frame_datas[i].cmdpool = gq->make_command_pool();
@@ -425,54 +424,6 @@ void Renderer::init_bufs()
         const auto num_tiles_y = (u32)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
         bufs.fwdp_num_tiles = num_tiles;
-    }
-}
-
-void Renderer::init_buffered_resources()
-{
-    char resname[128]{};
-    size_t resnamelen;
-    const auto make_res_name = [&resname, &resnamelen, this](const char* const name, u32 idx) {
-        resnamelen = ENG_FMT_TO_N(resname, 127, "{}{}", name, idx);
-        return std::string_view{ resname, resnamelen };
-    };
-
-    for(auto i = 0u; i < std::size(frame_datas); ++i)
-    {
-        auto& fd = frame_datas[i];
-        auto& rr = fd.render_resources;
-        if(!rr.constants)
-        {
-            rr.constants =
-                make_buffer(make_res_name("Constants", i), Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT));
-        }
-
-        struct BufferedImage
-        {
-            const char* name{};
-            Handle<Image>* rrimg{};
-            Image img{};
-        };
-        for(auto& [name, rrimg, img] :
-            { BufferedImage{ "Opaque", &rr.opaque,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
-                                         ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Opaque Normals", &rr.normals,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format,
-                                         ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "Depth", &rr.depth,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT) },
-              BufferedImage{ "Velocity", &rr.velocity,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) },
-              BufferedImage{ "History Length", &rr.history_len,
-                             Image::init(settings.render_resolution.x, settings.render_resolution.y,
-                                         settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT) } })
-        {
-            if(*rrimg) { queue_destroy(*rrimg); }
-            *rrimg = make_image(make_res_name(name, i), Image{ img });
-        }
     }
 }
 
@@ -566,8 +517,6 @@ void Renderer::update()
         settings.render_resolution = settings.new_render_resolution;
         get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.render_resolution.x,
                                                settings.render_resolution.y);
-        // images sized to render resolution must follow it; frame 0 creates them below.
-        if(current_frame > 0) { init_buffered_resources(); }
     }
 
     if(settings.regenerate_swapchain)
@@ -585,8 +534,6 @@ void Renderer::update()
         }
         else { return; }
     }
-
-    if(current_frame == 0) { init_buffered_resources(); }
 
     for(auto* s : current_data->wait_syncs)
     {
@@ -768,45 +715,41 @@ void Renderer::update()
     }
 
     ++current_frame;
-    prev_data = current_data;
     current_data = &frame_datas[current_frame % frame_delay];
 }
 
 void Renderer::compile_rendergraph()
 {
-    struct ImportedResources
+    struct SetupTargets
     {
-        RGResourceId constants;
-        RGResourceId depth;
-        RGResourceId opaque;
-        RGResourceId normals;
-        RGResourceId velocity;
-        RGResourceId final_color;
+        RGBuffer constants;
     };
-    const auto import_resources = rgraph->add_graphics_pass<ImportedResources>(
+    rgraph->add_graphics_pass<SetupTargets>(
         "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
-        [this](RGBuilder& b, ImportedResources& d) {
-            char resname[128]{};
-            size_t resnamelen;
-            const auto make_res_name = [&resname, &resnamelen, this](const char* const name) {
-                resnamelen = ENG_FMT_TO_N(resname, 127, "{}{}", name, current_frame % frame_delay);
-                return std::string_view{ resname, resnamelen };
+        [this](RGBuilder& b, SetupTargets& d) {
+            // Persistent, graph-owned targets. history = 2: the graph keeps two copies and alternates between them,
+            // so previous() gives last frame's. They are recreated when the description (e.g. resolution) changes.
+            const auto res = settings.render_resolution;
+            const auto image = [&res](ImageFormat format, Flags<ImageUsage> usage) {
+                return Image::init(res.x, res.y, format, usage);
             };
+            const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
+            const auto storage_usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
 
-            auto& rr = current_data->render_resources;
-            d.constants = b.as_res_id(b.write_buffer(b.import_resource(rr.constants)));
-            d.depth = b.as_res_id(b.import_resource(rr.depth, RGClear::depth_stencil(0.0)));
-            d.opaque = b.as_res_id(b.import_resource(rr.opaque, RGClear::color()));
-            d.normals = b.as_res_id(b.import_resource(rr.normals, RGClear::color()));
-            d.velocity = b.as_res_id(b.import_resource(rr.velocity, RGClear::color()));
-            d.final_color = b.as_res_id(b.create_resource(
-                make_res_name("Final Color"),
-                Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format,
-                            ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                RGClear::color(), true));
-            rr.final_color = d.final_color;
+            auto& t = targets;
+            t = RenderTargets{};
+            t.constants = b.write_buffer(
+                b.persistent("Constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), 2));
+            t.depth = b.persistent("Depth", image(settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
+                                   RGClear::depth_stencil(0.0f), 2);
+            t.opaque = b.persistent("Opaque", image(settings.color_format, color_usage), RGClear::color(), 2);
+            t.normals = b.persistent("Opaque Normals", image(settings.normal_format, color_usage), RGClear::color(), 2);
+            t.velocity = b.persistent("Velocity", image(settings.velocity_format, storage_usage), RGClear::color(), 2);
+            t.history_len = b.persistent("History Length", image(settings.history_len_format, storage_usage), {}, 2);
+            t.final_color = b.persistent("Final Color", image(settings.color_format, color_usage), RGClear::color(), 2);
+            d.constants = t.constants;
         },
-        [this](RGBuilder& b, const ImportedResources& d) {
+        [this](RGBuilder& b, const SetupTargets& d) {
             auto* c = get_engine().camera;
             GPUEngConstants constants{};
 
@@ -828,32 +771,31 @@ void Renderer::compile_rendergraph()
 
     pass::PassInitData pass_data{};
 
-    pass_data.depth_buffer = import_resources.depth;
+    pass_data.depth_buffer = targets.depth;
     passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
 
-    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
+    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = targets.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = targets.depth;
     // passes.velocity->init(rgraph, pass_data);
 
-    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = targets.opaque;
+    pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = targets.normals;
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
     // pass_data = {};
-    // pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
+    // pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = targets.opaque;
     // passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
     struct CopyToAccum
     {
-        RGAccessId input;
-        RGAccessId output;
+        RGImage input;
+        RGImage output;
     };
     rgraph->add_graphics_pass<CopyToAccum>(
         "Copy To Accum", RenderOrder::POST,
         [=, this](RGBuilder& b, CopyToAccum& d) {
-            d.input = b.copy_source(import_resources.opaque);
-            d.output = b.copy_dest(import_resources.final_color);
+            d.input = b.copy_source(targets.opaque);
+            d.output = b.copy_dest(targets.final_color);
         },
         [this](RGBuilder& b, const CopyToAccum& d) {
             auto* cmd = b.open_cmd_buf();
@@ -861,31 +803,27 @@ void Renderer::compile_rendergraph()
         });
 
     pass_data = {};
-    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = import_resources.final_color;
-    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    // pass_data.prev_gbuffer[(int)pass::GBufferType::DIFFUSE] =  prev_data->render_resources.opaque;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::NORMAL] = prev_data->render_resources.normal;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::ACCUMULATION] = prev_data->render_resources.final_color;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::VELOCITY] = prev_data->render_resources.velocity;
-    //  pass_data.prev_gbuffer[(int)pass::GBufferType::DEPTH] = prev_data->render_resources.depth;
+    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = targets.opaque;
+    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = targets.normals;
+    pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = targets.final_color;
+    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = targets.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = targets.history_len;
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = targets.depth;
     passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);
 
     struct CopySwapchainData
     {
-        RGAccessId input;
-        RGAccessId output;
+        RGImage input;
+        RGImage output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
         "Copy To Swap", RenderOrder::PRESENT,
         [=, this](RGBuilder& b, CopySwapchainData& data) {
-            data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
-            data.output = b.import_resource(swapchain->get_image());
-            data.output = b.copy_dest(data.output);
+            // the UI output when there is one (it draws the scene into a panel), the scene otherwise
+            data.input = b.copy_source(imdata.output ? imdata.output : targets.final_color);
+            data.output = b.copy_dest(b.import_resource(swapchain->get_image()));
         },
         [this](RGBuilder& pb, const CopySwapchainData& data) {
             auto* cmd = pb.open_cmd_buf();
@@ -899,9 +837,9 @@ void Renderer::compile_rendergraph()
                                  .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
                                  .filter = ImageFilter::LINEAR });
         });
-    rgraph->add_graphics_pass<RGAccessId>(
+    rgraph->add_graphics_pass<RGImage>(
         "Present", RenderOrder::PRESENT,
-        [copyswapchaindata](RGBuilder& b, RGAccessId& output) {
+        [copyswapchaindata](RGBuilder& b, RGImage& output) {
             output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
         [this](RGBuilder& b, auto& data) {

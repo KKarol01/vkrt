@@ -118,207 +118,343 @@ class GPUTransientAllocator
     std::deque<Allocation> allocations;
 };
 
-RGAccessId RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
+namespace
 {
-    ENG_ASSERT(!clear);
-    auto layout = resource.is_buffer() ? ImageLayout::UNDEFINED : resource.as_image()->layout;
-    RGWaitSync* wait_sync{};
-    if(auto it = graph->persistent_resources.find(ENG_HASH(resource.name)); it != graph->persistent_resources.end())
+
+struct RGBarrier
+{
+    bool needed{};
+    Flags<PipelineStage> src_stage{};
+    Flags<PipelineAccess> src_access{};
+    ImageLayout old_layout{ ImageLayout::UNDEFINED };
+};
+
+RGBarrier update_state_and_produce_barrier(RGResourceState& s, Flags<PipelineStage> stage, Flags<PipelineAccess> access,
+                                           ImageLayout layout, bool is_image, bool discard)
+{
+    const bool is_write = (access & PipelineAccess::WRITES).any();
+    const bool is_read = (access & PipelineAccess::READS).any();
+    const bool layout_change = is_image && (discard || s.layout != layout);
+    RGBarrier b{};
+    b.old_layout = discard ? ImageLayout::UNDEFINED : s.layout;
+
+    if(layout_change || is_write)
     {
-        if(!resource.is_buffer() && it->second.last_layout != ImageLayout::UNDEFINED)
+        b.src_stage = s.write_stages | s.read_stages; // wait for all the reads and writes first
+        b.src_access = s.write_access;                // flush writes and invalidate caches
+        b.needed = layout_change || b.src_stage.any();
+        if(is_image) { s.layout = layout; }
+        s.read_stages = is_read ? stage : Flags<PipelineStage>{};
+        if(is_write)
         {
-            layout = it->second.last_layout;
+            s.write_stages = stage;
+            s.write_access = access & PipelineAccess::WRITES;
+            s.read_stages_accum = {};
+            s.read_accesses_accum = {};
         }
-        if(it->second.wait_sync.sync) { wait_sync = &it->second.wait_sync; }
+        // pure layout transition branch
+        else
+        {
+            s.write_stages = stage;
+            s.write_access = {};
+            s.read_stages_accum = stage;
+            s.read_accesses_accum = access;
+        }
+        return b;
     }
 
-    graph->resources.push_back(resource);
-    const auto ret = add_access(RGAccess{ .resource = RGResourceId{ (u32)graph->resources.size() - 1 },
-                                          .prev_access = {},
-                                          .buffer_view = {},
-                                          .layout = layout,
-                                          .stage = {},
-                                          .access = {},
-                                          .wait_sync = wait_sync });
-    return ret;
+    if(is_read)
+    {
+        const bool barrier_already_covers_that_read =
+            (stage & ~s.read_stages_accum).empty() && (access & ~s.read_accesses_accum).empty();
+        // if we need to synchronise with any writes and if this is the first time we're doing so for that stage+access in this read chain since last write
+        if(s.write_stages.any() && !barrier_already_covers_that_read)
+        {
+            b.needed = true;
+            b.src_stage = s.write_stages;
+            b.src_access = s.write_access;
+            s.read_stages_accum |= stage;
+            s.read_accesses_accum |= access;
+        }
+        s.read_stages |= stage;
+    }
+    return b;
 }
 
-RGAccessId RGBuilder::import_resource(const RGResource::NativeResource& resource, const std::optional<RGClear>& clear)
+void record_barrier_if_needed(auto&& get_cmd, RGResource& res, const RGAccess& acc, bool discard)
 {
-    if((resource.index() == 0 && !std::get<0>(resource)) || (resource.index() == 1 && !std::get<1>(resource)))
+    if(acc.stage.empty() && acc.access.empty()) { return; }
+
+    const bool is_image = !res.is_buffer();
+    const auto b = update_state_and_produce_barrier(res.state, acc.stage, acc.access,
+                                                    is_image ? acc.layout : ImageLayout::UNDEFINED, is_image, discard);
+    if(!b.needed) { return; }
+    if(is_image)
     {
-        static_assert(std::variant_size_v<RGResource::NativeResource> == 2);
-        return {};
+        get_cmd()->barrier(res.as_image().get(), b.src_stage, b.src_access, acc.stage, acc.access, b.old_layout, acc.layout);
+    }
+    else { get_cmd()->barrier(b.src_stage, b.src_access, acc.stage, acc.access); }
+}
+
+void get_or_init_resource_state(RGRenderGraph& graph, RGResource& res)
+{
+    if(res.is_persistent)
+    {
+        auto it = graph.persistent_states_map.find(RGResource::make_key(res.native));
+        if(it != graph.persistent_states_map.end())
+        {
+            res.state = it->second;
+            return;
+        }
+    }
+    RGResourceState s{};
+    if(!res.is_buffer()) { s.layout = res.as_image()->layout; }
+    if(res.is_aliased())
+    {
+        // may have been used earlier by previous resource that aliased -- wait
+        s.layout = ImageLayout::UNDEFINED;
+        s.write_stages = PipelineStage::ALL;
+        s.write_access = PipelineAccess::WRITES;
+    }
+    res.state = s;
+}
+
+void make_access_a_clear(RGAccess& acc, const RGResource& res, const RGClear& clear)
+{
+    if(res.is_buffer())
+    {
+        ENG_ERROR("Clearing buffers is not supported (\"{}\"); ignoring the clear.", res.name.as_view());
+        acc = RGAccess{};
+        return;
+    }
+    acc.image_view = ImageView::init(res.as_image());
+    acc.layout = ImageLayout::TRANSFER_DST;
+    acc.stage = PipelineStage::TRANSFER_BIT;
+    acc.access = PipelineAccess::TRANSFER_WRITE_BIT;
+    acc.clear = clear;
+}
+
+// Finds or (re)creates the copies of a persistent() resource and returns the one to use this frame.
+template <typename Desc, typename MakeFunc>
+RGResource::NativeResource acquire_persistent(RGRenderGraph& graph, std::string_view name, const Desc& desc,
+                                              u32 history, MakeFunc&& make)
+{
+    history = std::max(history, 1u);
+    const auto deschash = ENG_HASH(desc);
+    RGPersistentResource& pr = graph.persistent_resources[ENG_HASH(name)];
+    ENG_ASSERT(std::none_of(graph.resources.begin(), graph.resources.end(),
+                            [h = ENG_HASH(name)](const RGResource& r) { return r.name_hash == h; }),
+               "Persistent resource \"{}\" was requested twice in one frame.", name);
+    if(pr.hash != deschash || pr.copies.size() != history)
+    {
+        for(const auto& c : pr.copies)
+        {
+            graph.persistent_states_map.erase(RGResource::make_key(c));
+            std::visit([](auto h) { get_renderer().queue_destroy(h); }, c);
+        }
+        pr.copies.clear();
+        for(u32 i = 0; i < history; ++i)
+        {
+            const auto copy_name = history == 1 ? std::string{ name } : ENG_FMT("{} {}", name, i);
+            pr.copies.push_back(make(std::string_view{ copy_name }, Desc{ desc }));
+        }
+        pr.hash = deschash;
+    }
+    return pr.copies[graph.frame % history];
+}
+
+} // namespace
+
+u32 RGBuilder::add_resource(const RGResource& resource, const std::optional<RGClear>& clear)
+{
+    graph->resources.push_back(resource);
+    const u32 index = (u32)graph->resources.size() - 1;
+    const auto& res = graph->resources.back();
+    RGAccess acc{ .resource = index, .is_first = true, .buffer_view = {} };
+    // the first access is a no-op (no stages), unless it clears; give it a valid view either way
+    if(res.is_buffer()) { acc.buffer_view = BufferView::init(res.as_buffer()); }
+    else { acc.image_view = ImageView::init(res.as_image()); }
+    if(clear) { make_access_a_clear(acc, res, *clear); }
+    add_access(acc);
+    return index;
+}
+
+u32 RGBuilder::import_native(const RGResource::NativeResource& native, const std::optional<RGClear>& clear)
+{
+    const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
+                                 [&native](const auto& e) { return e.native == native; });
+    if(it != graph->resources.end())
+    {
+        const auto index = (u32)std::distance(graph->resources.begin(), it);
+        ENG_ASSERT(std::holds_alternative<Handle<Image>>(native));
+        if(clear)
+        {
+            RGAccess acc{ .resource = index, .buffer_view = {} };
+            make_access_a_clear(acc, *it, *clear);
+            add_access(acc);
+        }
+        return index;
     }
 
-    const auto it = std::find_if(graph->resources.begin(), graph->resources.end(),
-                                 [&resource](const auto& e) { return e.native == resource; });
-    if(it != graph->resources.end()) { return it->last_access; }
-
-    auto res = RGResource{ "", resource, true, false, clear };
+    // imported resources are persistent: their state is kept between frames, keyed by the handle
+    auto res = RGResource{ "", native, true };
     if(res.is_buffer()) { res.name = get_renderer().backend->get_debug_name(res.as_buffer().get()); }
     else { res.name = get_renderer().backend->get_debug_name(res.as_image().get()); }
-
-    const auto hash = ENG_HASH(res.name);
-    auto& pr = graph->persistent_resources[hash]; // make sure it exists for execute()
-    pr.hash = 0;                                  // imported resources don't need a hash.
-    if(pr.native != resource)
-    {
-        // same name, but a different (recreated) resource -- previous layout and syncs don't apply to it.
-        pr.wait_sync = {};
-        pr.last_layout = ImageLayout::UNDEFINED;
-    }
-    pr.native = resource;
-
-    return add_resource(std::move(res));
+    return add_resource(res, clear);
 }
 
-RGAccessId RGBuilder::create_resource(std::string_view name, Buffer&& a, bool persistent)
+RGImage RGBuilder::import_resource(Handle<Image> image, const std::optional<RGClear>& clear)
+{
+    if(!image) { return {}; }
+    return RGImage{ import_native(image, clear) };
+}
+
+RGBuffer RGBuilder::import_resource(Handle<Buffer> buffer)
+{
+    if(!buffer) { return {}; }
+    return RGBuffer{ import_native(buffer, {}) };
+}
+
+RGImage RGBuilder::create_resource(std::string_view name, Image&& desc, const std::optional<RGClear>& clear)
 {
     ENG_ASSERT(!name.empty());
-    const bool is_aliased = !persistent && !graph->memory_aliasing_disabled;
-    RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
-        if(!is_aliased)
-        {
-            const auto namehash = ENG_HASH(name);
-            const auto objecthash = ENG_HASH(a);
-            if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
-            {
-                if(it->second.hash != objecthash)
-                {
-                    // object has changed -- for example image resolution might have changed -- recreate
-                    get_renderer().queue_destroy(*std::get_if<Handle<Buffer>>(&it->second.native));
-                    graph->persistent_resources.erase(it);
-                }
-                else { return it->second.native; }
-            }
-            auto native_handle = get_renderer().make_buffer(name, std::move(a));
-            if(persistent)
-            {
-                auto res = graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
-                                                               std::forward_as_tuple(objecthash, native_handle));
-                ENG_ASSERT(res.second, "Name conflict with resource {} in pass {}", name, pass->name.as_view());
-            }
-            return native_handle;
-        }
-        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
-        return get_renderer().make_buffer(name, std::move(a), allocation_mode);
-    }();
-    return add_resource(RGResource{ name, native, persistent, is_aliased });
+    const auto image = get_renderer().make_image(name, std::move(desc), AllocateMemory::ALIASED);
+    return RGImage{ add_resource(RGResource{ name, image, false }, clear) };
 }
 
-RGAccessId RGBuilder::create_resource(std::string_view name, Image&& a, const std::optional<RGClear>& clear, bool persistent)
+RGBuffer RGBuilder::create_resource(std::string_view name, Buffer&& desc)
 {
     ENG_ASSERT(!name.empty());
-    const bool is_aliased = !persistent && !graph->memory_aliasing_disabled;
-    RGResource::NativeResource native = [this, &a, &name, persistent, is_aliased]() -> RGResource::NativeResource {
-        if(!is_aliased)
-        {
-            const auto namehash = ENG_HASH(name);
-            const auto objecthash = ENG_HASH(a);
-            if(auto it = graph->persistent_resources.find(namehash); it != graph->persistent_resources.end())
-            {
-                if(it->second.hash != objecthash)
-                {
-                    // object has changed -- for example image resolution might have changed -- recreate
-                    get_renderer().queue_destroy(*std::get_if<Handle<Image>>(&it->second.native));
-                    graph->persistent_resources.erase(it);
-                }
-                else { return it->second.native; }
-            }
-            auto native_handle = get_renderer().make_image(name, std::move(a));
-            if(persistent)
-            {
-                graph->persistent_resources.emplace(std::piecewise_construct, std::forward_as_tuple(namehash),
-                                                    std::forward_as_tuple(objecthash, native_handle));
-            }
-            return native_handle;
-        }
-        const AllocateMemory allocation_mode = is_aliased ? AllocateMemory::ALIASED : AllocateMemory::YES;
-        return get_renderer().make_image(name, std::move(a), allocation_mode);
-    }();
-    return add_resource(RGResource{ name, native, persistent, is_aliased, clear });
+    const auto buffer = get_renderer().make_buffer(name, std::move(desc), AllocateMemory::ALIASED);
+    return RGBuffer{ add_resource(RGResource{ name, buffer, false }) };
 }
 
-RGAccessId RGBuilder::add_access(const RGAccess& a)
+RGImage RGBuilder::persistent(std::string_view name, Image&& desc, const std::optional<RGClear>& clear, u32 history)
 {
-    const bool already_contains_resource = std::any_of(pass->accesses.begin(), pass->accesses.end(), [this, &a](RGAccessId id) {
-        auto& acc = graph->get_acc(id);
-        return !acc.is_first_access() && acc.resource == a.resource;
+    ENG_ASSERT(!name.empty());
+    const auto native = acquire_persistent(*graph, name, desc, history, [](std::string_view n, Image&& d) {
+        return RGResource::NativeResource{ get_renderer().make_image(n, std::move(d)) };
     });
-    if(already_contains_resource)
+    return RGImage{ add_resource(RGResource{ name, native, true }, clear) };
+}
+
+RGBuffer RGBuilder::persistent(std::string_view name, Buffer&& desc, u32 history)
+{
+    ENG_ASSERT(!name.empty());
+    const auto native = acquire_persistent(*graph, name, desc, history, [](std::string_view n, Buffer&& d) {
+        return RGResource::NativeResource{ get_renderer().make_buffer(n, std::move(d)) };
+    });
+    return RGBuffer{ add_resource(RGResource{ name, native, true }) };
+}
+
+namespace
+{
+const RGResource::NativeResource* get_previous_copy(RGRenderGraph& graph, const RGResource& res)
+{
+    ENG_ASSERT(res.name_hash, "previous() needs a resource created with persistent(), got \"{}\".", res.name.as_view());
+    const auto it = graph.persistent_resources.find(res.name_hash);
+    if(it == graph.persistent_resources.end()) { return nullptr; }
+    const auto& pr = it->second;
+    return &pr.copies[(graph.frame + pr.copies.size() - 1) % pr.copies.size()];
+}
+} // namespace
+
+RGImage RGBuilder::previous(RGImage image)
+{
+    if(!image) { return {}; }
+    const auto* native = get_previous_copy(*graph, graph->get_res(image));
+    if(!native) { return {}; }
+    return RGImage{ import_native(*native, {}) };
+}
+
+RGBuffer RGBuilder::previous(RGBuffer buffer)
+{
+    if(!buffer) { return {}; }
+    const auto* native = get_previous_copy(*graph, graph->get_res(buffer));
+    if(!native) { return {}; }
+    return RGBuffer{ import_native(*native, {}) };
+}
+
+u32 RGBuilder::add_access(const RGAccess& a)
+{
+    const auto& res = graph->get_res(a.resource);
+    if(!res.is_buffer() && a.stage.any())
     {
-        ENG_WARN("Pass \"{}\" already references this resource (\"{}\")", pass->name.as_view(),
-                 graph->get_res(a.resource).name.as_view());
-        return {};
+        // make sure this pass does not access the same resource twice
+        for(const auto id : pass->accesses)
+        {
+            const auto& other = graph->get_acc(id);
+            if(other.resource != a.resource || other.stage.empty() || other.layout == a.layout) { continue; }
+            ENG_WARN("Pass \"{}\" accesses \"{}\" in different layouts; the later access wins.", pass->name.as_view(),
+                     res.name.as_view());
+        }
     }
 
     graph->accesses.push_back(a);
-    const auto ret = RGAccessId{ (u32)graph->accesses.size() - 1 };
-    graph->get_res(ret).last_access = ret;
+    const auto ret = (u32)graph->accesses.size() - 1;
     pass->accesses.push_back(ret);
-    pass->stage_mask |= a.stage;
     return ret;
 }
 
-RGAccessId RGBuilder::access_resource(RGAccessId acc, ImageLayout layout, Flags<PipelineStage> stage,
-                                      Flags<PipelineAccess> access, std::optional<ImageFormat> format,
-                                      std::optional<ImageViewType> type, Range32u mips, Range32u layers)
+RGImage RGBuilder::access_resource(RGImage image, ImageLayout layout, Flags<PipelineStage> stage,
+                                   Flags<PipelineAccess> access, std::optional<ImageFormat> format,
+                                   std::optional<ImageViewType> type, Range32u mips, Range32u layers)
 {
-    if(!acc) { return RGAccessId{}; }
-    return add_access(RGAccess{
-        .resource = graph->get_acc(acc).resource,
-        .prev_access = acc,
-        .image_view = ImageView::init(graph->get_img(acc), format, type, mips.offset, mips.size, layers.offset, layers.size),
+    if(!image) { return {}; }
+    const auto last = [](Range32u r) { return r.size == ~0u ? ~0u : r.offset + r.size - 1; };
+    add_access(RGAccess{
+        .resource = image.index,
+        .image_view = ImageView::init(graph->get_img(image), format, type, mips.offset, last(mips), layers.offset, last(layers)),
         .layout = layout,
         .stage = stage,
         .access = access,
     });
+    return image;
 }
 
-RGAccessId RGBuilder::access_resource(RGAccessId acc, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
+RGBuffer RGBuilder::access_resource(RGBuffer buffer, Flags<PipelineStage> stage, Flags<PipelineAccess> access, Range64u range)
 {
-    if(!acc) { return RGAccessId{}; }
-    return add_access(RGAccess{
-        .resource = graph->get_acc(acc).resource,
-        .prev_access = acc,
-        .buffer_view = BufferView::init(graph->get_buf(acc), range.offset, range.size),
+    if(!buffer) { return {}; }
+    add_access(RGAccess{
+        .resource = buffer.index,
+        .buffer_view = BufferView::init(graph->get_buf(buffer), range.offset, range.size),
         .stage = stage,
         .access = access,
     });
+    return buffer;
 }
 
-RGResourceId RGBuilder::as_res_id(RGAccessId acc) const
+const RGAccess& RGBuilder::get_pass_acc(u32 resource, u32 nth) const
 {
-    if(!acc) { return {}; }
-    return graph->get_acc(acc).resource;
+    // the no-op access that only added the resource is used only if the pass has no other access to it
+    const RGAccess* found{};
+    u32 count = 0;
+    for(const auto id : pass->accesses)
+    {
+        const auto& acc = graph->get_acc(id);
+        if(acc.resource != resource) { continue; }
+        if(acc.is_first && !acc.clear) { continue; }
+        if(count++ == nth) { return acc; }
+        found = &acc;
+    }
+    if(nth == ~0u && found) { return *found; }
+    ENG_ASSERT(false, "Pass \"{}\" has no access {} to resource \"{}\".", pass->name.as_view(), nth,
+               graph->get_res(resource).name.as_view());
+    static const RGAccess null_access{ .buffer_view = {} };
+    return null_access;
 }
 
-RGAccessId RGBuilder::as_acc_id(RGResourceId res) const
+const RGAccess& RGBuilder::get_acc(RGImage image, u32 nth) const
 {
-    if(!res) { return {}; }
-    return graph->get_res(res).last_access;
+    ENG_ASSERT(image);
+    return get_pass_acc(image.index, nth);
 }
 
-const RGAccess& RGBuilder::get_acc(RGAccessId acc) const
+const RGAccess& RGBuilder::get_acc(RGBuffer buffer, u32 nth) const
 {
-    ENG_ASSERT(acc);
-    return graph->get_acc(acc);
+    ENG_ASSERT(buffer);
+    return get_pass_acc(buffer.index, nth);
 }
-
-const RGAccess& RGBuilder::get_acc(RGResourceId res) const
-{
-    ENG_ASSERT(res);
-    return graph->get_acc(res);
-}
-
-const BufferView& RGBuilder::get_buf(RGAccessId acc) const { return get_acc(acc).buffer_view; }
-
-const BufferView& RGBuilder::get_buf(RGResourceId acc) const { return get_acc(acc).buffer_view; }
-
-const ImageView& RGBuilder::get_img(RGAccessId acc) const { return get_acc(acc).image_view; }
-
-const ImageView& RGBuilder::get_img(RGResourceId acc) const { return get_acc(acc).image_view; }
 
 ICommandBuffer* RGBuilder::open_cmd_buf()
 {
@@ -359,112 +495,54 @@ void RGRenderGraph::compile()
     allocator = allocators[0];
     allocator->reset_pages();
 
-    const auto group_passes = [this] {
-        const auto get_earliest_group_for_pass = [this](const std::vector<RGAccessId>& accesses) -> u32 {
-            return std::accumulate(accesses.begin(), accesses.end(), 0u, [this](auto max, const auto& val) {
-                return std::max(max, [this, &val] {
-                    const auto& acc = get_acc(val);
-                    // access just created the resource, we can start right away.
-                    if(acc.is_first_access()) { return 0u; }
-                    const auto& res = get_res(val);
-                    // if current access is a write, we need to wait for previous reads and writes.
-                    if(acc.is_write() || passes_serialized)
-                    {
-                        return std::max(res.last_read_group + 1, res.last_write_group + 1);
-                    }
-                    if(acc.is_read())
-                    {
-                        const auto& pacc = get_acc(acc.prev_access);
-                        // if reading, we need to at least wait for previous writes, if any
-                        auto earliest = res.last_write_group + 1;
-                        // if reading, and layouts are not same, change layout and read in the next stage
-                        if(pacc.layout != acc.layout) { earliest = std::max(earliest, res.last_read_group + 1); }
-                        // if layouts are compatible, we can read at the same time.
-                        return earliest;
-                    }
-                    ENG_ASSERT(false);
-                    return ~0u;
-                }());
-            });
-        };
-        const auto update_resource_accesses = [this](const std::vector<RGAccessId>& accesses, u32 last_group) {
-            std::for_each(accesses.begin(), accesses.end(), [this, last_group](RGAccessId a) {
-                const auto& acc = get_acc(a);
-                auto& res = get_res(a);
-                if(acc.is_read()) { res.last_read_group = last_group; }
-                if(acc.is_write()) { res.last_write_group = last_group; }
-            });
-        };
-        groups.clear();
-        groups.resize(passes.size());
-        u32 last_gid = 0;
-        for(auto& p : passes)
+    // calculate lifetimes
+    for(auto i = 0u; i < passes.size(); ++i)
+    {
+        for(const auto a : passes[i].pass->accesses)
         {
-            const auto gid = get_earliest_group_for_pass(p.pass->accesses);
-            last_gid = std::max(last_gid, gid);
-            groups[gid].passes.push_back(&*p.pass);
-            update_resource_accesses(p.pass->accesses, gid);
+            auto& res = get_res(get_acc(a).resource);
+            if(res.first_pass == ~0u) { res.first_pass = i; }
+            res.last_pass = i;
         }
-        groups.resize(last_gid + 1);
-    };
-    const auto bind_aliased_memory_to_resources = [this] {
-        // Allocate memory from transient allocator for resources to be used during execution
-        std::set<RGResourceId> alive_res_set;
-        std::set<RGResourceId> res_to_remove;
-        const auto remove_unused_res = [this, &res_to_remove, &alive_res_set] {
-            for(auto e : res_to_remove)
-            {
-                auto& res = get_res(e);
-                alive_res_set.erase(e);
-                allocator->free(res.alloc);
-                res.alloc = nullptr;
-            }
-            res_to_remove.clear();
-        };
-        for(auto& g : groups)
-        {
-            remove_unused_res(); // remove from previous group
-            for(auto* p : g.passes)
-            {
-                for(const auto& ra : p->accesses)
-                {
-                    auto& acc = get_acc(ra);
-                    auto& res = get_res(ra);
-                    if(!res.is_aliased) { continue; }
-                    auto insertion = alive_res_set.insert(acc.resource);
-                    if(!insertion.second)
-                    {
-                        if(res.last_access == ra) { res_to_remove.insert(acc.resource); }
-                        continue;
-                    }
-                    // insertion happened, this resource has never had memory bound to it during this frame
-                    RendererMemoryRequirements reqs;
-                    void* alloc;
-                    void* base;
-                    size_t offset;
-                    if(res.is_buffer())
-                    {
-                        get_renderer().backend->get_memory_requirements(res.as_buffer().get(), reqs);
-                        alloc = allocator->allocate(reqs);
-                        allocator->get_offset_and_base(alloc, base, offset);
-                        get_renderer().backend->bind_aliasable_memory(res.as_buffer().get(), base, offset);
-                    }
-                    else
-                    {
-                        get_renderer().backend->get_memory_requirements(res.as_image().get(), reqs);
-                        alloc = allocator->allocate(reqs);
-                        allocator->get_offset_and_base(alloc, base, offset);
-                        get_renderer().backend->bind_aliasable_memory(res.as_image().get(), base, offset);
-                    }
-                    res.alloc = alloc;
-                }
-            }
-        }
-        remove_unused_res();
-    };
+    }
 
-    group_passes();
-    bind_aliased_memory_to_resources();
+    pass_releases.clear();
+    pass_releases.resize(passes.size());
+    std::vector<std::vector<u32>> pass_acquires(passes.size());
+    for(auto i = 0u; i < resources.size(); ++i)
+    {
+        const auto& res = resources[i];
+        ENG_ASSERT(res.first_pass != ~0u);
+        if(res.first_pass == ~0u) { continue; }
+        pass_releases[res.last_pass].push_back(i);
+        if(res.is_aliased()) { pass_acquires[res.first_pass].push_back(i); }
+    }
+
+    // allocate and release temporal memory
+    for(auto i = 0u; i < passes.size(); ++i)
+    {
+        for(const auto id : pass_acquires[i])
+        {
+            auto& res = get_res(id);
+            RendererMemoryRequirements reqs;
+            void* base;
+            size_t offset;
+            if(res.is_buffer()) { get_renderer().backend->get_memory_requirements(res.as_buffer().get(), reqs); }
+            else { get_renderer().backend->get_memory_requirements(res.as_image().get(), reqs); }
+            res.aliased_memory = allocator->allocate(reqs);
+            allocator->get_offset_and_base(res.aliased_memory, base, offset);
+            if(res.is_buffer()) { get_renderer().backend->bind_aliasable_memory(res.as_buffer().get(), base, offset); }
+            else { get_renderer().backend->bind_aliasable_memory(res.as_image().get(), base, offset); }
+        }
+        for(const auto id : pass_releases[i])
+        {
+            auto& res = get_res(id);
+            if(!res.aliased_memory) { continue; }
+            allocator->free(res.aliased_memory);
+            res.aliased_memory = nullptr;
+        }
+    }
+
     m_debug_datas_arr[0]->build(this);
 }
 
@@ -478,122 +556,94 @@ Sync* RGRenderGraph::execute(Sync** wait_syncs, u32 wait_count)
         queue->wait_sync(wait_syncs[i]);
     }
 
-    for(auto i = 0u; i < groups.size(); ++i)
+    bool batch_empty = true;
+    // go over render passes
+    for(u32 pi = 0; pi < passes.size(); ++pi)
     {
-        const auto& g = groups[i];
-        Flags<PipelineStage> gstages;
-        ICommandBuffer* layout_cmd = nullptr;
-        const auto consume_wait_sync = [this, &layout_cmd](const RGPass* p, RGAccess& acc) {
-            auto* sync = acc.wait_sync;
-            acc.wait_sync = nullptr; // consume as later accesses now are synced
-            ENG_ASSERT(sync);
-            if(!sync) { return; }
-            // return, because if sems are the same, it means frame_delay has passed and renderer waited for the fence
-            if(sync->sync == sems[0]) { return; }
-            if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
-            ENG_LOG("Waiting on a sync {} for resource {} in pass {}", sync->sync->name, p->name.as_view(),
-                    get_res(acc.resource).name.as_view());
-            layout_cmd->wait_sync(sync->sync, sync->wait_value, acc.stage);
+        RGPass* p = passes[pi].pass.get();
+
+        ICommandBuffer* sync_cmd{};
+        const auto get_sync_cmd = [this, &sync_cmd] {
+            if(!sync_cmd) { sync_cmd = cmd_pools[0]->begin(); }
+            return sync_cmd;
         };
 
-        for(const auto* p : g.passes)
+        // go over pass' accesses and record barriers
+        for(const auto accid : p->accesses)
         {
-            gstages |= p->stage_mask;
-            for(const auto pa : p->accesses)
+            const auto& acc = get_acc(accid);
+            auto& res = get_res(acc.resource);
+
+            if(acc.is_first) { get_or_init_resource_state(*this, res); }
+
+            record_barrier_if_needed(get_sync_cmd, res, acc, acc.clear.has_value());
+
+            if(acc.clear)
             {
-                auto& acc = get_acc(pa);
-                const auto& res = get_res(pa);
-                if(acc.is_first_access())
+                auto* cmd = get_sync_cmd();
+                const auto& img = res.as_image().get();
+                if(acc.clear->is_color())
                 {
-                    if(acc.wait_sync) { consume_wait_sync(p, acc); }
-
-                    if(res.is_buffer()) { continue; }
-
-                    if(res.clear)
-                    {
-                        if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
-
-                        acc.stage = PipelineStage::TRANSFER_BIT;
-                        acc.access = PipelineAccess::TRANSFER_WRITE_BIT;
-                        acc.layout = ImageLayout::TRANSFER_DST;
-                        layout_cmd->barrier(res.as_image().get(), PipelineStage::NONE, PipelineAccess::NONE,
-                                            PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT,
-                                            ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST);
-                        if(res.clear->is_color())
-                        {
-                            const auto clear = res.clear->get_color().color;
-                            layout_cmd->clear_color(res.as_image().get(), Color4f{ clear.x, clear.y, clear.z, clear.w });
-                        }
-                        else
-                        {
-                            const auto clear = res.clear->get_ds();
-                            layout_cmd->clear_depth_stencil(res.as_image().get(), clear.depth, clear.stencil);
-                        }
-                    }
-                    continue;
+                    const auto c = acc.clear->get_color().color;
+                    cmd->clear_color(img, Color4f{ c.x, c.y, c.z, c.w });
                 }
-
-                const auto& pacc = get_acc(acc.prev_access);
-                ENG_ASSERT((!pacc.is_first_access() && !pacc.wait_sync) || (pacc.is_first_access())); // only first access may store wait_sync
-
-                if(pacc.layout == acc.layout) { continue; }
-
-                if(!layout_cmd) { layout_cmd = cmd_pools[0]->begin(); }
-                Handle<Image> img = acc.image_view.image;
-                layout_cmd->barrier(img.get(), pacc.stage, pacc.access, acc.stage, acc.access, pacc.layout, acc.layout);
+                else
+                {
+                    const auto ds = acc.clear->get_ds();
+                    cmd->clear_depth_stencil(img, ds.depth, ds.stencil);
+                }
             }
         }
+        if(sync_cmd) { cmd_pools[0]->end(sync_cmd); }
 
-        if(layout_cmd)
-        {
-            cmd_pools[0]->end(layout_cmd);
-            queue->with_cmd_buf(layout_cmd);
-            // queue->submit(); // this need not be submitted individually
-        }
+        // execute pass
 
-        for(auto* p : g.passes)
+        RGBuilder pb{ p, this };
+        p->execute(pb);
+        if(p->cmd)
         {
-            RGBuilder pb{ p, this };
-            p->execute(pb);
-            if(!p->cmd) { continue; }
             p->cmd->end_label();
             p->cmd->write_timestamp(p->query->pool, PipelineStage::ALL, p->query->index + 1);
             cmd_pools[0]->end(p->cmd);
-            queue->with_cmd_buf(p->cmd);
-            for(auto accid : p->accesses)
-            {
-                auto& acc = get_acc(accid);
-                auto& res = get_res(accid);
-                // todo: maybe pool handles here? renderer already does that, soo...
-                // also, maybe add resource set in pass, because iterating over accesses is going over same resource multiple times (potentially)
-                if(res.last_access == accid)
-                {
-                    if(!res.is_persistent) { free_resource(res); }
-                    else
-                    {
-                        if(auto it = persistent_resources.find(ENG_HASH(res.name)); it != persistent_resources.end())
-                        {
-                            auto& pr = it->second;
-                            pr.last_layout = acc.layout;
-                            if(res.last_write_group != ~0u)
-                            {
-                                // only add for resources that are not read-only
-                                pr.wait_sync = { sems[0], sems[0]->get_current_wait_value() };
-                            }
-                        }
-                    }
-                }
-            }
         }
-        queue->wait_sync(sems[0], gstages);
-        queue->signal_sync(sems[0], gstages);
-        queue->submit();
+
+        // submit all work in the batch before this pass, so it is not forced to wait on this pass' wait sync deps, if any.
+        const bool pass_has_wait_sync_deps = p->cmd && std::any_of(p->cmd->sync_deps.begin(), p->cmd->sync_deps.end(),
+                                                                   [](const auto& d) { return d.wait; });
+        if(pass_has_wait_sync_deps && !batch_empty)
+        {
+            queue->submit();
+            batch_empty = true;
+        }
+
+        if(sync_cmd)
+        {
+            queue->with_cmd_buf(sync_cmd);
+            batch_empty = false;
+        }
+        if(p->cmd)
+        {
+            queue->with_cmd_buf(p->cmd);
+            batch_empty = false;
+        }
+
+        // destroy transient resources, keep persistent ones
+        for(const auto id : pass_releases[pi])
+        {
+            auto& res = get_res(id);
+            if(res.is_persistent) { persistent_states_map[RGResource::make_key(res.native)] = res.state; }
+            else { free_resource(res); }
+        }
     }
+    queue->signal_sync(sems[0], PipelineStage::ALL);
+    queue->submit();
 
     resources.clear();
     accesses.clear();
     passes.clear();
+    pass_releases.clear();
     namedpasses.clear();
+    ++frame;
 
     return sems[0];
 }
@@ -621,23 +671,18 @@ void RGDebugData::build(RGRenderGraph* rg)
     {
         auto& dr = resources.emplace_back();
         dr.name = r.name.c_str();
-        // if(r.is_buffer()) { dr.resource = r.as_buffer().get(); }
-        // else { dr.resource = r.as_image().get(); }
         dr.persistent = r.is_persistent;
-        dr.aliased_memory = r.is_aliased;
+        dr.aliased_memory = r.is_aliased();
     }
-    for(const auto& g : rg->groups)
+    for(u32 i = 0; i < rg->passes.size(); ++i)
     {
-        auto& dg = groups.emplace_back();
-        for(const auto& p : g.passes)
+        const auto* p = rg->passes[i].pass.get();
+        auto& dp = passes.emplace_back(Pass{ p->name.c_str(), {}, p->query });
+        for(const auto& pa : p->accesses)
         {
-            auto& dp = dg.passes.emplace_back(Pass{ p->name.c_str(), {}, p->query });
-            for(const auto& pa : p->accesses)
-            {
-                const auto& pacc = rg->get_acc(pa);
-                const auto& pres = rg->get_res(pa);
-                dp.accesses.push_back(Access{ *pacc.resource, pacc.stage, pacc.access, pacc.layout, pres.last_access == pa });
-            }
+            const auto& pacc = rg->get_acc(pa);
+            const auto& pres = rg->get_res(pacc.resource);
+            dp.accesses.push_back(Access{ pacc.resource, pacc.stage, pacc.access, pacc.layout, pres.last_pass == i });
         }
     }
 }

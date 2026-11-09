@@ -628,17 +628,17 @@ enum class SubmitFlags : u32
 {
 };
 
-struct RenderResources
+// Render graph handles of the frame's main targets, set by the SETUP_TARGETS pass.
+// Only valid while the frame they were set in is being built and executed.
+struct RenderTargets
 {
-    Handle<Buffer> constants;
-    Handle<Image> depth;
-    Handle<Image> normals;
-    Handle<Image> velocity;
-    Handle<Image> history_len;
-    RGResourceId ao;
-    Handle<Image> opaque;
-    RGResourceId accum;
-    RGResourceId final_color;
+    RGBuffer constants;
+    RGImage depth;
+    RGImage opaque;
+    RGImage normals;
+    RGImage velocity;
+    RGImage history_len;
+    RGImage final_color;
 };
 
 struct TimestampQuery
@@ -704,7 +704,6 @@ class Renderer
         std::vector<Sync*> available_syncs;
         std::vector<Sync*> wait_syncs;
 
-        RenderResources render_resources;
 
         struct RetiredResource
         {
@@ -819,7 +818,6 @@ class Renderer
     void init_pipelines();
     void init_perframes();
     void init_bufs();
-    void init_buffered_resources();
 
     void update();
     void compile_rendergraph();
@@ -907,7 +905,7 @@ class Renderer
     ImGuiRenderer* imgui_renderer{};
     FrameData frame_datas[2]{};
     FrameData* current_data{};
-    FrameData* prev_data{};
+    RenderTargets targets; // graph handles for the frame being built
     u64 current_frame{}; // monotonically increasing counter
     Passes passes;
     u64 mesh_entt_hash{};

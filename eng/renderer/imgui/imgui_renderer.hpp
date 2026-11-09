@@ -17,7 +17,7 @@ class ImGuiRenderer
 {
     struct ImPassData
     {
-        RGAccessId output;
+        RGImage output;
     };
 
   public:

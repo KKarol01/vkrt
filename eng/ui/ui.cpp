@@ -54,9 +54,8 @@ class GamePanel : public Panel
             gfx::get_renderer().settings.new_render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
-            auto& rt = gfx::get_renderer().current_data->render_resources;
-            auto color = b.sample_texture(rt.final_color);
-            ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height });
+            const auto color = b.sample_texture(gfx::get_renderer().targets.final_color);
+            if(color) { ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height }); }
         }
         ImGui::End();
     }
@@ -274,88 +273,82 @@ class DebugPanel : public Panel
 
         ImGui::Separator();
 
-        if(ImGui::BeginChild("GroupsRegion", ImVec2(0, 0), ImGuiChildFlags_Borders))
+        if(ImGui::BeginChild("PassesRegion", ImVec2(0, 0), ImGuiChildFlags_Borders))
         {
-            for(size_t g_idx = 0; g_idx < rgdd.groups.size(); ++g_idx)
+            for(const auto& [idx, pass] : rgdd.passes | std::views::enumerate)
             {
-                ImGui::PushID(static_cast<int>(g_idx));
-                if(ImGui::CollapsingHeader(std::string("Group " + std::to_string(g_idx)).c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+                ImGui::PushID(static_cast<int>(idx));
+                ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+                if(idx > 0) { ImGui::Separator(); }
+
+                // Pass title with time measurement in ms
                 {
-                    for(const auto& [idx, pass] : rgdd.groups[g_idx].passes | std::views::enumerate)
+                    ImGui::Text("%s", pass.name.c_str());
+                    auto it = std::ranges::find_if(gfx::get_renderer().current_data->available_tstamp_queries,
+                                                   [&pass](const gfx::TimestampQuery& q) {
+                                                       return q.label == pass.name;
+                                                   });
+                    if(it != gfx::get_renderer().current_data->available_tstamp_queries.end())
                     {
-                        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-                        if(idx > 0) { ImGui::Separator(); }
-
-                        // Pass title with time measurement in ms
+                        auto& times = pass_times[it->label.hash()];
+                        const auto time_now_secs = get_engine().get_time_secs();
+                        if(time_now_secs - times.last_update_secs >= 0.05f)
                         {
-                            ImGui::Text("%s", pass.name.c_str());
-                            auto it = std::ranges::find_if(gfx::get_renderer().current_data->available_tstamp_queries,
-                                                           [&pass](const gfx::TimestampQuery& q) {
-                                                               return q.label == pass.name;
-                                                           });
-                            if(it != gfx::get_renderer().current_data->available_tstamp_queries.end())
-                            {
-                                auto& times = pass_times[it->label.hash()];
-                                const auto time_now_secs = get_engine().get_time_secs();
-                                if(time_now_secs - times.last_update_secs >= 0.05f)
-                                {
-                                    const auto query_res = gfx::TimestampQuery::to_ms(*it);
-                                    times.last_update_secs = time_now_secs;
-                                    times.time_ms = query_res;
-                                }
-                                ImGui::SameLine();
-                                ImGui::TextDisabled("(%2.2fms)", times.time_ms);
-                            }
+                            const auto query_res = gfx::TimestampQuery::to_ms(*it);
+                            times.last_update_secs = time_now_secs;
+                            times.time_ms = query_res;
                         }
-
-                        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(12.0f, 4.0f));
-                        if(ImGui::BeginTable("AccessTable", 4, ImGuiTableFlags_BordersInnerH))
-                        {
-                            ImGui::TableSetupColumn("Resource");
-                            ImGui::TableSetupColumn("Stage");
-                            ImGui::TableSetupColumn("Access");
-                            ImGui::TableSetupColumn("Layout");
-                            ImGui::TableHeadersRow();
-
-                            const auto tooltip_text = [](std::string_view text, ImVec4* color = nullptr) {
-                                if(color) { ImGui::TextColored(*color, "%s", text.data()); }
-                                else { ImGui::Text("%s", text.data()); }
-                                if(ImGui::IsItemHovered())
-                                {
-                                    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4{ 0.0, 0.0, 0.0, 1.0 });
-                                    if(ImGui::BeginTooltip())
-                                    {
-                                        ImGui::TextUnformatted(text.data());
-                                        if(color) { ImGui::TextColored(*color, "End of lifetime"); }
-                                        ImGui::EndTooltip();
-                                    }
-                                    ImGui::PopStyleColor();
-                                }
-                            };
-
-                            for(const auto& acc : pass.accesses)
-                            {
-                                ImGui::TableNextRow();
-                                ImGui::TableNextColumn();
-                                if(acc.resource < rgdd.resources.size())
-                                {
-                                    const auto& res = rgdd.resources[acc.resource];
-                                    ImVec4 destroyed_color{ 1.0f, 0.4f, 0.4f, 1.0f };
-                                    tooltip_text(rgdd.resources[acc.resource].name.c_str(),
-                                                 acc.last_access && !res.persistent ? &destroyed_color : (ImVec4*)nullptr);
-                                }
-                                else { ImGui::TextDisabled("Unknown (%u)", acc.resource); }
-                                ImGui::TableNextColumn();
-                                tooltip_text(gfx::to_string(acc.stage).c_str());
-                                ImGui::TableNextColumn();
-                                tooltip_text(gfx::to_string(acc.access).c_str());
-                                ImGui::TableNextColumn();
-                                tooltip_text(gfx::to_string(acc.layout).c_str());
-                            }
-                            ImGui::EndTable();
-                            ImGui::PopStyleVar();
-                        }
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("(%2.2fms)", times.time_ms);
                     }
+                }
+
+                ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(12.0f, 4.0f));
+                if(ImGui::BeginTable("AccessTable", 4, ImGuiTableFlags_BordersInnerH))
+                {
+                    ImGui::TableSetupColumn("Resource");
+                    ImGui::TableSetupColumn("Stage");
+                    ImGui::TableSetupColumn("Access");
+                    ImGui::TableSetupColumn("Layout");
+                    ImGui::TableHeadersRow();
+
+                    const auto tooltip_text = [](std::string_view text, ImVec4* color = nullptr) {
+                        if(color) { ImGui::TextColored(*color, "%s", text.data()); }
+                        else { ImGui::Text("%s", text.data()); }
+                        if(ImGui::IsItemHovered())
+                        {
+                            ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4{ 0.0, 0.0, 0.0, 1.0 });
+                            if(ImGui::BeginTooltip())
+                            {
+                                ImGui::TextUnformatted(text.data());
+                                if(color) { ImGui::TextColored(*color, "End of lifetime"); }
+                                ImGui::EndTooltip();
+                            }
+                            ImGui::PopStyleColor();
+                        }
+                    };
+
+                    for(const auto& acc : pass.accesses)
+                    {
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        if(acc.resource < rgdd.resources.size())
+                        {
+                            const auto& res = rgdd.resources[acc.resource];
+                            ImVec4 destroyed_color{ 1.0f, 0.4f, 0.4f, 1.0f };
+                            tooltip_text(rgdd.resources[acc.resource].name.c_str(),
+                                         acc.last_access && !res.persistent ? &destroyed_color : (ImVec4*)nullptr);
+                        }
+                        else { ImGui::TextDisabled("Unknown (%u)", acc.resource); }
+                        ImGui::TableNextColumn();
+                        tooltip_text(gfx::to_string(acc.stage).c_str());
+                        ImGui::TableNextColumn();
+                        tooltip_text(gfx::to_string(acc.access).c_str());
+                        ImGui::TableNextColumn();
+                        tooltip_text(gfx::to_string(acc.layout).c_str());
+                    }
+                    ImGui::EndTable();
+                    ImGui::PopStyleVar();
                 }
                 ImGui::PopID();
             }

@@ -54,10 +54,9 @@ enum class GBufferType
 
 struct PassInitData
 {
-    std::array<RGResourceId, 8> color_buffers;
-    RGResourceId depth_buffer;
-    std::array<RGResourceId, (int)GBufferType::LAST_ENUM> gbuffer;
-    std::array<RGResourceId, (int)GBufferType::LAST_ENUM> prev_gbuffer;
+    std::array<RGImage, 8> color_buffers;
+    RGImage depth_buffer;
+    std::array<RGImage, (int)GBufferType::LAST_ENUM> gbuffer;
 };
 
 struct Pass
@@ -572,15 +571,15 @@ struct MeshPass : public Pass
 {
     struct PassData
     {
-        RGAccessId constants;
-        RGAccessId positions;
-        RGAccessId attributes;
-        RGAccessId indices;
-        RGAccessId instances;
-        RGAccessId indirect;
+        RGBuffer constants;
+        RGBuffer positions;
+        RGBuffer attributes;
+        RGBuffer indices;
+        RGBuffer instances;
+        RGBuffer indirect;
 
-        RGAccessId color_buffers[8]{};
-        RGAccessId depth;
+        RGImage color_buffers[8]{};
+        RGImage depth;
     };
 
     MeshPass(MeshPassType type, u32 order) : Pass(ENG_FMT("Mesh Pass {}", to_string(type)), order), m_type(type) {}
@@ -610,10 +609,8 @@ struct MeshPass : public Pass
                 if(data.depth_buffer) { d.depth = b.access_depth(data.depth_buffer); }
 
                 d.constants = mesh_setup.constants;
-                d.positions = b.import_resource(r.bufs.positions);
-                d.positions = b.read_buffer(d.positions);
-                d.attributes = b.import_resource(r.bufs.attributes);
-                d.attributes = b.read_buffer(d.attributes);
+                d.positions = b.read_buffer(b.import_resource(r.bufs.positions));
+                d.attributes = b.read_buffer(b.import_resource(r.bufs.attributes));
                 d.instances = mesh_setup.gpuinstances;
                 d.indirect = mesh_setup.indirect;
             },
@@ -635,7 +632,7 @@ struct MeshPass : public Pass
                 {
                     if(!d.color_buffers[i]) { continue; }
                     vkcols[i].imageView = b.get_img(d.color_buffers[i]).get_md().vk->view;
-                    vkcols[i].imageLayout = to_vk(b.graph->get_acc(d.color_buffers[i]).layout);
+                    vkcols[i].imageLayout = to_vk(b.get_acc(d.color_buffers[i]).layout);
                     vkcols[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     vkcols[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
                 }
@@ -643,8 +640,8 @@ struct MeshPass : public Pass
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
                 if(d.depth)
                 {
-                    vkdep.imageView = b.graph->get_acc(d.depth).image_view.get_md().vk->view;
-                    vkdep.imageLayout = to_vk(b.graph->get_acc(d.depth).layout);
+                    vkdep.imageView = b.get_img(d.depth).get_md().vk->view;
+                    vkdep.imageLayout = to_vk(b.get_acc(d.depth).layout);
                     if(m_type == MeshPassType::Z_PREPASS)
                     {
                         vkdep.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -693,24 +690,21 @@ struct VelocityBuffer : public Pass
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
         if(!data.gbuffer[(int)GBufferType::DEPTH] || !data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
-        if(!get_renderer().prev_data->render_resources.constants) { return; }
         return;
 
         struct PassOutput
         {
-            RGAccessId constants;
-            RGAccessId prev_constants;
-            RGAccessId depth;
-            RGAccessId out_vel;
+            RGBuffer constants;
+            RGBuffer prev_constants;
+            RGImage depth;
+            RGImage out_vel;
         };
         graph->add_compute_pass<PassOutput>(
             m_name.c_str(), m_order,
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.constants = b.import_resource(r.current_data->render_resources.constants);
-                d.constants = b.read_buffer(d.constants);
-                d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
-                d.prev_constants = b.read_buffer(d.prev_constants);
+                d.constants = b.read_buffer(r.targets.constants);
+                d.prev_constants = b.read_buffer(b.previous(r.targets.constants));
                 d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
                 d.out_vel = b.read_write_image(data.gbuffer[(int)GBufferType::VELOCITY]);
             },
@@ -758,7 +752,6 @@ struct SSAO : public Pass
         if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
 
         auto& r = get_renderer();
-        if(!r.prev_data->render_resources.history_len) { return; }
 
         // if(!data.prev_gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
         // if(!data.prev_gbuffer[(int)GBufferType::VELOCITY]) { return; }
@@ -786,16 +779,14 @@ struct SSAO : public Pass
                 r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
             struct NoiseOutput
             {
-                RGAccessId noise_buf;
-                RGAccessId out_noise_img;
+                RGBuffer noise_buf;
+                RGImage out_noise_img;
             };
             graph->add_compute_pass<NoiseOutput>(
                 "SSAO Generate Noise", RenderOrder::SETUP_TARGETS,
                 [=, this](RGBuilder& b, NoiseOutput& d) {
-                    d.noise_buf = b.import_resource(buf);
-                    d.noise_buf = b.read_buffer(d.noise_buf);
-                    d.out_noise_img = b.import_resource(m_noise_texture);
-                    d.out_noise_img = b.write_image(d.out_noise_img);
+                    d.noise_buf = b.read_buffer(b.import_resource(buf));
+                    d.out_noise_img = b.write_image(b.import_resource(m_noise_texture));
                 },
                 [=](RGBuilder& b, const NoiseOutput& d) {
                     auto& r = get_renderer();
@@ -814,49 +805,39 @@ struct SSAO : public Pass
 
         struct PassSSAOOutput
         {
-            RGAccessId depth;
-            RGAccessId constants;
-            RGAccessId noise;
-            RGAccessId normals;
-            RGAccessId settings;
-            RGAccessId opaque;
-            RGAccessId velocity;
-            RGAccessId history_len;
-            RGAccessId out_ao;
+            RGImage depth;
+            RGBuffer constants;
+            RGImage noise;
+            RGImage normals;
+            RGImage opaque;
+            RGImage velocity;
+            RGImage history_len;
+            RGImage out_ao;
 
-            RGAccessId prev_constants;
-            RGAccessId prev_opaque;
-            RGAccessId prev_normals;
-            RGAccessId prev_depth;
-            RGAccessId prev_history_len;
+            RGBuffer prev_constants;
+            RGImage prev_opaque;
+            RGImage prev_normals;
+            RGImage prev_depth;
+            RGImage prev_history_len;
         };
         graph->add_compute_pass<PassSSAOOutput>(
             m_name.c_str(), RenderOrder::POST,
             [=, this](RGBuilder& b, PassSSAOOutput& d) {
                 auto& r = get_renderer();
                 d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
-                d.constants = b.import_resource(r.current_data->render_resources.constants);
-                d.constants = b.read_buffer(d.constants);
-                d.noise = b.import_resource(m_noise_texture);
-                d.noise = b.sample_texture(d.noise);
+                d.constants = b.read_buffer(r.targets.constants);
+                d.noise = b.sample_texture(b.import_resource(m_noise_texture));
                 d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
                 d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
                 d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
                 d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
                 d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
 
-                d.prev_constants = b.import_resource(r.prev_data->render_resources.constants);
-                d.prev_constants = b.read_buffer(d.prev_constants);
-                d.prev_opaque = b.import_resource(r.prev_data->render_resources.opaque);
-                d.prev_opaque = b.sample_texture(d.prev_opaque);
-                d.prev_normals = b.import_resource(r.prev_data->render_resources.normals);
-                d.prev_normals = b.sample_texture(d.prev_normals);
-                d.prev_depth = b.import_resource(r.prev_data->render_resources.depth);
-                d.prev_depth = b.sample_texture(d.prev_depth);
-                d.prev_history_len = b.import_resource(r.prev_data->render_resources.history_len);
-                d.prev_history_len = b.sample_texture(d.prev_history_len);
-
-                // r.current_data->render_resources.opaque = b.as_res_id(d.out_ao);
+                d.prev_constants = b.read_buffer(b.previous(r.targets.constants));
+                d.prev_opaque = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::DIFFUSE]));
+                d.prev_normals = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::NORMAL]));
+                d.prev_depth = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::DEPTH]));
+                d.prev_history_len = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::HISTORY_LEN]));
             },
             [this](RGBuilder& b, const PassSSAOOutput& d) {
                 auto& r = get_renderer();
