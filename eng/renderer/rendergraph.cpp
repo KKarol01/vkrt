@@ -286,9 +286,9 @@ u32 RGBuilder::import_native(const RGResource::NativeResource& native, const std
     if(it != graph->resources.end())
     {
         const auto index = (u32)std::distance(graph->resources.begin(), it);
-        ENG_ASSERT(std::holds_alternative<Handle<Image>>(native));
         if(clear)
         {
+            ENG_ASSERT(std::holds_alternative<Handle<Image>>(native));
             RGAccess acc{ .resource = index, .buffer_view = {} };
             make_access_a_clear(acc, *it, *clear);
             add_access(acc);
