@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.29)
-project(eng)
+project(eng LANGUAGES C CXX)
+
+option(ENG_BUILD_EXAMPLES "Build the engine example/sandbox executable" ${PROJECT_IS_TOP_LEVEL})
 
 find_package(Vulkan REQUIRED)
 
@@ -41,7 +43,7 @@ set(REPROC_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/reproc)
 
 add_library(build_header_only STATIC
-    "eng/build_header_only.cpp"
+    "src/build_header_only.cpp"
  )
 target_compile_definitions(build_header_only
     PRIVATE
@@ -59,7 +61,7 @@ target_compile_definitions(build_header_only
 
 target_include_directories(build_header_only
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/third_party
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         ${Vulkan_INCLUDE_DIRS}
 )
 
@@ -96,7 +98,7 @@ target_include_directories(imguizmo
 #add_library(eng_ui SHARED "eng/ui.cpp")
 #target_compile_definitions(eng_ui PRIVATE VK_NO_PROTOTYPES IMGUI_DEFINE_MATH_OPERATORS ENG_BUILD_AS_DLL)
 #target_compile_features(eng_ui PRIVATE cxx_std_23)
-#target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
+#target_include_directories(eng_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS})
 #target_link_libraries(eng_ui PRIVATE build_header_only glm imgui imguizmo glfw)
 
 set(FMT_DOC OFF CACHE BOOL "" FORCE)
@@ -113,46 +115,59 @@ add_subdirectory(third_party/fmt)
 set(MESHOPT_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/meshoptimizer)
 
-add_executable(eng
-    "main.cpp"
-    "app/app.cpp"
-
-    "eng/engine.cpp"  
-	"eng/fs/fs.cpp"
-    "eng/camera.cpp"
-    "eng/scene.cpp"
-	"eng/ui/ui.cpp" 
-    "eng/to_string.cpp" 
-	"eng/ecs/components.cpp"
-    "eng/physics/bvh.cpp"
-    "eng/renderer/renderer.cpp"
-    "eng/renderer/imgui/imgui_renderer.cpp"
-    "eng/renderer/vulkan/to_vk.cpp"
-    "eng/renderer/vulkan/vulkan_backend.cpp" 
-    "eng/renderer/bindlesspool.cpp"
-    "eng/renderer/staging_buffer.cpp" 
-    "eng/renderer/submit_queue.cpp"
-	"eng/renderer/rendergraph.cpp"
-	"eng/assets/asset_manager.cpp"
-	"eng/assets/loaders.cpp" 
-	"eng/assets/serialization.cpp"
- "eng/renderer/mesh/mesh_renderer.cpp")
-
-target_include_directories(eng 
-	PRIVATE 
-	${CMAKE_SOURCE_DIR} 
-	${CMAKE_SOURCE_DIR}/third_party 
-	${Vulkan_INCLUDE_DIRS} 
-	${CMAKE_SOURCE_DIR}/third_party/fastgltf/include 
-	${CMAKE_SOURCE_DIR}/third_party/fmt/include
-	${CMAKE_SOURCE_DIR}/third_party/reproc/reproc++/include
-	${CMAKE_SOURCE_DIR}/third_party/zlib/include/
+# zlib ships prebuilt in third_party/zlib (z.lib import library + z.dll).
+# Wrapped in an imported target so the link path is absolute and propagates to consumers of the static eng lib.
+add_library(eng_zlib SHARED IMPORTED GLOBAL)
+set_target_properties(eng_zlib PROPERTIES
+    IMPORTED_IMPLIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib/lib/z.lib"
+    IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib/lib/z.dll"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib/include"
 )
-target_compile_features(eng PRIVATE cxx_std_23)
-target_link_directories(eng PRIVATE ${CMAKE_SOURCE_DIR}/third_party ${Vulkan_INCLUDE_DIRS}/../Lib)
+
+add_library(eng STATIC
+    "src/engine.cpp"
+    "src/fs/fs.cpp"
+    "src/camera.cpp"
+    "src/scene.cpp"
+    "src/ui/ui.cpp"
+    "src/to_string.cpp"
+    "src/ecs/components.cpp"
+    "src/physics/bvh.cpp"
+    "src/renderer/renderer.cpp"
+    "src/renderer/imgui/imgui_renderer.cpp"
+    "src/renderer/vulkan/to_vk.cpp"
+    "src/renderer/vulkan/vulkan_backend.cpp"
+    "src/renderer/bindlesspool.cpp"
+    "src/renderer/staging_buffer.cpp"
+    "src/renderer/submit_queue.cpp"
+    "src/renderer/rendergraph.cpp"
+    "src/renderer/mesh/mesh_renderer.cpp"
+    "src/assets/asset_manager.cpp"
+    "src/assets/loaders.cpp"
+    "src/assets/serialization.cpp"
+)
+add_library(eng::eng ALIAS eng)
+
+target_include_directories(eng
+    PUBLIC
+        # <eng/...> public headers
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        # engine root: public headers include shared C++/HLSL headers as <assets/shaders/....hlsli>
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        # public headers include <volk/...>, <VulkanMemoryAllocator/...>, <glm/...>, <imgui/...> etc.
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        ${Vulkan_INCLUDE_DIRS}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fastgltf/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fmt/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/reproc/reproc++/include
+)
+target_compile_features(eng PUBLIC cxx_std_23)
+target_link_directories(eng PUBLIC ${Vulkan_INCLUDE_DIRS}/../Lib)
 if(MSVC)
-    target_compile_options(eng PRIVATE 
-        /W4    
+    target_compile_options(eng PRIVATE
+        /W4
     )
 else()
     target_compile_options(eng PRIVATE
@@ -160,24 +175,22 @@ else()
         -Wno-error=unused-parameter -Wno-error=unused-variable -Wno-error=unused-lambda-capture
     )
 endif()
-set_target_properties(eng PROPERTIES 
-    RUNTIME_OUTPUT_NAME_DEBUG "${CMAKE_PROJECT_NAME}Debug"
-    RUNTIME_OUTPUT_NAME_RELEASE "${CMAKE_PROJECT_NAME}"
-)
+# Static lib: PRIVATE deps are still propagated to the final executable's link line ($<LINK_ONLY:...>).
 target_link_libraries(eng
     PUBLIC
-        glm 
+        glm
         imgui
         imguizmo
         fmt::fmt
-    PRIVATE
+        eng_zlib
+        # PUBLIC so its VK_USE_PLATFORM_* / VK_VERSION_1_3 / WIN32_LEAN_AND_MEAN defines reach code including eng headers
         build_header_only
+    PRIVATE
         vk-bootstrap
         glfw
         fastgltf
         meshoptimizer
-		reproc++
-		zlib/lib/z
+        reproc++
 )
 target_compile_definitions(eng
     PUBLIC
@@ -185,8 +198,8 @@ target_compile_definitions(eng
         VC_EXTRALEAN
         NOMINMAX
         IMGUI_DEFINE_MATH_OPERATORS
-		ImTextureID_Invalid=~0ull
-		$<$<CONFIG:Debug>:ENG_DEBUG_BUILD>
+        ImTextureID_Invalid=~0ull
+        $<$<CONFIG:Debug>:ENG_DEBUG_BUILD>
         $<$<PLATFORM_ID:Windows>:ENG_PLATFORM_WIN32>
 )
 
@@ -249,9 +262,31 @@ target_precompile_headers(eng
         <eng/renderer/vulkan/to_vk.hpp>
 )
 
-add_custom_command(TARGET eng POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/third_party/zlib/lib/z.dll"
-        "${CMAKE_SOURCE_DIR}/third_party/zlib/lib/z.exp"
-        $<TARGET_FILE_DIR:eng>
-)
+# Call on a game/app executable that links eng:
+#   eng_setup_executable(<target> [ASSETS_DIR <dir>])
+# - reuses eng's precompiled-header list for the target (code written against eng has historically relied on it),
+# - copies runtime DLLs (z.dll) next to the executable after each build,
+# - if ASSETS_DIR is given, mirrors the engine's default shaders into <ASSETS_DIR>/shaders after each build,
+#   because the engine resolves '/assets/shaders/...' against the single runtime asset root (see README).
+function(eng_setup_executable target)
+    cmake_parse_arguments(ARG "" "ASSETS_DIR" "" ${ARGN})
+    get_target_property(_eng_pch eng PRECOMPILE_HEADERS)
+    if(_eng_pch)
+        target_precompile_headers(${target} PRIVATE ${_eng_pch})
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${target}> $<TARGET_FILE_DIR:${target}>
+        COMMAND_EXPAND_LISTS
+    )
+    if(ARG_ASSETS_DIR)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/assets/shaders"
+                "${ARG_ASSETS_DIR}/shaders"
+        )
+    endif()
+endfunction()
+
+if(ENG_BUILD_EXAMPLES)
+    add_subdirectory(examples/sandbox)
+endif()

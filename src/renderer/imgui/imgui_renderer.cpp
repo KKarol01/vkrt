@@ -1,0 +1,221 @@
+#include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/renderer/renderer.hpp>
+#include <assets/shaders/imgui/imgui.shared.hlsli>
+#include <eng/renderer/vulkan/vulkan_backend.hpp>
+#include <eng/renderer/submit_queue.hpp>
+#include <eng/renderer/staging_buffer.hpp>
+#include <eng/engine.hpp>
+#include <third_party/imgui/imgui.h>
+#include <third_party/imgui/imgui_internal.h>
+#include <third_party/imgui/backends/imgui_impl_glfw.h>
+#include <third_party/imgui/backends/imgui_impl_vulkan.h>
+#include <third_party/ImGuizmo/ImGuizmo.h>
+#include <eng/renderer/vulkan/vulkan_structs.hpp>
+
+namespace eng
+{
+namespace gfx
+{
+
+void ImGuiRenderer::init()
+{
+    auto& r = get_renderer();
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForVulkan(get_engine().window->window, true);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->AddFontDefault();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.IniFilename = nullptr;
+    ImGui::LoadIniSettingsFromDisk("imgui.ini");
+
+    unsigned char* pixels;
+    int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+    pipeline = r.make_pipeline(
+        PipelineCreateInfo::init({ "/assets/shaders/imgui/imgui.vs.hlsl", "/assets/shaders/imgui/imgui.ps.hlsl" })
+            .init_image_attachments(PipelineCreateInfo::AttachmentState{ .count = 1,
+                                                                         .color_formats = { ImageFormat::R8G8B8A8_SRGB },
+                                                                         .blend_states = { PipelineCreateInfo::BlendState{
+                                                                             .enable = true,
+                                                                             .src_color_factor = BlendFactor::SRC_ALPHA,
+                                                                             .dst_color_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                             .color_op = BlendOp::ADD,
+                                                                             .src_alpha_factor = BlendFactor::ONE,
+                                                                             .dst_alpha_factor = BlendFactor::ONE_MINUS_SRC_ALPHA,
+                                                                             .alpha_op = BlendOp::ADD,
+                                                                         } } })
+            .init_topology(Topology::TRIANGLE_LIST, PolygonMode::FILL, CullFace::NONE));
+
+    vertex_buffer = r.make_buffer("imgui vertex buffer", Buffer::init(1024 * 1024, BufferUsage::STORAGE_BIT));
+    index_buffer = r.make_buffer("imgui index buffer", Buffer::init(1024 * 1024, BufferUsage::INDEX_BIT));
+}
+
+ImGuiRenderer::ImPassData ImGuiRenderer::update(RGRenderGraph* graph)
+{
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
+
+    const auto& impassdata = graph->add_graphics_pass<ImPassData>(
+        "imgui", RenderOrder::UI,
+        [this](RGBuilder& b, ImPassData& data) {
+            auto& r = get_renderer();
+
+            ui_callbacks.signal(b);
+
+            ImGui::Render();
+
+            ImDrawData* draw_data = ImGui::GetDrawData();
+            if(!draw_data) { return; }
+            int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
+            int fb_height = (int)(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
+            if(fb_width <= 0 || fb_height <= 0) { return; }
+            if(draw_data->Textures != nullptr)
+            {
+                for(ImTextureData* tex : *draw_data->Textures)
+                {
+                    handle_imtexture(tex);
+                }
+            }
+
+            u64 vtx_off = 0;
+            u64 idx_off = 0;
+            for(int n = 0; n < draw_data->CmdListsCount; n++)
+            {
+                const ImDrawList* draw_list = draw_data->CmdLists[n];
+                r.staging->copy(vertex_buffer.get(), draw_list->VtxBuffer.Data, vtx_off,
+                                draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
+                r.staging->copy(index_buffer.get(), draw_list->IdxBuffer.Data, idx_off,
+                                draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
+                vtx_off += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
+                idx_off += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
+            }
+
+            const auto out_res =
+                f32_2{ get_renderer().settings.present_resolution.x, get_renderer().settings.present_resolution.y };
+            data.output = b.access_color(b.create_resource(
+                "imgui output", Image::init(out_res.x, out_res.y, ImageFormat::R8G8B8A8_SRGB, ImageUsage::COLOR_ATTACHMENT_BIT),
+                RGClear::color()));
+        },
+        [this](RGBuilder& builder, const ImPassData& data) {
+            auto& r = get_renderer();
+            auto* cmd = builder.open_cmd_buf();
+            cmd->wait_sync(r.staging->flush(true));
+            ImDrawData* draw_data = ImGui::GetDrawData();
+
+            const auto& img = builder.graph->get_img(data.output).get();
+
+            vk::VkRenderingAttachmentInfo r_col_atts[1]{};
+            r_col_atts[0].imageView = builder.get_img(data.output).get_md().vk->view;
+            r_col_atts[0].imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+            r_col_atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            r_col_atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            r_col_atts[0].clearValue = { .color = { .uint32 = { 0, 0, 0, 0 } } };
+
+            auto rendering_info = vk::VkRenderingInfo{};
+            rendering_info.renderArea = { .offset = {}, .extent = { .width = img.width, .height = img.height } };
+            rendering_info.layerCount = 1;
+            rendering_info.colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]);
+            rendering_info.pColorAttachments = r_col_atts;
+
+            cmd->bind_index(index_buffer.get(), 0, VK_INDEX_TYPE_UINT16);
+            cmd->bind_pipeline(pipeline.get());
+            GPUImGuiParams params{};
+            params.scale = { 2.0f / draw_data->DisplaySize.x, 2.0f / draw_data->DisplaySize.y };
+            params.translate = { -1.0f - draw_data->DisplayPos.x * params.scale.x,
+                                 -1.0f - draw_data->DisplayPos.y * params.scale.y };
+            params.vertices = get_bindless_storage_buffer_index(vertex_buffer);
+
+            cmd->begin_rendering(rendering_info);
+            {
+                VkViewport viewport;
+                viewport.x = 0;
+                viewport.y = 0;
+                viewport.width = (float)img.width;
+                viewport.height = (float)img.height;
+                viewport.minDepth = 0.0f;
+                viewport.maxDepth = 1.0f;
+                cmd->set_viewports(&viewport, 1);
+            }
+
+            ImVec2 clip_off = draw_data->DisplayPos;         // (0,0) unless using multi-viewports
+            ImVec2 clip_scale = draw_data->FramebufferScale; // (1,1) unless using retina display which are often (2,2)
+            int global_vtx_offset = 0;
+            int global_idx_offset = 0;
+            for(int n = 0; n < draw_data->CmdListsCount; n++)
+            {
+                const ImDrawList* draw_list = draw_data->CmdLists[n];
+                for(int cmd_i = 0; cmd_i < draw_list->CmdBuffer.Size; cmd_i++)
+                {
+                    const ImDrawCmd* imcmd = &draw_list->CmdBuffer[cmd_i];
+
+                    // Project scissor/clipping rectangles into framebuffer space
+                    ImVec2 clip_min((imcmd->ClipRect.x - clip_off.x) * clip_scale.x,
+                                    (imcmd->ClipRect.y - clip_off.y) * clip_scale.y);
+                    ImVec2 clip_max((imcmd->ClipRect.z - clip_off.x) * clip_scale.x,
+                                    (imcmd->ClipRect.w - clip_off.y) * clip_scale.y);
+
+                    // Clamp to viewport as vkCmdSetScissor() won't accept values that are off bounds
+                    if(clip_min.x < 0.0f) { clip_min.x = 0.0f; }
+                    if(clip_min.y < 0.0f) { clip_min.y = 0.0f; }
+                    if(clip_max.x > img.width) { clip_max.x = (float)img.width; }
+                    if(clip_max.y > img.height) { clip_max.y = (float)img.height; }
+                    if(clip_max.x <= clip_min.x || clip_max.y <= clip_min.y) { continue; }
+
+                    // Apply scissor/clipping rectangle
+                    VkRect2D scissor;
+                    scissor.offset.x = (i32)(clip_min.x);
+                    scissor.offset.y = (i32)(clip_min.y);
+                    scissor.extent.width = (u32)(clip_max.x - clip_min.x);
+                    scissor.extent.height = (u32)(clip_max.y - clip_min.y);
+                    cmd->set_scissors(&scissor, 1);
+
+                    const auto tid = (u32)imcmd->GetTexID();
+                    params.texture = get_bindless_sampled_image_index(Handle<Image>{ tid });
+                    cmd->push_constants(params);
+                    cmd->draw_indexed(imcmd->ElemCount, 1, imcmd->IdxOffset + global_idx_offset,
+                                      imcmd->VtxOffset + global_vtx_offset, 0);
+                }
+                global_idx_offset += draw_list->IdxBuffer.Size;
+                global_vtx_offset += draw_list->VtxBuffer.Size;
+            }
+            cmd->end_rendering();
+        });
+
+    return impassdata;
+}
+
+void ImGuiRenderer::handle_imtexture(ImTextureData* imtex)
+{
+    if(imtex->Status == ImTextureStatus_OK) { return; }
+
+    auto& r = get_renderer();
+    Handle<Image> image;
+    if(imtex->Status == ImTextureStatus_WantCreate)
+    {
+        image = r.make_image("imgui image", Image::init((u32)imtex->Width, (u32)imtex->Height, ImageFormat::R8G8B8A8_UNORM,
+                                                        ImageUsage::SAMPLED_BIT, ImageLayout::READ_ONLY));
+        images.push_back(image);
+        imtex->SetTexID((ImTextureID)(*image));
+    }
+
+    if(imtex->Status == ImTextureStatus_WantCreate || imtex->Status == ImTextureStatus_WantUpdates)
+    {
+        const int upload_x = (imtex->Status == ImTextureStatus_WantCreate) ? 0 : imtex->UpdateRect.x;
+        const int upload_y = (imtex->Status == ImTextureStatus_WantCreate) ? 0 : imtex->UpdateRect.y;
+        const int upload_w = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Width : imtex->UpdateRect.w;
+        const int upload_h = (imtex->Status == ImTextureStatus_WantCreate) ? imtex->Height : imtex->UpdateRect.h;
+        ENG_ASSERT(image);
+        ENG_ASSERT(upload_x == 0 && upload_y == 0 && upload_w == imtex->Width && upload_h == imtex->Height);
+        r.staging->copy(image.get(), imtex->Pixels, 0, 0);
+        imtex->SetStatus(ImTextureStatus_OK);
+    }
+}
+
+} // namespace gfx
+} // namespace eng
