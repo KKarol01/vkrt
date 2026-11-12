@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
+#include <set>
 #include <glm/glm.hpp>
 #include <eng/engine.hpp>
 #include <eng/common/handle.hpp>

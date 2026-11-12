@@ -1,4 +1,6 @@
 #include <eng/assets/asset_manager.hpp>
+#include <algorithm>
+#include <functional>
 #include <ranges>
 #include <eng/engine.hpp>
 #include <eng/renderer/renderer.hpp>
@@ -21,17 +23,14 @@ Asset s_null_asset{};
 void AssetManager::init()
 {
     std::vector<fs::Path> engb_paths;
-    for(auto it : std::filesystem::directory_iterator{ get_engine().fs->make_rel_path("/assets") })
+    for(const auto& entry : std::filesystem::directory_iterator{ "assets" })
     {
-        if(it.path().extension() == ".engb")
+        if(entry.path().extension() == ".engb")
         {
-            auto itpath = it.path();
-            itpath.make_preferred();
-            engb_paths.push_back(itpath);
+            engb_paths.push_back(fs::Path{ "/assets" } / entry.path().filename());
         }
     }
-    std::sort(engb_paths.begin(), engb_paths.end(), [](const auto& a, const auto& b) { return b < a; });
-    m_engb_containers_vec.reserve(engb_paths.size());
+    std::ranges::sort(engb_paths, std::greater{}); // assetsN, assetsN-1, ... (newest first)
     for(const auto& p : engb_paths)
     {
         m_engb_containers_vec.emplace_back(get_engine().fs->open_file(p, fs::OpenMode::READ_WRITE_BYTES));
@@ -42,43 +41,28 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
 {
     if(auto it = m_loaded_assets_map.find(file_path); it != m_loaded_assets_map.end()) { return it->second; }
 
-    const auto ext = file_path.extension();
-
-    if(auto assetopt = try_deserialize_asset(file_path); assetopt)
+    auto asset = try_deserialize_asset(file_path);
+    const bool deserialized = asset.has_value();
+    if(!asset) { asset = load_gltf_from_virtual_path(file_path, ImportSettings::KEEP_DATA_BIT); }
+    if(!asset)
     {
-        auto it = m_loaded_assets_map.emplace(file_path, std::move(*assetopt));
-        return it.first->second;
+        ENG_WARN("Couldn't load asset {}", file_path.string());
+        return s_null_asset;
     }
 
-    if(ext == ".glb" || ext == ".gltf")
+    auto& loaded = m_loaded_assets_map.emplace(file_path, std::move(*asset)).first->second;
+    if(!deserialized && get_engine().settings.serialize_to_enbc)
     {
-        auto asset = AssetLoaderGLTF::load_from_file(get_engine().fs->make_rel_path(file_path), ImportSettings::KEEP_DATA_BIT);
-        if(!asset)
-        {
-            ENG_WARN("Couldn't load asset {}", file_path.string());
-            return s_null_asset;
-        }
-        asset->path = file_path;
-        auto it = m_loaded_assets_map.emplace(file_path, std::move(*asset));
-
-        if(get_engine().settings.serialize_to_enbc)
-        {
-            m_serializing_threads.push_back(std::make_unique<std::jthread>(std::jthread{
-                &AssetManager::serialize_asset_to_enbc_thread, this, std::ref(it.first->second) }));
-        }
-
-        return it.first->second;
+        m_serializing_threads.emplace_back(&AssetManager::serialize_asset_to_enbc_thread, this, std::ref(loaded));
     }
-
-    ENG_ERROR("Extension not supported {}", file_path.string());
-    return s_null_asset;
+    return loaded;
 }
 
 serialization::engb::Container& AssetManager::get_latest_container()
 {
     if(m_engb_containers_vec.empty())
     {
-        m_engb_containers_vec.emplace_back(get_engine().fs->get_asset("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
+        m_engb_containers_vec.emplace_back(get_engine().fs->open_file("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
     }
     return m_engb_containers_vec.front();
 }
@@ -100,15 +84,6 @@ std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(u64
 
 std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_path)
 {
-    {
-        u32 head{};
-        while(m_serializing_threads.size())
-        {
-            if(m_serializing_threads[head]->joinable()) { break; }
-            ++head;
-        }
-        m_serializing_threads.erase(m_serializing_threads.begin(), m_serializing_threads.begin() + head);
-    }
     serialization::engb::Container* container{};
     const auto listopt = try_find_list_by_hash(ENG_HASH(file_path.string()), &container);
     if(!listopt) { return std::nullopt; }
@@ -126,7 +101,7 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
         std::vector<std::byte> file_buf(compression::ZLIB_SCRATCH_SIZE);
         size_t asset_read_offset = 0;
         u64 uncompressed_size = 0;
-        container->m_file->read((std::byte*)&uncompressed_size, 8, list.asset_start - 8);
+        container->m_file.read((std::byte*)&uncompressed_size, 8, list.asset_start - 8);
         asset_bytes.reserve(uncompressed_size);
         auto success = compression::zlib_inflate(
             [&](size_t size) {

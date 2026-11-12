@@ -17,11 +17,8 @@ enum class ImportSettings
 };
 ENG_ENABLE_FLAGS_OPERATORS(ImportSettings);
 
-class AssetLoaderGLTF
-{
-  public:
-    static std::optional<Asset> load_from_file(const fs::Path& path, Flags<ImportSettings> import_settings = {});
-};
+// Loads .gltf/.glb file from virtual path (e.g. '/assets/models/a.glb').
+std::optional<Asset> load_gltf_from_virtual_path(const fs::Path& path, Flags<ImportSettings> import_settings = {});
 
 } // namespace assets
 } // namespace eng

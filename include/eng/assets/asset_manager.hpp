@@ -3,6 +3,8 @@
 #include <deque>
 #include <mutex>
 #include <shared_mutex>
+#include <thread>
+#include <unordered_map>
 
 #include <eng/common/handle.hpp>
 #include <eng/common/types.hpp>
@@ -63,9 +65,9 @@ class AssetManager
     void serialize_asset_to_enbc_thread(Asset& asset);
 
     std::unordered_map<fs::Path, Asset> m_loaded_assets_map;
-    std::vector<serialization::engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
+    std::deque<serialization::engb::Container> m_engb_containers_vec; // assetN, assetN-1, assetN-2; from newest to oldest
     std::shared_mutex m_engbc_vec_mutex;
-    std::vector<std::unique_ptr<std::jthread>> m_serializing_threads;
+    std::vector<std::jthread> m_serializing_threads;
 };
 
 } // namespace assets

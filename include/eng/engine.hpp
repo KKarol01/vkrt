@@ -84,6 +84,7 @@ struct Settings
 {
     void parse_cmdline_args(int count, const char* const argv[]);
     bool serialize_to_enbc{ true };
+    std::string root_dir;
 };
 
 class Engine

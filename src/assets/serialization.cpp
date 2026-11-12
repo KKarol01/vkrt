@@ -13,39 +13,39 @@ namespace engb
 namespace v0
 {
 
-Container::Container(fs::FilePtr file) : m_file(file) { read_list_section(); }
+Container::Container(fs::File file) : m_file(std::move(file)) { read_list_section(); }
 
 Container::~Container() { serialize(); }
 
 void Container::read_list_section()
 {
-    if(!m_file || !m_file->is_read())
+    if(!m_file.is_read())
     {
-        ENG_WARN("Couldn't open engb file {} for read", m_file ? m_file->path().string() : "<empty path>");
+        ENG_WARN("Couldn't open engb file {} for read", m_file.path().string());
         m_lists_vec.clear();
         return;
     }
 
     // file is empty, no list to be read
-    if(m_file->size() == 0) { return; }
+    if(m_file.size() == 0) { return; }
 
     std::byte buf[64];
     static_assert(LIST_BYTE_SZ <= std::size(buf));
-    auto read_bytes = m_file->read(buf, HEADER_BYTE_SZ, 0);
+    auto read_bytes = m_file.read(buf, HEADER_BYTE_SZ, 0);
     if(read_bytes != HEADER_BYTE_SZ)
     {
-        ENG_WARN("Could read engb header ({})", m_file->path().string());
+        ENG_WARN("Could read engb header ({})", m_file.path().string());
         return;
     }
     if(std::string_view{ (const char*)buf, 4 } != "engb")
     {
-        ENG_WARN("File is not valid engb file ({})", m_file->path().string());
+        ENG_WARN("File is not valid engb file ({})", m_file.path().string());
         return;
     }
 
     if((char)buf[4] != (char)0)
     {
-        ENG_WARN("Engb container {} has invalid version {}", m_file->path().string(), (char)buf[4]);
+        ENG_WARN("Engb container {} has invalid version {}", m_file.path().string(), (char)buf[4]);
         return;
     }
 
@@ -55,10 +55,10 @@ void Container::read_list_section()
     for(auto i = 0u; i < num_lists; ++i)
     {
         auto& l = m_lists_vec.emplace_back();
-        const auto file_read = m_file->read(buf, LIST_BYTE_SZ);
+        const auto file_read = m_file.read(buf, LIST_BYTE_SZ);
         if(file_read != LIST_BYTE_SZ)
         {
-            ENG_WARN("Failed reading engb container list from file {}", m_file->path().string());
+            ENG_WARN("Failed reading engb container list from file {}", m_file.path().string());
             m_lists_vec.clear();
             return;
         }
@@ -104,7 +104,7 @@ void Container::append_asset_bytes(std::span<const std::byte> bytes, bool finish
 void Container::serialize()
 {
     if(!m_modified) { return; }
-    if(!m_file)
+    if(!m_file.is_write())
     {
         ENG_WARN("Cannot serialize engb container: file mode is not permitting writes");
         return;
@@ -114,7 +114,7 @@ void Container::serialize()
     size_t out_bytes_written = 0;
     serialization::serialize(std::span{ data }, *this, out_bytes_written);
     ENG_ASSERT(total_size_bytes == out_bytes_written);
-    const auto file_bytes_writen = m_file->write(data.data(), out_bytes_written, 0, true);
+    const auto file_bytes_writen = m_file.write(data.data(), out_bytes_written, 0, true);
     ENG_ASSERT(file_bytes_writen == total_size_bytes);
 }
 
@@ -129,11 +129,11 @@ std::optional<List> Container::get_asset_list(u64 custom_hash) const
 
 size_t Container::get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset) const
 {
-    if(!m_file || !m_file->is_read()) { return 0; }
+    if(!m_file.is_read()) { return 0; }
     if(src_offset >= list.asset_size) { return 0; }
     const size_t remaining_in_asset = list.asset_size - src_offset;
     const size_t bytes_to_read = std::min(out_data.size(), remaining_in_asset);
-    const auto file_bytes = m_file->read(out_data.data(), bytes_to_read, list.asset_start + src_offset);
+    const auto file_bytes = m_file.read(out_data.data(), bytes_to_read, list.asset_start + src_offset);
     return file_bytes;
 }
 

@@ -14,15 +14,10 @@
 #include <eng/common/flags.hpp>
 #include <eng/common/handle.hpp>
 #include <eng/string/stack_string.hpp>
+#include <eng/fs/fs.hpp>
 
 namespace eng
 {
-
-namespace fs
-{
-class File;
-using FilePtr = std::shared_ptr<File>;
-} // namespace fs
 
 namespace serialization
 {
@@ -297,7 +292,7 @@ struct List
 
 struct Container
 {
-    Container(fs::FilePtr file);
+    Container(fs::File file);
     ~Container();
 
     void read_list_section();
@@ -312,7 +307,7 @@ struct Container
     std::optional<List> get_asset_list(u64 custom_hash) const;
     usize get_asset_data(const List& list, std::span<std::byte> out_data, usize src_offset) const;
 
-    fs::FilePtr m_file;
+    fs::File m_file;
     std::vector<List> m_lists_vec;
     std::vector<std::byte> m_asset_bytes;
     bool m_modified{ false };

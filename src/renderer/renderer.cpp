@@ -168,7 +168,7 @@ void Renderer::init(IRendererBackend* backend)
     get_engine().window->add_on_resize(on_window_resize);
 
     std::string_view exts[]{ ".hlsl", ".hlsli" };
-    new_shaders_listener = get_engine().fs->make_listener("/assets/shaders", exts);
+    new_shaders_listener = get_engine().fs->make_recursive_directory_listener("/assets/shaders", exts);
 }
 
 void Renderer::init_helper_geom()
@@ -738,8 +738,8 @@ void Renderer::compile_rendergraph()
 
             auto& t = targets;
             t = RenderTargets{};
-            t.constants = b.write_buffer(
-                b.persistent("Constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), 2));
+            t.constants =
+                b.write_buffer(b.persistent("Constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), 2));
             t.depth = b.persistent("Depth", image(settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
                                    RGClear::depth_stencil(0.0f), 2);
             t.opaque = b.persistent("Opaque", image(settings.color_format, color_usage), RGClear::color(), 2);
@@ -972,10 +972,10 @@ bool Renderer::compile_shader(Handle<Shader> shader)
 bool Renderer::compile_shader(Shader& shader)
 {
     const auto shhash = m_shaders.get_hash(shader.path);
-    fs::FilePtr shfile = get_engine().fs->get_asset(shader.path, fs::OpenMode::READ_BYTES);
+    auto& fs = *get_engine().fs;
     const auto pcpath = fs::Path{ shader.path.string() + ".precompiled" };
-    fs::FilePtr pcfile = get_engine().fs->get_asset(pcpath, fs::OpenMode::READ_BYTES);
-    if(!shfile && !pcfile)
+    auto pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
+    if(!fs.file_exists(shader.path) && !pcfile)
     {
         ENG_WARN("Shader {} has no source file nor precompiled binary", shader.path.string());
         return false;
@@ -983,12 +983,12 @@ bool Renderer::compile_shader(Shader& shader)
 
     const auto compile_from_bytecode = [this, shhash, &shader, &pcfile]() -> bool {
         u64 readhash{};
-        auto readb = pcfile->read((std::byte*)&readhash, 8, 0);
+        auto readb = pcfile.read((std::byte*)&readhash, 8, 0);
         ENG_ASSERT(readb == 8);
         if(shhash == readhash)
         {
-            std::vector<u32> pcdata((pcfile->size() - 8) / 4);
-            readb = pcfile->read((std::byte*)pcdata.data(), pcdata.size() * 4, 8);
+            std::vector<u32> pcdata((pcfile.size() - 8) / 4);
+            readb = pcfile.read((std::byte*)pcdata.data(), pcdata.size() * 4, 8);
             ENG_ASSERT(readb % 4 == 0);
             auto res = backend->compile_shader(shader, std::as_bytes(std::span{ pcdata }));
             ENG_ASSERT(res);
@@ -997,7 +997,7 @@ bool Renderer::compile_shader(Shader& shader)
         return false;
     };
 
-    if(pcfile && pcfile->size() > 8)
+    if(pcfile && pcfile.size() > 8)
     {
         if(compile_from_bytecode())
         {
@@ -1024,10 +1024,8 @@ bool Renderer::compile_shader(Shader& shader)
     }();
     if(!shader_target) { return false; }
 
-    // compilation should happen from where the folder assets/ is
-    const auto include_path = get_engine().fs->make_rel_path("/").string();
-    const auto hlsl_path = get_engine().fs->make_rel_path(shader.path).string();
-    const auto pcpath_str = get_engine().fs->make_rel_path(pcpath).string();
+    const auto hlsl_path = shader.path.relative_path().string();
+    const auto pcpath_str = pcpath.relative_path().string();
     const char* args[]{
         "dxc.exe",
         "-T",
@@ -1041,31 +1039,34 @@ bool Renderer::compile_shader(Shader& shader)
         "-Zi",
 #endif
         "-I",
-        include_path.c_str(),
+        ".",
         "-Fo",
         pcpath_str.c_str(),
         hlsl_path.c_str(),
         (const char*)nullptr,
     };
-    get_engine().fs->delete_file(pcpath_str);
+    pcfile.close();
+    fs.delete_file(pcpath);
     auto [ret, code] = reproc::run(args, opts);
     if(ret != 0) { return false; }
 
-    pcfile = get_engine().fs->get_asset(pcpath, fs::OpenMode::READ_BYTES);
+    pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
     if(!pcfile)
     {
         ENG_WARN("Could not open file with compiled shader code {}", pcpath.string());
         return false;
     }
 
-    std::vector<std::byte> pcdata(pcfile->size());
-    pcfile->read(pcdata.data(), pcdata.size(), 0);
+    std::vector<std::byte> pcdata(pcfile.size());
+    pcfile.read(pcdata.data(), pcdata.size(), 0);
+    pcfile.close();
 
-    pcfile = get_engine().fs->get_asset(pcpath, fs::OpenMode::WRITE_CREATE_BYTES);
-    pcfile->write((const std::byte*)&shhash, 8, 0);
-    pcfile->write(pcdata.data(), pcdata.size(), 8, true);
+    pcfile = fs.open_file(pcpath, fs::OpenMode::WRITE_CREATE_BYTES);
+    pcfile.write((const std::byte*)&shhash, 8, 0);
+    pcfile.write(pcdata.data(), pcdata.size(), 8, true);
+    pcfile.close();
 
-    pcfile = get_engine().fs->get_asset(pcpath, fs::OpenMode::READ_BYTES);
+    pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
     compile_from_bytecode();
     return true;
 }
@@ -1594,15 +1595,15 @@ void ShaderManager::parse_includes(File& f, File* pf)
 {
     if(f.hash == 0)
     {
-        auto file = get_engine().fs->get_asset(f.path, fs::OpenMode::READ_BYTES);
+        auto file = get_engine().fs->open_file(f.path, fs::OpenMode::READ_BYTES);
         if(!file)
         {
             ENG_WARN("Couldn't open file {}", f.path.string());
             return;
         }
-        f.hash = ENG_HASH(f.hash, file->get_hash());
+        f.hash = ENG_HASH(f.hash, file.get_hash());
         const auto shader_dir = f.path.parent_path();
-        for(std::string line; file->getline(line);)
+        for(std::string line; file.getline(line);)
         {
             if(!line.starts_with("#include")) { continue; }
             auto start = line.find('"');

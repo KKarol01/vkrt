@@ -159,43 +159,12 @@ void Window::add_on_mouse_move(const on_mouse_move_cb_t& a) { on_mouse_move_call
 
 void Settings::parse_cmdline_args(int count, const char* const argv[])
 {
-    enum Type
+    for(auto i = 1; i < count; ++i)
     {
-        TNone,
-        TBool,
-        TLastEnum,
-    };
-    struct Setting
-    {
-        Type type{};
-        void* setting{};
-        union DefaultValue {
-            bool Bool;
-        } value;
-    };
-    std::unordered_map<std::string_view, Setting> settings{ { "--no-serialize", { TBool, &serialize_to_enbc, { .Bool = false } } } };
-    for(auto i = 1u; i < count; ++i)
-    {
-        auto it = settings.find(argv[i]);
-        if(it == settings.end())
-        {
-            ENG_WARN("Undefined cmdline arg {}", argv[i]);
-            continue;
-        }
-        switch(it->second.type)
-        {
-            static_assert((int)TLastEnum == 2);
-        case TBool:
-        {
-            *(bool*)it->second.setting = it->second.value.Bool;
-            continue;
-        }
-        default:
-        {
-            ENG_ASSERT(false, "Unhandled enum");
-            continue;
-        }
-        }
+        const std::string_view arg = argv[i];
+        if(arg == "--no-serialize") { serialize_to_enbc = false; }
+        else if(arg == "--root" && i + 1 < count) { root_dir = argv[++i]; }
+        else { ENG_WARN("Undefined cmdline arg {}", arg); }
     }
 }
 
@@ -213,10 +182,10 @@ void Engine::init(int argc, char* argv[])
     ui = new ui::UI{};
     scene = new eng::Scene{};
 
-    if(!fs->init())
+    if(!fs->init(settings.root_dir))
     {
         destroy();
-        ENG_ERROR("Engine assets manager initialization failed.");
+        ENG_ERROR("Engine filesystem initialization failed.");
         return;
     }
 

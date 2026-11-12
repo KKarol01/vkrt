@@ -10,6 +10,7 @@
 #include <stb/stb_image.h>
 #include <stb/stb_image_write.h>
 
+#include <eng/engine.hpp>
 #include <eng/ecs/components.hpp>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
@@ -405,24 +406,24 @@ Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::N
 
 } // namespace gltf
 
-std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, Flags<ImportSettings> import_settings)
+std::optional<Asset> load_gltf_from_virtual_path(const fs::Path& file_path, Flags<ImportSettings> import_settings)
 {
-    auto fastdatabuf = fastgltf::GltfDataBuffer::FromPath(file_path);
+    const auto ext = file_path.extension();
+    if(ext != ".glb" && ext != ".gltf") { return std::nullopt; }
+
+    auto file = get_engine().fs->open_file(file_path, fs::OpenMode::READ_BYTES);
+    if(!file) { return std::nullopt; }
+    const auto file_bytes = file.read();
+    auto fastdatabuf = fastgltf::GltfDataBuffer::FromBytes((const std::byte*)file_bytes.data(), file_bytes.size());
     if(!fastdatabuf) { return std::nullopt; }
 
     static constexpr auto gltfOptions = fastgltf::Options::DontRequireValidAssetMember | fastgltf::Options::LoadExternalBuffers |
                                         fastgltf::Options::LoadExternalImages | fastgltf::Options::GenerateMeshIndices;
     fastgltf::Parser gltfparser;
-    const auto gltfasset = [&file_path, &gltfparser, &fastdatabuf] {
+    // external buffers/images are resolved by fastgltf directly, so it needs the physical directory (relative to root)
+    const auto gltfasset = [&] {
         ENG_TIMER_SCOPED("GLTF file parsing {}", file_path.string());
-        if(file_path.extension() == ".glb")
-        {
-            return gltfparser.loadGltfBinary(fastdatabuf.get(), file_path.parent_path(), gltfOptions);
-        }
-        else if(file_path.extension() == ".gltf")
-        {
-            return gltfparser.loadGltfJson(fastdatabuf.get(), file_path.parent_path(), gltfOptions);
-        }
+        return gltfparser.loadGltf(fastdatabuf.get(), file_path.parent_path().relative_path(), gltfOptions);
     }();
 
     if(!gltfasset) { return std::nullopt; }
@@ -449,6 +450,7 @@ std::optional<Asset> AssetLoaderGLTF::load_from_file(const fs::Path& file_path, 
     gfx::get_renderer().gq->with_cmd_buf(ctx.cmd).submit();
     gfx::get_renderer().current_data->wait_syncs.push_back(mip_sync);
 
+    asset.path = file_path;
     return asset;
 }
 
