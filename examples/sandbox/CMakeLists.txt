@@ -5,7 +5,7 @@ add_executable(sandbox
     "app/app.cpp"
 )
 target_include_directories(sandbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(sandbox PRIVATE eng::eng)
+target_link_libraries(sandbox PRIVATE eng)
 if(MSVC)
     target_compile_options(sandbox PRIVATE /W4)
 endif()
@@ -16,8 +16,11 @@ set_target_properties(sandbox PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
     RUNTIME_OUTPUT_NAME_DEBUG "sandboxDebug"
     RUNTIME_OUTPUT_NAME_RELEASE "sandbox"
-    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
-# The sandbox uses the engine repo's own assets/ (which already contains assets/shaders), so no ASSETS_DIR here.
-eng_setup_executable(sandbox)
+# Copy runtime DLLs (z.dll) next to the exe.
+add_custom_command(TARGET sandbox POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:sandbox> $<TARGET_FILE_DIR:sandbox>
+    COMMAND_EXPAND_LISTS
+)

@@ -146,7 +146,6 @@ add_library(eng STATIC
     "src/assets/loaders.cpp"
     "src/assets/serialization.cpp"
 )
-add_library(eng::eng ALIAS eng)
 
 target_include_directories(eng
     PUBLIC
@@ -204,7 +203,7 @@ target_compile_definitions(eng
 )
 
 target_precompile_headers(eng
-    PRIVATE
+    PUBLIC
         <algorithm>
         <atomic>
         <cstddef>
@@ -261,31 +260,6 @@ target_precompile_headers(eng
         <eng/renderer/renderer_fwd.hpp>
         <eng/renderer/vulkan/to_vk.hpp>
 )
-
-# Call on a game/app executable that links eng:
-#   eng_setup_executable(<target> [ASSETS_DIR <dir>])
-# - reuses eng's precompiled-header list for the target (code written against eng has historically relied on it),
-# - copies runtime DLLs (z.dll) next to the executable after each build,
-# - if ASSETS_DIR is given, mirrors the engine's default shaders into <ASSETS_DIR>/shaders after each build,
-#   because the engine resolves '/assets/shaders/...' against the single runtime asset root (see README).
-function(eng_setup_executable target)
-    cmake_parse_arguments(ARG "" "ASSETS_DIR" "" ${ARGN})
-    get_target_property(_eng_pch eng PRECOMPILE_HEADERS)
-    if(_eng_pch)
-        target_precompile_headers(${target} PRIVATE ${_eng_pch})
-    endif()
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${target}> $<TARGET_FILE_DIR:${target}>
-        COMMAND_EXPAND_LISTS
-    )
-    if(ARG_ASSETS_DIR)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
-                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/assets/shaders"
-                "${ARG_ASSETS_DIR}/shaders"
-        )
-    endif()
-endfunction()
 
 if(ENG_BUILD_EXAMPLES)
     add_subdirectory(examples/sandbox)
