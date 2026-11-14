@@ -113,7 +113,7 @@ class Engine
     size_t engine_startup_time{};
     float refresh_rate{ 1.0f / 60.0f };
 
-    Signal<void()> on_init;
+    Signal<void()> on_after_init;
     Signal<void()> on_update;
 
     std::deque<std::string> msg_log;

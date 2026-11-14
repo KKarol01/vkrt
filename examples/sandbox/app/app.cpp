@@ -49,7 +49,7 @@ namespace app
 
 void App::start()
 {
-    get_engine().on_init += [this] { on_init(); };
+    get_engine().on_after_init += [this] { on_init(); };
     // get_engine().on_update += [this] { on_update(); };
 }
 

@@ -380,11 +380,10 @@ u32 RGBuilder::add_access(const RGAccess& a)
     const auto& res = graph->get_res(a.resource);
     if(!res.is_buffer() && a.stage.any())
     {
-        // make sure this pass does not access the same resource twice
         for(const auto id : pass->accesses)
         {
             const auto& other = graph->get_acc(id);
-            if(other.resource != a.resource || other.stage.empty() || other.layout == a.layout) { continue; }
+            if(other.resource != a.resource || other.stage.empty() || other.clear || other.layout == a.layout) { continue; }
             ENG_WARN("Pass \"{}\" accesses \"{}\" in different layouts; the later access wins.", pass->name.as_view(),
                      res.name.as_view());
         }

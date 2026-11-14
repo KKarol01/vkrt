@@ -127,14 +127,13 @@ std::optional<List> Container::get_asset_list(u64 custom_hash) const
     return std::nullopt;
 }
 
-size_t Container::get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset) const
+size_t Container::get_asset_data(const List& list, std::span<std::byte> out_data, size_t src_offset)
 {
     if(!m_file.is_read()) { return 0; }
     if(src_offset >= list.asset_size) { return 0; }
     const size_t remaining_in_asset = list.asset_size - src_offset;
     const size_t bytes_to_read = std::min(out_data.size(), remaining_in_asset);
-    const auto file_bytes = m_file.read(out_data.data(), bytes_to_read, list.asset_start + src_offset);
-    return file_bytes;
+    return m_file.read(out_data.data(), bytes_to_read, list.asset_start + src_offset);
 }
 
 } // namespace v0

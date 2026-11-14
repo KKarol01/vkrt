@@ -170,7 +170,9 @@ void Settings::parse_cmdline_args(int count, const char* const argv[])
 
 void Engine::init(int argc, char* argv[])
 {
+    settings.root_dir = ENG_ROOT_DIR;
     settings.parse_cmdline_args(argc, argv);
+
     if(!glfwInit()) { ENG_ERROR("Could not initialize GLFW"); }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
@@ -218,7 +220,7 @@ void Engine::destroy()
 
 void Engine::start()
 {
-    on_init.signal();
+    on_after_init.signal();
     while(!window->should_close())
     {
         if(get_time_secs() - last_frame_time >= refresh_rate)

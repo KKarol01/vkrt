@@ -305,7 +305,7 @@ struct Container
     void serialize();
 
     std::optional<List> get_asset_list(u64 custom_hash) const;
-    usize get_asset_data(const List& list, std::span<std::byte> out_data, usize src_offset) const;
+    usize get_asset_data(const List& list, std::span<std::byte> out_data, usize src_offset);
 
     fs::File m_file;
     std::vector<List> m_lists_vec;

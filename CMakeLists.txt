@@ -191,6 +191,9 @@ target_link_libraries(eng
         meshoptimizer
         reproc++
 )
+
+set(ENG_ROOT_DIR "${CMAKE_SOURCE_DIR}" CACHE PATH "Default engine asset root")
+target_compile_definitions(eng PRIVATE ENG_ROOT_DIR="${ENG_ROOT_DIR}")
 target_compile_definitions(eng
     PUBLIC
         _CRT_SECURE_NO_WARNINGS

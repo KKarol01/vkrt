@@ -10,8 +10,7 @@ if(MSVC)
     target_compile_options(sandbox PRIVATE /W4)
 endif()
 
-# Keep the exe directly in the build root (out/) like the old 'eng' executable, so the engine's
-# asset-root search (cwd, ../, ../../) still finds the repo's assets/ folder when run from there.
+# Keep the exe directly in the build root (out/). The asset root defaults to this repo (ENG_ROOT_DIR).
 set_target_properties(sandbox PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
     RUNTIME_OUTPUT_NAME_DEBUG "sandboxDebug"
