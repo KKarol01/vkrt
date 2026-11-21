@@ -8,8 +8,8 @@
 #include <eng/common/spatial.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/logger.hpp>
-#include <eng/common/types.hpp>
 #include <eng/string/stack_string.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/assets/serialization.hpp>
 #include <assets/shaders/common.hlsli>
 
@@ -33,8 +33,6 @@ struct Transform
         if(!glm::decompose(mat, t.scale, t.rotation, t.position, skew, perspective)) { return {}; }
         return t;
     }
-    void serialize(serialization::Context& ctx) const {}
-    void deserialize(serialization::Context& ctx) {}
     glm::mat4 to_mat4() const { return glm::translate(glm::scale(glm::mat4_cast(rotation), scale), position); }
     glm::vec3 position{};
     glm::quat rotation{ glm::quat_identity<float, glm::packed_highp>() };
@@ -56,7 +54,7 @@ struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> render_meshes;
-    u32 gpu_resource{ ~0u }; // renderer sets this when it processed the mesh
+    u32 gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
 };
 
 struct alignas(16) Light
@@ -85,5 +83,10 @@ inline std::string to_string(const ecsc::Light::Type& a)
     }
 }
 // clang-format on
+
+namespace serialization
+{
+ENG_SERIALIZATION_DECLARE_CUSTOM_FUNCTIONS(ecsc::Transform);
+}
 
 } // namespace eng

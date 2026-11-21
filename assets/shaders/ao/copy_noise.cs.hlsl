@@ -1,6 +1,6 @@
 #include "ssao.shared.hlsli"
 
-ENG_PUSH_CONSTANTS(GPUAOCopyNoiseParams)
+ENG_PUSH_CONSTANTS(GPUSSAOCopyNoiseParams)
 
 [numthreads(8, 8, 1)]
 void main(uint3 thread_id : SV_DispatchThreadID)

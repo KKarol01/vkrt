@@ -60,7 +60,8 @@ struct Window
     void add_on_resize(const on_resize_cb_t& a);
     void add_on_mouse_move(const on_mouse_move_cb_t& a);
 
-    f32_2 size{};
+    float width{};
+    float height{};
     bool focused{};
     GLFWwindow* window{ nullptr };
     std::vector<on_focus_cb_t> on_focus_callbacks;

@@ -51,7 +51,7 @@ class GamePanel : public Panel
             }
             width = std::ceil(width);
             height = std::ceil(height);
-            // gfx::get_renderer().settings.new_render_resolution = { width, height };
+            gfx::get_renderer().settings.new_render_resolution = { width, height };
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             const auto color = b.sample_texture(gfx::get_renderer().targets.final_color);
@@ -181,19 +181,19 @@ class ConsolePanel : public Panel
         if(ImGui::Begin("Console Panel"))
         {
             // auto& gfx_settings = r.settings.gfx_settings;
-            // auto& pass = r.passes.ao[(int)r.settings.ao_mode];
+            // auto& pass = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
             // if(ImGui::BeginCombo("AO_MODE", pass->m_name.c_str()))
             //{
             //     for(auto i = 0; i < (int)gfx::AOMode::LAST_ENUM; ++i)
             //     {
             //         if(ImGui::Selectable(r.passes.ao[i]->m_name.c_str()))
             //         {
-            //             r.settings.ao_mode = (gfx::AOMode)i;
+            //             r.settings.gfx_settings.ao_mode = (gfx::AOMode)i;
             //         }
             //     }
             //     ImGui::EndCombo();
             // }
-            // auto& ao_mode = r.passes.ao[(int)r.settings.ao_mode];
+            // auto& ao_mode = r.passes.ao[(int)r.settings.gfx_settings.ao_mode];
             // auto& settings = ao_mode->m_settings;
             // settings.iterate_settings([](std::string_view name, gfx::pass::PassSettings::Value& value) {
             //     if(auto** s = std::get_if<float*>(&value)) { return ImGui::DragFloat(name.data(), *s); }
@@ -249,23 +249,12 @@ class DebugPanel : public Panel
 
         if(ImGui::TreeNodeEx("Resources", ImGuiTreeNodeFlags_DefaultOpen))
         {
-
-            if(ImGui::BeginTable("ResourcesTable", 2,
-                                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
-                                 ImVec2{ ImGui::GetContentRegionMax().x, 200.0f }))
+            if(ImGui::BeginTable("ResourcesTable", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
             {
-                ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
-                ImGui::TableNextColumn();
-                ImGui::TableHeader("Name");
-                ImGui::TableNextColumn();
-                ImGui::TableHeader("P A E");
-				ImGui::SameLine();
-				ImGui::Text("asdf");
-                if(ImGui::IsItemHovered() && ImGui::BeginTooltip())
-                {
-                    ImGui::Text("Persistent Aliased External");
-                    ImGui::EndTooltip();
-                }
+                ImGui::TableSetupColumn("Name");
+                ImGui::TableSetupColumn("Persistent");
+                ImGui::TableSetupColumn("Aliased");
+                ImGui::TableHeadersRow();
 
                 for(const auto& res : rgdd.resources)
                 {
@@ -273,11 +262,9 @@ class DebugPanel : public Panel
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(res.name.c_str());
                     ImGui::TableNextColumn();
-                    char descriptor[]{ 'N', ' ', 'N', ' ', 'N', '\0' };
-                    if(res.persistent) { descriptor[0] = 'Y'; }
-                    if(res.aliased_memory) { descriptor[2] = 'Y'; }
-                    if(res.is_external) { descriptor[4] = 'Y'; }
-                    ImGui::Text(descriptor);
+                    ImGui::Text(res.persistent ? "Yes" : "No");
+                    ImGui::TableNextColumn();
+                    ImGui::Text(res.aliased_memory ? "Yes" : "No");
                 }
                 ImGui::EndTable();
             }
@@ -369,7 +356,7 @@ class DebugPanel : public Panel
         ImGui::EndChild();
     }
 
-    std::unordered_map<hash_t, PassTime> pass_times;
+    std::unordered_map<StringHash, PassTime> pass_times;
 };
 
 void UI::init()

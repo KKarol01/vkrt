@@ -1,6 +1,6 @@
 #include "ssao.shared.hlsli"
 
-ENG_PUSH_CONSTANTS(GPUAOApplyParams)
+ENG_PUSH_CONSTANTS(GPUSSAOApplyParams)
 
 static const uint LOCAL_SIZE = 8;
 

@@ -4,6 +4,7 @@
 #include <eng/fs/fs.hpp>
 #include <eng/assets/asset_manager.hpp>
 #include <eng/common/flags.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 
 namespace eng
 {

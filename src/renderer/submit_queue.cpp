@@ -180,7 +180,7 @@ void CommandBufferVk::blit(const Image& dst, const Image& src, const ImageBlit& 
                    to_vk(ImageLayout::TRANSFER_DST), 1, &vkblit, to_vk(blit.filter));
 }
 
-void CommandBufferVk::clear_color(const Image& image, const f32_4& color)
+void CommandBufferVk::clear_color(const Image& image, const Color4f& color)
 {
     const auto clear = VkClearColorValue{ .float32 = { color.x, color.y, color.z, color.a } };
     const auto range =

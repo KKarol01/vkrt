@@ -1,7 +1,5 @@
 #pragma once
 
-<<<<<<<< HEAD:include/eng/renderer/types.hpp
-========
 #include <cstdint>
 #include <cstring>
 #include <future>
@@ -19,23 +17,14 @@
 #include <eng/string/stack_string.hpp>
 #include <eng/assets/serialization.hpp>
 
->>>>>>>> 8d79093572807589d994cfd0955b555b75bba783:include/eng/renderer/renderer_fwd.hpp
 // Windows macro. Expands to '2'. Don't need it, compiles without it. Thanks MS.
 #ifdef OPAQUE
 #undef OPAQUE
 #endif
-// Windows macro. Expands to '1'. Don't need it, compiles without it. Thanks MS.
-#ifdef TRANSPARENT
-#undef TRANSPARENT
-#endif
 
-#include <array>
-#include <eng/common/logger.hpp>
-#include <eng/common/types.hpp>
-
-// Enums
 namespace eng
 {
+
 namespace gfx
 {
 enum class CullFace
@@ -254,17 +243,6 @@ enum class ImageViewType : u8
     TYPE_3D,
 };
 
-enum class ChannelSwizzle : u8
-{
-    IDENTITY,
-    ZERO,
-    ONE,
-    R,
-    G,
-    B,
-    A
-};
-
 enum class ImageFilter : u8
 {
     NEAREST,
@@ -425,53 +403,6 @@ enum class DiscardContents : u8
     YES,
 };
 
-<<<<<<<< HEAD:include/eng/renderer/types.hpp
-// Forward declarations
-class BindlessPool;
-class CommandBufferVk;
-class CommandPoolVk;
-class ICommandBuffer;
-class ICommandPool;
-class ImGuiRenderer;
-class Renderer;
-class RGRenderGraph;
-class StagingBuffer;
-class SubmitQueue;
-enum class SyncType;
-struct BLASInstanceSettings;
-struct Buffer;
-struct BufferMetadataVk;
-struct BufferView;
-struct DebugGeometry;
-struct DescriptorLayout;
-struct DescriptorLayoutMetadataVk;
-struct DescriptorResource;
-struct DescriptorSet;
-struct DescriptorSetMetadataVk;
-struct Geometry;
-struct GeometryDescriptor;
-struct GeometryMetadataVk;
-struct IDescriptorSetAllocator;
-struct Image;
-struct ImageMetadataVk;
-struct ImageMipsLayers;
-struct ImageView;
-struct ImageViewMetadataVk;
-struct InstanceSettings;
-struct Material;
-struct Mesh;
-struct MeshDescriptor;
-struct Meshlet;
-struct MeshPass;
-struct Pipeline;
-struct PipelineLayout;
-struct PipelineLayoutMetadataVk;
-struct PipelineMetadataVk;
-struct PushRange;
-struct QueryPool;
-struct QueryPoolCreateInfo;
-struct QueryPoolMetadataVk;
-========
 class Renderer;
 struct ImageBlockData;
 struct Shader;
@@ -531,35 +462,9 @@ struct BufferMetadataVk;
 
 class RGRenderGraph;
 struct RGResource;
->>>>>>>> 8d79093572807589d994cfd0955b555b75bba783:include/eng/renderer/renderer_fwd.hpp
 struct RGAccess;
 struct RGBuilder;
-struct RGResource;
-struct Sampler;
-struct SamplerMetadataVk;
-struct ScopedTimestampQuery;
-struct Shader;
-struct ShaderEffect;
-struct ShaderMetadataVk;
-struct Swapchain;
-struct Sync;
-struct SyncCreateInfo;
-struct Texture;
-struct TimestampQuery;
-struct VkDescriptorPoolMetadata;
 
-<<<<<<<< HEAD:include/eng/renderer/types.hpp
-} // namespace gfx
-
-} // namespace eng
-
-// Shared types (to avoid including renderer.hpp)
-namespace eng
-{
-namespace gfx
-{
-========
->>>>>>>> 8d79093572807589d994cfd0955b555b75bba783:include/eng/renderer/renderer_fwd.hpp
 struct BufferView
 {
     auto operator<=>(const BufferView&) const = default;
@@ -574,29 +479,21 @@ struct BufferView
 
 struct ImageView
 {
+    union Metadata {
+        ImageViewMetadataVk* vk;
+    };
     static ImageView init(Handle<Image> image, std::optional<ImageFormat> format = {}, std::optional<ImageViewType> type = {},
                           u32 src_mip = 0u, u32 dst_mip = ~0u, u32 src_layer = 0u, u32 dst_layer = ~0u);
-    static constexpr auto get_struct_fields()
-    {
-        return std::make_tuple(serialization::StructField{ &ImageView::image }, serialization::StructField{ &ImageView::type },
-                               serialization::StructField{ &ImageView::format },
-                               serialization::StructField{ &ImageView::src_subresource },
-                               serialization::StructField{ &ImageView::dst_subresource });
-    }
-    auto operator<=>(const ImageView&) const = default;
+    auto operator<=>(const ImageView& a) const = default;
     explicit operator bool() const { return (bool)image; }
-    void* get_md();
-    const void* get_md() const;
+    Metadata get_md() const;
     Handle<Image> image;
     ImageViewType type{};
     ImageFormat format{};
     u32 src_subresource{};
-    u32 dst_subresource{};
+    u32 dst_subresource{ ~0u };
 };
 
-<<<<<<<< HEAD:include/eng/renderer/types.hpp
-// Helper funcs
-========
 struct ImageMipsLayers
 {
     Range32u mips{};
@@ -627,7 +524,6 @@ struct ImageCopy
     u32_3 extent{};
 };
 
->>>>>>>> 8d79093572807589d994cfd0955b555b75bba783:include/eng/renderer/renderer_fwd.hpp
 inline constexpr size_t get_vertex_component_size(VertexComponent comp)
 {
     switch(comp)
@@ -643,7 +539,7 @@ inline constexpr size_t get_vertex_component_size(VertexComponent comp)
     case VertexComponent::UV0_BIT:
         return 2 * sizeof(float);
     }
-    ENG_ASSERT("Undefined case");
+    ENG_ERROR("Undefined case");
     return 0;
 }
 
@@ -686,7 +582,7 @@ inline constexpr size_t get_index_size(IndexFormat format)
     case IndexFormat::U32:
         return 4;
     }
-    ENG_ASSERT("Undefined case");
+    ENG_ERROR("Undefined case");
     return 0;
 }
 
@@ -722,7 +618,7 @@ inline size_t copy_indices(std::span<std::byte> dst, std::span<const std::byte> 
     else if(dstf == IndexFormat::U8 && srcf == IndexFormat::U8) { memcpy(dst.data(), src.data(), src.size_bytes()); }
     else
     {
-        ENG_ASSERT("Unhandled case.");
+        ENG_ERROR("Unhandled case.");
         return 0;
     }
     return ic;
@@ -753,7 +649,7 @@ inline Flags<ImageAspect> get_aspect_from_format(ImageFormat format)
 
     default:
     {
-        ENG_ASSERT("Undefined case");
+        ENG_ERROR("Undefined case");
         return ImageAspect::NONE;
     }
     }
@@ -771,12 +667,98 @@ inline ImageViewType get_view_type_from_image(ImageType type)
         return ImageViewType::TYPE_3D;
     default:
     {
-        ENG_ASSERT("Undefined case");
+        ENG_ERROR("Undefined case");
         return ImageViewType::NONE;
     }
     }
 }
+
+struct ParsedGeometryData
+{
+    Flags<gfx::VertexComponent> vertex_layout;
+    std::vector<float> positions{};
+    std::vector<float> attributes{};
+    std::vector<u16> indices{};
+    std::vector<gfx::Meshlet> meshlets{};
+};
+using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
+
+struct ParsedImageData
+{
+    StackString<128> name;
+    u32 width{};
+    u32 height{};
+    gfx::ImageFormat format{};
+    std::vector<std::byte> data;
+};
+
+struct Meshlet
+{
+    i32 vertex_offset;
+    u32 vertex_count;
+    u32 index_offset;
+    u32 index_count;
+    glm::vec4 bounding_sphere{};
+};
+
+struct GeometryDescriptor
+{
+    // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
+    size_t get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
+    Flags<GeometryFlags> flags;
+    Flags<VertexComponent> vertex_layout;
+    IndexFormat index_format{};
+    std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
+    std::span<const float> attributes;
+    std::span<const std::byte> indices;
+    std::span<const Meshlet> meshlets; // optional
+    ParsedGeometryReadySignal* signal{};
+};
+
 } // namespace gfx
+
+namespace serialization
+{
+template <> inline constexpr auto get_struct_fields<gfx::ImageView>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, image),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, type),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, format),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, src_subresource),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ImageView, dst_subresource));
+}
+template <> inline constexpr auto get_struct_fields<gfx::ParsedImageData>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, name),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, width),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, height),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, format),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedImageData, data));
+}
+template <> inline constexpr auto get_struct_fields<gfx::ParsedGeometryData>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, vertex_layout),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, positions),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, attributes),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, indices),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::ParsedGeometryData, meshlets));
+}
+template <> inline constexpr auto get_struct_fields<gfx::Meshlet>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_offset),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, vertex_count),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_offset),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, index_count),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Meshlet, bounding_sphere));
+}
+template <> inline constexpr auto get_struct_fields<glm::vec4>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, x),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, y),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, z),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(glm::vec4, w));
+}
+} // namespace serialization
 } // namespace eng
 
 ENG_DEFINE_STD_HASH(eng::gfx::ImageView, ENG_HASH(t.image, t.type, t.format, t.src_subresource, t.dst_subresource));

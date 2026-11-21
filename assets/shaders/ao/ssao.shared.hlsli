@@ -1,60 +1,38 @@
-#ifndef SSAO_COMMON_H
-#define SSAO_COMMON_H
+#ifndef SSAO_SHARED_HLSLI
+#define SSAO_SHARED_HLSLI
 
 #include "assets/shaders/common.hlsli"
 
-#ifndef NO_PUSH_CONSTANTS
-struct PushConstants
+ENG_NAMESPACE_BEGIN
+
+// One push-constant block for every AO pipeline (SSAO, SSILVB, GTAO, RTAO).
+// Each shader reads only the fields it needs; unused refs may be invalid.
+struct GPUAOParams
 {
-	ENG_UINT GPUEngConstantsBufferIndex;
-    ENG_UINT DepthTextureIndex;
-	ENG_UINT NoiseTextureIndex;
-	ENG_UINT NormalTextureIndex;
-	ENG_UINT ColorTextureIndex;
-	ENG_UINT VelocityTextureIndex;
-	ENG_UINT OutHistoryLenRWTextureIndex;
-	ENG_UINT OutHistoryRWTextureIndex;
-	ENG_UINT OutColorRWTextureIndex;
-	
-	ENG_UINT PrevGPUEngConstantsBufferIndex;
-	ENG_UINT PrevDepthTextureIndex;
-	ENG_UINT PrevNormalTextureIndex;
-	ENG_UINT PrevHistoryLenTextureIndex;
-	ENG_UINT PrevHistoryRWTextureIndex;
+    BufferRef<GPUEngConstants> engine;
+    GPUEngAOSettings ao; // GTAO: radius scale. RTAO: bias = ray tmin, radius = ray tmax
+    Texture2DRef<ENG_FLOAT> depth;
+    Texture2DRef<ENG_FLOAT2> noise;
+    Texture2DRef<ENG_FLOAT4> normal; // world-space gbuffer normal
+    Texture2DRef<ENG_FLOAT4> color;
+    Texture2DRef<ENG_FLOAT2> velocity;
+    TlasRef scene; // invalid when the scene has no TLAS
+    RWTexture2DRef<ENG_FLOAT4> out_ao;
 };
-[[vk::push_constant]] PushConstants pc;
-#endif
 
-<<<<<<<< HEAD:assets/shaders/ssao/common.hlsli
-#include "assets/shaders/util.hlsli"
-
-#define gDepthTexture gTextures2Dfloat[pc.DepthTextureIndex]
-#define gNoiseTexture gTextures2Dfloat2[pc.NoiseTextureIndex]
-#define gNormalTexture gTextures2Dfloat4[pc.NormalTextureIndex]
-#define gColorTexture gTextures2Dfloat4[pc.ColorTextureIndex]
-#define gOutAOImage gRWTextures2Dfloat4[pc.OutColorRWTextureIndex]
-#define gVelocityTexture    gTextures2Dfloat2[pc.VelocityTextureIndex]
-#define gOutHistoryTexture  gRWTextures2Dfloat4[pc.OutHistoryRWTextureIndex]
-#define gOutHistoryLen      gRWTextures2Dfloat[pc.OutHistoryLenRWTextureIndex]
-#define gPrevHistoryTexture gRWTextures2Dfloat4[pc.PrevHistoryRWTextureIndex]
-#define gPrevHistoryLen     gRWTextures2Dfloat[pc.PrevHistoryLenTextureIndex]
-#define gPrevDepthTexture   gTextures2Dfloat[pc.PrevDepthTextureIndex]
-#define gPrevNormalTexture  gTextures2Dfloat4[pc.PrevNormalTextureIndex]
-
-========
-struct GPUAOCopyNoiseParams
+struct GPUSSAOCopyNoiseParams
 {
     BufferRef<ENG_FLOAT2> noise;
     RWTexture2DRef<ENG_FLOAT2> out_noise;
 };
 
-struct GPUAOBlurParams
+struct GPUSSAOBlurParams
 {
     RWTexture2DRef<ENG_FLOAT4> ao;
     RWTexture2DRef<ENG_FLOAT4> out_blur;
 };
 
-struct GPUAOApplyParams
+struct GPUSSAOApplyParams
 {
     RWTexture2DRef<ENG_FLOAT4> color;
     RWTexture2DRef<ENG_FLOAT4> ao;
@@ -63,7 +41,6 @@ struct GPUAOApplyParams
 ENG_NAMESPACE_END
 
 #ifndef __cplusplus
->>>>>>>> a10ce13 (ssao to ao rename):assets/shaders/ao/ssao.shared.hlsli
 /*
 Generated with:
     glm::vec3 ssaopoints[64];
@@ -151,5 +128,6 @@ static const float3 SSAO_SAMPLES[64] = {
     float3(-0.32, -0.01, 0.89),
     float3(-0.28, -0.84, 0.40),
 };
+#endif // __cplusplus
 
 #endif

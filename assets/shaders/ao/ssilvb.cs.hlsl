@@ -1,16 +1,21 @@
-#include "common.hlsli"
+#include "ssao.shared.hlsli"
+#include "assets/shaders/util.hlsli"
 
+ENG_PUSH_CONSTANTS(GPUAOParams)
 #define LOCAL_SIZE 8
 
 static const uint N_SECTORS = 32u;
-static const float MAX_HISTORY_LEN = 16.0f;
 
-// Paper: https://arxiv.org/abs/2301.11376
-// Visibility Bitmask reference: https://cybereality.com/screen-space-indirect-lighting-with-visibility-bitmask-improvement-to-gtao-ssao-real-time-ambient-occlusion-algorithm-glsl-shader-implementation/
+// Paper
+// https://arxiv.org/abs/2301.11376
+// Code adjusted from
+// https://cybereality.com/screen-space-indirect-lighting-with-visibility-bitmask-improvement-to-gtao-ssao-real-time-ambient-occlusion-algorithm-glsl-shader-implementation/
 
 uint count_ones(uint value)
 {
-    return countbits(value);
+    value = value - ((value >> 1u) & 0x55555555u);
+    value = (value & 0x33333333u) + ((value >> 2u) & 0x33333333u);
+    return ((value + (value >> 4u) & 0xF0F0F0Fu) * 0x1010101u) >> 24u;
 }
 
 uint update_sectors(float min_horizon, float max_horizon, uint bitfield)
@@ -22,86 +27,48 @@ uint update_sectors(float min_horizon, float max_horizon, uint bitfield)
     return bitfield | cur_bitfield;
 }
 
-float Halton(uint index, uint base)
-{
-    float f = 1.0f;
-    float result = 0.0f;
-    uint current = index;
-    
-    while (current > 0u)
-    {
-        f = f / float(base);
-        result += f * float(current % base);
-        current = current / base;
-    }
-    
-    return result;
-}
-
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
-    uint2 dims;
-    gOutAOImage.GetDimensions(dims.x, dims.y);
-    const GPUEngConstants consts = eng_get_pc_rw_buf(GPUEngConstants, 0);
-    const GPUEngConstants prev_consts = eng_get_rw_buf(GPUEngConstants, pc.PrevGPUEngConstantsBufferIndex, 0);
+    const GPUEngConstants consts = pc.engine.load();
+    Texture2D<float> depth_tex = pc.depth.get();
+    Texture2D<float4> normal_tex = pc.normal.get();
+    Texture2D<float4> color_tex = pc.color.get();
+    RWTexture2D<float4> out_ao = pc.out_ao.get();
+	uint2 dims;
+    out_ao.GetDimensions(dims.x, dims.y);
     float2 thread_uv = (float2(dtid.xy) + 0.5f) / float2(dims.xy);
-    
+	
     if(any(dtid.xy >= dims)) { return; }
     
     float visibility = 0.0f;
     float3 lighting = 0.0f;
-    float2 frontBackHorizon = 0.0;
+	float2 frontBackHorizon = 0.0;
+    const float2 aspect = dims.yx / dims.x;
     
-    const float depth = gDepthTexture.SampleLevel(gSamplerNearest, thread_uv, 0).x;
+    const float depth = depth_tex.SampleLevel(gSamplerNearest, thread_uv, 0).x;
+    const float3 position = depth_to_view_pos(consts.proj, dtid.xy, dims, depth);
+	const float3 normal = mul(consts.view, float4(normal_tex.SampleLevel(gSamplerNearest, thread_uv, 0).xyz, 0.0)).xyz;
+    const float3 camera = normalize(-position);
     
-    // Discard background/skybox pixels to prevent history smearing
-    if(depth < 1e-5) 
+    const float sample_radius = 8.0;
+    const float n_slices = 4.0;
+    const float n_samples = 32.0;    
+    const float hitThickness = 0.15;
+    
+	float proj_radius = (sample_radius * consts.proj[0][0]) / -position.z;
+	float step_size = proj_radius / (n_samples + 1.0);
+	
+    float sliceRotation = ENG_TWO_PI / n_slices;
+    float jitter = IGN(int(dtid.x), int(dtid.y)) - 0.5; // -0.5, +0.5 subpixel jitter
+	for (float slice = 0; slice < n_slices + 0.5; slice += 1.0) 
     {
-        gOutHistoryLen[dtid.xy] = 1.0f;
-        gOutHistoryTexture[dtid.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        gOutAOImage[dtid.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        return; 
-    }
-    
-    const float3 position = depth_to_view_pos(dtid.xy, dims, depth);
-    const float3 world_normal = gNormalTexture.SampleLevel(gSamplerNearest, thread_uv, 0).xyz;
-    float3 normal = normalize(mul(consts.view, float4(world_normal, 0.0)).xyz);
-    const float3 camera = normalize(-position); 
-    
-    const float sample_radius = 1.0;
-    const float n_slices = 4.0; 
-    const float n_samples = 8.0;    
-    const float hitThickness = 1.0;
-	const float2 aspect = float2(dims.yx) / dims.x;
-    
-    float proj_radius = (sample_radius * consts.proj[0][0]) / -position.z;
-    float step_size = proj_radius / (n_samples + 1.0);
-    float sliceRotation = ENG_TWO_PI / n_slices; 
-    
-    // Spatiotemporal Jitter using Halton sampling
-    uint frame_idx = consts.frame_index * 1;
-    float jitter_x = Halton((frame_idx % 16) + 1, 2);
-    float jitter_y = Halton((frame_idx % 16) + 1, 3);
-    
-    // Base spatial interleaved gradient noise
-    float u1 = IGN(dtid.x, dtid.y) - 0.5;
-    float u2 = fmod(IGN(dtid.x, dtid.y) + 0.5, 1.0) - 0.5;
-    
-    // Combined Spatiotemporal jitter offsets
-    float slice_jitter = u1 + jitter_x; 
-    float step_jitter  = u2 + jitter_y; 
-    
-    // Spatial pass calculation
-    for (float slice = 0; slice < n_slices + 0.5; slice += 1.0) 
-    {
-        const float phi = sliceRotation * (slice + slice_jitter) + ENG_PI;
+        const float phi = sliceRotation * (slice + jitter) + ENG_PI;
         const float2 omega = float2(cos(phi), sin(phi));
-        const float2 uv_omega = float2(omega.x, -omega.y);
         const float3 direction = float3(omega.x, omega.y, 0.0);
-        
+		
         const float3 orthoDirection = direction - dot(direction, camera) * camera;
-        const float3 axis = normalize(cross(direction, camera));
+        const float3 axis = cross(direction, camera);
         const float3 projNormal = normal - dot(normal, axis) * axis;
         const float projLength = length(projNormal);
 
@@ -109,109 +76,119 @@ void main(uint3 dtid : SV_DispatchThreadID)
         const float cosN = clamp(dot(projNormal, camera) / projLength, -1.0, 1.0);
         const float n = signN * acos(cosN);
 
-        uint occlusion = 0u;
+		uint occlusion = 0u;
 
-        for(float currentSample = 0.0; currentSample < n_samples + 0.5; currentSample += 1.0)
-        {
-            float sampleStep = (currentSample + step_jitter + 0.5) * step_size + 0.01;
-            float2 sampleUV = thread_uv - (uv_omega * sampleStep * aspect);
-            
-            if(any(sampleUV < 0.0) || any(sampleUV > 1.0)) { continue; }
-            
-            float sampleDepth = gDepthTexture.SampleLevel(gSamplerNearest, sampleUV, 0).x;
-            float3 samplePosition = depth_to_view_pos(uint2(sampleUV * dims), dims, sampleDepth);
-            float3 sampleDistance = samplePosition - position;
-            float sampleLength = length(sampleDistance);
-            
-            if(sampleLength < 1e-5) { continue; }
-            
-            float3 sampleHorizon = sampleDistance / sampleLength;
-            
-            frontBackHorizon.x = dot(sampleHorizon, camera);
-            frontBackHorizon.y = dot(normalize(sampleDistance - camera * hitThickness), camera);
+		for(float currentSample = 0.0; currentSample < n_samples + 0.5; currentSample += 1.0)
+		{
+			float sampleStep = (currentSample + jitter) * step_size + 0.01;
+			float2 sampleUV = thread_uv + (omega * sampleStep * aspect);
+			
+			if(any(sampleUV < 0.0) || any(sampleUV > 1.0)) { continue; }
+			
+			float sampleDepth = depth_tex.SampleLevel(gSamplerNearest, sampleUV, 0).x;
+			float3 samplePosition = depth_to_view_pos(consts.proj, uint2(sampleUV * dims), dims, sampleDepth);
+			float3 sampleNormal = mul(consts.view, float4(normal_tex.SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz;
+			float3 sampleLight = color_tex.SampleLevel(gSamplerLinear, sampleUV, 0).xyz;
+			
+			float3 sampleDistance = samplePosition - position;
+			float sampleLength = length(sampleDistance);
+			
+			if(sampleLength < 1e-5) { continue; }
+			
+			float3 sampleHorizon = sampleDistance / sampleLength;
+			
+			frontBackHorizon.x = dot(sampleHorizon, camera);
+			frontBackHorizon.y = dot(normalize(sampleDistance - camera * hitThickness), camera);
 
-            frontBackHorizon = acos(clamp(frontBackHorizon, -1.0, 1.0));
-            frontBackHorizon = clamp((frontBackHorizon + n + ENG_HALF_PI) / ENG_PI, 0.0, 1.0);
+			frontBackHorizon = acos(clamp(frontBackHorizon, -1.0, 1.0));
+			frontBackHorizon = clamp((frontBackHorizon + n + ENG_HALF_PI) / ENG_PI, 0.0, 1.0);
 
-            float minHorizon = min(frontBackHorizon.x, frontBackHorizon.y);
+			float minHorizon = min(frontBackHorizon.x, frontBackHorizon.y);
             float maxHorizon = max(frontBackHorizon.x, frontBackHorizon.y);
-            
             uint indirect = update_sectors(minHorizon, maxHorizon, 0u);
-            uint new_bits = indirect & ~occlusion;
-            
-            if(new_bits == 0u) { continue; } 
-             
-            float3 sampleNormal = normalize(mul(consts.view, float4(gNormalTexture.SampleLevel(gSamplerNearest, sampleUV, 0).xyz, 0.0)).xyz);
-            float3 sampleLight = gColorTexture.SampleLevel(gSamplerNearest, sampleUV, 0).xyz;
-            
-            float stepVisibility = float(count_ones(new_bits)) / float(N_SECTORS);
-            
-            lighting += stepVisibility 
-                      * sampleLight 
-                      * clamp(dot(normal, sampleHorizon), 0.0, 1.0) 
-                      * clamp(dot(sampleNormal, -sampleHorizon), 0.0, 1.0); 
+			//uint indirect = update_sectors(frontBackHorizon.x, frontBackHorizon.y, 0u);
+			
+			float stepVisibility = float(count_ones(indirect & ~occlusion) / float(N_SECTORS));
+			lighting += stepVisibility * sampleLight * clamp(dot(normal, sampleHorizon), 0.0, 1.0) * clamp(dot(sampleNormal, -sampleHorizon), 0.0, 1.0);
 
-            occlusion |= indirect;
-        }
-        
+			occlusion |= indirect;
+		}
+		
         visibility += 1.0 - float(count_ones(occlusion)) / float(N_SECTORS);
     }
-	
+
     visibility /= n_slices;
     lighting /= n_slices;
     
-    // --- SPATIOTEMPORAL REPROJECTION ---
+    float4 current_signal = float4(lighting, visibility);
+
+	//out_ao[dtid.xy] *= 0.5;
+
+    // =========================================================================
+    // SPATIOTEMPORAL ACCUMULATION
+    // =========================================================================
     
-    float2 velocity = gVelocityTexture.SampleLevel(gSamplerNearest, thread_uv, 0);
-    float2 prev_uv = thread_uv - velocity;
-    int2 prev_coords = int2(prev_uv * dims);
+    // // 1. fetch velocity and reproject
+    // Texture2D<float2> tex_velocity = pc.velocity.get();
+    // float2 velocity = tex_velocity.SampleLevel(gSamplerNearest, thread_uv, 0);
+    // float2 prev_uv = thread_uv - velocity;
     
-    bool valid_history = true;
-	//valid_history = false;
-    if(any(prev_uv < 0.0) || any(prev_uv > 1.0)) 
-    {
-        valid_history = false;
-    }
+    // bool valid_history = true;
     
-    // Neighborhood / Geometry Validation
-    if(valid_history) 
-    {
-        float prev_depth = gPrevDepthTexture.SampleLevel(gSamplerNearest, prev_uv, 0).x;
-        float3 prev_world_normal = gPrevNormalTexture.SampleLevel(gSamplerNearest, prev_uv, 0).xyz;
+    // // Out-of-bounds check
+    // if (any(prev_uv < 0.0f) || any(prev_uv > 1.0f)) 
+    // {
+        // valid_history = false;
+    // }
+    
+    // // 2. Disocclusion Check (Using View-Space Z for highly accurate rejection)
+    // if (valid_history)
+    // {
+        // Texture2D<float> tex_prev_depth = get_gt(PrevDepth, float); 
+        // Texture2D<float4> tex_prev_normal = get_gt(PrevNormal, float4); 
+
+        // float prev_depth_val = tex_prev_depth.SampleLevel(gSamplerNearest, prev_uv, 0).x;
+        // float3 prev_normal = mul(consts.prev_view, float4(tex_prev_normal.SampleLevel(gSamplerNearest, prev_uv, 0).xyz, 0.0)).xyz;
         
-        // Unproject previous depth to world space for distance validation
-        float3 prev_view_pos = depth_to_view_pos(prev_coords, dims, prev_depth);
-        float3 prev_world_pos = mul(prev_consts.inv_view, float4(prev_view_pos, 1.0)).xyz;
-        float3 curr_world_pos = mul(consts.inv_view, float4(position, 1.0)).xyz;
+        // // Unproject the history depth to view space
+        // float3 prev_pos = unproject_inf_revz_depth(consts.proj, float3(prev_uv * 2.0f - 1.0f, prev_depth_val));
         
-        // Discard history if geometry drifted too far or normals drastically deviate
-        if(distance(curr_world_pos, prev_world_pos) > 0.15) 
-        {
-            valid_history = false;
-        }
-        else if(dot(world_normal, prev_world_normal) < 0.8) 
-        {
-            valid_history = false;
-        }
-    }
+        // // Compare view-space Z distance (e.g., 0.2 meters threshold)
+        // if (abs(position.z - prev_pos.z) > 0.2f) 
+        // {
+            // valid_history = false;
+        // }
+        // // Compare view-space Normals (approx 25 degree threshold)
+        // else if (dot(normal, prev_normal) < 0.9f) 
+        // {
+            // valid_history = false;
+        // }
+    // }
     
-    float history_len = 0.0;
-    float4 prev_history = float4(0.0, 0.0, 0.0, 1.0);
+    // // 3. Accumulate
+    // float4 output_signal = current_signal;
+    // float history_length = 1.0f;
     
-    if(valid_history) 
-    {
-        history_len = gPrevHistoryLen[prev_coords];
-        prev_history = gPrevHistoryTexture[prev_coords];
-    }
+    // // We need an RW texture for tracking current history length, and a Texture2D for reading the old one.
+    // RWTexture2D<float> out_history_len = get_grwt(HistoryLength, float);
     
-    history_len = min(history_len + 1.0, MAX_HISTORY_LEN);
-    float alpha = 1.0 / history_len;
+    // if (valid_history)
+    // {
+        // Texture2D<float4> tex_history_gi = get_gt(HistoryAOImage, float4);
+        // Texture2D<float> tex_prev_history_len = get_gt(PrevHistoryLength, float);
+        
+        // // Linear sample the history to smooth sub-pixel sub-jitter motion
+        // float4 history_signal = tex_history_gi.SampleLevel(gSamplerLinear, prev_uv, 0);
+        // float prev_len = tex_prev_history_len.SampleLevel(gSamplerNearest, prev_uv, 0);
+        
+        // // Cap history at 16 frames (or 32, tune to your liking)
+        // history_length = min(prev_len + 1.0f, 16.0f);
+        
+        // float alpha = 1.0f / history_length;
+        // output_signal = lerp(history_signal, current_signal, alpha);
+    // }
     
-    float4 current_val = float4(lighting, visibility);
-    float4 final_val = lerp(prev_history, current_val, alpha);
-    
-    // Write out states and visual buffer
-    gOutHistoryLen[dtid.xy] = history_len;
-    gOutHistoryTexture[dtid.xy] = final_val;
-	gOutAOImage[dtid.xy] = final_val;
+    // // Write out final blended result and history length
+    // out_ao[dtid.xy] = output_signal;
+    // out_history_len[dtid.xy] = history_length;
 }

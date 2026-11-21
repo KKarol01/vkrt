@@ -386,7 +386,7 @@ void Renderer::init_pipelines()
             std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE, RenderOrder::MESH_RENDER);
         passes.mesh_passes[(int)MeshPassType::WIREFRAME] =
             std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME, RenderOrder::MESH_RENDER);
-        passes.ao = std::make_shared<pass::AO>();
+        passes.ao = std::make_shared<pass::SSAO>();
         passes.velocity = std::make_shared<pass::VelocityBuffer>();
     }
 }

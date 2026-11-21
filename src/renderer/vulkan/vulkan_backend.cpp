@@ -25,22 +25,22 @@
 #endif
 
 // https://www.shadertoy.com/view/WlSSWc
-static float halton(int i, int b)
-{
-    /* Creates a halton sequence of values between 0 and 1.
-        https://en.wikipedia.org/wiki/Halton_sequence
-        Used for jittering based on a constant set of 2D points. */
-    float f = 1.0;
-    float r = 0.0;
-    while(i > 0)
-    {
-        f = f / float(b);
-        r = r + f * float(i % b);
-        i = i / b;
-    }
-
-    return r;
-}
+// static float halton(int i, int b)
+//{
+//    /* Creates a halton sequence of values between 0 and 1.
+//        https://en.wikipedia.org/wiki/Halton_sequence
+//        Used for jittering based on a constant set of 2D points. */
+//    float f = 1.0;
+//    float r = 0.0;
+//    while(i > 0)
+//    {
+//        f = f / float(b);
+//        r = r + f * float(i % b);
+//        i = i / b;
+//    }
+//
+//    return r;
+//}
 
 namespace eng
 {
@@ -282,6 +282,42 @@ void PipelineMetadataVk::init(const Pipeline& a)
     VK_CHECK(vkCreateGraphicsPipelines(vkdev, nullptr, 1, &vkinfo, nullptr, &md->pipeline));
 }
 
+void ImageMetadataVk::init(Image& a, AllocateMemory allocate, void* vkimage)
+{
+    if(a.md.vk())
+    {
+        ENG_ERROR("Trying to init already init image");
+        return;
+    }
+
+    auto& backend = RendererBackendVk::get_instance();
+    auto* md = new ImageMetadataVk{};
+    a.md.ptr = md;
+
+    if(a.width + a.height + a.depth == 0)
+    {
+        ENG_WARN("Trying to create 0-sized image");
+        return;
+    }
+
+    VmaAllocationCreateInfo vma_info{};
+    vma_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+    VkImageCreateInfo info;
+    init(a, info);
+    if(allocate == AllocateMemory::EXTERNAL)
+    {
+        ENG_ASSERT(vkimage);
+        md->image = static_cast<VkImage>(vkimage);
+    }
+    else if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
+    else if(allocate == AllocateMemory::YES)
+    {
+        VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr));
+    }
+    if(!md->image) { ENG_ERROR("Could not create image"); }
+}
+
 void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
 {
     info = vk::VkImageCreateInfo{};
@@ -296,19 +332,69 @@ void ImageMetadataVk::init(Image& a, VkImageCreateInfo& info)
     info.initialLayout = to_vk(ImageLayout::UNDEFINED);
 }
 
-void ImageMetadataVk::destroy(Image& a) {}
+void ImageMetadataVk::destroy(Image& a)
+{
+    if(!a.md.vk()) { return; }
+    auto& backend = RendererBackendVk::get_instance();
+    auto* md = a.md.vk();
+    if(!md) { return; }
+    if(!md->is_aliased && md->vmaa) { vmaDestroyImage(backend.vma, md->image, md->vmaa); }
+    else if(md->is_aliased) { vkDestroyImage(backend.dev, md->image, nullptr); }
+    for(auto& [view, vkview] : a.md.vk()->views)
+    {
+        vkDestroyImageView(backend.dev, vkview.view, nullptr);
+    }
+    delete a.md.vk();
+    a.md.ptr = nullptr;
+}
 
-// void ImageViewMetadataVk::destroy(ImageView& a)
-//{
-//     if(!a) { return; }
-//     auto md = a.get_md();
-//     if(!md.vk) { return; }
-//     ENG_ASSERT(md.vk->view);
-//     auto& backend = RendererBackendVk::get_instance();
-//     vkDestroyImageView(backend.dev, md.vk->view, nullptr);
-//     delete md.vk;
-//     md.vk = nullptr;
-// }
+void ImageViewMetadataVk::init(const ImageView& view, void** out_allocation)
+{
+    if(!out_allocation)
+    {
+        ENG_ERROR("Out allocation is nullptr");
+        return;
+    }
+
+    if(!view.image)
+    {
+        ENG_ERROR("Invalid image");
+        return;
+    }
+
+    auto& backend = RendererBackendVk::get_instance();
+    auto& img = view.image.get();
+    ENG_ASSERT(img.md.ptr != nullptr);
+
+    const auto src_layer = view.src_subresource / img.mips;
+    const auto src_mip = view.src_subresource % img.mips;
+    const auto dst_layer = view.dst_subresource / img.mips;
+    const auto dst_mip = view.dst_subresource % img.mips;
+    auto vkinfo = vk::VkImageViewCreateInfo{};
+    vkinfo.image = view.image->md.vk()->image;
+    vkinfo.viewType = to_vk(view.type);
+    vkinfo.format = to_vk(view.format);
+    vkinfo.subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip, dst_mip - src_mip + 1, src_layer,
+                                dst_layer - src_layer + 1 };
+
+    auto* md = new ImageViewMetadataVk{};
+    VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
+    if(!md->view) { ENG_ERROR("Could not create image view for image {}", *view.image); }
+    else { set_debug_name(md->view, ENG_FMT("image_{}_view", *view.image)); }
+    *out_allocation = md;
+}
+
+void ImageViewMetadataVk::destroy(ImageView& a)
+{
+    if(!a) { return; }
+    auto md = a.get_md();
+    if(!md.vk) { return; }
+    ENG_ASSERT(md.vk->view);
+    auto& backend = RendererBackendVk::get_instance();
+    vkDestroyImageView(backend.dev, md.vk->view, nullptr);
+    delete md.vk;
+    md.vk = nullptr;
+}
 
 void SamplerMetadataVk::init(Sampler& a)
 {
@@ -356,7 +442,7 @@ void SwapchainMetadataVk::init(Swapchain& a)
     a.metadata = md;
 
     const auto image_usage_flags = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT;
-    const auto image_format = get_renderer().settings.present_format;
+    const auto image_format = ImageFormat::R8G8B8A8_SRGB;
     auto& backend = RendererBackendVk::get_instance();
     auto vkswpinfo = vk::VkSwapchainCreateInfoKHR{};
     vkswpinfo.surface = backend.window_surface;
@@ -397,7 +483,7 @@ void SwapchainMetadataVk::destroy(Swapchain& a)
     ENG_ASSERT(a.images.size() == a.views.size());
     for(auto i = 0u; i < a.images.size(); ++i)
     {
-        get_renderer().queue_destroy_in_n_frames(a.images[i], true);
+        get_renderer().queue_destroy(a.images[i], true);
     }
     delete &md;
     a = Swapchain{};
@@ -583,6 +669,30 @@ void RendererBackendVk::init()
     VmaVulkanFunctions vulkanFunctions = {
         .vkGetInstanceProcAddr = inst_ret->fp_vkGetInstanceProcAddr,
         .vkGetDeviceProcAddr = inst_ret->fp_vkGetDeviceProcAddr,
+        .vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties,
+        .vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties,
+        .vkAllocateMemory = vkAllocateMemory,
+        .vkFreeMemory = vkFreeMemory,
+        .vkMapMemory = vkMapMemory,
+        .vkUnmapMemory = vkUnmapMemory,
+        .vkFlushMappedMemoryRanges = vkFlushMappedMemoryRanges,
+        .vkInvalidateMappedMemoryRanges = vkInvalidateMappedMemoryRanges,
+        .vkBindBufferMemory = vkBindBufferMemory,
+        .vkBindImageMemory = vkBindImageMemory,
+        .vkGetBufferMemoryRequirements = vkGetBufferMemoryRequirements,
+        .vkGetImageMemoryRequirements = vkGetImageMemoryRequirements,
+        .vkCreateBuffer = vkCreateBuffer,
+        .vkDestroyBuffer = vkDestroyBuffer,
+        .vkCreateImage = vkCreateImage,
+        .vkDestroyImage = vkDestroyImage,
+        .vkCmdCopyBuffer = vkCmdCopyBuffer,
+        .vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2,
+        .vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2,
+        .vkBindBufferMemory2KHR = vkBindBufferMemory2,
+        .vkBindImageMemory2KHR = vkBindImageMemory2,
+        .vkGetPhysicalDeviceMemoryProperties2KHR = vkGetPhysicalDeviceMemoryProperties2,
+        .vkGetDeviceBufferMemoryRequirements = vkGetDeviceBufferMemoryRequirements,
+        .vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements,
     };
 
     VmaAllocatorCreateInfo allocatorCreateInfo{};
@@ -1159,8 +1269,6 @@ void RendererBackendVk::allocate_buffer(Buffer& buffer, AllocateMemory allocate)
         return;
     }
 
-    // buffer.usage |= gfx::BufferUsage::CPU_ACCESS;
-
     auto* md = new BufferMetadataVk{};
     buffer.md.ptr = md;
     const auto cpu_map = buffer.usage.test(gfx::BufferUsage::CPU_ACCESS);
@@ -1221,98 +1329,14 @@ void RendererBackendVk::destroy_buffer(Buffer& buffer)
 
 void RendererBackendVk::allocate_image(Image& image, AllocateMemory allocate, void* vkimage)
 {
-    if(image.md.ptr)
-    {
-        ENG_ERROR("Trying to init already init image");
-        return;
-    }
-
-    auto& backend = RendererBackendVk::get_instance();
-    auto* md = new ImageMetadataVk{};
-    image.md.ptr = md;
-
-    if(image.width + image.height + image.depth == 0)
-    {
-        ENG_WARN("Trying to create 0-sized image");
-        return;
-    }
-
-    VmaAllocationCreateInfo vma_info{};
-    vma_info.usage = VMA_MEMORY_USAGE_AUTO;
-
-    VkImageCreateInfo info;
-    ImageMetadataVk::init(image, info);
-    if(allocate == AllocateMemory::EXTERNAL)
-    {
-        ENG_ASSERT(vkimage);
-        md->image = static_cast<VkImage>(vkimage);
-    }
-    else if(allocate == AllocateMemory::ALIASED) { VK_CHECK(vkCreateImage(backend.dev, &info, nullptr, &md->image)); }
-    else if(allocate == AllocateMemory::YES)
-    {
-        VK_CHECK(vmaCreateImage(backend.vma, &info, &vma_info, &md->image, &md->vmaa, nullptr));
-    }
-    if(!md->image) { ENG_ERROR("Could not create image"); }
+    ImageMetadataVk::init(image, allocate, vkimage);
 }
 
-void RendererBackendVk::destroy_image(Image& image)
+void RendererBackendVk::destroy_image(Image& image) { ImageMetadataVk::destroy(image); }
+
+void RendererBackendVk::allocate_view(const ImageView& view, void** out_allocation)
 {
-    auto* md = (ImageMetadataVk*)image.md.ptr;
-    if(!md) { return; }
-    if(!md->is_aliased && md->vmaa) { vmaDestroyImage(vma, md->image, md->vmaa); }
-    else if(md->is_aliased) { vkDestroyImage(dev, md->image, nullptr); }
-    for(auto*& viewmd : md->views)
-    {
-        destroy_view((void*&)viewmd);
-    }
-    delete md;
-    image.md.ptr = nullptr;
-}
-
-void RendererBackendVk::allocate_view(ImageView& view, void*& out_md)
-{
-    if(!view.image)
-    {
-        ENG_WARN("Invalid image");
-        return;
-    }
-    if(out_md)
-    {
-        ENG_WARN("Image already has metadata allocated");
-        return;
-    }
-
-    auto& backend = RendererBackendVk::get_instance();
-    auto& img = view.image.get();
-    ENG_ASSERT(img.md.ptr != nullptr);
-
-    const auto src_layer = view.src_subresource / img.mips;
-    const auto src_mip = view.src_subresource % img.mips;
-    const auto dst_layer = view.dst_subresource / img.mips;
-    const auto dst_mip = view.dst_subresource % img.mips;
-    auto vkinfo = vk::VkImageViewCreateInfo{};
-    vkinfo.image = view.image->md.vk()->image;
-    vkinfo.viewType = to_vk(view.type);
-    vkinfo.format = to_vk(view.format);
-    vkinfo.components = {};
-    vkinfo.subresourceRange = { to_vk(get_aspect_from_format(view.format)), src_mip, dst_mip - src_mip + 1, src_layer,
-                                dst_layer - src_layer + 1 };
-
-    auto* md = new ImageViewMetadataVk{};
-    VK_CHECK(vkCreateImageView(backend.dev, &vkinfo, {}, &md->view));
-    if(!md->view) { ENG_ERROR("Could not create image view for image {}", *view.image); }
-    else { gfx::set_debug_name(md->view, ENG_FMT("image_{}_view", *view.image)); }
-    out_md = md;
-}
-
-void RendererBackendVk::destroy_view(void*& md)
-{
-    if(!md) { return; }
-    auto* viewmd = (ImageViewMetadataVk*)md;
-    ENG_ASSERT(viewmd->view);
-    vkDestroyImageView(dev, viewmd->view, nullptr);
-    delete viewmd;
-    md = nullptr;
+    ImageViewMetadataVk::init(view, out_allocation);
 }
 
 void RendererBackendVk::allocate_sampler(Sampler& sampler) { SamplerMetadataVk::init(sampler); }
@@ -1581,6 +1605,31 @@ TopAccelerationStructure RendererBackendVk::make_tlas(std::span<const Geometry*>
     vkCmdBuildAccelerationStructuresKHR(vkcmd, 1, &vk_build_info, vp_vk_build_ranges);
 
     return (TopAccelerationStructure)tlas;
+}
+
+ImageView::Metadata RendererBackendVk::get_md(const ImageView& view)
+{
+    if(!view.image) { return {}; }
+    auto& img = view.image.get();
+    auto* imgmd = img.md.vk();
+    {
+        std::shared_lock lock{ imgmd->views_mutex };
+        auto it = imgmd->views.find(view);
+        if(it != imgmd->views.end()) { return ImageView::Metadata{ .vk = &it->second }; }
+    }
+
+    std::scoped_lock lock{ imgmd->views_mutex };
+
+    {
+        auto it = imgmd->views.find(view);
+        if(it != imgmd->views.end()) { return ImageView::Metadata{ .vk = &it->second }; }
+    }
+
+    ImageViewMetadataVk* mdvk{};
+    get_renderer().backend->allocate_view(view, (void**)&mdvk);
+    auto retit = imgmd->views.emplace(view, *mdvk);
+    delete mdvk; // delete md here, as allocate_view currently allocates dynamic memory and we do a copy to views map
+    return ImageView::Metadata{ .vk = &retit.first->second };
 }
 
 size_t RendererBackendVk::get_indirect_indexed_command_size() const { return sizeof(IndirectIndexedCommand); }

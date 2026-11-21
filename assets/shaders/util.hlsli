@@ -56,7 +56,7 @@ float3 calculate_normal_from_depth(float4x4 proj, int2 coords, int2 dimensions, 
 
     // Right-Handed (+X Right, +Y Down): Normal = Horizontal x Vertical
     // This results in +Z pointing toward the camera.
-    return normalize(cross(vH, vV)); 
+    return normalize(cross(vV, vH));
 }
 
 // https://blog.demofox.org/2022/01/01/interleaved-gradient-noise-a-different-kind-of-low-discrepancy-sequence/

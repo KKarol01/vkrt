@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-#include <eng/renderer/types.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 
 namespace eng
 {

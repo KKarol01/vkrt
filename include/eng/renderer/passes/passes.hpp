@@ -3,7 +3,7 @@
 #include <random>
 #include <type_traits>
 #include <eng/renderer/renderer.hpp>
-#include <assets/shaders/ssao/ssao.shared.hlsli>
+#include <assets/shaders/ao/ssao.shared.hlsli>
 #include <assets/shaders/velocity/velocity.shared.hlsli>
 #include <eng/renderer/vulkan/vulkan_backend.hpp> // todo: remove this
 #include <eng/engine.hpp>
@@ -142,8 +142,8 @@ struct Pass
 //     SSAO() : Pass("SSAO", RenderOrder::POST_Z)
 //     {
 //         auto& r = get_renderer();
-//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
-//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/ssao.cs.hlsl" }));
+//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/blur.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("SSAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
 //         ao_settings = {
@@ -317,8 +317,8 @@ struct Pass
 //     GTAO() : Pass("GTAO", RenderOrder::POST_Z)
 //     {
 //         auto& r = get_renderer();
-//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/gtao.cs.hlsl" }));
-//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/gtao.cs.hlsl" }));
+//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/blur.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
 //         ao_settings = {
@@ -455,10 +455,10 @@ struct Pass
 //     RTAO() : Pass("RTAO", RenderOrder::MESH_RENDER)
 //     {
 //         auto& r = get_renderer();
-//         pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+//         pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/rtao.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
-//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/blur.cs.hlsl" }));
 //         ao_settings = {
 //             .radius = 0.006f,
 //             .bias = 0.0f,
@@ -733,13 +733,13 @@ struct SSAO : public Pass
         m_reconstruct_normals =
             r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/normal_reconstruction/normal.cs.hlsl" }));
         m_pp_arr[(int)AOMode::SSAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/ssao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::GTAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/gtao.cs.hlsl" }));
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/gtao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::RTAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/rtao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::SSILVB] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssilvb.cs.hlsl" }));
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/ssilvb.cs.hlsl" }));
     }
 
     ~SSAO() override = default;
@@ -776,7 +776,7 @@ struct SSAO : public Pass
             }
 
             auto copypp =
-                r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
+                r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/copy_noise.cs.hlsl" }), Compilation::NOW);
             struct NoiseOutput
             {
                 RGBuffer noise_buf;
