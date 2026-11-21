@@ -1,4 +1,3 @@
-#include <meshoptimizer/src/meshoptimizer.h>
 #include <ranges>
 #include <barrier>
 #include <execution>
@@ -88,58 +87,14 @@ ImageBlockData get_block_data(ImageFormat format)
 
 void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, const GeometryDescriptor& desc)
 {
+    ENG_ASSERT(desc.index_format == IndexFormat::U16 && !desc.meshlets.empty());
     auto& batch = batches.emplace_back();
     batch.geom = geometry;
-    batch.flags = desc.flags;
-    batch.vertex_layout = desc.vertex_layout;
-    batch.index_format = desc.index_format;
-    batch.indices.insert(batch.indices.end(), desc.indices.begin(), desc.indices.end());
-    batch.meshlets.insert(batch.meshlets.end(), desc.meshlets.begin(), desc.meshlets.end());
-    batch.geom_ready_signal = desc.signal;
-
-    if(desc.attributes.size())
-    {
-        batch.positions.insert(batch.positions.end(), desc.vertices.begin(), desc.vertices.end());
-        batch.attributes.insert(batch.attributes.end(), desc.attributes.begin(), desc.attributes.end());
-    }
-    else
-    {
-        const auto n_vertices = desc.get_num_vertices();
-        const auto layout_size = get_vertex_layout_size(desc.vertex_layout);
-        const auto n_layout_flts = layout_size / sizeof(float);
-        const auto pos_size = get_vertex_layout_size(VertexComponent::POSITION_BIT);
-        const auto attrs_size = layout_size - pos_size;
-        // const auto att_size_flts = attrs_size / sizeof(float);
-        //  this is temp, as i'm too lazy to support nonuniform vertex attribute layouts
-        constexpr auto n_required_att_flts = 9;
-        const auto n_att_flts = n_required_att_flts;
-        std::vector<float> out_pos(n_vertices * 3);
-        std::vector<float> out_att(n_vertices * n_att_flts, 0.0f);
-        const float* src = static_cast<const float*>(desc.vertices.data());
-        for(size_t i = 0; i < n_vertices; ++i)
-        {
-            const float* vertex_start = src + (i * n_layout_flts);
-            out_pos[i * 3 + 0] = vertex_start[0];
-            out_pos[i * 3 + 1] = vertex_start[1];
-            out_pos[i * 3 + 2] = vertex_start[2];
-            const float* att_start = vertex_start + 3;
-            float* dst_att_start = &out_att[i * n_att_flts];
-            static_assert((int)VertexComponent::ALL == 15);
-            for(auto comp : { VertexComponent::NORMAL_BIT, VertexComponent::TANGENT_BIT, VertexComponent::UV0_BIT })
-            {
-                if(desc.vertex_layout.test(comp))
-                {
-                    const auto src_flt_offset = get_vertex_component_offset(batch.vertex_layout, comp) / sizeof(float) - 3;
-                    const auto flt_offset = get_vertex_component_offset(comp) / sizeof(float) - 3;
-                    const auto comp_size = get_vertex_component_size(comp);
-                    std::memcpy(dst_att_start + flt_offset, att_start + src_flt_offset, comp_size);
-                }
-            }
-        }
-        batch.vertex_layout = VertexComponent::ALL; // todo: remove this when nonuniform layout supported
-        batch.positions = std::move(out_pos);
-        batch.attributes = std::move(out_att);
-    }
+    batch.positions.assign(desc.vertices.begin(), desc.vertices.end());
+    batch.attributes.assign(desc.attributes.begin(), desc.attributes.end());
+    batch.indices.resize(desc.indices.size() / sizeof(u16));
+    memcpy(batch.indices.data(), desc.indices.data(), desc.indices.size());
+    batch.meshlets.assign(desc.meshlets.begin(), desc.meshlets.end());
 }
 
 void Renderer::init(IRendererBackend* backend)
@@ -1164,103 +1119,35 @@ void Renderer::build_pending_geometries()
 
     ENG_TIMER_SCOPED("Build pending geometries");
 
-    struct JobResult
-    {
-        Handle<Geometry> geometry;
-        std::vector<float> positions;
-        std::vector<float> attributes;
-        std::vector<u16> indices;
-        std::vector<Meshlet> meshlets;
-    };
-    std::vector<JobResult> results(new_geometries.batches.size());
-    {
-        const auto thread_count = std::thread::hardware_concurrency();
-        std::atomic<u64> batch_idx = 0;
-        std::vector<std::jthread> jobs(thread_count);
-        for(auto& j : jobs)
-        {
-            j = std::jthread{ [&batch_idx, &results, this]() {
-                for(;;)
-                {
-                    const auto bidx = batch_idx.fetch_add(1);
-                    if(bidx >= new_geometries.batches.size()) { return; }
-                    auto& batch = new_geometries.batches[bidx];
-
-                    auto& res = results[bidx];
-                    res.geometry = batch.geom;
-                    if(batch.meshlets.empty())
-                    {
-                        meshletize_geometry(batch, res.positions, res.attributes, res.indices, res.meshlets);
-                        if(batch.geom_ready_signal)
-                        {
-                            batch.geom_ready_signal->set_value(ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
-                                                                                   .positions = res.positions,
-                                                                                   .attributes = res.attributes,
-                                                                                   .indices = res.indices,
-                                                                                   .meshlets = res.meshlets });
-                        }
-                    }
-                    else
-                    {
-                        ENG_ASSERT(batch.index_format == IndexFormat::U16);
-                        res.positions = std::move(batch.positions);
-                        res.attributes = std::move(batch.attributes);
-                        res.indices.resize(batch.indices.size() / sizeof(u16));
-                        memcpy(res.indices.data(), batch.indices.data(), batch.indices.size());
-                        res.meshlets = std::move(batch.meshlets);
-                    }
-                }
-            } };
-        }
-    }
-
-    JobResult final_result{};
+    std::vector<float> positions;
+    std::vector<float> attributes;
+    std::vector<u16> indices;
     std::vector<glm::vec4> bspheres;
-    size_t total_pos{};
-    size_t total_att{};
-    size_t total_idx{};
-    size_t total_mlt{};
-    for(const auto& res : results)
+    for(auto& batch : new_geometries.batches)
     {
-        total_pos += res.positions.size();
-        total_att += res.attributes.size();
-        total_idx += res.indices.size();
-        total_mlt += res.meshlets.size();
-    }
-    final_result.positions.reserve(total_pos);
-    final_result.attributes.reserve(total_att);
-    final_result.indices.reserve(total_idx);
-    bspheres.reserve(total_mlt);
-    for(const auto& res : results)
-    {
-        final_result.positions.insert(final_result.positions.end(), res.positions.begin(), res.positions.end());
-        final_result.attributes.insert(final_result.attributes.end(), res.attributes.begin(), res.attributes.end());
-        final_result.indices.insert(final_result.indices.end(), res.indices.begin(), res.indices.end());
-        for(const auto& mlt : res.meshlets)
+        batch.geom->meshlet_range = { .offset = (u32)meshlets.size(), .size = (u32)batch.meshlets.size() };
+        for(auto mlt : batch.meshlets)
         {
             bspheres.push_back(mlt.bounding_sphere);
+            mlt.vertex_offset += (i32)(bufs.vertex_count + positions.size() / 3);
+            mlt.index_offset += (u32)(bufs.index_count + indices.size());
+            meshlets.push_back(mlt);
         }
+        positions.insert(positions.end(), batch.positions.begin(), batch.positions.end());
+        attributes.insert(attributes.end(), batch.attributes.begin(), batch.attributes.end());
+        indices.insert(indices.end(), batch.indices.begin(), batch.indices.end());
     }
-    resize_buffer(bufs.positions, total_pos * sizeof(float), STAGING_APPEND, true);
-    resize_buffer(bufs.attributes, total_att * sizeof(float), STAGING_APPEND, true);
-    resize_buffer(bufs.indices, total_idx * sizeof(u16), STAGING_APPEND, true);
-    resize_buffer(bufs.bspheres, total_mlt * sizeof(glm::vec4), STAGING_APPEND, true);
-    staging->copy(bufs.positions.get(), final_result.positions, STAGING_APPEND);
-    staging->copy(bufs.attributes.get(), final_result.attributes, STAGING_APPEND);
-    staging->copy(bufs.indices.get(), final_result.indices, STAGING_APPEND);
+
+    resize_buffer(bufs.positions, positions.size() * sizeof(float), STAGING_APPEND, true);
+    resize_buffer(bufs.attributes, attributes.size() * sizeof(float), STAGING_APPEND, true);
+    resize_buffer(bufs.indices, indices.size() * sizeof(u16), STAGING_APPEND, true);
+    resize_buffer(bufs.bspheres, bspheres.size() * sizeof(glm::vec4), STAGING_APPEND, true);
+    staging->copy(bufs.positions.get(), positions, STAGING_APPEND);
+    staging->copy(bufs.attributes.get(), attributes, STAGING_APPEND);
+    staging->copy(bufs.indices.get(), indices, STAGING_APPEND);
     staging->copy(bufs.bspheres.get(), bspheres, STAGING_APPEND);
-    for(auto& res : results)
-    {
-        res.geometry->meshlet_range = { .offset = (u32)meshlets.size(), .size = (u32)res.meshlets.size() };
-        for(auto& mlt : res.meshlets)
-        {
-            mlt.vertex_offset += bufs.vertex_count;
-            mlt.index_offset += bufs.index_count;
-        }
-        meshlets.insert(meshlets.end(), res.meshlets.begin(), res.meshlets.end());
-        bufs.vertex_count += res.positions.size() / 3;
-        bufs.index_count += res.indices.size();
-    }
+    bufs.vertex_count += positions.size() / 3;
+    bufs.index_count += indices.size();
 
     new_geometries = {};
 }
@@ -1348,93 +1235,6 @@ void Renderer::build_pending_blases()
     gq->with_cmd_buf(cmd);
     gq->submit();
     new_blases.clear();
-}
-
-void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
-                                   std::vector<u16>& out_indices, std::vector<Meshlet>& out_meshlets)
-{
-    auto& context = new_geometries;
-
-    static constexpr auto max_verts = 64u;
-    static constexpr auto max_tris = 124u;
-    static constexpr auto cone_weight = 0.0f;
-
-    if(batch.indices.empty())
-    {
-        ENG_WARN("Batch has no indices");
-        return;
-    }
-
-    // get indices to meshletize
-    std::vector<u32> indices(batch.indices.size() / sizeof(u32));
-    copy_indices(std::as_writable_bytes(std::span{ indices }), std::span{ batch.indices }, IndexFormat::U32, batch.index_format);
-
-    // get positions to meshletize
-    const std::vector<float>& positions = batch.positions;
-
-    const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
-    std::vector<meshopt_Meshlet> mlts(max_meshlets);
-    std::vector<u32> mlt_vtxs(max_meshlets * max_verts);   // indices to original vertices
-    std::vector<u8> mlt_tris(max_meshlets * max_tris * 3); // indices to remapped vertices
-
-    const auto vtx_count = positions.size() / 3;
-    const auto pos_stride = 3 * sizeof(float);
-    const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vtxs.data(), mlt_tris.data(), indices.data(), indices.size(),
-                                              positions.data(), vtx_count, pos_stride, max_verts, max_tris, cone_weight);
-
-    mlts.resize(mltcnt);
-    const auto& last = mlts.back();
-    mlt_vtxs.resize(last.vertex_offset + last.vertex_count);
-    mlt_tris.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
-
-    // compute bounding spheres
-    std::vector<meshopt_Bounds> mlt_bnds(mltcnt);
-    for(size_t i = 0; i < mltcnt; ++i)
-    {
-        auto& m = mlts[i];
-        meshopt_optimizeMeshlet(&mlt_vtxs[m.vertex_offset], &mlt_tris[m.triangle_offset], m.triangle_count, m.vertex_count);
-        mlt_bnds[i] = meshopt_computeMeshletBounds(&mlt_vtxs[m.vertex_offset], &mlt_tris[m.triangle_offset],
-                                                   m.triangle_count, positions.data(), vtx_count, pos_stride);
-    }
-
-    // remap and output positions
-    out_positions.resize(mlt_vtxs.size() * 3);
-    for(size_t i = 0; i < mlt_vtxs.size(); ++i)
-    {
-        memcpy(&out_positions[i * 3], &positions[mlt_vtxs[i] * 3], 3 * sizeof(float));
-    }
-
-    // remap and output attributes
-    if(batch.attributes.size() > 0)
-    {
-        const auto vx_size = get_vertex_layout_size(batch.vertex_layout);
-        const auto attr_stride = vx_size - pos_stride;
-        const auto att_size_flts = attr_stride / sizeof(float);
-        out_attributes.resize(mlt_vtxs.size() * att_size_flts);
-        ENG_ASSERT(att_size_flts == 9);
-        for(size_t i = 0; i < mlt_vtxs.size(); ++i)
-        {
-            memcpy(&out_attributes[i * att_size_flts], &batch.attributes[mlt_vtxs[i] * att_size_flts], attr_stride);
-        }
-    }
-
-    // output meshlet triangles
-    out_indices.resize(mlt_tris.size());
-    copy_indices(std::as_writable_bytes(std::span{ out_indices }), std::as_bytes(std::span{ mlt_tris }),
-                 IndexFormat::U16, IndexFormat::U8);
-
-    // output meshlets
-    out_meshlets.resize(mltcnt);
-    for(size_t i = 0; i < mltcnt; ++i)
-    {
-        const auto& m = mlts[i];
-        const auto& b = mlt_bnds[i];
-        out_meshlets[i] = Meshlet{ .vertex_offset = (i32)m.vertex_offset,
-                                   .vertex_count = m.vertex_count,
-                                   .index_offset = m.triangle_offset,
-                                   .index_count = m.triangle_count * 3,
-                                   .bounding_sphere = { b.center[0], b.center[1], b.center[2], b.radius } };
-    }
 }
 
 Handle<Mesh> Renderer::make_mesh(const MeshDescriptor& batch)

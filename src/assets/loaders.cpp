@@ -9,6 +9,7 @@
 #include <fastgltf/tools.hpp>
 #include <stb/stb_image.h>
 #include <stb/stb_image_write.h>
+#include <meshoptimizer/src/meshoptimizer.h>
 
 #include <eng/engine.hpp>
 #include <eng/ecs/components.hpp>
@@ -36,6 +37,62 @@ struct Context
     gfx::ICommandBuffer* cmd;
 };
 
+static constexpr size_t ATTRIBUTE_FLOATS =
+    (gfx::get_vertex_layout_size(gfx::VertexComponent::ALL) - gfx::get_vertex_layout_size(gfx::VertexComponent::POSITION_BIT)) /
+    sizeof(float);
+
+gfx::ParsedGeometryData meshletize(const std::vector<float>& positions, const std::vector<float>& attributes,
+                                   const std::vector<u32>& indices)
+{
+    static constexpr auto max_verts = 64u;
+    static constexpr auto max_tris = 124u;
+    static constexpr auto cone_weight = 0.0f;
+
+    const auto max_meshlets = meshopt_buildMeshletsBound(indices.size(), max_verts, max_tris);
+    std::vector<meshopt_Meshlet> mlts(max_meshlets);
+    std::vector<u32> mlt_vtxs(max_meshlets * max_verts);
+    std::vector<u8> mlt_tris(max_meshlets * max_tris * 3);
+
+    const auto vtx_count = positions.size() / 3;
+    const auto pos_stride = 3 * sizeof(float);
+    const auto mltcnt = meshopt_buildMeshlets(mlts.data(), mlt_vtxs.data(), mlt_tris.data(), indices.data(), indices.size(),
+                                              positions.data(), vtx_count, pos_stride, max_verts, max_tris, cone_weight);
+
+    mlts.resize(mltcnt);
+    const auto& last = mlts.back();
+    mlt_vtxs.resize(last.vertex_offset + last.vertex_count);
+    mlt_tris.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
+
+    gfx::ParsedGeometryData geom{ .vertex_layout = gfx::VertexComponent::ALL };
+    geom.meshlets.resize(mltcnt);
+    for(size_t i = 0; i < mltcnt; ++i)
+    {
+        auto& m = mlts[i];
+        meshopt_optimizeMeshlet(&mlt_vtxs[m.vertex_offset], &mlt_tris[m.triangle_offset], m.triangle_count, m.vertex_count);
+        const auto b = meshopt_computeMeshletBounds(&mlt_vtxs[m.vertex_offset], &mlt_tris[m.triangle_offset],
+                                                    m.triangle_count, positions.data(), vtx_count, pos_stride);
+        geom.meshlets[i] = gfx::Meshlet{ .vertex_offset = (i32)m.vertex_offset,
+                                         .vertex_count = m.vertex_count,
+                                         .index_offset = m.triangle_offset,
+                                         .index_count = m.triangle_count * 3,
+                                         .bounding_sphere = { b.center[0], b.center[1], b.center[2], b.radius } };
+    }
+
+    geom.positions.resize(mlt_vtxs.size() * 3);
+    geom.attributes.resize(mlt_vtxs.size() * ATTRIBUTE_FLOATS);
+    for(size_t i = 0; i < mlt_vtxs.size(); ++i)
+    {
+        memcpy(&geom.positions[i * 3], &positions[mlt_vtxs[i] * 3], 3 * sizeof(float));
+        memcpy(&geom.attributes[i * ATTRIBUTE_FLOATS], &attributes[mlt_vtxs[i] * ATTRIBUTE_FLOATS],
+               ATTRIBUTE_FLOATS * sizeof(float));
+    }
+
+    geom.indices.resize(mlt_tris.size());
+    gfx::copy_indices(std::as_writable_bytes(std::span{ geom.indices }), std::as_bytes(std::span{ mlt_tris }),
+                      gfx::IndexFormat::U16, gfx::IndexFormat::U8);
+    return geom;
+}
+
 Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gltfmeshidx, Context& ctx)
 {
     if(ctx.geometries.empty()) { ctx.geometries.insert(ctx.geometries.begin(), gltfasset.meshes.size(), Range32u{}); }
@@ -44,108 +101,61 @@ Range32u load_geometry(Asset& asset, const fastgltf::Asset& gltfasset, size_t gl
     const fastgltf::Mesh& gltfmesh = gltfasset.meshes[gltfmeshidx];
 
     Range32u geoms{ (u32)asset.geometries.size(), 0u };
-    std::vector<float> vertices;
-    std::vector<u32> indices;
     for(auto i = 0ull; i < gltfmesh.primitives.size(); ++i)
     {
-        vertices.clear();
-        indices.clear();
         const fastgltf::Primitive& gltfprim = gltfmesh.primitives[i];
 
-        static constexpr const char* FAST_COMPS[]{ "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0" };
-        static constexpr gfx::VertexComponent GFX_COMPS[]{ gfx::VertexComponent::POSITION_BIT, gfx::VertexComponent::NORMAL_BIT,
-                                                           gfx::VertexComponent::TANGENT_BIT, gfx::VertexComponent::UV0_BIT };
-        static constexpr fastgltf::AccessorType GFX_COMP_TYPES[]{ fastgltf::AccessorType::Vec3, fastgltf::AccessorType::Vec3,
-                                                                  fastgltf::AccessorType::Vec4, fastgltf::AccessorType::Vec2 };
-        const auto vertex_layout = [&gltfprim] {
-            Flags<gfx::VertexComponent> vertex_layout{};
-            for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
-            {
-                if(gltfprim.findAttribute(FAST_COMPS[i]) != gltfprim.attributes.end())
-                {
-                    vertex_layout |= GFX_COMPS[i];
-                }
-            }
-            return vertex_layout;
-        }();
-        const auto vertex_size = gfx::get_vertex_layout_size(vertex_layout);
-        const auto get_vertex_component = [&vertices, &vertex_size,
-                                           &vertex_layout](size_t vidx, gfx::VertexComponent comp) -> std::byte* {
-            auto* ptr = (std::byte*)vertices.data();
-            return ptr + vertex_size * vidx + gfx::get_vertex_component_offset(vertex_layout, comp);
-        };
-
-        const auto fast_iterate = [&gltfasset, &get_vertex_component](int comp, const auto& gltfacc, gfx::VertexComponent gfxcomp) {
-            const auto copy_bytes = [&get_vertex_component, &gfxcomp]<size_t num_floats>(const auto& vec, auto idx) {
-                std::array<float, num_floats> v{};
-                for(auto i = 0u; i < num_floats; ++i)
-                {
-                    v[i] = (float)vec[i];
-                }
-                auto* pdst = get_vertex_component(idx, gfxcomp);
-                memcpy(pdst, v.data(), num_floats * sizeof(v[0]));
-            };
-            const auto cb2 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<2>(vec, idx); };
-            const auto cb3 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<3>(vec, idx); };
-            const auto cb4 = [&copy_bytes](const auto& vec, auto idx) { copy_bytes.template operator()<4>(vec, idx); };
-
-            ENG_ASSERT(GFX_COMP_TYPES[comp] == gltfacc.type);
-
-            if(comp == 0) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, gltfacc, cb3); }
-            else if(comp == 1) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(gltfasset, gltfacc, cb3); }
-            else if(comp == 2) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(gltfasset, gltfacc, cb4); }
-            else if(comp == 3) { fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(gltfasset, gltfacc, cb2); }
-        };
-
-        for(auto i = 0u; i < std::size(FAST_COMPS); ++i)
+        const auto posit = gltfprim.findAttribute("POSITION");
+        if(posit == gltfprim.attributes.end())
         {
-            if(!vertex_layout.test(GFX_COMPS[i]))
-            {
-                if(i == 0)
-                {
-                    ENG_ERROR("Mesh does not have positions");
-                    continue;
-                }
-                continue;
-            }
-            auto it = gltfprim.findAttribute(FAST_COMPS[i]);
-            auto& acc = gltfasset.accessors.at(it->accessorIndex);
-
-            if(i == 0) { vertices.resize(acc.count * vertex_size); }
-            fast_iterate(i, acc, GFX_COMPS[i]);
+            ENG_ERROR("Mesh {} primitive {} does not have positions. Skipping...", gltfmesh.name.c_str(), i);
+            continue;
         }
-
-        if(gltfprim.indicesAccessor)
-        {
-            auto& acc = gltfasset.accessors.at(*gltfprim.indicesAccessor);
-            if(!acc.bufferViewIndex)
-            {
-                ENG_ERROR("No bufferViewIndex...");
-                continue;
-            }
-            indices.resize(acc.count);
-            fastgltf::copyFromAccessor<u32>(gltfasset, acc, indices.data());
-        }
-        else
+        if(!gltfprim.indicesAccessor)
         {
             ENG_WARN("Mesh {} primitive {} does not have mandatory vertex indices. Skipping...", gltfmesh.name.c_str(), i);
             continue;
         }
-
-        asset.geometries.push_back(gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{
-            .flags = {},
-            .vertex_layout = vertex_layout,
-            .index_format = gfx::IndexFormat::U32,
-            .vertices = vertices,
-            .indices = std::as_bytes(std::span{ indices }),
-            .signal = ctx.import_settings.test(ImportSettings::KEEP_DATA_BIT)
-                          ? &asset.geometry_data.emplace_back(gfx::ParsedGeometryReadySignal{})
-                          : (gfx::ParsedGeometryReadySignal*)nullptr,
-        }));
-        if(ctx.import_settings & ImportSettings::KEEP_DATA_BIT)
+        const auto& idxacc = gltfasset.accessors.at(*gltfprim.indicesAccessor);
+        if(!idxacc.bufferViewIndex)
         {
-            asset.geometry_data_futures.push_back(asset.geometry_data.back().get_future().share());
+            ENG_ERROR("No bufferViewIndex...");
+            continue;
         }
+
+        const auto& posacc = gltfasset.accessors.at(posit->accessorIndex);
+        std::vector<float> positions(posacc.count * 3);
+        std::vector<float> attributes(posacc.count * ATTRIBUTE_FLOATS);
+        std::vector<u32> indices(idxacc.count);
+        fastgltf::copyFromAccessor<fastgltf::math::fvec3>(gltfasset, posacc, positions.data());
+        fastgltf::copyFromAccessor<u32>(gltfasset, idxacc, indices.data());
+
+        const auto copy_attribute = [&]<size_t N>(const char* name, gfx::VertexComponent comp) {
+            const auto it = gltfprim.findAttribute(name);
+            if(it == gltfprim.attributes.end()) { return; }
+            const auto offset = gfx::get_vertex_component_offset(comp) / sizeof(float) - 3;
+            fastgltf::iterateAccessorWithIndex<fastgltf::math::vec<float, N>>(
+                gltfasset, gltfasset.accessors.at(it->accessorIndex), [&](const auto& v, size_t vidx) {
+                    for(size_t k = 0; k < N; ++k)
+                    {
+                        attributes[vidx * ATTRIBUTE_FLOATS + offset + k] = v[k];
+                    }
+                });
+        };
+        copy_attribute.template operator()<3>("NORMAL", gfx::VertexComponent::NORMAL_BIT);
+        copy_attribute.template operator()<4>("TANGENT", gfx::VertexComponent::TANGENT_BIT);
+        copy_attribute.template operator()<2>("TEXCOORD_0", gfx::VertexComponent::UV0_BIT);
+
+        auto geom = meshletize(positions, attributes, indices);
+        asset.geometries.push_back(gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{
+            .vertex_layout = geom.vertex_layout,
+            .index_format = gfx::IndexFormat::U16,
+            .vertices = geom.positions,
+            .attributes = geom.attributes,
+            .indices = std::as_bytes(std::span{ geom.indices }),
+            .meshlets = geom.meshlets,
+        }));
+        if(ctx.import_settings.test(ImportSettings::KEEP_DATA_BIT)) { asset.geometry_data.push_back(std::move(geom)); }
         ++geoms.size;
     }
 

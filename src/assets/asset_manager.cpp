@@ -134,15 +134,10 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
 
 void AssetManager::serialize_asset_to_enbc(Asset& asset)
 {
-    if(asset.geometry_data_futures.empty())
+    if(asset.geometry_data.empty())
     {
         ENG_WARN("Cannot serialize asset without geometries");
         return;
-    }
-
-    for(auto& future : asset.geometry_data_futures)
-    {
-        future.wait();
     }
 
     size_t size = 0;
@@ -184,9 +179,8 @@ void AssetManager::serialize_asset_to_enbc(Asset& asset)
 #endif
     }
 
-    asset.geometry_data.resize(0);
-    asset.geometry_data_futures.resize(0);
-    asset.image_data.resize(0);
+    asset.geometry_data.clear();
+    asset.image_data.clear();
 
     ENG_LOG("Serializing asset {} finished. Written {} bytes.", asset.path.string(), size);
 }
@@ -226,9 +220,8 @@ template <> void serialize<assets::Asset>(std::span<std::byte> dst, const assets
 
     ENG_ASSERT(src.geometries.size() == src.geometry_data.size());
     serialize(dst, src.geometry_data.size(), out_bytes_written);
-    for(const auto& gdf : src.geometry_data_futures)
+    for(const auto& gd : src.geometry_data)
     {
-        const auto& gd = gdf.get();
         serialize(dst, gd, out_bytes_written);
     }
 

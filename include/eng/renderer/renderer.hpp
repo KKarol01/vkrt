@@ -799,14 +799,10 @@ class Renderer
     struct BuildGeometryBatch
     {
         Handle<Geometry> geom;
-        Flags<GeometryFlags> flags;
-        Flags<VertexComponent> vertex_layout;
-        IndexFormat index_format{};
         std::vector<float> positions;
         std::vector<float> attributes;
-        std::vector<std::byte> indices;
+        std::vector<u16> indices;
         std::vector<Meshlet> meshlets;
-        ParsedGeometryReadySignal* geom_ready_signal{};
     };
 
     struct BuildGeometryContext
@@ -849,8 +845,6 @@ class Renderer
     Handle<Geometry> make_geometry(const GeometryDescriptor& info);
     void build_pending_geometries();
     void build_pending_blases();
-    void meshletize_geometry(const BuildGeometryBatch& batch, std::vector<float>& out_positions, std::vector<float>& out_attributes,
-                             std::vector<u16>& out_indices, std::vector<Meshlet>& out_meshlets);
     Handle<Mesh> make_mesh(const MeshDescriptor& info);
     void make_blas(Handle<Geometry> geom);
     Handle<ShaderEffect> make_shader_effect(const ShaderEffect& info);

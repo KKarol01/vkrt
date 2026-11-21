@@ -42,8 +42,7 @@ struct Asset
     std::vector<Node> nodes;
     std::vector<u32> root_nodes;
 
-    std::deque<gfx::ParsedGeometryReadySignal> geometry_data;
-    std::deque<std::shared_future<gfx::ParsedGeometryData>> geometry_data_futures;
+    std::vector<gfx::ParsedGeometryData> geometry_data;
     std::vector<gfx::ParsedImageData> image_data;
 };
 

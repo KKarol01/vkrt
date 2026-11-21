@@ -681,7 +681,6 @@ struct ParsedGeometryData
     std::vector<u16> indices{};
     std::vector<gfx::Meshlet> meshlets{};
 };
-using ParsedGeometryReadySignal = std::promise<ParsedGeometryData>;
 
 struct ParsedImageData
 {
@@ -711,8 +710,7 @@ struct GeometryDescriptor
     std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
     std::span<const float> attributes;
     std::span<const std::byte> indices;
-    std::span<const Meshlet> meshlets; // optional
-    ParsedGeometryReadySignal* signal{};
+    std::span<const Meshlet> meshlets;
 };
 
 } // namespace gfx
