@@ -90,6 +90,12 @@ struct Settings
 class Engine
 {
   public:
+    static Engine& get()
+    {
+        static Engine engine{};
+        return engine;
+    }
+
     void init(int argc, char* argv[]);
     void destroy();
     void start();
@@ -118,11 +124,5 @@ class Engine
 
     std::deque<std::string> msg_log;
 };
-
-inline Engine& get_engine()
-{
-    static Engine engine{};
-    return engine;
-}
 
 } // namespace eng

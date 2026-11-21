@@ -15,15 +15,15 @@
 
 static void on_mouse_move(GLFWwindow* window, double px, double py)
 {
-    eng::get_engine().window->on_mouse_move(static_cast<float>(px), static_cast<float>(py));
+    eng::Engine::get().window->on_mouse_move(static_cast<float>(px), static_cast<float>(py));
 }
 
 static void on_window_resize(GLFWwindow* window, int w, int h)
 {
-    eng::get_engine().window->on_resize(static_cast<float>(w), static_cast<float>(h));
+    eng::Engine::get().window->on_resize(static_cast<float>(w), static_cast<float>(h));
 }
 
-static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().window->on_focus(focus > 0); }
+static void on_window_focus(GLFWwindow* window, int focus) { eng::Engine::get().window->on_focus(focus > 0); }
 
 // static void eng_ui_reload_dll(HMODULE hnew)
 //{
@@ -31,12 +31,12 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 //              .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
 //     // TODO: transition data
 //      UIContext context{
-//          .engine = &get_engine(),
+//          .engine = &Engine::get(),
 //          .imgui_ctx = nullptr,
 //          .alloc_cbs = { malloc, free },
 //      };
-//     _ui.context = _ui.init(get_engine().ui.context ? get_engine().ui.context : &context);
-//      get_engine().ui = _ui;
+//     _ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
+//      Engine::get().ui = _ui;
 // }
 
 // static void eng_vkrenderer_reload_dll(HMODULE hnew) {
@@ -44,12 +44,12 @@ static void on_window_focus(GLFWwindow* window, int focus) { eng::get_engine().w
 //             .update = (eng_ui_update_t)GetProcAddress(hnew, "eng_ui_update") };
 //     // TODO: transition data
 //     UIContext context{
-//         .engine = &get_engine(),
+//         .engine = &Engine::get(),
 //         .imgui_ctx = nullptr,
 //         .alloc_cbs = { malloc, free },
 //     };
-//     _ui.context = _ui.init(get_engine().ui.context ? get_engine().ui.context : &context);
-//     get_engine().ui = _ui;
+//     _ui.context = _ui.init(Engine::get().ui.context ? Engine::get().ui.context : &context);
+//     Engine::get().ui = _ui;
 // }
 
 // static void load_dll(const std::filesystem::path& path_dll, auto cb_dll_load_transfer_free)

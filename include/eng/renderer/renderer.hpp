@@ -37,7 +37,7 @@ struct Pass;
 
 class Renderer;
 
-inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
+inline Renderer& get_renderer() { return *eng::Engine::get().renderer; }
 
 struct DescriptorResource
 {

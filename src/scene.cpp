@@ -23,7 +23,7 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
     ENG_ASSERT(asset.root_nodes.size() > 0);
 
     const auto recursive_instance = [&asset](const auto& self, const assets::Node& node, ecs::EntityId parent_entity) -> ecs::EntityId {
-        auto* ecs = get_engine().ecs;
+        auto* ecs = Engine::get().ecs;
         auto e = ecs->create();
         ecs->add_components<ecsc::Node>(e, ecsc::Node{ .name = node.name });
         if(node.transform != ~0u)
@@ -49,8 +49,8 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
     ecs::EntityId e;
     if(asset.root_nodes.size() > 1)
     {
-        e = get_engine().ecs->create();
-        get_engine().ecs->add_components<ecsc::Node>(e, ecsc::Node{ .name = ENG_FMT("{}_root", asset.path.filename().string()) });
+        e = Engine::get().ecs->create();
+        Engine::get().ecs->add_components<ecsc::Node>(e, ecsc::Node{ .name = ENG_FMT("{}_root", asset.path.filename().string()) });
         for(auto rn : asset.root_nodes)
         {
             const auto& node = asset.nodes[rn];
@@ -73,7 +73,7 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
 //{
 //     if(!ui.scene.sel_entity) { return; }
 //
-//     auto* ecs = get_engine().ecs;
+//     auto* ecs = Engine::get().ecs;
 //     auto& entity = ui.scene.sel_entity;
 //     auto& ctransform = ecs->get<ecsc::Transform>(entity);
 //     auto& cnode = ecs->get<ecsc::Node>(entity);
@@ -87,9 +87,9 @@ ecs::EntityId Scene::instance_asset(const assets::Asset& asset)
 //     ImGui::PopStyleColor(1);
 //     ImGuizmo::SetDrawlist();
 //
-//     const auto view = get_engine().camera->get_view();
-//     auto proj = get_engine().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
-//     proj = glm::perspectiveFov(glm::radians(75.0f), get_engine().window->width, get_engine().window->height, 0.1f, 30.0f);
+//     const auto view = Engine::get().camera->get_view();
+//     auto proj = Engine::get().camera->get_projection(); // imguizmo hates inf_revz_zo perspective matrix that i use (div by 0 because no far plane)
+//     proj = glm::perspectiveFov(glm::radians(75.0f), Engine::get().window->width, Engine::get().window->height, 0.1f, 30.0f);
 //     const auto window_width = ImGui::GetWindowWidth();
 //     const auto window_height = ImGui::GetWindowHeight();
 //     const auto window_pos = ImGui::GetWindowPos();

@@ -411,7 +411,7 @@ std::optional<Asset> load_gltf_from_virtual_path(const fs::Path& file_path, Flag
     const auto ext = file_path.extension();
     if(ext != ".glb" && ext != ".gltf") { return std::nullopt; }
 
-    auto file = get_engine().fs->open_file(file_path, fs::OpenMode::READ_BYTES);
+    auto file = Engine::get().fs->open_file(file_path, fs::OpenMode::READ_BYTES);
     if(!file) { return std::nullopt; }
     const auto file_bytes = file.read();
     auto fastdatabuf = fastgltf::GltfDataBuffer::FromBytes((const std::byte*)file_bytes.data(), file_bytes.size());

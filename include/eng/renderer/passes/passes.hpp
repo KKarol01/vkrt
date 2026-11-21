@@ -893,7 +893,7 @@ namespace culling
 //     void setup(RenderGraph* rg)
 //     {
 //         auto& r = get_renderer();
-//         auto* w = get_engine().window;
+//         auto* w = Engine::get().window;
 //         auto& pf = r->get_perframe();
 //
 //         struct ZbufPass
@@ -926,8 +926,8 @@ namespace culling
 //     {
 //         auto& r = get_renderer();
 //         const auto& rp = r->render_passes.at(RenderPassType::FORWARD);
-//         VkViewport vkview{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
-//         VkRect2D vksciss{ {}, { (u32)get_engine().window->width, (u32)get_engine().window->height } };
+//         VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+//         VkRect2D vksciss{ {}, { (u32)Engine::get().window->width, (u32)Engine::get().window->height } };
 //         const auto vkdep =
 //             Vks(VkRenderingAttachmentInfo{ .imageView = rg->get_resource(zbufs).image->default_view->md.vk->view,
 //                                            .imageLayout = to_vk(ImageLayout::ATTACHMENT),
@@ -985,7 +985,7 @@ namespace culling
 //     Hiz(RenderGraph* g, const CreateInfo& info) : Pass("culling::Hiz", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         auto& r = get_renderer();
-//         auto* w = get_engine().window;
+//         auto* w = Engine::get().window;
 //         zbuf = info.zbufs;
 //         const auto hizpmips = (u32)(std::log2f(std::max(w->width, w->height)) + 1);
 //         hiz = g->make_resource(ImageDescriptor{ .name = "hizpyramid",
@@ -1163,7 +1163,7 @@ namespace culling
 //         r->sbuf->copy(rg->get_resource(culled_light_list_bufs).buffer, &zero, 0ull, 4);
 //         q->wait_sync(r->sbuf->flush(), PipelineStage::COMPUTE_BIT);
 //
-//         const auto* w = get_engine().window;
+//         const auto* w = Engine::get().window;
 //         auto dx = (u32)w->width;
 //         auto dy = (u32)w->height;
 //         dx = (dx + tile_pixels - 1) / tile_pixels;

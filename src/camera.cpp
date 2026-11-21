@@ -27,7 +27,7 @@ static glm::mat4 infinitePerspectiveFovReverseZRH_ZO(float fov, float width, flo
 
 Camera::Camera(float fov_radians, float min_dist)
 {
-    const auto* window = get_engine().window;
+    const auto* window = Engine::get().window;
     update_projection(fov_radians, min_dist, window->width, window->height);
 
     double pos[2];
@@ -35,7 +35,7 @@ Camera::Camera(float fov_radians, float min_dist)
     lpx = (float)pos[0];
     lpy = (float)pos[1];
 
-    get_engine().window->add_on_mouse_move([this](float x, float y) {
+    Engine::get().window->add_on_mouse_move([this](float x, float y) {
         on_mouse_move(x, y);
         return true;
     });
@@ -43,8 +43,8 @@ Camera::Camera(float fov_radians, float min_dist)
 
 void Camera::update()
 {
-    GLFWwindow* window = get_engine().window->window;
-    const float dt = get_engine().delta_time * 5.0f;
+    GLFWwindow* window = Engine::get().window->window;
+    const float dt = Engine::get().delta_time * 5.0f;
 
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && glfwGetTime() - last_press_time > 0.3f)
     {
@@ -54,7 +54,7 @@ void Camera::update()
         else { glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); }
     }
 
-    if(!enabled && get_engine().tick != 0) { return; }
+    if(!enabled && Engine::get().tick != 0) { return; }
 
     glm::quat rot = glm::angleAxis(yaw, glm::vec3{ 0.0f, 1.0f, 0.0f });
     rot = rot * glm::angleAxis(pitch, glm::vec3{ 1.0f, 0.0f, 0.0f });

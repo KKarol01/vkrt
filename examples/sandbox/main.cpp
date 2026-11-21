@@ -3,11 +3,11 @@
 
 int main(int argc, char* argv[])
 {
-    eng::get_engine().init(argc, argv);
+    eng::Engine::get().init(argc, argv);
     app::App app;
     app.start();
-    eng::get_engine().start();
-    eng::get_engine().destroy();
+    eng::Engine::get().start();
+    eng::Engine::get().destroy();
 
     return 0;
 }

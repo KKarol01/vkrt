@@ -540,7 +540,7 @@ void RendererBackendVk::init()
     vkb::Instance vkb_inst = inst_ret.value();
     volkLoadInstance(vkb_inst.instance);
 
-    const auto* window = get_engine().window;
+    const auto* window = Engine::get().window;
 
     auto vkwin32surfinfo = vk::VkWin32SurfaceCreateInfoKHR{};
     vkwin32surfinfo.hinstance = GetModuleHandle(nullptr);
@@ -852,28 +852,28 @@ void RendererBackendVk::init()
 //
 //         // fd.hiz_pyramid = make_image(ImageDescriptor{
 //         //     .name = ENG_FMT("hiz_pyramid_{}", i),
-//         //     .width = (u32)get_engine().window->width,
-//         //     .height = (u32)get_engine().window->height,
-//         //     .mips = (u32)std::log2f(std::max(get_engine().window->width, get_engine().window->height)) + 1,
+//         //     .width = (u32)Engine::get().window->width,
+//         //     .height = (u32)Engine::get().window->height,
+//         //     .mips = (u32)std::log2f(std::max(Engine::get().window->width, Engine::get().window->height)) + 1,
 //         //     .format = ImageFormat::D32_SFLOAT,
 //         //     .usage = ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_SRC_BIT | ImageUsage::TRANSFER_DST_BIT });
 //         // fd.hiz_debug_output =
 //         //     make_image(ImageDescriptor{ .name = ENG_FMT("hiz_debug_output_{}", i),
-//         //                                 .width = (u32)get_engine().window->width,
-//         //                                 .height = (u32)get_engine().window->height,
+//         //                                 .width = (u32)Engine::get().window->width,
+//         //                                 .height = (u32)Engine::get().window->height,
 //         //                                 .format = ImageFormat::R32FG32FB32FA32F,
 //         //                                 .usage = ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 //
 //         // fd.gbuffer.color_image = make_image(ImageDescriptor{ .name = ENG_FMT("g_color_{}", i),
-//         //                                                      .width = (u32)get_engine().window->width,
-//         //                                                      .height = (u32)get_engine().window->height,
+//         //                                                      .width = (u32)Engine::get().window->width,
+//         //                                                      .height = (u32)Engine::get().window->height,
 //         //                                                      .format = ImageFormat::R8G8B8A8_SRGB,
 //         //                                                      .usage = ImageUsage::COLOR_ATTACHMENT_BIT |
 //         //                                                               ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 //         // fd.gbuffer.depth_buffer_image = make_image(ImageDescriptor{
 //         //     .name = ENG_FMT("g_depth_{}", i),
-//         //     .width = (u32)get_engine().window->width,
-//         //     .height = (u32)get_engine().window->height,
+//         //     .width = (u32)Engine::get().window->width,
+//         //     .height = (u32)Engine::get().window->height,
 //         //     .format = ImageFormat::D32_SFLOAT,
 //         //     .usage = ImageUsage::DEPTH_STENCIL_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::TRANSFER_RW });
 //
@@ -978,7 +978,7 @@ void RendererBackendVk::init()
 //     if(!pipelines_to_compile.empty()) { compile_pipelines(); }
 //
 //     auto& fd = get_frame_data();
-//     const auto frame_num = get_engine().frame_num;
+//     const auto frame_num = Engine::get().frame_num;
 //     // fd.rendering_fence->wait_cpu(~0ull);
 //     // fd.cmdpool->reset();
 //
@@ -993,23 +993,23 @@ void RendererBackendVk::init()
 //     // fd.rendering_fence->reset();
 //
 // #if 0
-//     static glm::mat4 s_view = get_engine().camera->prev_view;
-//     if(true || (glfwGetKey(get_engine().window->window, GLFW_KEY_0) == GLFW_PRESS))
+//     static glm::mat4 s_view = Engine::get().camera->prev_view;
+//     if(true || (glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
 //     {
-//         s_view = get_engine().camera->prev_view;
+//         s_view = Engine::get().camera->prev_view;
 //     }
 // #endif
 //
 //     {
-//         const float hx = (halton(get_engine().frame_num % 4u, 2) * 2.0 - 1.0);
-//         const float hy = (halton(get_engine().frame_num % 4u, 3) * 2.0 - 1.0);
+//         const float hx = (halton(Engine::get().frame_num % 4u, 2) * 2.0 - 1.0);
+//         const float hy = (halton(Engine::get().frame_num % 4u, 3) * 2.0 - 1.0);
 //         const glm::mat3 rand_mat =
 //             glm::mat3_cast(glm::angleAxis(hy, glm::vec3{ 1.0, 0.0, 0.0 }) * glm::angleAxis(hx, glm::vec3{ 0.0, 1.0, 0.0 }));
 //
 //         std::swap(bufs.const_bufs[0], bufs.const_bufs[1]);
 //
-//         const auto view = get_engine().camera->get_view();
-//         const auto proj = get_engine().camera->get_projection();
+//         const auto view = Engine::get().camera->get_view();
+//         const auto proj = Engine::get().camera->get_projection();
 //         const auto invview = glm::inverse(view);
 //         const auto invproj = glm::inverse(proj);
 //
@@ -1025,11 +1025,11 @@ void RendererBackendVk::init()
 //             .inv_proj = invproj,
 //             .inv_proj_view = invview * invproj,
 //             .rand_mat = rand_mat,
-//             .cam_pos = get_engine().camera->pos,
+//             .cam_pos = Engine::get().camera->pos,
 //         };
 //         staging_buf->copy(bufs.const_bufs[0], &cb, 0ull, { 0, sizeof(cb) });
-//         // const auto ldir = glm::normalize(*(glm::vec3*)get_engine().scene->debug_dir_light_dir);
-//         // const auto cam = get_engine().camera->pos;
+//         // const auto ldir = glm::normalize(*(glm::vec3*)Engine::get().scene->debug_dir_light_dir);
+//         // const auto cam = Engine::get().camera->pos;
 //         // auto eye = -ldir * 30.0f;
 //         // const auto lview = glm::lookAt(eye, eye + ldir, glm::vec3{ 0.0f, 1.0f, 0.0f });
 //         // const auto eyelpos = lview * glm::vec4{ cam, 1.0f };
@@ -1061,13 +1061,13 @@ void RendererBackendVk::init()
 //
 //         // GPUConstantsBuffer constants{
 //         //     .debug_view = s_view,
-//         //     .view = get_engine().camera->get_view(),
-//         //     .proj = get_engine().camera->get_projection(),
-//         //     .proj_view = get_engine().camera->get_projection() * get_engine().camera->get_view(),
-//         //     .inv_view = glm::inverse(get_engine().camera->get_view()),
-//         //     .inv_proj = glm::inverse(get_engine().camera->get_projection()),
-//         //     .inv_proj_view = glm::inverse(get_engine().camera->get_projection() * get_engine().camera->get_view()),
-//         //     .cam_pos = get_engine().camera->pos,
+//         //     .view = Engine::get().camera->get_view(),
+//         //     .proj = Engine::get().camera->get_projection(),
+//         //     .proj_view = Engine::get().camera->get_projection() * Engine::get().camera->get_view(),
+//         //     .inv_view = glm::inverse(Engine::get().camera->get_view()),
+//         //     .inv_proj = glm::inverse(Engine::get().camera->get_projection()),
+//         //     .inv_proj_view = glm::inverse(Engine::get().camera->get_projection() * Engine::get().camera->get_view()),
+//         //     .cam_pos = Engine::get().camera->pos,
 //         // };
 //         // staging_buf->copy(fd.constants, &constants, 0, { 0, sizeof(constants) });
 //         // staging_buffer->stage(vsm.constants_buffer, vsmconsts, 0ull);
@@ -1108,7 +1108,7 @@ void RendererBackendVk::init()
 //         auto& hiz_image = fd.hiz_pyramid.get();
 //         cmd->bind_pipeline(hiz_pipeline.get());
 //         bindless_pool->bind(cmd);
-//         if(true || (glfwGetKey(get_engine().window->window, GLFW_KEY_0) == GLFW_PRESS))
+//         if(true || (glfwGetKey(Engine::get().window->window, GLFW_KEY_0) == GLFW_PRESS))
 //         {
 //             cmd->clear_depth_stencil(hiz_image, 0.0f, 0);
 //             cmd->barrier(PipelineStage::TRANSFER_BIT, PipelineAccess::TRANSFER_WRITE_BIT, PipelineStage::COMPUTE_BIT,
@@ -1221,8 +1221,8 @@ void RendererBackendVk::init()
 //                  PipelineStage::EARLY_Z_BIT, PipelineAccess::DS_RW, ImageLayout::UNDEFINED, ImageLayout::ATTACHMENT);
 //     cmd->begin_rendering(rinfo);
 //
-//     VkViewport viewport{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
-//     VkRect2D scissor{ {}, { (u32)get_engine().window->width, (u32)get_engine().window->height } };
+//     VkViewport viewport{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+//     VkRect2D scissor{ {}, { (u32)Engine::get().window->width, (u32)Engine::get().window->height } };
 //     for(auto i = 0u, off = 0u; i < multibatches.size(); ++i)
 //     {
 //         const auto& mb = multibatches.at(i);
@@ -1237,7 +1237,7 @@ void RendererBackendVk::init()
 //     }
 //     cmd->end_rendering();
 //
-//     get_engine().imgui_renderer->render(cmd);
+//     Engine::get().imgui_renderer->render(cmd);
 //
 //     cmd->barrier(*swapchain_image, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, PipelineStage::ALL,
 //                  PipelineAccess::NONE, ImageLayout::ATTACHMENT, ImageLayout::PRESENT);
@@ -1830,8 +1830,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 
 // Handle<Mesh> RendererBackendVulkan::instance_mesh(const InstanceSettings& settings)
 //{
-//     const auto* mr = get_engine().ecs->get<eng::ecsc::Mesh>(settings.entity);
-//     const auto* transform = get_engine().ecs->get<ecsc::Transform>(settings.entity);
+//     const auto* mr = Engine::get().ecs->get<eng::ecsc::Mesh>(settings.entity);
+//     const auto* transform = Engine::get().ecs->get<ecsc::Transform>(settings.entity);
 //     if(!mr) { return {}; }
 //     if(!transform) { ENG_ERROR("Instanced node {} doesn't have transform component", settings.entity); }
 //     for(const auto& e : mr->meshes)
@@ -1847,7 +1847,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 // void RendererBackendVulkan::instance_blas(const BLASInstanceSettings& settings)
 //{
 //     ENG_TODO("Implement blas instancing");
-//     // auto& r = get_engine().ecs_storage->get<components::Renderable>(settings.entity);
+//     // auto& r = Engine::get().ecs_storage->get<components::Renderable>(settings.entity);
 //     // auto& mesh = meshes.at(r.mesh_handle);
 //     // auto& geometry = geometries.at(mesh.geometry);
 //     // auto& metadata = geometry_metadatas.at(geometry.metadata);
@@ -1966,7 +1966,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     size_t off = 0;
 //     for(auto e : entities)
 //     {
-//         auto* t = get_engine().ecs->get<ecsc::Transform>(e);
+//         auto* t = Engine::get().ecs->get<ecsc::Transform>(e);
 //         ts.at(off++) = t->global;
 //     }
 //     std::swap(bufs.trs_bufs[0], bufs.trs_bufs[1]);
@@ -2082,8 +2082,8 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //     // std::vector<VkAccelerationStructureInstanceKHR> tlas_instances;
 //
 //     // std::sort(blas_instances.begin(), blas_instances.end(), [](auto a, auto b) {
-//     //     const auto& ra = get_engine().ecs_storage->get<components::Renderable>(a);
-//     //     const auto& rb = get_engine().ecs_storage->get<components::Renderable>(b);
+//     //     const auto& ra = Engine::get().ecs_storage->get<components::Renderable>(a);
+//     //     const auto& rb = Engine::get().ecs_storage->get<components::Renderable>(b);
 //     //     return ra.mesh_handle < rb.mesh_handle;
 //     // });
 //
@@ -2094,7 +2094,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 // #if 0
 //     for(u32 i = 0, toff = 0, boff = 0; i < blas_instances.size(); ++i) {
 //         const u32 mi_idx = mesh_instance_idxs.at(blas_instances.at(i));
-//         const auto& mr = get_engine().ecs_storage->get<components::Renderable>(mesh_instances.at(mi_idx));
+//         const auto& mr = Engine::get().ecs_storage->get<components::Renderable>(mesh_instances.at(mi_idx));
 //         const Mesh& mb = meshes.at(mr.mesh_handle);
 //         const Geometry& geom = geometries.at(mb.geometry);
 //         const MeshMetadata& mm = mesh_metadatas.at(mb.metadata);
@@ -2110,7 +2110,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //         VkAccelerationStructureInstanceKHR& tlas_instance = tlas_instances.emplace_back();
 //         tlas_instance = Vks(VkAccelerationStructureInstanceKHR{
 //             .transform = std::bit_cast<VkTransformMatrixKHR>(glm::transpose(glm::mat4x3{
-//                 get_engine().ecs_storage->get<components::Transform>(mesh_instances.at(mi_idx)).transform })),
+//                 Engine::get().ecs_storage->get<components::Transform>(mesh_instances.at(mi_idx)).transform })),
 //             .instanceCustomIndex = 0,
 //             .mask = 0xFF,
 //             .instanceShaderBindingTableRecordOffset = 0,
@@ -2362,7 +2362,7 @@ size_t RendererBackendVk::get_query_result_size(QueryType type)
 //
 // FrameData& RendererBackendVulkan::get_frame_data(u32 offset)
 //{
-//     return frame_datas[(get_engine().frame_num + offset) % frame_datas.size()];
+//     return frame_datas[(Engine::get().frame_num + offset) % frame_datas.size()];
 // }
 //
 // const FrameData& RendererBackendVulkan::get_frame_data(u32 offset) const

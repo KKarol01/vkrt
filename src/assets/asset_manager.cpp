@@ -33,7 +33,7 @@ void AssetManager::init()
     std::ranges::sort(engb_paths, std::greater{}); // assetsN, assetsN-1, ... (newest first)
     for(const auto& p : engb_paths)
     {
-        m_engb_containers_vec.emplace_back(get_engine().fs->open_file(p, fs::OpenMode::READ_WRITE_BYTES));
+        m_engb_containers_vec.emplace_back(Engine::get().fs->open_file(p, fs::OpenMode::READ_WRITE_BYTES));
     }
 }
 
@@ -51,7 +51,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
     }
 
     auto& loaded = m_loaded_assets_map.emplace(file_path, std::move(*asset)).first->second;
-    if(!deserialized && get_engine().settings.serialize_to_enbc)
+    if(!deserialized && Engine::get().settings.serialize_to_enbc)
     {
         m_serializing_threads.emplace_back(&AssetManager::serialize_asset_to_enbc_thread, this, std::ref(loaded));
     }
@@ -62,7 +62,7 @@ serialization::engb::Container& AssetManager::get_latest_container()
 {
     if(m_engb_containers_vec.empty())
     {
-        m_engb_containers_vec.emplace_back(get_engine().fs->open_file("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
+        m_engb_containers_vec.emplace_back(Engine::get().fs->open_file("/assets/assets0.engb", fs::OpenMode::READ_WRITE_CREATE_BYTES));
     }
     return m_engb_containers_vec.front();
 }

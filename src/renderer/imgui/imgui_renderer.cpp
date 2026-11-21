@@ -24,7 +24,7 @@ void ImGuiRenderer::init()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForVulkan(get_engine().window->window, true);
+    ImGui_ImplGlfw_InitForVulkan(Engine::get().window->window, true);
 
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontDefault();

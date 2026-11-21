@@ -73,10 +73,10 @@ class ScenePanel : public Panel
         if(ImGui::Begin("Scene Panel", 0))
         {
             const auto toggle_expanded_below = [this](ecs::EntityId e, bool state) {
-                get_engine().ecs->traverse_hierarchy(e, [this, state](ecs::EntityId e) { states[e].expanded = state; });
+                Engine::get().ecs->traverse_hierarchy(e, [this, state](ecs::EntityId e) { states[e].expanded = state; });
             };
             const auto draw_node = [this, &toggle_expanded_below](const auto& self, ecs::EntityId e) {
-                auto* ecs = get_engine().ecs;
+                auto* ecs = Engine::get().ecs;
                 const auto& node = ecs->get<ecsc::Node>(e);
                 auto& state = states[e];
                 ImGui::PushID(&node);
@@ -108,9 +108,9 @@ class ScenePanel : public Panel
                     }
 
                     static const auto set_mesh_pass = [](ecs::EntityId e, gfx::MeshPassType type) {
-                        if(e && get_engine().ecs->has<ecsc::Mesh>(e))
+                        if(e && Engine::get().ecs->has<ecsc::Mesh>(e))
                         {
-                            auto& mesh = get_engine().ecs->get<ecsc::Mesh>(e);
+                            auto& mesh = Engine::get().ecs->get<ecsc::Mesh>(e);
                             for(auto rmh : mesh.render_meshes)
                             {
                                 rmh->material->mesh_pass = gfx::get_renderer().settings.default_meshpasses[(int)type];
@@ -135,7 +135,7 @@ class ScenePanel : public Panel
                 }
                 ImGui::PopID();
             };
-            for(auto e : get_engine().scene->scene)
+            for(auto e : Engine::get().scene->scene)
             {
                 draw_node(draw_node, e);
             }
@@ -291,7 +291,7 @@ class DebugPanel : public Panel
                     if(it != gfx::get_renderer().current_data->available_tstamp_queries.end())
                     {
                         auto& times = pass_times[it->label.hash()];
-                        const auto time_now_secs = get_engine().get_time_secs();
+                        const auto time_now_secs = Engine::get().get_time_secs();
                         if(time_now_secs - times.last_update_secs >= 0.05f)
                         {
                             const auto query_res = gfx::TimestampQuery::to_ms(*it);

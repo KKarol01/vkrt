@@ -60,8 +60,8 @@ inline thread_local char msg_buf[1024]{};
         const auto chars_written = ENG_FMT_TO_N(logger::msg_buf, 1023, "[LOG][{} : {}]: " msg, __FILE__, __LINE__, __VA_ARGS__); \
         logger::msg_buf[chars_written] = '\0';                                                                                   \
         ENG_PRTLN("{}", logger::msg_buf);                                                                                        \
-        /*if(get_engine().msg_log.size() >= 512) { get_engine().msg_log.pop_back(); } */                                         \
-        /*get_engine().msg_log.push_front(format); */                                                                            \
+        /*if(Engine::get().msg_log.size() >= 512) { Engine::get().msg_log.pop_back(); } */                                         \
+        /*Engine::get().msg_log.push_front(format); */                                                                            \
     }                                                                                                                            \
     while(0)
 

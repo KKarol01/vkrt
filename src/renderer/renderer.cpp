@@ -161,14 +161,14 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    settings.new_render_resolution = { get_engine().window->width, get_engine().window->height };
-    settings.present_resolution = { get_engine().window->width, get_engine().window->height };
+    settings.new_render_resolution = { Engine::get().window->width, Engine::get().window->height };
+    settings.present_resolution = { Engine::get().window->width, Engine::get().window->height };
     settings.regenerate_swapchain = true;
 
-    get_engine().window->add_on_resize(on_window_resize);
+    Engine::get().window->add_on_resize(on_window_resize);
 
     std::string_view exts[]{ ".hlsl", ".hlsli" };
-    new_shaders_listener = get_engine().fs->make_recursive_directory_listener("/assets/shaders", exts);
+    new_shaders_listener = Engine::get().fs->make_recursive_directory_listener("/assets/shaders", exts);
 }
 
 void Renderer::init_helper_geom()
@@ -419,7 +419,7 @@ void Renderer::init_bufs()
         bufs.lights[i] = make_buffer(ENG_FMT("lights {}", i), Buffer::init(1024, BufferUsage::STORAGE_BIT));
     }
     {
-        const auto* w = get_engine().window;
+        const auto* w = Engine::get().window;
         const auto num_tiles_x = (u32)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles_y = (u32)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
@@ -481,12 +481,12 @@ void Renderer::init_bufs()
 // void Renderer::instance_entity(ecs::EntityId e)
 //{
 // ENG_ASSERT(false);
-//  if(!get_engine().ecs->has<ecsc::Transform, ecsc::Mesh>(e))
+//  if(!Engine::get().ecs->has<ecsc::Transform, ecsc::Mesh>(e))
 //{
 //      ENG_WARN("Entity {} does not have the required components (Transform, Mesh).", *e);
 //      return;
 //  }
-//  auto& mesh = get_engine().ecs->get<ecsc::Mesh>(e);
+//  auto& mesh = Engine::get().ecs->get<ecsc::Mesh>(e);
 //  if(mesh.gpu_resource != ~0u)
 //{
 //      ENG_WARN("Entity {} with mesh {} is already instanced {}", *e, mesh.asset->name, mesh.gpu_resource);
@@ -515,7 +515,7 @@ void Renderer::update()
     if(settings.render_resolution != settings.new_render_resolution)
     {
         settings.render_resolution = settings.new_render_resolution;
-        get_engine().camera->update_projection(glm::radians(70.0f), 0.1, settings.render_resolution.x,
+        Engine::get().camera->update_projection(glm::radians(70.0f), 0.1, settings.render_resolution.x,
                                                settings.render_resolution.y);
     }
 
@@ -609,12 +609,12 @@ void Renderer::update()
             compile_pipeline(h);
         }
     });
-    if(const auto& qg = get_engine().ecs->get_query_group<ecsc::Mesh>(); mesh_entt_hash != qg.hash)
+    if(const auto& qg = Engine::get().ecs->get_query_group<ecsc::Mesh>(); mesh_entt_hash != qg.hash)
     {
         ENG_TIMER_SCOPED("Allocate mesh gpu resources");
         for(auto e : qg.entities)
         {
-            auto& mesh = get_engine().ecs->get<ecsc::Mesh>(e);
+            auto& mesh = Engine::get().ecs->get<ecsc::Mesh>(e);
             if(mesh.gpu_resource == ~0u)
             {
                 mesh.gpu_resource = *gpu_resource_allocator.allocate();
@@ -666,8 +666,8 @@ void Renderer::update()
         for(auto i = 0u; i < new_transforms.size(); ++i)
         {
             const auto entity = new_transforms[i];
-            const auto& transform = get_engine().ecs->get<ecsc::Transform>(entity);
-            const auto& mesh = get_engine().ecs->get<ecsc::Mesh>(entity);
+            const auto& transform = Engine::get().ecs->get<ecsc::Transform>(entity);
+            const auto& mesh = Engine::get().ecs->get<ecsc::Mesh>(entity);
             const auto trsmat4x4 = transform.to_mat4();
             staging->copy(bufs.transforms[0].get(), &trsmat4x4[0][0], mesh.gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
         }
@@ -682,8 +682,8 @@ void Renderer::update()
         //  staging->copy(bufs.lights[0], bufs.lights[1], 0, { 0, bufs.lights[1]->size }, true);
         //  for(auto i = 0u; i < new_lights.size(); ++i)
         //{
-        //      auto& l = get_engine().ecs->get<ecsc::Light>(new_lights[i]);
-        //      const auto& t = get_engine().ecs->get<ecsc::Transform>(new_lights[i]);
+        //      auto& l = Engine::get().ecs->get<ecsc::Light>(new_lights[i]);
+        //      const auto& t = Engine::get().ecs->get<ecsc::Transform>(new_lights[i]);
         //      if(l.gpu_index == ~0u) { l.gpu_index = gpu_light_allocator.allocate(); }
         //      GPULight gpul{ t.pos(), l.range, l.color, l.intensity, (u32)l.type };
         //      staging->copy(bufs.lights[0], &gpul, offsetof(GPULightsBuffer, lights_us) + l.gpu_index * sizeof(GPULight),
@@ -750,7 +750,7 @@ void Renderer::compile_rendergraph()
             d.constants = t.constants;
         },
         [this](RGBuilder& b, const SetupTargets& d) {
-            auto* c = get_engine().camera;
+            auto* c = Engine::get().camera;
             GPUEngConstants constants{};
 
             constants.vertex_positions = get_bindless_storage_buffer_index(bufs.positions);
@@ -854,7 +854,7 @@ void Renderer::compile_rendergraph()
 // void Renderer::render(RenderPassType pass, SubmitQueue* queue, CommandBufferVk* cmd)
 //{
 //  ENG_ASSERT(false);
-//   auto* ew = get_engine().window;
+//   auto* ew = Engine::get().window;
 //   auto& pf = get_perframe();
 //   auto& rp = render_passes.at(pass);
 
@@ -868,8 +868,8 @@ void Renderer::compile_rendergraph()
 //                                                   .imageLayout = to_vk(ImageLayout::ATTACHMENT),
 //                                                   .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 //                                                   .storeOp = VK_ATTACHMENT_STORE_OP_STORE });
-// VkViewport vkview{ 0.0f, 0.0f, get_engine().window->width, get_engine().window->height, 0.0f, 1.0f };
-// VkRect2D vksciss{ {}, { (u32)get_engine().window->width, (u32)get_engine().window->height } };
+// VkViewport vkview{ 0.0f, 0.0f, Engine::get().window->width, Engine::get().window->height, 0.0f, 1.0f };
+// VkRect2D vksciss{ {}, { (u32)Engine::get().window->width, (u32)Engine::get().window->height } };
 // const auto vkreninfo = Vks(VkRenderingInfo{
 //     .renderArea = vksciss, .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = vkcols, .pDepthAttachment = &vkdep });
 
@@ -972,7 +972,7 @@ bool Renderer::compile_shader(Handle<Shader> shader)
 bool Renderer::compile_shader(Shader& shader)
 {
     const auto shhash = m_shaders.get_hash(shader.path);
-    auto& fs = *get_engine().fs;
+    auto& fs = *Engine::get().fs;
     const auto pcpath = fs::Path{ shader.path.string() + ".precompiled" };
     auto pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
     if(!fs.file_exists(shader.path) && !pcfile)
@@ -1314,7 +1314,7 @@ void Renderer::build_pending_blases()
     std::vector<u32> instance_ids;
     std::vector<const Geometry*> tlas_geoms;
     std::vector<glm::mat3x4> trs;
-    get_engine().ecs->iterate_components<ecsc::Mesh, ecsc::Transform>([&](ecs::EntityId e, const ecsc::Mesh& m,
+    Engine::get().ecs->iterate_components<ecsc::Mesh, ecsc::Transform>([&](ecs::EntityId e, const ecsc::Mesh& m,
                                                                           const ecsc::Transform& t) {
         for(auto rmh : m.render_meshes)
         {
@@ -1595,7 +1595,7 @@ void ShaderManager::parse_includes(File& f, File* pf)
 {
     if(f.hash == 0)
     {
-        auto file = get_engine().fs->open_file(f.path, fs::OpenMode::READ_BYTES);
+        auto file = Engine::get().fs->open_file(f.path, fs::OpenMode::READ_BYTES);
         if(!file)
         {
             ENG_WARN("Couldn't open file {}", f.path.string());

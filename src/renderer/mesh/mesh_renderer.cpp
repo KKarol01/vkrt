@@ -13,7 +13,7 @@ namespace gfx
 
 void MeshRenderer::instance_entity(ecs::EntityId entity)
 {
-    const auto& msh = get_engine().ecs->get<ecsc::Mesh>(entity);
+    const auto& msh = Engine::get().ecs->get<ecsc::Mesh>(entity);
     ENG_ASSERT(msh.gpu_resource != ~0u);
     for(auto rmsh : msh.render_meshes)
     {
@@ -39,7 +39,7 @@ void MeshRenderer::build_passes()
     for(auto i = 0u; i < (int)MeshPassType::LAST_ENUM; ++i)
     {
         auto& pass = m_pass_datas_arr[i];
-        const auto& qgroup = get_engine().ecs->get_query_group<ecsc::Mesh>();
+        const auto& qgroup = Engine::get().ecs->get_query_group<ecsc::Mesh>();
         if(pass.meshes_hash != qgroup.hash)
         {
             for(auto e : qgroup.entities)

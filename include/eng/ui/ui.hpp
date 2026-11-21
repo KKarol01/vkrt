@@ -14,7 +14,7 @@ namespace ui
 class Panel;
 class UI;
 
-inline UI& get_ui() { return *get_engine().ui; }
+inline UI& get_ui() { return *Engine::get().ui; }
 
 using PanelId = TypedId<Panel, u32>;
 

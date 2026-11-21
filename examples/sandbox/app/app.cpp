@@ -26,20 +26,20 @@ namespace app
 //
 // void Renderer::update()
 //{
-//     // for(auto e : get_engine().scene->scene)
+//     // for(auto e : Engine::get().scene->scene)
 //     //{
-//     //      get_engine().ecs->traverse_hierarchy(e, [](auto p, auto e) {
-//     //          if(get_engine().ecs->has<ecsc::Mesh>(e))
+//     //      Engine::get().ecs->traverse_hierarchy(e, [](auto p, auto e) {
+//     //          if(Engine::get().ecs->has<ecsc::Mesh>(e))
 //     //          {
-//     //              get_engine().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
+//     //              Engine::get().renderer->submit_mesh(gfx::SubmitInfo{ e, gfx::MeshPassType::FORWARD });
 //     //          };
 //     //      });
 //     // }
 //
-//     // get_engine().renderer->rgraph->add_pass(
+//     // Engine::get().renderer->rgraph->add_pass(
 //     //     gfx::RenderGraph::PassCreateInfo{ "ex1", gfx::RenderOrder::DEFAULT_UNLIT - 1 },
 //     //     [](gfx::RenderGraph::PassResourceBuilder& b) {
-//     //         b.access(get_engine().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
+//     //         b.access(Engine::get().renderer->render_passes.at((uint32_t)gfx::MeshPassType::FORWARD).cmd_buf,
 //     //                  gfx::RenderGraph::AccessType::RW, gfx::PipelineStage::COMPUTE_BIT, gfx::PipelineAccess::SHADER_RW);
 //     //     },
 //     //     [](gfx::SubmitQueue* q, gfx::CommandBuffer* cmd) {
@@ -49,17 +49,17 @@ namespace app
 
 void App::start()
 {
-    get_engine().on_after_init += [this] { on_init(); };
-    // get_engine().on_update += [this] { on_update(); };
+    Engine::get().on_after_init += [this] { on_init(); };
+    // Engine::get().on_update += [this] { on_update(); };
 }
 
 void App::on_init()
 {
-    auto* ecs = get_engine().ecs;
+    auto* ecs = Engine::get().ecs;
 
-    auto& model = get_engine().assets->get_asset("/assets/models/bistro.glb");
-    //auto& model = get_engine().assets->get_asset("/assets/models/datsun/scene.gltf");
-    get_engine().scene->instance_asset(model);
+    auto& model = Engine::get().assets->get_asset("/assets/models/bistro.glb");
+    //auto& model = Engine::get().assets->get_asset("/assets/models/datsun/scene.gltf");
+    Engine::get().scene->instance_asset(model);
 
     glm::vec3 aabbMin(-10.0f, -5.0f, -5.0f);
     glm::vec3 aabbMax(10.0f, 5.0f, 5.0f);
@@ -102,13 +102,13 @@ void App::on_init()
     //            ecs->make_child(light_aggregate, light); // so they look nice in the scene hierarchy
     //            ecs->add_components(light, ecsc::Node{ .name = ENG_FMT("LIGHT {}", i) }, ecsc::Transform::from(pos),
     //                                ecsc::Light{ .range = 2.0f, .type = ecsc::Light::Type::POINT });
-    //            // get_engine().renderer->add_light(light);
+    //            // Engine::get().renderer->add_light(light);
     //        }
     //    }
     //}
-    // get_engine().scene->scene.push_back(light_aggregate);
+    // Engine::get().scene->scene.push_back(light_aggregate);
 
-    // get_engine().scene->instance_model(e);
+    // Engine::get().scene->instance_model(e);
 }
 
 // void App::on_update() { renderer.update(); }

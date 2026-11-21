@@ -503,8 +503,8 @@
 ////         .clearValue = { .depthStencil = { 1.0f, 0 } },
 ////     });
 ////     const auto rendering_info = Vks(VkRenderingInfo{
-////         .renderArea = { .extent = { .width = (u32)get_engine().window->width,
-////                                     .height = (u32)get_engine().window->height } },
+////         .renderArea = { .extent = { .width = (u32)Engine::get().window->width,
+////                                     .height = (u32)Engine::get().window->height } },
 ////         .layerCount = 1,
 ////         .colorAttachmentCount = 0,
 ////         .pColorAttachments = nullptr,
@@ -593,8 +593,8 @@
 ////     auto& r = *RendererVulkan::get_instance();
 ////     set_pc_vsm_common(cmd);
 ////     r.bindless_pool->bind(cmd, pipeline->bind_point);
-////     vkCmdDispatch(cmd, (u32)std::ceilf(get_engine().window->width / 8.0f),
-////                   (u32)std::ceilf(get_engine().window->height / 8.0f), 1);
+////     vkCmdDispatch(cmd, (u32)std::ceilf(Engine::get().window->width / 8.0f),
+////                   (u32)std::ceilf(Engine::get().window->height / 8.0f), 1);
 //// }
 ////
 //// VsmShadowsPass::VsmShadowsPass(RenderGraph* rg)
@@ -735,8 +735,8 @@
 ////         .clearValue = { .depthStencil = { 1.0f, 0 } },
 ////     });
 ////     auto rendering_info = Vks(VkRenderingInfo{
-////         .renderArea = { .extent = { .width = (u32)get_engine().window->width,
-////                                     .height = (u32)get_engine().window->height } },
+////         .renderArea = { .extent = { .width = (u32)Engine::get().window->width,
+////                                     .height = (u32)Engine::get().window->height } },
 ////         .layerCount = 1,
 ////         .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
 ////         .pColorAttachments = r_col_atts,
@@ -745,9 +745,9 @@
 ////
 ////     vkCmdBindIndexBuffer(cmd, r.get_buffer(r.index_buffer).buffer, 0, VK_INDEX_TYPE_UINT32);
 ////     vkCmdBeginRendering(cmd, &rendering_info);
-////     VkRect2D r_sciss_1{ .offset = {}, .extent = { (u32)get_engine().window->width, (u32)get_engine().window->height } };
+////     VkRect2D r_sciss_1{ .offset = {}, .extent = { (u32)Engine::get().window->width, (u32)Engine::get().window->height } };
 ////     VkViewport r_view_1{
-////         .x = 0.0f, .y = 0.0f, .width = get_engine().window->width, .height = get_engine().window->height, .minDepth = 0.0f, .maxDepth = 1.0f
+////         .x = 0.0f, .y = 0.0f, .width = Engine::get().window->width, .height = Engine::get().window->height, .minDepth = 0.0f, .maxDepth = 1.0f
 ////     };
 ////     vkCmdSetScissorWithCount(cmd, 1, &r_sciss_1);
 ////     vkCmdSetViewportWithCount(cmd, 1, &r_view_1);
@@ -787,12 +787,12 @@
 //// void ImguiPass::render(VkCommandBuffer cmd)
 ////{
 ////     auto& r = *RendererVulkan::get_instance();
-////     // ImGui::SetCurrentContext(get_engine().ui_ctx->imgui_ctx);
+////     // ImGui::SetCurrentContext(Engine::get().ui_ctx->imgui_ctx);
 ////     ImGui_ImplVulkan_NewFrame();
 ////     ImGui_ImplGlfw_NewFrame();
 ////     ImGui::NewFrame();
 ////     ImGuizmo::BeginFrame();
-////     get_engine().ui->update();
+////     Engine::get().ui->update();
 ////     ImGui::Render();
 ////     ImDrawData* im_draw_data = ImGui::GetDrawData();
 ////     if(im_draw_data)
@@ -807,16 +807,16 @@
 ////             }),
 ////         };
 ////         VkRect2D r_sciss_1{ .offset = {},
-////                             .extent = { (u32)get_engine().window->width, (u32)get_engine().window->height } };
+////                             .extent = { (u32)Engine::get().window->width, (u32)Engine::get().window->height } };
 ////         VkViewport r_view_1{ .x = 0.0f,
-////                              .y = get_engine().window->height,
-////                              .width = get_engine().window->width,
-////                              .height = get_engine().window->height,
+////                              .y = Engine::get().window->height,
+////                              .width = Engine::get().window->width,
+////                              .height = Engine::get().window->height,
 ////                              .minDepth = 0.0f,
 ////                              .maxDepth = 1.0f };
 ////         auto rendering_info = Vks(VkRenderingInfo{
-////             .renderArea = { .extent = { .width = (u32)get_engine().window->width,
-////                                         .height = (u32)get_engine().window->height } },
+////             .renderArea = { .extent = { .width = (u32)Engine::get().window->width,
+////                                         .height = (u32)Engine::get().window->height } },
 ////             .layerCount = 1,
 ////             .colorAttachmentCount = sizeof(r_col_atts) / sizeof(r_col_atts[0]),
 ////             .pColorAttachments = r_col_atts,
