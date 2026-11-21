@@ -88,7 +88,7 @@ target_compile_definitions(imgui
 )
 
 add_library(imguizmo STATIC
-    "third_party/ImGuizmo/ImGuizmo.cpp"
+    "third_party/imguizmo/src/ImGuizmo.cpp"
  )
 target_include_directories(imguizmo
     PRIVATE
