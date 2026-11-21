@@ -9,6 +9,7 @@
 #include <eng/common/handle.hpp>
 #include <eng/common/flags.hpp>
 #include <eng/common/types.hpp>
+#include <eng/common/spatial.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/renderer/backend.hpp>
@@ -300,6 +301,7 @@ struct Geometry
     auto operator<=>(const Geometry& a) const { return meshlet_range <=> a.meshlet_range; }
     auto operator==(const Geometry& a) const { return meshlet_range == a.meshlet_range; }
     Range32u meshlet_range{}; // position inside meshlet buffer
+    BoundingBox aabb{};
     Handle<Buffer> blas_buffer{};
     struct Metadata
     {

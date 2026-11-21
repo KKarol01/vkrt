@@ -50,8 +50,8 @@ void MeshRenderer::build_passes()
         }
         else { continue; }
 
-        auto instances = extract_mesh_instances((MeshPassType)i, pass);
-        sort_mesh_instances(instances);
+        auto instances = extract_meshlet_instances((MeshPassType)i, pass);
+        sort_meshlet_instances(instances);
         auto ret = build_pass_from_instances(pass, instances);
 
         std::vector<u32> counts;
@@ -120,9 +120,9 @@ void MeshRenderer::draw(MeshPassType type, ICommandBuffer& cmd)
     }
 }
 
-MeshRenderer::InstancesVec MeshRenderer::extract_mesh_instances(MeshPassType type, PassData& pass)
+MeshRenderer::InstancesVec MeshRenderer::extract_meshlet_instances(MeshPassType type, PassData& pass)
 {
-    std::vector<PassData::MeshInstance> instances;
+    std::vector<PassData::MeshletInstance> instances;
     for(const auto& m : pass.meshes_vec)
     {
         const auto meshlets = m.mesh->geometry->meshlet_range;
@@ -135,10 +135,10 @@ MeshRenderer::InstancesVec MeshRenderer::extract_mesh_instances(MeshPassType typ
     return instances;
 }
 
-void MeshRenderer::sort_mesh_instances(InstancesVec& vec)
+void MeshRenderer::sort_meshlet_instances(InstancesVec& vec)
 {
     // first sort by material (pipeline grouping), then sort by geometry (indirect command per pipeline grouping)
-    std::ranges::sort(vec, [](const PassData::MeshInstance& a, const PassData::MeshInstance& b) {
+    std::ranges::sort(vec, [](const PassData::MeshletInstance& a, const PassData::MeshletInstance& b) {
         return std::tie(a.material, a.meshlet) < std::tie(b.material, b.meshlet);
     });
 }
@@ -148,7 +148,7 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
     const PassInstancesGroups groups = [&vec] {
         PassInstancesGroups groups;
         groups.reserve(vec.size());
-        const PassData::MeshInstance* pi{};
+        const PassData::MeshletInstance* pi{};
         for(auto i = 0u; i < vec.size(); ++i)
         {
             const auto& ci = vec[i];
@@ -167,12 +167,12 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
     pass.batches_vec.reserve(vec.size());
     PassData::InstanceBatch* pb{};
     std::vector<std::byte> cmds(groups.size() * get_renderer().backend->get_indirect_indexed_command_size());
-    u32 cmdoff{};
+    u32 cmdoff = 0;
     std::vector<GPUInstanceId> gpuinstanceids;
     gpuinstanceids.reserve(vec.size());
-    for(auto g : groups)
+    for(Range32u group : groups)
     {
-        const auto& fi = vec[g.offset];
+        const auto& fi = vec[group.offset];
         if(!pb || (pb->pipeline != fi.pipeline))
         {
             pass.batches_vec.emplace_back(fi.pipeline, cmdoff, 1);
@@ -182,12 +182,14 @@ MeshRenderer::BuildPassResult MeshRenderer::build_pass_from_instances(PassData& 
 
         const auto& meshlet = get_renderer().meshlets[fi.meshlet];
         get_renderer().backend->make_indirect_indexed_command(cmds.data() + cmdoff * get_renderer().backend->get_indirect_indexed_command_size(),
-                                                              meshlet.index_count, g.size, meshlet.index_offset,
-                                                              meshlet.vertex_offset, g.offset);
-        for(auto i = 0u; i < g.size; ++i)
+                                                              meshlet.index_count, group.size, meshlet.index_offset,
+                                                              meshlet.vertex_offset, group.offset);
+        for(auto i = 0u; i < group.size; ++i)
         {
-            gpuinstanceids.push_back(GPUInstanceId{
-                .cmdi = cmdoff, .resi = g.offset, .insti = g.offset + i, .mati = vec[g.offset + i].material.index() });
+            gpuinstanceids.push_back(GPUInstanceId{ .cmdi = cmdoff,
+                                                    .resi = group.offset,
+                                                    .insti = vec[group.offset + i].gpu_resource,
+                                                    .mati = vec[group.offset + i].material.index() });
         }
         ++cmdoff;
     }

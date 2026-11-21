@@ -15,7 +15,8 @@ VSOutput main(VSInput vsinput)
 	const GPUVertexAttribute attribs = consts.vertex_attributes.load(vsinput.vertex_index);
 	
     VSOutput vsoutput;
-	vsoutput.position = mul(consts.proj_view, float4(consts.vertex_positions.load(vsinput.vertex_index).pos, 1.0));
+	const float4x4 transform = consts.transforms.load(instanceid.insti);
+	vsoutput.position = mul(consts.proj_view, mul(transform, float4(consts.vertex_positions.load(vsinput.vertex_index).pos, 1.0)));
 	vsoutput.normal = float4(attribs.normal, 0.0);
 	vsoutput.uv = attribs.uv;
 	vsoutput.material_index = instanceid.mati;

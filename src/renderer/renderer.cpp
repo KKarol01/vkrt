@@ -90,7 +90,7 @@ void Renderer::BuildGeometryContext::add_descriptor(Handle<Geometry> geometry, c
     ENG_ASSERT(desc.index_format == IndexFormat::U16 && !desc.meshlets.empty());
     auto& batch = batches.emplace_back();
     batch.geom = geometry;
-    batch.positions.assign(desc.vertices.begin(), desc.vertices.end());
+    batch.positions.assign(desc.positions.begin(), desc.positions.end());
     batch.attributes.assign(desc.attributes.begin(), desc.attributes.end());
     batch.indices.resize(desc.indices.size() / sizeof(u16));
     memcpy(batch.indices.data(), desc.indices.data(), desc.indices.size());
@@ -711,6 +711,7 @@ void Renderer::compile_rendergraph()
             constants.vertex_positions = get_bindless_storage_buffer_index(bufs.positions);
             constants.vertex_attributes = get_bindless_storage_buffer_index(bufs.attributes);
             constants.materials = get_bindless_storage_buffer_index(bufs.materials);
+            constants.transforms = get_bindless_storage_buffer_index(bufs.transforms[0]);
             constants.view = c->get_view();
             constants.proj = c->get_projection();
             constants.proj_view = c->get_projection() * c->get_view();
@@ -1108,7 +1109,17 @@ Handle<Material> Renderer::make_material(const Material& desc)
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
+    ENG_ASSERT(batch.positions.size() % 3 == 0);
     const auto ret_handle = geometries.emplace();
+    auto& aabb = ret_handle->aabb;
+    aabb.min = glm::vec3{ std::numeric_limits<float>::max() };
+    aabb.max = glm::vec3{ std::numeric_limits<float>::lowest() };
+    for(size_t i = 0; i < batch.positions.size(); i += 3)
+    {
+        const glm::vec3 p{ batch.positions[i], batch.positions[i + 1], batch.positions[i + 2] };
+        aabb.min = glm::min(aabb.min, p);
+        aabb.max = glm::max(aabb.max, p);
+    }
     new_geometries.add_descriptor(ret_handle, batch);
     return ret_handle;
 }

@@ -2,12 +2,16 @@
 
 #include <third_party/imgui/imgui.h>
 #include <third_party/imgui/imgui_internal.h>
+#include <third_party/imguizmo/src/ImGuizmo.h>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/imgui/imgui_renderer.hpp>
 #include <eng/renderer/passes/passes.hpp>
 #include <eng/common/to_string.hpp>
 
 #include <eng/scene.hpp>
+#include <eng/engine.hpp>
+#include <eng/camera.hpp>
+#include <eng/ecs/components.hpp>
 
 namespace eng
 {
@@ -27,7 +31,9 @@ class Panel
 class GamePanel : public Panel
 {
   public:
-    GamePanel(UI& ui, u32* dock) : Panel("Game Panel", dock) {}
+    GamePanel(UI& ui, const ecs::EntityId* selected_node, u32* dock) : Panel("Game Panel", dock), selected_node(selected_node)
+    {
+    }
 
     ~GamePanel() noexcept override = default;
 
@@ -55,10 +61,66 @@ class GamePanel : public Panel
             ImVec2 padding = { (mpcsize.x - width) * 0.5f, (mpcsize.y - height) * 0.5f };
             ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + padding.x, ImGui::GetCursorPosY() + padding.y));
             const auto color = b.sample_texture(gfx::get_renderer().targets.final_color);
-            if(color) { ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height }); }
+            if(color)
+            {
+                ImGui::Image(*b.graph->get_img(color), ImVec2{ width, height });
+                draw_gizmo(ImGui::GetItemRectMin(), ImVec2{ width, height });
+            }
         }
         ImGui::End();
     }
+
+    void draw_gizmo(ImVec2 pos, ImVec2 size)
+    {
+        auto* ecs = Engine::get().ecs;
+        const auto e = *selected_node;
+        if(!e || !ecs->has<ecsc::Transform>(e)) { return; }
+
+        const auto* camera = Engine::get().camera;
+        const auto view = camera->get_view();
+        const auto fov = 2.0f * std::atan(1.0f / std::abs(camera->get_projection()[1][1]));
+        const auto proj = glm::perspective(fov, size.x / size.y, 0.1f, 1000.0f);
+
+        BoundingBox bounds{ .min = glm::vec3{ std::numeric_limits<float>::max() },
+                            .max = glm::vec3{ std::numeric_limits<float>::lowest() } };
+        bool has_bounds = false;
+        ecs->traverse_hierarchy(e, [ecs, &bounds, &has_bounds](ecs::EntityId child) {
+            if(!ecs->has<ecsc::Transform, ecsc::Mesh>(child)) { return; }
+            const auto world = ecs->get<ecsc::Transform>(child).to_mat4();
+            for(auto rmh : ecs->get<ecsc::Mesh>(child).render_meshes)
+            {
+                const auto& aabb = rmh->geometry->aabb;
+                for(int c = 0; c < 8; ++c)
+                {
+                    const glm::vec3 corner{ (c & 1) ? aabb.max.x : aabb.min.x, (c & 2) ? aabb.max.y : aabb.min.y,
+                                            (c & 4) ? aabb.max.z : aabb.min.z };
+                    const glm::vec3 p = world * glm::vec4{ corner, 1.0f };
+                    bounds.min = glm::min(bounds.min, p);
+                    bounds.max = glm::max(bounds.max, p);
+                }
+                has_bounds = true;
+            }
+        });
+
+        auto matrix = ecs->get<ecsc::Transform>(e).to_mat4();
+        if(has_bounds) { matrix[3] = glm::vec4{ bounds.center(), 1.0f }; }
+        glm::mat4 delta{ 1.0f };
+        ImGuizmo::SetDrawlist();
+        ImGuizmo::SetRect(pos.x, pos.y, size.x, size.y);
+        if(!ImGuizmo::Manipulate(&view[0][0], &proj[0][0], ImGuizmo::UNIVERSAL, ImGuizmo::WORLD, &matrix[0][0], &delta[0][0]))
+        {
+            return;
+        }
+
+        ecs->traverse_hierarchy(e, [ecs, &delta](ecs::EntityId child) {
+            if(!ecs->has<ecsc::Transform>(child)) { return; }
+            auto& transform = ecs->get<ecsc::Transform>(child);
+            transform = ecsc::Transform::init(delta * transform.to_mat4());
+            if(ecs->has<ecsc::Mesh>(child)) { gfx::get_renderer().new_transforms.push_back(child); }
+        });
+    }
+
+    const ecs::EntityId* selected_node{};
 };
 
 class ScenePanel : public Panel
@@ -364,9 +426,10 @@ void UI::init()
     reset_layout |= always_redo_layout_on_start;
     gfx::get_renderer().imgui_renderer->ui_callbacks += [this](auto& b) { draw(b); };
 
-    auto& gamepanel = panels.emplace_back(new GamePanel{ *this, &game });
-    auto& scenepanel = panels.emplace_back(new ScenePanel{ *this, &scene });
-    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, (ScenePanel*)&*scenepanel, &inspector });
+    auto* scenepanel = new ScenePanel{ *this, &scene };
+    auto& gamepanel = panels.emplace_back(new GamePanel{ *this, &scenepanel->selected_node, &game });
+    panels.emplace_back(scenepanel);
+    auto& inspectorpanel = panels.emplace_back(new InspectorPanel{ *this, scenepanel, &inspector });
     auto& debugpanel = panels.emplace_back(new DebugPanel{ *this, &scene });
     auto& consolepanel = panels.emplace_back(new ConsolePanel{ *this, &console });
 }

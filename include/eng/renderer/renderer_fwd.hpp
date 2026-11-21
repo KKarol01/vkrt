@@ -703,11 +703,11 @@ struct Meshlet
 struct GeometryDescriptor
 {
     // size_t get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
-    size_t get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
+    size_t get_num_positions() const { return positions.size() / 3; }
     Flags<GeometryFlags> flags;
     Flags<VertexComponent> vertex_layout;
     IndexFormat index_format{};
-    std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
+    std::span<const float> positions;
     std::span<const float> attributes;
     std::span<const std::byte> indices;
     std::span<const Meshlet> meshlets;

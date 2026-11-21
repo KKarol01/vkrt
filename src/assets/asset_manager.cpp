@@ -334,7 +334,7 @@ void deserialize<assets::Asset>(assets::Asset& dst, std::span<const std::byte> s
             gfx::get_renderer().make_geometry(gfx::GeometryDescriptor{ .flags = {},
                                                                        .vertex_layout = geom.vertex_layout,
                                                                        .index_format = gfx::IndexFormat::U16,
-                                                                       .vertices = geom.positions,
+                                                                       .positions = geom.positions,
                                                                        .attributes = geom.attributes,
                                                                        .indices = std::as_bytes(std::span{ geom.indices }),
                                                                        .meshlets = geom.meshlets });

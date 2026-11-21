@@ -19,7 +19,7 @@ class MeshRenderer
             u32 gpu_resource;
         };
 
-        struct MeshInstance
+        struct MeshletInstance
         {
             Handle<Geometry> geometry;
             Handle<Material> material;
@@ -59,7 +59,7 @@ class MeshRenderer
         u32 cmd_count;
     };
 
-    using InstancesVec = std::vector<PassData::MeshInstance>;
+    using InstancesVec = std::vector<PassData::MeshletInstance>;
     using PassInstancesGroups = std::vector<Range32u>;
 
   public:
@@ -69,8 +69,8 @@ class MeshRenderer
     void draw(MeshPassType type, ICommandBuffer& cmd);
 
   private:
-    static InstancesVec extract_mesh_instances(MeshPassType type, PassData& pass);
-    static void sort_mesh_instances(InstancesVec& vec);
+    static InstancesVec extract_meshlet_instances(MeshPassType type, PassData& pass);
+    static void sort_meshlet_instances(InstancesVec& vec);
     static BuildPassResult build_pass_from_instances(PassData& pass, const InstancesVec& vec);
 
     std::array<PassData, (int)MeshPassType::LAST_ENUM> m_pass_datas_arr;
