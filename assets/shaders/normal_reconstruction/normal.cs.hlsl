@@ -1,37 +1,20 @@
-#include "common.hlsli"
+#include "normal_reconstruction.shared.hlsli"
 #include "assets/shaders/util.hlsli"
 
-static const uint LOCAL_SIZE = 8; 
-static const uint TILE_BORDER = 1;
-static const uint TILE_SIZE = LOCAL_SIZE * LOCAL_SIZE + TILE_BORDER * 2;
+ENG_PUSH_CONSTANTS(GPUNormalReconstructionParams)
 
-groupshared float tile_xy[TILE_SIZE * TILE_SIZE];
-groupshared float tile_z[TILE_SIZE * TILE_SIZE];
+static const uint LOCAL_SIZE = 8; 
 
 [numthreads(LOCAL_SIZE, LOCAL_SIZE, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
-    RWTexture2D<float4> normalTex = gRWTextures2Dfloat4[pc.NormalRWTextureIndex];
-    Texture2D<float4> depthTex = gTexture2Ds[pc.DepthRWTextureIndex];
+    RWTexture2D<float4> out_normal = pc.out_normal.get();
+    Texture2D<float> depth_tex = pc.depth.get();
+    const float4x4 proj = pc.engine.load().proj;
     
     uint2 dims;
-    normalTex.GetDimensions(dims.x, dims.y);
+    out_normal.GetDimensions(dims.x, dims.y);
     if (any(dtid.xy >= dims)) return;
 
-    // Load center and 4 neighbors
-    float3 p0 = depth_to_view_pos(dtid.xy, dims, depthTex.Load(int3(dtid.xy, 0)).x);
-    float3 pR = depth_to_view_pos(dtid.xy + int2(1, 0),  dims, depthTex.Load(int3(dtid.xy + int2(1, 0), 0)).x);
-    float3 pL = depth_to_view_pos(dtid.xy + int2(-1, 0), dims, depthTex.Load(int3(dtid.xy + int2(-1, 0), 0)).x);
-    float3 pD = depth_to_view_pos(dtid.xy + int2(0, 1),  dims, depthTex.Load(int3(dtid.xy + int2(0, 1), 0)).x);
-    float3 pU = depth_to_view_pos(dtid.xy + int2(0, -1), dims, depthTex.Load(int3(dtid.xy + int2(0, -1), 0)).x);
-
-    // Pick best horizontal and vertical vectors based on smallest depth delta
-    float3 vH = (abs(pR.z - p0.z) < abs(pL.z - p0.z)) ? (pR - p0) : (p0 - pL);
-    float3 vV = (abs(pD.z - p0.z) < abs(pU.z - p0.z)) ? (pD - p0) : (p0 - pU);
-
-    // Right-Handed (+X Right, +Y Down): Normal = Horizontal x Vertical
-    // This results in +Z pointing toward the camera.
-    float3 n = normalize(cross(vV, vH));
-
-    normalTex[dtid.xy] = float4(n, 1.0);
+    out_normal[dtid.xy] = float4(calculate_normal_from_depth(proj, int2(dtid.xy), int2(dims), depth_tex), 1.0);
 }

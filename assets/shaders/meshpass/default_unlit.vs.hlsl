@@ -1,4 +1,6 @@
-#include "common.hlsli"
+#include "meshpass.shared.hlsli"
+
+ENG_PUSH_CONSTANTS(GPUMeshPassParams)
 
 struct VSInput
 {
@@ -8,14 +10,14 @@ struct VSInput
 
 VSOutput main(VSInput vsinput)
 {
-	GPUEngConstants constants = get_grwb2(GPUEngConstants, pc, 0);
-	GPUInstanceId instanceid = get_grwb2(GPUInstanceId, pc, vsinput.instance_index);
+	const GPUEngConstants consts = pc.engine.load();
+	const GPUInstanceId instanceid = pc.instances.load(vsinput.instance_index);
+	const GPUVertexAttribute attribs = consts.vertex_attributes.load(vsinput.vertex_index);
 	
     VSOutput vsoutput;
-	vsoutput.wpos = get_grwb2(GPUVertexPosition, constants, vsinput.vertex_index).pos.xyz;
-	vsoutput.position = mul(constants.proj_view, float4(vsoutput.wpos, 1.0));
-	vsoutput.normal = get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).normal.xyz;
-	vsoutput.uv = get_grwb2(GPUVertexAttribute, constants, vsinput.vertex_index).uv.xy;
+	vsoutput.position = mul(consts.proj_view, float4(consts.vertex_positions.load(vsinput.vertex_index).pos, 1.0));
+	vsoutput.normal = float4(attribs.normal, 0.0);
+	vsoutput.uv = attribs.uv;
 	vsoutput.material_index = instanceid.mati;
     
     return vsoutput;

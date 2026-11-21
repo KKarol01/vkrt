@@ -1,4 +1,4 @@
-#include "assets/shaders/ao/ssao.shared.hlsli"
+#include "assets/shaders/ssao/ssao.shared.hlsli"
 #include "assets/shaders/util.hlsli"
 
 ENG_PUSH_CONSTANTS(GPUAOParams)
