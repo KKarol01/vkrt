@@ -43,7 +43,9 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
 
     auto asset = try_deserialize_asset(file_path);
     const bool deserialized = asset.has_value();
-    if(!asset) { asset = load_gltf_from_virtual_path(file_path, ImportSettings::KEEP_DATA_BIT); }
+
+    if(!asset) { asset = try_load_gltf_from_virtual_path(file_path, ImportSettings::KEEP_DATA_BIT); }
+
     if(!asset)
     {
         ENG_WARN("Couldn't load asset {}", file_path.string());
@@ -51,10 +53,7 @@ const Asset& AssetManager::get_asset(const fs::Path& file_path)
     }
 
     auto& loaded = m_loaded_assets_map.emplace(file_path, std::move(*asset)).first->second;
-    if(!deserialized && Engine::get().settings.serialize_to_enbc)
-    {
-        m_serializing_threads.emplace_back(&AssetManager::serialize_asset_to_enbc_thread, this, std::ref(loaded));
-    }
+    if(!deserialized && Engine::get().settings.serialize_to_enbc) { serialize_asset_to_enbc(loaded); }
     return loaded;
 }
 
@@ -69,7 +68,6 @@ serialization::engb::Container& AssetManager::get_latest_container()
 
 std::optional<serialization::engb::List> AssetManager::try_find_list_by_hash(u64 hash, serialization::engb::Container** out_container)
 {
-    std::shared_lock lock{ m_engbc_vec_mutex };
     for(auto& c : m_engb_containers_vec)
     {
         const auto list = c.get_asset_list(hash);
@@ -93,7 +91,6 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     if(list.version != 0) { ENG_WARN("Asset {} has invalid version {}", file_path.string(), list.version); }
 
     ENG_TIMER_SCOPED("Deserializing {}", file_path.string());
-    std::shared_lock lock{ m_engbc_vec_mutex };
 
     std::vector<std::byte> asset_bytes;
     if(list.flags.test(engb::ListFlags::CONTENT_COMPRESSED_BIT))
@@ -135,7 +132,7 @@ std::optional<Asset> AssetManager::try_deserialize_asset(const fs::Path& file_pa
     return asset;
 }
 
-void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
+void AssetManager::serialize_asset_to_enbc(Asset& asset)
 {
     if(asset.geometry_data_futures.empty())
     {
@@ -143,9 +140,9 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
         return;
     }
 
-    for(auto& signal : asset.geometry_data_futures)
+    for(auto& future : asset.geometry_data_futures)
     {
-        signal.wait();
+        future.wait();
     }
 
     size_t size = 0;
@@ -162,7 +159,6 @@ void AssetManager::serialize_asset_to_enbc_thread(Asset& asset)
         size_t bytes_read = 0;
         size_t bytes_left = asset_bytes.size();
 
-        std::scoped_lock lock{ m_engbc_vec_mutex };
         auto& engbc = get_latest_container();
         // engbc.add_asset(0, ENG_HASH(asset.path.string()), engb::ListFlags::CONTENT_COMPRESSED_BIT, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });
         engbc.add_asset(0, ENG_HASH(asset.path.string()), {}, {}, engb::AssetMetadata{ .uncompressed_size = asset_bytes.size() });

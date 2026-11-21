@@ -18,7 +18,7 @@ enum class ImportSettings
 ENG_ENABLE_FLAGS_OPERATORS(ImportSettings);
 
 // Loads .gltf/.glb file from virtual path (e.g. '/assets/models/a.glb').
-std::optional<Asset> load_gltf_from_virtual_path(const fs::Path& path, Flags<ImportSettings> import_settings = {});
+std::optional<Asset> try_load_gltf_from_virtual_path(const fs::Path& path, Flags<ImportSettings> import_settings = {});
 
 } // namespace assets
 } // namespace eng

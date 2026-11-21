@@ -406,7 +406,7 @@ Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::N
 
 } // namespace gltf
 
-std::optional<Asset> load_gltf_from_virtual_path(const fs::Path& file_path, Flags<ImportSettings> import_settings)
+std::optional<Asset> try_load_gltf_from_virtual_path(const fs::Path& file_path, Flags<ImportSettings> import_settings)
 {
     const auto ext = file_path.extension();
     if(ext != ".glb" && ext != ".gltf") { return std::nullopt; }

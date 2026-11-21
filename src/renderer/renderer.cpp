@@ -516,7 +516,7 @@ void Renderer::update()
     {
         settings.render_resolution = settings.new_render_resolution;
         Engine::get().camera->update_projection(glm::radians(70.0f), 0.1, settings.render_resolution.x,
-                                               settings.render_resolution.y);
+                                                settings.render_resolution.y);
     }
 
     if(settings.regenerate_swapchain)
@@ -1315,7 +1315,7 @@ void Renderer::build_pending_blases()
     std::vector<const Geometry*> tlas_geoms;
     std::vector<glm::mat3x4> trs;
     Engine::get().ecs->iterate_components<ecsc::Mesh, ecsc::Transform>([&](ecs::EntityId e, const ecsc::Mesh& m,
-                                                                          const ecsc::Transform& t) {
+                                                                           const ecsc::Transform& t) {
         for(auto rmh : m.render_meshes)
         {
             instance_ids.push_back(m.gpu_resource);
