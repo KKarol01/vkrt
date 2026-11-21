@@ -115,8 +115,17 @@ Window::~Window()
 
 void Window::init()
 {
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     window = glfwCreateWindow(width, height, "window title", nullptr, nullptr);
-    if(!window) { ENG_ERROR("Could not create glfw window"); }
+    if(!window)
+    {
+        ENG_ERROR("Could not create glfw window");
+        return;
+    }
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    width = (float)fbw;
+    height = (float)fbh;
 }
 
 bool Window::should_close() const { return glfwWindowShouldClose(window); }
