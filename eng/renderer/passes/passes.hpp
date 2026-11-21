@@ -3,6 +3,8 @@
 #include <random>
 #include <type_traits>
 #include <eng/renderer/renderer.hpp>
+#include <assets/shaders/ao/ssao.shared.hlsli>
+#include <assets/shaders/velocity/velocity.shared.hlsli>
 #include <eng/renderer/vulkan/vulkan_backend.hpp> // todo: remove this
 #include <eng/engine.hpp>
 #include <eng/renderer/rendergraph.hpp>
@@ -52,19 +54,18 @@ enum class GBufferType
 
 struct PassInitData
 {
-    std::array<RGResourceId, 8> color_buffers;
-    RGResourceId depth_buffer;
-    std::array<RGResourceId, (int)GBufferType::LAST_ENUM> gbuffer;
-    float resolution_multiplier{ 1.0f };
+    std::array<RGImage, 8> color_buffers;
+    RGImage depth_buffer;
+    std::array<RGImage, (int)GBufferType::LAST_ENUM> gbuffer;
 };
 
 struct Pass
 {
-    Pass(std::string_view name) : m_name(name) {}
+    Pass(std::string_view name, u32 order) : m_name(name), m_order(order) {}
     virtual ~Pass() = default;
     virtual void init(RGRenderGraph* graph, const PassInitData& data) = 0;
-
     std::string m_name;
+    u32 m_order{};
     PassSettings m_settings;
 };
 
@@ -72,12 +73,12 @@ struct Pass
 //{
 //     struct PassData
 //     {
-//         RGResourceId constants;
-//         RGResourceId depth;
+//         RGAccessId constants;
+//         RGAccessId depth;
 //         RGResourceId out_normals;
 //     };
 //
-//     NormalFromDepth() : Pass("DEPTH_NORMAL")
+//     NormalFromDepth() : Pass("DEPTH_NORMAL", RenderOrder::POST_Z)
 //     {
 //         auto& r = get_renderer();
 //         pipeline =
@@ -90,7 +91,7 @@ struct Pass
 //     {
 //         if(!graph) { return; }
 //         m_data = graph->add_compute_pass<PassData>(
-//             m_name.data(),
+//             m_name.data(), m_order,
 //             [this](RGBuilder& b, PassData& d) {
 //                 const auto& r = get_renderer();
 //                 const auto res = r.settings.render_resolution;
@@ -107,14 +108,14 @@ struct Pass
 //             [this](RGBuilder& b, const PassData& d) {
 //                 if(!d.out_normals) { return; }
 //                 const auto& r = get_renderer();
-//                 const auto& normals_img = b.b.get_img(b.as_acc_id(d.out_normals));
+//                 const auto& normals_img = b.graph->get_img(b.as_acc_id(d.out_normals));
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(pipeline.get());
 //
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(b.as_acc_id(d.out_normals)).image_view)
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_normals)).image_view)
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((normals_img->width + 7) / 8, (normals_img->height + 7) / 8, 1);
@@ -129,20 +130,20 @@ struct Pass
 //{
 //     struct PassData
 //     {
-//         RGResourceId constants;
-//         RGResourceId settings;
-//         RGResourceId depth;
-//         RGResourceId normals;
-//         RGResourceId samples;
-//         RGResourceId noise;
+//         RGAccessId constants;
+//         RGAccessId settings;
+//         RGAccessId depth;
+//         RGAccessId normals;
+//         RGAccessId samples;
+//         RGAccessId noise;
 //         RGResourceId out_ao;
 //     };
 //
-//     SSAO() : Pass("SSAO")
+//     SSAO() : Pass("SSAO", RenderOrder::POST_Z)
 //     {
 //         auto& r = get_renderer();
-//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
-//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/ssao.cs.hlsl" }));
+//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/blur.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("SSAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
 //         ao_settings = {
@@ -167,7 +168,7 @@ struct Pass
 //         if(!graph) { return; }
 //         poll_settings_change();
 //         m_data = graph->add_compute_pass<PassData>(
-//             m_name.data(),
+//             m_name.data(), m_order,
 //             [this](RGBuilder& b, PassData& d) {
 //                 const auto& r = get_renderer();
 //                 const auto res = r.settings.render_resolution;
@@ -187,18 +188,18 @@ struct Pass
 //             [this](RGBuilder& b, const PassData& d) {
 //                 if(!d.out_ao) { return; }
 //                 const auto& r = get_renderer();
-//                 const auto& out_img = b.b.get_img(b.as_acc_id(d.out_ao));
+//                 const auto& out_img = b.graph->get_img(b.as_acc_id(d.out_ao));
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(ao_pipeline.get());
 //
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
-//                     DescriptorResource::storage_buffer(b.get_acc(d.settings).buffer_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(d.normals).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(b.as_acc_id(d.out_ao)).image_view),
-//                     DescriptorResource::storage_buffer(b.get_acc(d.samples).buffer_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.noise).image_view)
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.normals).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.samples).buffer_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.noise).image_view)
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
@@ -206,12 +207,12 @@ struct Pass
 //
 //         struct BlurData
 //         {
-//             RGResourceId in_ao;
+//             RGAccessId in_ao;
 //             RGResourceId out_blur;
 //         };
 //
 //         const auto blurdata = graph->add_compute_pass<BlurData>(
-//             "SSAO_BLUR",
+//             "SSAO_BLUR", m_order,
 //             [this](RGBuilder& b, BlurData& d) {
 //                 const auto& r = get_renderer();
 //                 const auto res = r.settings.render_resolution;
@@ -225,10 +226,10 @@ struct Pass
 //                 if(!blur_pipeline) { return; }
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(blur_pipeline.get());
-//                 const auto img = b.b.get_img(d.in_ao);
+//                 const auto img = b.graph->get_img(d.in_ao);
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_image(b.get_acc(d.in_ao).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(d.out_blur).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
@@ -304,20 +305,20 @@ struct Pass
 //{
 //     struct PassData
 //     {
-//         RGResourceId constants;
-//         RGResourceId settings;
-//         RGResourceId depth;
-//         RGResourceId normals;
-//         RGResourceId samples;
-//         RGResourceId noise;
+//         RGAccessId constants;
+//         RGAccessId settings;
+//         RGAccessId depth;
+//         RGAccessId normals;
+//         RGAccessId samples;
+//         RGAccessId noise;
 //         RGResourceId out_ao;
 //     };
 //
-//     GTAO() : Pass("GTAO")
+//     GTAO() : Pass("GTAO", RenderOrder::POST_Z)
 //     {
 //         auto& r = get_renderer();
-//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
-//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+//         ao_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/gtao.cs.hlsl" }));
+//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/blur.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
 //         ao_settings = {
@@ -341,7 +342,7 @@ struct Pass
 //         if(!graph) { return; }
 //         poll_settings_change();
 //         m_data = graph->add_compute_pass<PassData>(
-//             m_name.data(),
+//             m_name.data(), m_order,
 //             [this](RGBuilder& b, PassData& d) {
 //                 const auto& r = get_renderer();
 //                 const auto res = r.settings.render_resolution;
@@ -360,17 +361,17 @@ struct Pass
 //             [this](RGBuilder& b, const PassData& d) {
 //                 if(!d.out_ao) { return; }
 //                 const auto& r = get_renderer();
-//                 const auto& out_img = b.b.get_img(b.as_acc_id(d.out_ao));
+//                 const auto& out_img = b.graph->get_img(b.as_acc_id(d.out_ao));
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(ao_pipeline.get());
 //
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
-//                     DescriptorResource::storage_buffer(b.get_acc(d.settings).buffer_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(d.normals).image_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.noise).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(b.as_acc_id(d.out_ao)).image_view),
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.normals).image_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.noise).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(b.as_acc_id(d.out_ao)).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((out_img->width + 7) / 8, (out_img->height + 7) / 8, 1);
@@ -378,12 +379,12 @@ struct Pass
 //
 //         struct BlurData
 //         {
-//             RGResourceId in_ao;
+//             RGAccessId in_ao;
 //             RGResourceId out_blur;
 //         };
 //
 //         const auto blurdata = graph->add_compute_pass<BlurData>(
-//             "GTAO_BLUR",
+//             "GTAO_BLUR", m_order,
 //             [this](RGBuilder& b, BlurData& d) {
 //                 const auto& r = get_renderer();
 //                 const auto res = r.settings.render_resolution;
@@ -397,10 +398,10 @@ struct Pass
 //                 if(!blur_pipeline) { return; }
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(blur_pipeline.get());
-//                 const auto img = b.b.get_img(d.in_ao);
+//                 const auto img = b.graph->get_img(d.in_ao);
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_image(b.get_acc(d.in_ao).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(d.out_blur).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
@@ -451,13 +452,13 @@ struct Pass
 //
 // struct RTAO : public Pass
 //{
-//     RTAO() : Pass("RTAO")
+//     RTAO() : Pass("RTAO", RenderOrder::MESH_RENDER)
 //     {
 //         auto& r = get_renderer();
-//         pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+//         pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao.cs.hlsl" }));
 //         settings_buffer = r.make_buffer("GTAO_SETTINGS", Buffer::init(sizeof(GPUEngAOSettings),
 //                                                                       BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
-//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/blur.cs.hlsl" }));
+//         blur_pipeline = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/blur.cs.hlsl" }));
 //         ao_settings = {
 //             .radius = 0.006f,
 //             .bias = 0.0f,
@@ -474,11 +475,11 @@ struct Pass
 //
 //     struct PassData
 //     {
-//         RGResourceId constants;
-//         RGResourceId depth;
-//         RGResourceId normals;
+//         RGAccessId constants;
+//         RGAccessId depth;
+//         RGAccessId normals;
 //         RGResourceId out_ao;
-//         RGResourceId settings;
+//         RGAccessId settings;
 //     };
 //
 //     void init(RGRenderGraph* graph, const PassInitData& data) override
@@ -487,7 +488,7 @@ struct Pass
 //         const auto res = r.settings.render_resolution;
 //         poll_settings_change();
 //         m_data = graph->add_compute_pass<PassData>(
-//             m_name.c_str(),
+//             m_name.c_str(), m_order,
 //             [=](RGBuilder& b, PassData& d) {
 //                 const auto& r = get_renderer();
 //                 if(!r.current_data->render_resources.zpdepth) { return; }
@@ -505,12 +506,12 @@ struct Pass
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(pipeline.get());
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_buffer(b.get_acc(d.constants).buffer_view),
-//                     DescriptorResource::storage_buffer(b.get_acc(d.settings).buffer_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.depth).image_view),
-//                     DescriptorResource::sampled_image(b.get_acc(d.normals).image_view),
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.constants).buffer_view),
+//                     DescriptorResource::storage_buffer(b.graph->get_acc(d.settings).buffer_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.depth).image_view),
+//                     DescriptorResource::sampled_image(b.graph->get_acc(d.normals).image_view),
 //                     DescriptorResource::acceleration_struct(get_renderer().bufs.geom_tlas),
-//                     DescriptorResource::storage_image(b.get_acc(d.out_ao).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_ao).image_view),
 //                 };
 //                 cmd->bind_resources(0, resources);
 //                 cmd->dispatch((res.x + 7) / 8, (res.y + 7) / 8, 1);
@@ -518,12 +519,12 @@ struct Pass
 //
 //         struct BlurData
 //         {
-//             RGResourceId in_ao;
+//             RGAccessId in_ao;
 //             RGResourceId out_blur;
 //         };
 //
 //         const auto blurdata = graph->add_compute_pass<BlurData>(
-//             "GTAO_BLUR",
+//             "GTAO_BLUR", m_order,
 //             [this](RGBuilder& b, BlurData& d) {
 //                 const auto& r = get_renderer();
 //                 const auto res = r.settings.render_resolution;
@@ -537,10 +538,10 @@ struct Pass
 //                 if(!blur_pipeline) { return; }
 //                 auto* cmd = b.open_cmd_buf();
 //                 cmd->bind_pipeline(blur_pipeline.get());
-//                 const auto img = b.b.get_img(d.in_ao);
+//                 const auto img = b.graph->get_img(d.in_ao);
 //                 DescriptorResource resources[]{
-//                     DescriptorResource::storage_image(b.get_acc(d.in_ao).image_view),
-//                     DescriptorResource::storage_image(b.get_acc(d.out_blur).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.in_ao).image_view),
+//                     DescriptorResource::storage_image(b.graph->get_acc(d.out_blur).image_view),
 //                 };
 //                 cmd->bind_resources(1, resources);
 //                 cmd->dispatch((img->width + 7) / 8, (img->height + 7) / 8, 1);
@@ -570,18 +571,18 @@ struct MeshPass : public Pass
 {
     struct PassData
     {
-        RGResourceId constants;
-        RGResourceId positions;
-        RGResourceId attributes;
-        RGResourceId indices;
-        RGResourceId instances;
-        RGResourceId indirect;
+        RGBuffer constants;
+        RGBuffer positions;
+        RGBuffer attributes;
+        RGBuffer indices;
+        RGBuffer instances;
+        RGBuffer indirect;
 
-        RGResourceId color_buffers[8]{};
-        RGResourceId depth;
+        RGImage color_buffers[8]{};
+        RGImage depth;
     };
 
-    MeshPass(MeshPassType type) : Pass(ENG_FMT("Mesh Pass {}", to_string(type))), m_type(type) {}
+    MeshPass(MeshPassType type, u32 order) : Pass(ENG_FMT("Mesh Pass {}", to_string(type)), order), m_type(type) {}
 
     ~MeshPass() override = default;
 
@@ -589,13 +590,16 @@ struct MeshPass : public Pass
     {
         if(!graph) { return; }
         m_data = graph->add_graphics_pass<PassData>(
-            m_name.data(),
+            m_name.data(), m_order,
             [=, this](RGBuilder& b, PassData& d) {
                 const auto& r = get_renderer();
                 auto& cd = *r.current_data;
                 const auto& settings = r.settings;
                 const auto mesh_setup = r.mesh_renderer.setup(m_type, b);
                 if(!mesh_setup.indirect) { return; }
+
+                const auto resolution = settings.render_resolution;
+                const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
 
                 for(auto i = 0u; i < data.color_buffers.size(); ++i)
                 {
@@ -605,10 +609,8 @@ struct MeshPass : public Pass
                 if(data.depth_buffer) { d.depth = b.access_depth(data.depth_buffer); }
 
                 d.constants = mesh_setup.constants;
-                d.positions = b.import_resource(r.bufs.positions);
-                d.positions = b.read_buffer(d.positions);
-                d.attributes = b.import_resource(r.bufs.attributes);
-                d.attributes = b.read_buffer(d.attributes);
+                d.positions = b.read_buffer(b.import_resource(r.bufs.positions));
+                d.attributes = b.read_buffer(b.import_resource(r.bufs.attributes));
                 d.instances = mesh_setup.gpuinstances;
                 d.indirect = mesh_setup.indirect;
             },
@@ -629,7 +631,7 @@ struct MeshPass : public Pass
                 for(auto i = 0; i < std::size(vkcols); ++i)
                 {
                     if(!d.color_buffers[i]) { continue; }
-                    vkcols[i].imageView = ((const ImageViewMetadataVk*)b.get_img(d.color_buffers[i]).get_md())->view;
+                    vkcols[i].imageView = b.get_img(d.color_buffers[i]).get_md().vk->view;
                     vkcols[i].imageLayout = to_vk(b.get_acc(d.color_buffers[i]).layout);
                     vkcols[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     vkcols[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -638,7 +640,7 @@ struct MeshPass : public Pass
                 auto vkdep = vk::VkRenderingAttachmentInfo{};
                 if(d.depth)
                 {
-                    vkdep.imageView = ((const ImageViewMetadataVk*)b.get_acc(d.depth).image_view.get_md())->view;
+                    vkdep.imageView = b.get_img(d.depth).get_md().vk->view;
                     vkdep.imageLayout = to_vk(b.get_acc(d.depth).layout);
                     if(m_type == MeshPassType::Z_PREPASS)
                     {
@@ -657,15 +659,15 @@ struct MeshPass : public Pass
                 vkrinfo.layerCount = 1;
                 VkViewport viewport{ 0.0, 0.0, render_res.x, render_res.y, 0.0, 1.0 };
                 VkRect2D scissor{ {}, { (u32)render_res.x, (u32)render_res.y } };
-                DescriptorResource shaderresources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::storage_buffer(b.get_buf(d.instances)),
+                const GPUMeshPassParams params{
+                    .engine = get_bindless_storage_buffer_index(b.get_buf(d.constants)),
+                    .instances = get_bindless_storage_buffer_index(b.get_buf(d.instances)),
                 };
                 auto* cmd = b.open_cmd_buf();
                 cmd->begin_rendering(vkrinfo);
                 cmd->set_viewports(&viewport, 1);
                 cmd->set_scissors(&scissor, 1);
-                cmd->bind_resources(0, shaderresources);
+                cmd->push_constants(params);
                 r.mesh_renderer.draw(m_type, *cmd);
                 cmd->end_rendering();
             });
@@ -677,7 +679,7 @@ struct MeshPass : public Pass
 
 struct VelocityBuffer : public Pass
 {
-    VelocityBuffer() : Pass("Velocity Vector Gen")
+    VelocityBuffer() : Pass("Velocity Vector Gen", RenderOrder::POST_Z)
     {
         auto& r = get_renderer();
         m_pp = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/velocity/velocity.cs.hlsl" }));
@@ -687,37 +689,35 @@ struct VelocityBuffer : public Pass
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
-        if(!get_renderer().prev_data) { return; }
-        if(!get_renderer().prev_data->render_resources.constants) { return; }
         if(!data.gbuffer[(int)GBufferType::DEPTH] || !data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
+        return;
 
         struct PassOutput
         {
-            RGResourceId constants;
-            RGResourceId prev_constants;
-            RGResourceId depth;
-            RGResourceId out_vel;
+            RGBuffer constants;
+            RGBuffer prev_constants;
+            RGImage depth;
+            RGImage out_vel;
         };
         graph->add_compute_pass<PassOutput>(
-            m_name.c_str(),
+            m_name.c_str(), m_order,
             [=](RGBuilder& b, PassOutput& d) {
                 auto& r = get_renderer();
-                d.constants = b.read_buffer(r.current_data->render_resources.constants);
-                d.prev_constants = b.read_buffer(r.prev_data->render_resources.constants);
+                d.constants = b.read_buffer(r.targets.constants);
+                d.prev_constants = b.read_buffer(b.previous(r.targets.constants));
                 d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
                 d.out_vel = b.read_write_image(data.gbuffer[(int)GBufferType::VELOCITY]);
             },
             [=](RGBuilder& b, const PassOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
-                DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.depth)),
-                    DescriptorResource::storage_image(b.get_img(d.out_vel)),
-                };
-                cmd->bind_resources(1, resources);
                 cmd->bind_pipeline(m_pp.get());
+                cmd->push_constants(GPUVelocityParams{
+                    .engine = get_bindless_storage_buffer_index(b.get_buf(d.constants)),
+                    .prev_engine = get_bindless_storage_buffer_index(b.get_buf(d.prev_constants)),
+                    .depth = get_bindless_sampled_image_index(b.get_img(d.depth)),
+                    .out_velocity = get_bindless_storage_image_index(b.get_img(d.out_vel)),
+                });
                 cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
             });
     }
@@ -725,118 +725,41 @@ struct VelocityBuffer : public Pass
     Handle<Pipeline> m_pp;
 };
 
-struct DepthDownsample final : public Pass
+struct AO : public Pass
 {
-    DepthDownsample() : Pass("DepthDownsample")
-    {
-        auto& r = get_renderer();
-        m_pp = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/downsample/depth_half.cs.hlsl" }));
-    }
-
-    ~DepthDownsample() override = default;
-
-    void init(RGRenderGraph* graph, const PassInitData& data) override
-    {
-        if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
-        if(!data.gbuffer[(int)GBufferType::NORMAL]) { return; }
-        if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
-
-        struct PassOutput
-        {
-            RGResourceId out_depth;
-            RGResourceId out_normal;
-            RGResourceId out_velocity;
-            RGResourceId src_depth;
-            RGResourceId src_normal;
-            RGResourceId src_velocity;
-        };
-        PassOutput output = graph->add_compute_pass<PassOutput>(
-            m_name.c_str(),
-            [=](RGBuilder& b, PassOutput& d) {
-                auto& r = get_renderer();
-                d.out_depth =
-                    b.create_resource(get_buffered_name("Halfres Depth"),
-                                      Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
-                                                  ImageFormat::R16F, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                      {}, true);
-                d.out_normal =
-                    b.create_resource(get_buffered_name("Halfres Normal"),
-                                      Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
-                                                  ImageFormat::R16FG16FB16FA16F, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                      {}, true);
-                d.out_velocity =
-                    b.create_resource(get_buffered_name("Halfres Velocity"),
-                                      Image::init(r.settings.render_resolution.x / 2, r.settings.render_resolution.y / 2,
-                                                  r.settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),
-                                      {}, true);
-
-                d.out_depth = b.write_image(d.out_depth);
-                d.out_normal = b.write_image(d.out_normal);
-                d.out_velocity = b.write_image(d.out_velocity);
-                d.src_depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
-                d.src_normal = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
-                d.src_velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
-            },
-            [=](RGBuilder& b, const PassOutput& d) {
-                auto& r = get_renderer();
-                auto* cmd = b.open_cmd_buf();
-
-                DescriptorResource resources[]{
-                    DescriptorResource::storage_image(b.get_img(d.out_depth)),
-                    DescriptorResource::storage_image(b.get_img(d.out_normal)),
-                    DescriptorResource::storage_image(b.get_img(d.out_velocity)),
-                    DescriptorResource::sampled_image(b.get_img(d.src_depth)),
-                    DescriptorResource::sampled_image(b.get_img(d.src_normal)),
-                    DescriptorResource::sampled_image(b.get_img(d.src_velocity)),
-                };
-                cmd->bind_resources(1, resources);
-                cmd->bind_pipeline(m_pp.get());
-                cmd->dispatch((r.settings.render_resolution.x / 2 + 7) / 8, (r.settings.render_resolution.y / 2 + 7) / 8, 1);
-            });
-        get_frame_data().render_resources.halfres_depth = output.out_depth;
-        get_frame_data().render_resources.halfres_normal = output.out_normal;
-        get_frame_data().render_resources.halfres_velocity = output.out_velocity;
-    }
-
-    Handle<Pipeline> m_pp;
-};
-
-struct SSAO : public Pass
-{
-    SSAO() : Pass("<PassSSAO>")
+    AO() : Pass("<PassAO>", RenderOrder::POST)
     {
         auto& r = get_renderer();
         m_reconstruct_normals =
             r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/normal_reconstruction/normal.cs.hlsl" }));
-        m_pp_arr[(int)AOMode::SSAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssao.cs.hlsl" }));
-        m_pp_arr[(int)AOMode::GTAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/gtao/gtao.cs.hlsl" }));
-        m_pp_arr[(int)AOMode::RTAO] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/rtao/rtao.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::SSAO] = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/ssao.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::GTAO] = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/gtao.cs.hlsl" }));
+        m_pp_arr[(int)AOMode::RTAO] = r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/rtao.cs.hlsl" }));
         m_pp_arr[(int)AOMode::SSILVB] =
-            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/ssilvb.cs.hlsl" }));
+            r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/ssilvb.cs.hlsl" }));
     }
-
-    ~SSAO() override = default;
 
     void init(RGRenderGraph* graph, const PassInitData& data) override
     {
+        if(!data.gbuffer[(int)GBufferType::ACCUMULATION]) { return; }
+        if(!data.gbuffer[(int)GBufferType::VELOCITY]) { return; }
+        if(!data.gbuffer[(int)GBufferType::DEPTH]) { return; }
+
         auto& r = get_renderer();
 
-        m_name = to_string(r.settings.gfx_settings.ao_mode);
+        m_name = to_string(r.settings.ao_mode);
 
         if(!m_noise_texture)
         {
-            m_noise_texture = r.make_image("SSAO Noise", Image::init(8, 8, ImageFormat::R16FG16F,
-                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
+            m_noise_texture = r.make_image("AO Noise", Image::init(8, 8, ImageFormat::R16FG16F,
+                                                                   ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT));
             std::mt19937 mt{ 0 };
             std::uniform_real_distribution<float> dist{ -1.0, 1.0 };
 
             size_t tex_sz = 8;
-            auto buf = r.make_buffer("SSAO Temp Noise", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
-                                                                     BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
-            r.queue_destroy_in_n_frames(buf);
+            auto buf = r.make_buffer("AO Temp Noise", Buffer::init(tex_sz * tex_sz * sizeof(float) * 2,
+                                                                   BufferUsage::STORAGE_BIT | BufferUsage::CPU_ACCESS));
+            r.queue_destroy(buf);
             auto* bufptr = (float*)buf->memory;
             for(auto i = 0; i < tex_sz * tex_sz * 2; ++i)
             {
@@ -844,131 +767,86 @@ struct SSAO : public Pass
             }
 
             auto copypp =
-                r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/copy_noise.cs.hlsl" }), Compilation::NOW);
+                r.make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/copy_noise.cs.hlsl" }), Compilation::NOW);
             struct NoiseOutput
             {
-                RGResourceId noise_buf;
-                RGResourceId out_noise_img;
+                RGBuffer noise_buf;
+                RGImage out_noise_img;
             };
             graph->add_compute_pass<NoiseOutput>(
-                "SSAO Generate Noise",
+                "AO Generate Noise", RenderOrder::SETUP_TARGETS,
                 [=, this](RGBuilder& b, NoiseOutput& d) {
-                    d.noise_buf = b.import_resource(buf);
-                    d.noise_buf = b.read_buffer(d.noise_buf);
-                    d.out_noise_img = b.import_resource(m_noise_texture);
-                    d.out_noise_img = b.write_image(d.out_noise_img);
+                    d.noise_buf = b.read_buffer(b.import_resource(buf));
+                    d.out_noise_img = b.write_image(b.import_resource(m_noise_texture));
                 },
                 [=](RGBuilder& b, const NoiseOutput& d) {
                     auto& r = get_renderer();
                     auto* cmd = b.open_cmd_buf();
 
-                    DescriptorResource resources[]{
-                        DescriptorResource::storage_buffer(b.get_buf(d.noise_buf)),
-                        DescriptorResource::storage_image(b.get_img(d.out_noise_img)),
-                    };
                     cmd->bind_pipeline(copypp.get());
-                    cmd->bind_resources(1, resources);
+                    cmd->push_constants(GPUAOCopyNoiseParams{
+                        .noise = get_bindless_storage_buffer_index(b.get_buf(d.noise_buf)),
+                        .out_noise = get_bindless_storage_image_index(b.get_img(d.out_noise_img)),
+                    });
                     ENG_ASSERT(tex_sz == 8);
                     cmd->dispatch(1, 1, 1);
                     r.destroy_pipeline(copypp);
                 });
         }
 
-        if(!r.prev_data) { return; }
-
-        struct PassSSAOOutput
+        struct PassAOOutput
         {
-            // Current Frame Inputs
-            RGResourceId constants;
-            RGResourceId depth;
-            RGResourceId noise;
-            RGResourceId normals;
-            RGResourceId color;
-            RGResourceId velocity;
+            RGImage depth;
+            RGBuffer constants;
+            RGImage noise;
+            RGImage normals;
+            RGImage opaque;
+            RGImage velocity;
+            RGImage history_len;
+            RGImage out_ao;
 
-            RGResourceId prev_constants;
-            RGResourceId prev_depth;
-            RGResourceId prev_normals;
-            RGResourceId prev_history_len;
-            RGResourceId prev_history;
-
-            RGResourceId out_history_len;
-            RGResourceId out_history;
-            RGResourceId out_color;
+            RGBuffer prev_constants;
+            RGImage prev_opaque;
+            RGImage prev_normals;
+            RGImage prev_depth;
+            RGImage prev_history_len;
         };
-        graph->add_compute_pass<PassSSAOOutput>(
-            m_name.c_str(),
-            [=, this](RGBuilder& b, PassSSAOOutput& d) {
+        graph->add_compute_pass<PassAOOutput>(
+            m_name.c_str(), RenderOrder::POST,
+            [=, this](RGBuilder& b, PassAOOutput& d) {
                 auto& r = get_renderer();
-                const u32 half_x = r.settings.render_resolution.x / 2;
-                const u32 half_y = r.settings.render_resolution.y / 2;
-
-                d.constants = b.read_buffer(r.current_data->render_resources.constants);
-                d.depth = b.sample_texture(get_frame_data().render_resources.halfres_depth);
+                d.depth = b.sample_texture(data.gbuffer[(int)GBufferType::DEPTH]);
+                d.constants = b.read_buffer(r.targets.constants);
                 d.noise = b.sample_texture(b.import_resource(m_noise_texture));
-                d.normals = b.sample_texture(get_frame_data().render_resources.halfres_normal);
-                d.color = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
-                d.velocity = b.sample_texture(get_frame_data().render_resources.halfres_velocity);
+                d.normals = b.sample_texture(data.gbuffer[(int)GBufferType::NORMAL]);
+                d.opaque = b.sample_texture(data.gbuffer[(int)GBufferType::DIFFUSE]);
+                d.velocity = b.sample_texture(data.gbuffer[(int)GBufferType::VELOCITY]);
+                d.out_ao = b.read_write_image(data.gbuffer[(int)GBufferType::ACCUMULATION]);
+                d.history_len = b.read_write_image(data.gbuffer[(int)GBufferType::HISTORY_LEN]);
 
-                d.prev_constants = b.read_buffer(b.import_resource(r.prev_data->render_resources.constants));
-                d.prev_depth = b.sample_texture(b.import_resource(r.prev_data->render_resources.halfres_depth));
-                d.prev_normals = b.sample_texture(b.import_resource(r.prev_data->render_resources.halfres_normal));
-
-                d.prev_history_len = b.read_image(b.create_resource(get_buffered_name("AO History Len", -1).as_view(),
-                                                                    Image::init(half_x, half_y, ImageFormat::R16F,
-                                                                                ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
-                                                                    {}, true));
-
-                d.prev_history = b.read_image(b.create_resource(get_buffered_name("AO History", -1).as_view(),
-                                                                Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
-                                                                            ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
-                                                                {}, true));
-
-                d.out_history_len =
-                    b.read_write_image(b.create_resource(get_buffered_name("AO History Len").as_view(),
-                                                         Image::init(half_x, half_y, ImageFormat::R16F,
-                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
-                                                         {}, true));
-
-                d.out_history =
-                    b.read_write_image(b.create_resource(get_buffered_name("AO History").as_view(),
-                                                         Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
-                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT),
-                                                         {}, true));
-
-                d.out_color =
-                    b.read_write_image(b.create_resource("AO Output",
-                                                         Image::init(half_x, half_y, ImageFormat::R16FG16FB16FA16F,
-                                                                     ImageUsage::STORAGE_BIT | ImageUsage::SAMPLED_BIT)));
-
-                r.current_data->render_resources.ao = d.out_color;
+                d.prev_constants = b.read_buffer(b.previous(r.targets.constants));
+                d.prev_opaque = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::DIFFUSE]));
+                d.prev_normals = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::NORMAL]));
+                d.prev_depth = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::DEPTH]));
+                d.prev_history_len = b.sample_texture(b.previous(data.gbuffer[(int)GBufferType::HISTORY_LEN]));
             },
-            [this](RGBuilder& b, const PassSSAOOutput& d) {
+            [this](RGBuilder& b, const PassAOOutput& d) {
                 auto& r = get_renderer();
                 auto* cmd = b.open_cmd_buf();
-                cmd->bind_pipeline(m_pp_arr[(int)r.settings.gfx_settings.ao_mode].get());
-
-                // MUST strictly match the field order of `struct PushConstants` in your HLSL header!
-                DescriptorResource resources[]{
-                    DescriptorResource::storage_buffer(b.get_buf(d.constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.depth)),
-                    DescriptorResource::sampled_image(b.get_img(d.noise)),
-                    DescriptorResource::sampled_image(b.get_img(d.normals)),
-                    DescriptorResource::sampled_image(b.get_img(d.color)),
-                    DescriptorResource::sampled_image(b.get_img(d.velocity)),
-                    DescriptorResource::storage_image(b.get_img(d.out_history_len)),
-                    DescriptorResource::storage_image(b.get_img(d.out_history)),
-                    DescriptorResource::storage_image(b.get_img(d.out_color)),
-
-                    DescriptorResource::storage_buffer(b.get_buf(d.prev_constants)),
-                    DescriptorResource::sampled_image(b.get_img(d.prev_depth)),
-                    DescriptorResource::sampled_image(b.get_img(d.prev_normals)),
-                    DescriptorResource::storage_image(b.get_img(d.prev_history_len)),
-                    DescriptorResource::storage_image(b.get_img(d.prev_history)),
+                GPUAOParams params{
+                    .engine = get_bindless_storage_buffer_index(b.get_buf(d.constants)),
+                    .ao = r.settings.ao_settings,
+                    .depth = get_bindless_sampled_image_index(b.get_img(d.depth)),
+                    .noise = get_bindless_sampled_image_index(b.get_img(d.noise)),
+                    .normal = get_bindless_sampled_image_index(b.get_img(d.normals)),
+                    .color = get_bindless_sampled_image_index(b.get_img(d.opaque)),
+                    .velocity = get_bindless_sampled_image_index(b.get_img(d.velocity)),
+                    .out_ao = get_bindless_storage_image_index(b.get_img(d.out_ao)),
                 };
-
-                cmd->bind_resources(1, resources);
-                cmd->dispatch((r.settings.render_resolution.x / 2 + 7) / 8, (r.settings.render_resolution.y / 2 + 7) / 8, 1);
+                if(r.settings.ao_mode == AOMode::RTAO) { params.scene = get_bindless_tlas_index(r.bufs.geom_tlas); }
+                cmd->push_constants(params);
+                cmd->bind_pipeline(m_pp_arr[(int)r.settings.ao_mode].get());
+                cmd->dispatch((r.settings.render_resolution.x + 7) / 8, (r.settings.render_resolution.y + 7) / 8, 1);
             });
     }
 
@@ -1094,7 +972,7 @@ namespace culling
 //     {
 //         RenderGraph::ResourceView zbufs;
 //     };
-//     Hiz(RenderGraph* g, const CreateInfo& info) : Pass("culling::Hiz")
+//     Hiz(RenderGraph* g, const CreateInfo& info) : Pass("culling::Hiz", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         auto& r = get_renderer();
 //         auto* w = get_engine().window;
@@ -1156,7 +1034,7 @@ namespace culling
 //         const ZPrepass* pzprepass;
 //         const Hiz* phiz;
 //     };
-//     MainPass(RenderGraph* g, const CreateInfo& info) : Pass("culling::MainPass")
+//     MainPass(RenderGraph* g, const CreateInfo& info) : Pass("culling::MainPass", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         auto& r = get_renderer();
 //         fwd = info.fwd;
@@ -1237,7 +1115,7 @@ namespace culling
 //         u32 lights_per_tile;
 //         u32 tile_pixels;
 //     };
-//     LightCulling(RenderGraph* g, const CreateInfo& info) : Pass("fwdp::LightCulling")
+//     LightCulling(RenderGraph* g, const CreateInfo& info) : Pass("fwdp::LightCulling", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         num_tiles = info.num_tiles;
 //         lights_per_tile = info.lights_per_tile;
@@ -1303,7 +1181,7 @@ namespace culling
 //         RenderGraph::ResourceView cbufs;
 //         RenderGraph::ResourceView zbufs;
 //     };
-//     DefaultUnlit(RenderGraph* g, const CreateInfo& info) : Pass("DefaultUnlit")
+//     DefaultUnlit(RenderGraph* g, const CreateInfo& info) : Pass("DefaultUnlit", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         auto& r = get_renderer();
 //         culled_id_bufs = info.pzprepass->culled_id_bufs;
@@ -1343,7 +1221,7 @@ namespace culling
 //         RenderGraph::ResourceView cbufs;
 //         RenderGraph::ResourceView zbufs;
 //     };
-//     DebugGeom(RenderGraph* g, const CreateInfo& info) : Pass("DebugGeom")
+//     DebugGeom(RenderGraph* g, const CreateInfo& info) : Pass("DebugGeom", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         auto& r = get_renderer();
 //         zbufs = info.zbufs;
@@ -1405,7 +1283,7 @@ namespace culling
 //     {
 //         RenderGraph::ResourceView cbufs;
 //     };
-//     ImGui(RenderGraph* g, const CreateInfo& info) : Pass("ImGui") { cbufs = info.cbufs; }
+//     ImGui(RenderGraph* g, const CreateInfo& info) : Pass("ImGui", RenderOrder::DEFAULT_UNLIT) { cbufs = info.cbufs; }
 //     void setup() override
 //     {
 //         access(cbufs, PipelineStage::COLOR_OUT_BIT, PipelineAccess::COLOR_WRITE_BIT, ImageLayout::ATTACHMENT);
@@ -1427,7 +1305,7 @@ namespace culling
 //         RenderGraph::ResourceView swapcbufs;
 //         const gfx::Swapchain* swapchain;
 //     };
-//     PresentCopy(RenderGraph* g, const CreateInfo& info) : Pass("PresentCopy")
+//     PresentCopy(RenderGraph* g, const CreateInfo& info) : Pass("PresentCopy", RenderOrder::DEFAULT_UNLIT)
 //     {
 //         cbufs = info.cbufs;
 //         swapcbufs = info.swapcbufs;

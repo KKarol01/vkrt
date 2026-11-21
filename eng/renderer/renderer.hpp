@@ -1,26 +1,29 @@
 #pragma once
-#pragma once
 
 #include <mutex>
-#include <shared_mutex>
 #include <unordered_set>
+#include <unordered_map>
+#include <set>
 #include <glm/glm.hpp>
-#include <eng/assets/asset_manager.hpp>
-#include <eng/assets/serialization.hpp>
-#include <eng/common/flags.hpp>
-#include <eng/common/handle.hpp>
-#include <eng/common/handleflatset.hpp>
-#include <eng/common/hash.hpp>
-#include <eng/common/slotallocator.hpp>
-#include <eng/common/slotmap.hpp>
-#include <eng/ecs/components.hpp>
-#include <eng/ecs/ecs.hpp>
 #include <eng/engine.hpp>
-#include <eng/fs/fs.hpp>
-#include <eng/renderer/backend.hpp>
-#include <eng/renderer/mesh/mesh_renderer.hpp>
+#include <eng/common/handle.hpp>
+#include <eng/common/flags.hpp>
+#include <eng/common/types.hpp>
+#include <eng/renderer/renderer_fwd.hpp>
 #include <eng/renderer/rendergraph.hpp>
-#include <eng/renderer/types.hpp>
+#include <eng/renderer/backend.hpp>
+#include <eng/ecs/ecs.hpp>
+#include <eng/common/hash.hpp>
+#include <eng/common/pool.hpp>
+#include <eng/common/uniquepool.hpp>
+#include <eng/common/slotallocator.hpp>
+#include <eng/assets/serialization.hpp>
+#include <eng/fs/fs.hpp>
+#include <eng/renderer/mesh/mesh_renderer.hpp>
+#include <assets/shaders/common.hlsli>
+
+// Windows macro. Expands to '1'. Don't need it, compiles without it. Thanks MS.
+#undef TRANSPARENT
 
 namespace eng
 {
@@ -32,36 +35,9 @@ namespace pass
 struct Pass;
 }
 
-struct Meshlet
-{
-    static constexpr auto get_struct_fields()
-    {
-        return std::make_tuple(serialization::StructField{ &Meshlet::vertex_offset },
-                               serialization::StructField{ &Meshlet::vertex_count },
-                               serialization::StructField{ &Meshlet::index_offset },
-                               serialization::StructField{ &Meshlet::index_count },
-                               serialization::StructField{ &Meshlet::bounding_sphere });
-    }
-    i32 vertex_offset;
-    u32 vertex_count;
-    u32 index_offset;
-    u32 index_count;
-    glm::vec4 bounding_sphere{};
-};
+class Renderer;
 
-struct GeometryDescriptor
-{
-    // usize get_num_indices() const { return indices.size_bytes() / get_index_size(gfx::IndexFormat::U16); }
-    usize get_num_vertices() const { return vertices.size_bytes() / get_vertex_layout_size(vertex_layout); }
-    Flags<GeometryFlags> flags;
-    Flags<VertexComponent> vertex_layout;
-    IndexFormat index_format{};
-    std::span<const float> vertices; // if attributes is non-empty, vertices is just positions (float3)
-    std::span<const float> attributes;
-    std::span<const std::byte> indices;
-    std::span<const Meshlet> meshlets; // optional
-    assets::ParsedGeometryReadySignal* signal{};
-};
+inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
 
 struct DescriptorResource
 {
@@ -107,6 +83,15 @@ struct DescriptorResource
     u32 index{ ~0u };
 };
 
+// Allocate (or reuse) a slot in the bindless table for the resource. The descriptor write happens at the next draw/dispatch.
+u32 get_bindless_storage_buffer_index(const BufferView& view);
+u32 get_bindless_storage_buffer_index(Handle<Buffer> buffer);
+u32 get_bindless_sampled_image_index(const ImageView& view);
+u32 get_bindless_sampled_image_index(Handle<Image> image);
+u32 get_bindless_storage_image_index(const ImageView& view);
+u32 get_bindless_storage_image_index(Handle<Image> image);
+u32 get_bindless_tlas_index(TopAccelerationStructure tlas);
+
 struct ImageBlockData
 {
     u32 bytes_per_texel;
@@ -117,16 +102,10 @@ ImageBlockData get_block_data(ImageFormat format);
 
 struct Shader
 {
-    struct Macro
-    {
-        StackString<64> name;
-        StackString<64> value;
-    };
     auto operator==(const Shader& o) const { return path == o.path; }
-    static Shader init(const fs::Path& path, const std::vector<Macro>& macros = {});
+    static Shader init(const fs::Path& path);
     fs::Path path;
     ShaderStage stage{ ShaderStage::NONE };
-    std::vector<Macro> macros;
     struct Metadata
     {
         ShaderMetadataVk* vk() const { return (ShaderMetadataVk*)ptr; }
@@ -353,15 +332,6 @@ struct MeshPass
 
 struct Material
 {
-    static constexpr auto get_struct_fields()
-    {
-        return std::make_tuple(serialization::StructField{ &Material::name }, serialization::StructField{ &Material::mesh_pass },
-                               serialization::StructField{ &Material::mode }, serialization::StructField{ &Material::alpha_cutoff },
-                               serialization::StructField{ &Material::base_color_factor },
-                               serialization::StructField{ &Material::base_color_texture },
-                               serialization::StructField{ &Material::normal_texture },
-                               serialization::StructField{ &Material::metallic_roughness_texture });
-    }
     enum class Mode : u8
     {
         OPAQUE,
@@ -388,10 +358,6 @@ struct Material
 
 struct Mesh
 {
-    static constexpr auto get_struct_fields()
-    {
-        return std::make_tuple(serialization::StructField{ &Mesh::geometry }, serialization::StructField{ &Mesh::material });
-    }
     auto operator<=>(const Mesh&) const = default;
     Handle<Geometry> geometry;
     Handle<Material> material;
@@ -399,7 +365,7 @@ struct Mesh
 
 struct Buffer
 {
-    static constexpr Buffer init(usize capacity, Flags<BufferUsage> usage)
+    static constexpr Buffer init(size_t capacity, Flags<BufferUsage> usage)
     {
         return Buffer{ .usage = usage, .capacity = capacity, .size = 0ull, .memory = {}, .md = {} };
     }
@@ -410,8 +376,8 @@ struct Buffer
     }
 
     Flags<BufferUsage> usage{};
-    usize capacity{};
-    usize size{};
+    size_t capacity{};
+    size_t size{};
     void* memory{};
     struct Metadata
     {
@@ -453,8 +419,6 @@ struct Image
                mips == a.mips && layers == a.layers && usage == a.usage && layout == a.layout;
     }
 
-    void* get_view_md(ImageView& view);
-
     ImageType type{ ImageType::TYPE_2D };
     ImageFormat format{};
     u32 width{};
@@ -469,36 +433,6 @@ struct Image
         ImageMetadataVk* vk() const { return (ImageMetadataVk*)ptr; }
         void* ptr{};
     } md;
-};
-
-struct ImageMipsLayers
-{
-    Range32u mips{};
-    Range32u layers{};
-};
-
-struct ImageMipLayers
-{
-    u32 mip{};
-    Range32u layers{};
-};
-
-struct ImageBlit
-{
-    ImageMipLayers srclayers{};
-    ImageMipLayers dstlayers{};
-    Range3D32i srcrange{};
-    Range3D32i dstrange{};
-    ImageFilter filter{ ImageFilter::LINEAR };
-};
-
-struct ImageCopy
-{
-    ImageMipLayers srclayers{};
-    ImageMipLayers dstlayers{};
-    i32_3 srcoffset{};
-    i32_3 dstoffset{};
-    u32_3 extent{};
 };
 
 struct Sampler
@@ -633,8 +567,7 @@ ENG_DEFINE_STD_HASH(eng::gfx::PipelineCreateInfo,
                              t.line_width, t.shaders, t.bindings, t.attributes));
 ENG_DEFINE_STD_HASH(eng::gfx::PipelineLayout, ENG_HASH(t.push_range.stages, t.push_range.size, t.layout));
 ENG_DEFINE_STD_HASH(eng::gfx::Pipeline, ENG_HASH(t.info));
-ENG_DEFINE_STD_HASH(eng::gfx::Shader::Macro, ENG_HASH(t.name, t.value));
-ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path, std::span{ t.macros }));
+ENG_DEFINE_STD_HASH(eng::gfx::Shader, ENG_HASH(t.path));
 ENG_DEFINE_STD_HASH(eng::gfx::Geometry, ENG_HASH(t.meshlet_range));
 ENG_DEFINE_STD_HASH(eng::gfx::Material, ENG_HASH(t.mesh_pass, t.mode, t.alpha_cutoff, t.base_color_factor, t.base_color_texture));
 ENG_DEFINE_STD_HASH(eng::gfx::Mesh, ENG_HASH(t.geometry, t.material));
@@ -669,46 +602,45 @@ struct Swapchain
 
 class ShaderManager
 {
-    struct SourceFile
+    struct File
     {
-        Handle<Shader> shader;
         fs::Path path;
         u64 hash{};
-        std::set<SourceFile*> include_set;
+        Handle<Shader> shader;
+        std::set<File*> headers_set;
+        std::set<Handle<Pipeline>> pipelines_set;
     };
 
   public:
-    void register_shader(Handle<Shader> shader);
-    void process_file_source_change(const fs::Path& modified_path, std::vector<Handle<Shader>>& out_shaders);
+    auto* try_get(this auto& self, Handle<Shader> a) { return self.m_shader_alloc.try_get(a); }
 
-    void parse_includes(SourceFile& f);
-    u64 get_hash(SourceFile& f);
-    u64 get_hash(hash_t shader_hash);
+    Handle<Shader> make_shader(const fs::Path& path);
+    void parse_includes(File& f, File* pf);
+    std::vector<Handle<Shader>> get_affected_shaders(const fs::Path& path,
+                                                     std::vector<Handle<Pipeline>>* out_affected_pipelines = nullptr);
+    u64 get_hash(const fs::Path& path);
+    void associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline);
+    std::vector<Handle<Pipeline>> get_associated_pipelines(Handle<Shader> sh) const;
 
-    std::unordered_map<hash_t, SourceFile> m_files_map;
+    Pool<Shader> m_shader_alloc;
+    std::unordered_map<fs::Path, File> m_files_map;
 };
 
 enum class SubmitFlags : u32
 {
 };
 
-struct RenderResources
+// Render graph handles of the frame's main targets, set by the SETUP_TARGETS pass.
+// Only valid while the frame they were set in is being built and executed.
+struct RenderTargets
 {
-    RGResourceId constants;
-
-    RGResourceId depth;
-    RGResourceId normals;
-    RGResourceId velocity;
-    RGResourceId history_len;
-    RGResourceId opaque;
-
-    RGResourceId halfres_depth;
-    RGResourceId halfres_normal;
-    RGResourceId halfres_velocity;
-
-    RGResourceId ao;
-    RGResourceId accum;
-    RGResourceId final_color;
+    RGBuffer constants;
+    RGImage depth;
+    RGImage opaque;
+    RGImage normals;
+    RGImage velocity;
+    RGImage history_len;
+    RGImage final_color;
 };
 
 struct TimestampQuery
@@ -726,6 +658,30 @@ struct ScopedTimestampQuery
     TimestampQuery* query{};
     ICommandBuffer* cmd{};
 };
+
+// Used for adding passes to the render graph.
+// Essentially divides vector of render passes into segments
+// or partitions, and using the constants from this namespace
+// adds render pass to the end of the corresponding segment.
+// This solves a problem of having to coordinate add everything
+// from one segment BEFORE adding anything ordered after.
+namespace RenderOrder
+{
+// First pass, creation of main textures/targets happens here
+inline constexpr u32 SETUP_TARGETS = 0;
+// Zprepass of the geometry
+inline constexpr u32 Z_PREPASS = 50;
+// Right after prepass, but before any rendering to other buffers happens
+inline constexpr u32 POST_Z = 51;
+// Rendering of opaque/transparent/other passes happens with the use of geometry
+inline constexpr u32 MESH_RENDER = 100;
+// Post processes happen here
+inline constexpr u32 POST = 150;
+// UI happens here, after all rendering had finished
+inline constexpr u32 UI = 200;
+// After UI, but right before present.
+inline constexpr u32 PRESENT = 250;
+}; // namespace RenderOrder
 
 class Renderer
 {
@@ -750,18 +706,11 @@ class Renderer
         std::vector<Sync*> available_syncs;
         std::vector<Sync*> wait_syncs;
 
-        Sync* staging_sync{};
-        StagingBuffer* staging{}; // small data staging to avoid stutters when big fills up
-
-        RenderResources render_resources;
-
         struct RetiredResource
         {
-            using NativeResource = std::variant<Handle<Buffer>, Handle<Image>>;
-            NativeResource resource;
-            usize deleted_at_frame{};
+            std::variant<Handle<Buffer>, Handle<Image>> resource;
+            size_t deleted_at_frame{};
         };
-        void add_retired_resource(const RetiredResource::NativeResource& native);
         std::mutex retired_mutex;
         std::vector<RetiredResource> retired_resources;
     };
@@ -795,30 +744,25 @@ class Renderer
         u32 fwdp_num_tiles{};
 
         IndexFormat index_type{ IndexFormat::U16 };
-        usize vertex_count{};
-        usize index_count{};
-        // usize transform_count{};
-        // usize light_count{};
+        size_t vertex_count{};
+        size_t index_count{};
+        // size_t transform_count{};
+        // size_t light_count{};
 
         Handle<Buffer> geom_blas; // todo: it's one big blas buffer for all the geometries that are forced to have blas built.
         Handle<Buffer> geom_tlas_buffer;
         TopAccelerationStructure geom_tlas;
     };
 
-    struct GraphicsSettings
-    {
-        AOMode ao_mode{ AOMode::SSILVB };
-    };
-
     struct Settings
     {
-        ImageFormat color_format{ ImageFormat::R16FG16FB16FA16F };
+        ImageFormat color_format{ ImageFormat::R8G8B8A8_UNORM };
         ImageFormat normal_format{ ImageFormat::R16FG16FB16FA16F };
         ImageFormat depth_format{ ImageFormat::D32_SFLOAT };
         ImageFormat velocity_format{ ImageFormat::R16FG16F };
         ImageFormat history_len_format{ ImageFormat::R16F };
-        ImageFormat present_format{ ImageFormat::R8G8B8A8_SRGB };
         f32_2 new_render_resolution{};
+        f32_2 override_render_resolution{};
         f32_2 render_resolution{};
         f32_2 present_resolution{};
 
@@ -832,7 +776,8 @@ class Renderer
         Handle<Image> white_texture;
         Handle<Image> magenta_black_texture;
 
-        GraphicsSettings gfx_settings;
+        AOMode ao_mode{ AOMode::SSILVB };
+        GPUEngAOSettings ao_settings{ .radius = 1.0f, .bias = 0.01f };
 
         bool regenerate_swapchain{};
     };
@@ -841,7 +786,6 @@ class Renderer
     {
         // std::shared_ptr<pass::Pass> reconstruct_normals;
         std::array<std::shared_ptr<pass::Pass>, (int)MeshPassType::LAST_ENUM> mesh_passes{};
-        std::shared_ptr<pass::Pass> downscale_depth;
         std::shared_ptr<pass::Pass> ao;
         std::shared_ptr<pass::Pass> velocity;
     };
@@ -856,7 +800,7 @@ class Renderer
         std::vector<float> attributes;
         std::vector<std::byte> indices;
         std::vector<Meshlet> meshlets;
-        assets::ParsedGeometryReadySignal* geom_ready_signal{};
+        ParsedGeometryReadySignal* geom_ready_signal{};
     };
 
     struct BuildGeometryContext
@@ -877,14 +821,15 @@ class Renderer
 
     // Creates buffer with optional gpu memory allocation. Thread-safe.
     Handle<Buffer> make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate = AllocateMemory::YES);
+    // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
+    void queue_destroy(Handle<Buffer> handle);
     // Creates image with optional gpu memory allocation. Thread-safe.
     Handle<Image> make_image(std::string_view name, Image&& image, AllocateMemory allocate = AllocateMemory::YES,
                              void* user_data = nullptr);
     // Enqueue resource to be destroyed in frame_delay frames, returning handle to the pool. Thread-safe.
-    void queue_destroy_in_n_frames(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now = false);
+    void queue_destroy(Handle<Image>& image, bool destroy_now = false);
     Handle<Sampler> make_sampler(Sampler&& sampler);
-    Handle<Shader> make_shader(const fs::Path& path, const std::vector<Shader::Macro>& defines = {},
-                               Compilation compilation = Compilation::DEFERRED);
+    Handle<Shader> make_shader(const fs::Path& path, Compilation compilation = Compilation::DEFERRED);
     bool compile_shader(Handle<Shader> shader);
     bool compile_shader(Shader& shader);
     Handle<DescriptorLayout> make_layout(const DescriptorLayout& info);
@@ -906,8 +851,8 @@ class Renderer
     Handle<MeshPass> make_mesh_pass(const MeshPass& info);
     // Handle<MeshPass> find_mesh_pass(std::string_view name);
 
-    void resize_buffer(Handle<Buffer>& handle, usize new_size, bool copy_data);
-    void resize_buffer(Handle<Buffer>& handle, usize upload_size, usize offset, bool copy_data);
+    void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
+    void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
 
     // void instance_blas(const BLASInstanceSettings& settingsi);
     // void update_transform(ecs::entity_id entity);
@@ -921,25 +866,23 @@ class Renderer
     Settings settings;
     RGRenderGraph* rgraph{};
 
-    Slotmap<Buffer> buffers;
-    Slotmap<Image> images;
+    Pool<Buffer> buffers;
+    Pool<Image> images;
 
-    HandleFlatSet<Sampler> samplers;
+    UniquePool<Sampler> samplers;
+    ShaderManager m_shaders;
+    fs::DirectoryListener* new_shaders_listener{};
 
-    ShaderManager m_shader_manager;
-    Slotmap<Shader> m_shaders;
-    fs::DirectoryListener* m_shader_listener{};
+    Pool<DescriptorLayout> dlayouts;
+    Pool<PipelineLayout> pplayouts;
+    Pool<Pipeline> pipelines;
 
-    std::vector<DescriptorLayout> dlayouts;
-    std::vector<PipelineLayout> pplayouts;
-    std::vector<Pipeline> pipelines;
-
-    std::vector<Geometry> geometries;
+    Pool<Geometry> geometries;
     std::vector<Meshlet> meshlets;
-    std::vector<Material> materials;
-    std::vector<Mesh> meshes;
-    std::vector<ShaderEffect> shader_effects;
-    HandleFlatSet<MeshPass> mesh_passes;
+    Pool<Material> materials;
+    UniquePool<Mesh> meshes;
+    Pool<ShaderEffect> shader_effects;
+    UniquePool<MeshPass> mesh_passes;
     MeshRenderer mesh_renderer;
 
     BuildGeometryContext new_geometries;
@@ -950,7 +893,6 @@ class Renderer
     std::vector<ecs::EntityId> new_transforms;
     std::vector<ecs::EntityId> new_lights;
 
-    std::shared_mutex m_make_resource_mutex;
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
     SlotAllocator<u32> gpu_resource_allocator;
@@ -959,8 +901,8 @@ class Renderer
     ImGuiRenderer* imgui_renderer{};
     FrameData frame_datas[2]{};
     FrameData* current_data{};
-    FrameData* prev_data{};
-    u64 current_frame{}; // monotonically increasing counter
+    RenderTargets targets; // graph handles for the frame being built
+    u64 current_frame{};   // monotonically increasing counter
     Passes passes;
     u64 mesh_entt_hash{};
 };
@@ -980,37 +922,44 @@ inline std::string to_string(AOMode a)
 }
 // clang-format on
 
-inline Renderer& get_renderer() { return *eng::get_engine().renderer; }
-inline Renderer::FrameData& get_frame_data() { return *get_renderer().current_data; }
-inline IRendererBackend& get_backend() { return *get_renderer().backend; }
-
-inline StackString<128> get_buffered_name(std::string_view name, i32 offset = 0)
-{
-    thread_local char buf[128]{};
-    const isize delay = (isize)get_renderer().frame_delay;
-    isize idx = get_renderer().current_frame;
-    idx = (((idx + offset) % delay) + delay) % delay;
-    const auto len = ENG_FMT_TO_N(buf, 128, "{}{}", name, idx);
-    return StackString<128>{ std::string_view{ buf, len } };
-}
+inline IRendererBackend& get_renderer_backend() { return *get_renderer().backend; }
 
 } // namespace gfx
-} // namespace eng
 
 // clang-format off
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Buffer, { return &::eng::gfx::get_renderer().buffers.at(*handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Image, { return &::eng::gfx::get_renderer().images.at(*handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Geometry, { return &::eng::gfx::get_renderer().geometries[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Mesh, { return &::eng::gfx::get_renderer().meshes[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Shader, { return &::eng::gfx::get_renderer().m_shaders.at(*handle); });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Pipeline, { return &::eng::gfx::get_renderer().pipelines[*handle]; });
-ENG_DEFINE_HANDLE_ALL_GETTERS(eng::gfx::Material, { return &::eng::gfx::get_renderer().materials[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Sampler, { return &::eng::gfx::get_renderer().samplers.at(handle); });
-//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::BufferView, { return &::eng::gfx::get_renderer().buffer_views.at(handle); });
-//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ImageView, { return &::eng::gfx::get_renderer().image_views.at(handle); });
-//ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::Texture);
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::DescriptorLayout, { return &::eng::gfx::get_renderer().dlayouts[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::PipelineLayout, { return &::eng::gfx::get_renderer().pplayouts[*handle]; });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::MeshPass, { return &::eng::gfx::get_renderer().mesh_passes.at(handle); });
-ENG_DEFINE_HANDLE_CONST_GETTERS(eng::gfx::ShaderEffect, { return &::eng::gfx::get_renderer().shader_effects.at(*handle); });
+ENG_HANDLE_POOL(eng::gfx::Buffer, ::eng::gfx::get_renderer().buffers);
+ENG_HANDLE_POOL(eng::gfx::Image, ::eng::gfx::get_renderer().images);
+ENG_HANDLE_POOL(eng::gfx::Geometry, ::eng::gfx::get_renderer().geometries);
+ENG_HANDLE_POOL(eng::gfx::Mesh, ::eng::gfx::get_renderer().meshes);
+ENG_HANDLE_POOL(eng::gfx::Shader, ::eng::gfx::get_renderer().m_shaders);
+ENG_HANDLE_POOL(eng::gfx::Pipeline, ::eng::gfx::get_renderer().pipelines);
+ENG_HANDLE_POOL(eng::gfx::Material, ::eng::gfx::get_renderer().materials);
+ENG_HANDLE_POOL(eng::gfx::Sampler, ::eng::gfx::get_renderer().samplers);
+ENG_HANDLE_CONST_POOL(eng::gfx::DescriptorLayout, ::eng::gfx::get_renderer().dlayouts);
+ENG_HANDLE_CONST_POOL(eng::gfx::PipelineLayout, ::eng::gfx::get_renderer().pplayouts);
+ENG_HANDLE_POOL(eng::gfx::MeshPass, ::eng::gfx::get_renderer().mesh_passes);
+ENG_HANDLE_CONST_POOL(eng::gfx::ShaderEffect, ::eng::gfx::get_renderer().shader_effects);
+
+namespace serialization 
+{
+template <> inline constexpr auto get_struct_fields<gfx::Material>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, name),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mesh_pass),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, mode),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, alpha_cutoff),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_factor),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, base_color_texture),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, normal_texture),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Material, metallic_roughness_texture));
+}
+template <> inline constexpr auto get_struct_fields<gfx::Mesh>()
+{
+    return std::make_tuple(ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, geometry),
+                           ENG_SERIALIZATION_DECLARE_STRUCT_FIELD(gfx::Mesh, material));
+}
+}
+
 // clang-format on
+
+} // namespace eng

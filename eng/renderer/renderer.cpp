@@ -1,31 +1,58 @@
+#include <meshoptimizer/src/meshoptimizer.h>
 #include <ranges>
 #include <barrier>
 #include <execution>
 #include <algorithm>
-#include <meshoptimizer/src/meshoptimizer.h>
-#include <reproc++/run.hpp>
-#include "renderer.hpp"
-#include <eng/camera.hpp>
-#include <eng/common/to_string.hpp>
-#include <eng/ecs/components.hpp>
-#include <eng/engine.hpp>
-#include <eng/fs/fs.hpp>
-#include <eng/math/align.hpp>
-#include <eng/renderer/bindlesspool.hpp>
-#include <eng/renderer/imgui/imgui_renderer.hpp>
-#include <eng/renderer/mesh/mesh_renderer.hpp>
-#include <eng/renderer/passes/passes.hpp>
-#include <eng/renderer/rendergraph.hpp>
+#include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
+#include <eng/engine.hpp>
+#include <eng/camera.hpp>
+#include <eng/renderer/bindlesspool.hpp>
 #include <eng/renderer/vulkan/to_vk.hpp>
+#include <eng/common/to_string.hpp>
+#include <eng/renderer/imgui/imgui_renderer.hpp>
+#include <eng/ecs/components.hpp>
+#include <eng/fs/fs.hpp>
+#include <eng/renderer/passes/passes.hpp>
 #include <eng/scene.hpp>
+#include <eng/math/align.hpp>
 #include <assets/shaders/common.hlsli>
+#include <reproc++/run.hpp>
 
 namespace eng
 {
 
 namespace gfx
 {
+
+u32 get_bindless_storage_buffer_index(const BufferView& view)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(view)) };
+}
+u32 get_bindless_storage_buffer_index(Handle<Buffer> buffer)
+{
+    return get_bindless_storage_buffer_index(BufferView::init(buffer));
+}
+u32 get_bindless_sampled_image_index(const ImageView& view)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::sampled_image(view)) };
+}
+u32 get_bindless_sampled_image_index(Handle<Image> image)
+{
+    return get_bindless_sampled_image_index(ImageView::init(image));
+}
+u32 get_bindless_storage_image_index(const ImageView& view)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::storage_image(view)) };
+}
+u32 get_bindless_storage_image_index(Handle<Image> image)
+{
+    return get_bindless_storage_image_index(ImageView::init(image));
+}
+u32 get_bindless_tlas_index(TopAccelerationStructure tlas)
+{
+    return { get_renderer().descriptor_allocator->get_bindless(DescriptorResource::acceleration_struct(tlas)) };
+}
 
 bool on_window_resize(float x, float y)
 {
@@ -122,11 +149,7 @@ void Renderer::init(IRendererBackend* backend)
 
     gq = backend->get_queue(QueueType::GRAPHICS);
     staging = new StagingBuffer{};
-
-    staging->init(gq, new StagingBufferAllocatorRingBuffer{
-                          BufferView::init(make_buffer("global staging", Buffer::init(62 * MiB, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT |
-                                                                                                    BufferUsage::CPU_ACCESS))),
-                          make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, "global staging sync" }) });
+    staging->init(gq);
     rgraph = new RGRenderGraph{};
     rgraph->init(this);
 
@@ -138,13 +161,14 @@ void Renderer::init(IRendererBackend* backend)
     imgui_renderer = new ImGuiRenderer{};
     imgui_renderer->init();
 
-    settings.new_render_resolution = get_engine().window->size;
-    settings.present_resolution = get_engine().window->size;
+    settings.new_render_resolution = { get_engine().window->width, get_engine().window->height };
+    settings.present_resolution = { get_engine().window->width, get_engine().window->height };
     settings.regenerate_swapchain = true;
 
     get_engine().window->add_on_resize(on_window_resize);
 
-    m_shader_listener = get_engine().fs->make_listener("/assets/shaders");
+    std::string_view exts[]{ ".hlsl", ".hlsli" };
+    new_shaders_listener = get_engine().fs->make_recursive_directory_listener("/assets/shaders", exts);
 }
 
 void Renderer::init_helper_geom()
@@ -305,7 +329,7 @@ void Renderer::init_pipelines()
                                                                                     .alpha_op = BlendOp::ADD } } })
                               .init_depth_test(false, false, settings.read_depth_compare)
                               .init_topology(Topology::TRIANGLE_LIST, PolygonMode::LINE, CullFace::BACK));
-        settings.apply_ao_pipeline = make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ssao/apply.cs.hlsl" }));
+        settings.apply_ao_pipeline = make_pipeline(PipelineCreateInfo::init({ "/assets/shaders/ao/apply.cs.hlsl" }));
     }
 
     {
@@ -356,11 +380,13 @@ void Renderer::init_pipelines()
         // passes.ao[(int)AOMode::SSAO] = std::make_shared<pass::SSAO>();
         // passes.ao[(int)AOMode::GTAO] = std::make_shared<pass::GTAO>();
         // passes.ao[(int)AOMode::RTAO] = std::make_shared<pass::RTAO>();
-        passes.mesh_passes[(int)MeshPassType::Z_PREPASS] = std::make_shared<pass::MeshPass>(MeshPassType::Z_PREPASS);
-        passes.mesh_passes[(int)MeshPassType::OPAQUE] = std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE);
-        passes.mesh_passes[(int)MeshPassType::WIREFRAME] = std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME);
-        passes.downscale_depth = std::make_shared<pass::DepthDownsample>();
-        passes.ao = std::make_shared<pass::SSAO>();
+        passes.mesh_passes[(int)MeshPassType::Z_PREPASS] =
+            std::make_shared<pass::MeshPass>(MeshPassType::Z_PREPASS, RenderOrder::Z_PREPASS);
+        passes.mesh_passes[(int)MeshPassType::OPAQUE] =
+            std::make_shared<pass::MeshPass>(MeshPassType::OPAQUE, RenderOrder::MESH_RENDER);
+        passes.mesh_passes[(int)MeshPassType::WIREFRAME] =
+            std::make_shared<pass::MeshPass>(MeshPassType::WIREFRAME, RenderOrder::MESH_RENDER);
+        passes.ao = std::make_shared<pass::AO>();
         passes.velocity = std::make_shared<pass::VelocityBuffer>();
     }
 }
@@ -369,7 +395,6 @@ void Renderer::init_perframes()
 {
     static_assert(frame_delay == 2);
     current_data = &frame_datas[0];
-    prev_data = nullptr;
     for(auto i = 0u; i < frame_delay; ++i)
     {
         frame_datas[i].cmdpool = gq->make_command_pool();
@@ -377,14 +402,6 @@ void Renderer::init_perframes()
         frame_datas[i].ren_fen = make_sync({ SyncType::FENCE, 1, ENG_FMT("rendering fence {}", i) });
         frame_datas[i].swp_sem = make_sync({ SyncType::BINARY_SEMAPHORE, 1, ENG_FMT("swap semaphore {}", i) });
         frame_datas[i].timestamp_pool = backend->make_query_pool({ QueryType::TIMESTAMP, 1024 });
-
-        frame_datas[i].staging_sync = make_sync({ SyncType::TIMELINE_SEMAPHORE, 0, ENG_FMT("staging sync") });
-        frame_datas[i].staging = new StagingBuffer{};
-        frame_datas[i].staging->init(
-            gq, new StagingBufferAllocatorRingBuffer{
-                    BufferView::init(make_buffer("frame staging", Buffer::init(1 * MiB, BufferUsage::TRANSFER_SRC_BIT | BufferUsage::TRANSFER_DST_BIT |
-                                                                                            BufferUsage::CPU_ACCESS))),
-                    frame_datas[i].staging_sync });
     }
 }
 
@@ -403,8 +420,8 @@ void Renderer::init_bufs()
     }
     {
         const auto* w = get_engine().window;
-        const auto num_tiles_x = (u32)std::ceilf(w->size.x / bufs.fwdp_tile_pixels);
-        const auto num_tiles_y = (u32)std::ceilf(w->size.y / bufs.fwdp_tile_pixels);
+        const auto num_tiles_x = (u32)std::ceilf(w->width / (float)bufs.fwdp_tile_pixels);
+        const auto num_tiles_y = (u32)std::ceilf(w->height / (float)bufs.fwdp_tile_pixels);
         const auto num_tiles = num_tiles_x * num_tiles_y;
         bufs.fwdp_num_tiles = num_tiles;
     }
@@ -491,6 +508,10 @@ void Renderer::update()
 {
     ENG_TIMER_SCOPED("Renderer update");
 
+    if(settings.override_render_resolution.x != 0 && settings.override_render_resolution.y != 0)
+    {
+        settings.new_render_resolution = settings.override_render_resolution;
+    }
     if(settings.render_resolution != settings.new_render_resolution)
     {
         settings.render_resolution = settings.new_render_resolution;
@@ -508,6 +529,7 @@ void Renderer::update()
         }
         if(settings.present_resolution.x > 0.0f && settings.present_resolution.y > 0.0f)
         {
+            settings.regenerate_swapchain = false;
             swapchain = backend->make_swapchain();
         }
         else { return; }
@@ -524,7 +546,6 @@ void Renderer::update()
     current_data->cmdpool->reset();
     current_data->reset_syncs();
     current_data->reset_queries();
-    // current_data->reset_staging();
 
     if(current_data->retired_resources.size() > 0)
     {
@@ -538,46 +559,38 @@ void Renderer::update()
             if(auto* buf = std::get_if<Handle<Buffer>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired buffer {} ({})", buffer_names[*(*buf)], *(*buf));
-                descriptor_allocator->on_resource_destroyed(*buf);
+                if(descriptor_allocator) { descriptor_allocator->release(*buf); }
                 backend->destroy_buffer(buf->get());
-                buffers.erase(buf->handle);
+                buffers.erase(*buf);
             }
             else if(auto* img = std::get_if<Handle<Image>>(&rs.resource))
             {
                 // ENG_LOG("Removing retired image {} ({})", image_names[*(*img)], *(*img));
-                descriptor_allocator->on_resource_destroyed(*img);
+                if(descriptor_allocator) { descriptor_allocator->release(*img); }
                 backend->destroy_image(img->get());
-                images.erase(img->handle);
+                images.erase(*img);
             }
         }
         current_data->retired_resources.erase(current_data->retired_resources.begin(), remove_until);
     }
 
-    {
-        std::vector<fs::Path> changed_paths;
-        m_shader_listener->consume_paths(changed_paths);
-        std::erase_if(changed_paths,
-                      [](const fs::Path& p) { return p.extension() != ".hlsli" && p.extension() != ".hlsl"; });
+    new_shaders_listener->consume_paths([this](std::vector<fs::Path> paths) {
+        if(paths.empty()) { return; }
 
-        std::vector<Handle<Shader>> affected_shaders;
-        for(const auto& p : changed_paths)
+        std::unordered_set<Handle<Shader>> to_recompile;
+        std::unordered_set<Handle<Pipeline>> pps_to_recompile;
+        to_recompile.reserve(paths.size());
+        for(const auto& p : paths)
         {
-            m_shader_manager.process_file_source_change(p, affected_shaders);
+            std::vector<Handle<Pipeline>> ppvec;
+            auto vec = m_shaders.get_affected_shaders(p, &ppvec);
+            to_recompile.insert(vec.begin(), vec.end());
+            pps_to_recompile.insert(ppvec.begin(), ppvec.end());
         }
-        std::vector<Handle<Pipeline>> affected_pipelines;
-        static_assert(std::is_same_v<decltype(pipelines), std::vector<Pipeline>>); // relying on index == handle behavior
-        for(auto i = 0u; i < pipelines.size(); ++i)
-        {
-            Handle<Pipeline> pp{ i };
-            if(std::any_of(pp->info.shaders.begin(), pp->info.shaders.end(), [&affected_shaders](Handle<Shader> sh) {
-                   return std::find(affected_shaders.begin(), affected_shaders.end(), sh) != affected_shaders.end();
-               }))
-            {
-                affected_pipelines.push_back(pp);
-            }
-        }
-        if(!affected_shaders.empty()) { vkDeviceWaitIdle(RendererBackendVk::get_dev()); }
-        for(auto h : affected_shaders)
+
+        vkDeviceWaitIdle(RendererBackendVk::get_dev());
+
+        for(auto h : to_recompile)
         {
             auto newsh = Shader::init(h->path);
             backend->make_shader(newsh);
@@ -590,13 +603,12 @@ void Renderer::update()
             backend->destroy_shader(h.get());
             h.get() = std::move(newsh);
         }
-        for(auto h : affected_pipelines)
+        for(auto h : pps_to_recompile)
         {
             backend->destroy_pipeline(h.get());
             compile_pipeline(h);
         }
-    }
-
+    });
     if(const auto& qg = get_engine().ecs->get_query_group<ecsc::Mesh>(); mesh_entt_hash != qg.hash)
     {
         ENG_TIMER_SCOPED("Allocate mesh gpu resources");
@@ -636,10 +648,10 @@ void Renderer::update()
             if(backend->caps.supports_bindless)
             {
                 GPUMaterial gpumat{
-                    .base_color_idx = descriptor_allocator->get_bindless(DescriptorResource::sampled_image(e->base_color_texture)),
+                    .base_color = get_bindless_sampled_image_index(e->base_color_texture),
                     .base_color_factor = e->base_color_factor,
                 };
-                staging->copy(bufs.materials.get(), &gpumat, *e * sizeof(gpumat), sizeof(gpumat));
+                staging->copy(bufs.materials.get(), &gpumat, e.index() * sizeof(gpumat), sizeof(gpumat));
             }
             else { ENG_ASSERT(false); }
         }
@@ -686,76 +698,64 @@ void Renderer::update()
     build_pending_geometries();
     build_pending_blases();
     {
-        // ENG_TIMER_SCOPED("Build passes");
+        ENG_TIMER_SCOPED("Build passes");
         mesh_renderer.build_passes();
     }
 
     {
-        // ENG_TIMER_SCOPED("Compile rendergraph");
+        ENG_TIMER_SCOPED("Compile rendergraph");
         compile_rendergraph();
     }
 
     {
-        // ENG_TIMER_SCOPED("render");
+        ENG_TIMER_SCOPED("render");
         Sync* rg_wait_syncs[]{ staging->flush(true) };
         Sync* rgsync = rgraph->execute(&rg_wait_syncs[0], std::size(rg_wait_syncs));
         gq->wait_sync(current_data->swp_sem).present(swapchain);
     }
 
-    settings.regenerate_swapchain = false;
     ++current_frame;
-    prev_data = current_data;
     current_data = &frame_datas[current_frame % frame_delay];
 }
 
 void Renderer::compile_rendergraph()
 {
-    struct ImportedResources
+    struct SetupTargets
     {
-        RGResourceId constants;
-        RGResourceId depth;
-        RGResourceId opaque;
-        RGResourceId normals;
-        RGResourceId velocity;
-        RGResourceId history_len;
-        RGResourceId final_color;
+        RGBuffer constants;
     };
+    rgraph->add_graphics_pass<SetupTargets>(
+        "SETUP_TARGETS", RenderOrder::SETUP_TARGETS,
+        [this](RGBuilder& b, SetupTargets& d) {
+            // Persistent, graph-owned targets. history = 2: the graph keeps two copies and alternates between them,
+            // so previous() gives last frame's. They are recreated when the description (e.g. resolution) changes.
+            const auto res = settings.render_resolution;
+            const auto image = [&res](ImageFormat format, Flags<ImageUsage> usage) {
+                return Image::init(res.x, res.y, format, usage);
+            };
+            const auto color_usage = ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
+            const auto storage_usage = ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT;
 
-    const auto import_resources = rgraph->add_graphics_pass<ImportedResources>(
-        "Setup Targets",
-        [this](RGBuilder& b, ImportedResources& d) {
-            auto& rr = current_data->render_resources;
-
-            // clang-format off
-			d.constants = b.create_resource(get_buffered_name("Constants"), Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), true);
-            d.constants = b.write_buffer(d.constants);
-
-            d.opaque = b.create_resource(get_buffered_name("Opaque"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT),RGClear::color(), true);
-            d.normals = b.create_resource(get_buffered_name("Opaque Normals"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.normal_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
-            d.depth = b.create_resource(get_buffered_name("Depth"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT), RGClear::depth_stencil(0.0), true);
-            d.velocity = b.create_resource(get_buffered_name("Velocity"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.velocity_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), RGClear::color(), true);
-            d.history_len = b.create_resource(get_buffered_name("History Length"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.history_len_format, ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
-            d.final_color = b.create_resource(get_buffered_name("Final Color"), Image::init(settings.render_resolution.x, settings.render_resolution.y, settings.color_format, ImageUsage::COLOR_ATTACHMENT_BIT | ImageUsage::SAMPLED_BIT | ImageUsage::STORAGE_BIT), {}, true);
-            // clang-format on
-
-            rr.constants = d.constants;
-            rr.opaque = d.opaque;
-            rr.normals = d.normals;
-            rr.depth = d.depth;
-            rr.velocity = d.velocity;
-            rr.history_len = d.history_len;
-            rr.final_color = d.final_color;
+            auto& t = targets;
+            t = RenderTargets{};
+            t.constants =
+                b.write_buffer(b.persistent("Constants", Buffer::init(sizeof(GPUEngConstants), BufferUsage::STORAGE_BIT), 2));
+            t.depth = b.persistent("Depth", image(settings.depth_format, ImageUsage::DEPTH_BIT | ImageUsage::SAMPLED_BIT),
+                                   RGClear::depth_stencil(0.0f), 2);
+            t.opaque = b.persistent("Opaque", image(settings.color_format, color_usage), RGClear::color(), 2);
+            t.normals = b.persistent("Opaque Normals", image(settings.normal_format, color_usage), RGClear::color(), 2);
+            t.velocity = b.persistent("Velocity", image(settings.velocity_format, storage_usage), RGClear::color(), 2);
+            t.history_len = b.persistent("History Length", image(settings.history_len_format, storage_usage), {}, 2);
+            t.final_color = b.persistent("Final Color", image(settings.color_format, color_usage), RGClear::color(), 2);
+            d.constants = t.constants;
         },
-        [this](RGBuilder& b, const ImportedResources& d) {
+        [this](RGBuilder& b, const SetupTargets& d) {
             auto* c = get_engine().camera;
             GPUEngConstants constants{};
 
-            constants.GPUVertexPositionBufferIndex =
-                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.positions));
-            constants.GPUVertexAttributeBufferIndex =
-                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.attributes));
-            constants.GPUMaterialBufferIndex =
-                descriptor_allocator->get_bindless(DescriptorResource::storage_buffer(bufs.materials));
+            constants.vertex_positions = get_bindless_storage_buffer_index(bufs.positions);
+            constants.vertex_attributes = get_bindless_storage_buffer_index(bufs.attributes);
+            constants.materials = get_bindless_storage_buffer_index(bufs.materials);
             constants.view = c->get_view();
             constants.proj = c->get_projection();
             constants.proj_view = c->get_projection() * c->get_view();
@@ -763,111 +763,83 @@ void Renderer::compile_rendergraph()
             constants.inv_proj = glm::inverse(c->get_projection());
             constants.inv_proj_view = constants.inv_view * constants.inv_proj;
             constants.cam_pos = c->pos;
-            constants.frame_index = (u32)current_frame;
 
             auto* cmd = b.open_cmd_buf();
-            get_renderer().current_data->staging->copy(b.get_buf(d.constants).buffer.get(), &constants, 0ull,
-                                                       sizeof(constants), false);
-            cmd->wait_sync(get_renderer().current_data->staging->flush(true));
+            get_renderer().staging->copy(b.get_buf(d.constants).buffer.get(), &constants, 0ull, sizeof(constants), false);
+            cmd->wait_sync(get_renderer().staging->flush(true));
         });
 
     pass::PassInitData pass_data{};
 
-    pass_data.depth_buffer = import_resources.depth;
+    pass_data.depth_buffer = targets.depth;
     passes.mesh_passes[(int)MeshPassType::Z_PREPASS]->init(rgraph, pass_data);
 
-    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    passes.velocity->init(rgraph, pass_data);
+    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = targets.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = targets.depth;
+    // passes.velocity->init(rgraph, pass_data);
 
-    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = import_resources.normals;
+    pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = targets.opaque;
+    pass_data.color_buffers[(int)pass::GBufferType::NORMAL] = targets.normals;
     passes.mesh_passes[(int)MeshPassType::OPAQUE]->init(rgraph, pass_data);
 
-    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = import_resources.depth;
-    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = import_resources.normals;
-    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = import_resources.velocity;
-    passes.downscale_depth->init(rgraph, pass_data);
+    // pass_data = {};
+    // pass_data.color_buffers[(int)pass::GBufferType::DIFFUSE] = targets.opaque;
+    // passes.mesh_passes[(int)MeshPassType::WIREFRAME]->init(rgraph, pass_data);
 
-    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = import_resources.opaque;
-    passes.ao->init(rgraph, pass_data);
     struct CopyToAccum
     {
-        RGResourceId input;
-        RGResourceId output;
+        RGImage input;
+        RGImage output;
     };
     rgraph->add_graphics_pass<CopyToAccum>(
-        "Copy To Accum",
+        "Copy To Accum", RenderOrder::POST,
         [=, this](RGBuilder& b, CopyToAccum& d) {
-            d.input = b.copy_source(get_frame_data().render_resources.opaque);
-            // d.input = b.copy_source(get_frame_data().render_resources.velocity);
-            d.output = b.copy_dest(import_resources.final_color);
+            d.input = b.copy_source(targets.opaque);
+            d.output = b.copy_dest(targets.final_color);
         },
         [this](RGBuilder& b, const CopyToAccum& d) {
             auto* cmd = b.open_cmd_buf();
-            const auto& srci = b.get_img(d.input).image.get();
-            const auto& dsti = b.get_img(d.output).image.get();
             cmd->copy(b.get_img(d.output).image.get(), b.get_img(d.input).image.get());
-            // cmd->blit(b.get_img(d.output).image.get(), b.get_img(d.input).image.get(),
-            //           ImageBlit{ .srclayers = { 0, { 0, 1 } },
-            //                      .dstlayers = { 0, { 0, 1 } },
-            //                      .srcrange = { { 0, 0, 0 }, { srci.width, srci.height, 1 } },
-            //                      .dstrange = { { 0, 0, 0 }, { dsti.width, dsti.height, 1 } },
-            //                      .filter = ImageFilter::NEAREST });
         });
 
-    struct ApplyAO
-    {
-        RGResourceId input;
-        RGResourceId ao;
-    };
-    rgraph->add_graphics_pass<ApplyAO>(
-        "Apply AO",
-        [=, this](RGBuilder& b, ApplyAO& d) {
-            d.input = b.read_write_image(get_frame_data().render_resources.final_color);
-            d.ao = b.sample_texture(get_frame_data().render_resources.ao);
-        },
-        [this](RGBuilder& b, const ApplyAO& d) {
-            if(!d.ao) { return; } // only during first frame, where there is no previous frame data yet.
-            auto* cmd = b.open_cmd_buf();
-            DescriptorResource dres[]{
-                DescriptorResource::storage_image(b.get_img(d.input)),
-                DescriptorResource::sampled_image(b.get_img(d.ao)),
-            };
-            cmd->bind_pipeline(settings.apply_ao_pipeline.get());
-            cmd->bind_resources(1, dres);
-            cmd->dispatch((settings.render_resolution.x + 7) / 8, (settings.render_resolution.y + 7) / 8, 1);
-        });
+    pass_data = {};
+    pass_data.gbuffer[(int)pass::GBufferType::DIFFUSE] = targets.opaque;
+    pass_data.gbuffer[(int)pass::GBufferType::NORMAL] = targets.normals;
+    pass_data.gbuffer[(int)pass::GBufferType::ACCUMULATION] = targets.final_color;
+    pass_data.gbuffer[(int)pass::GBufferType::VELOCITY] = targets.velocity;
+    pass_data.gbuffer[(int)pass::GBufferType::HISTORY_LEN] = targets.history_len;
+    pass_data.gbuffer[(int)pass::GBufferType::DEPTH] = targets.depth;
+    passes.ao->init(rgraph, pass_data);
 
     const auto imdata = imgui_renderer->update(rgraph);
 
     struct CopySwapchainData
     {
-        RGResourceId input;
-        RGResourceId output;
+        RGImage input;
+        RGImage output;
     };
     const auto copyswapchaindata = rgraph->add_graphics_pass<CopySwapchainData>(
-        "Copy To Swap",
+        "Copy To Swap", RenderOrder::PRESENT,
         [=, this](RGBuilder& b, CopySwapchainData& data) {
-            data.input = b.copy_source(get_renderer().current_data->render_resources.final_color);
-            data.output = b.import_resource(swapchain->get_image(), DiscardContents::YES);
-            data.output = b.copy_dest(data.output);
+            // the UI output when there is one (it draws the scene into a panel), the scene otherwise
+            data.input = b.copy_source(imdata.output ? imdata.output : targets.final_color);
+            data.output = b.copy_dest(b.import_resource(swapchain->get_image()));
         },
-        [this](RGBuilder& b, const CopySwapchainData& data) {
-            auto* cmd = b.open_cmd_buf();
-            auto& dsti = b.get_img(data.output).image.get();
-            const auto& srci = b.get_img(data.input).image.get();
+        [this](RGBuilder& pb, const CopySwapchainData& data) {
+            auto* cmd = pb.open_cmd_buf();
+            auto& dsti = pb.graph->get_img(data.output).get();
+            const auto& srci = pb.graph->get_img(data.input).get();
             cmd->wait_sync(current_data->acq_sem, PipelineStage::TRANSFER_BIT);
             cmd->blit(dsti, srci,
-                      ImageBlit{ .srclayers = ImageMipLayers{ 0, { 0, 1 } },
-                                 .dstlayers = ImageMipLayers{ 0, { 0, 1 } },
+                      ImageBlit{ .srclayers = ImageLayers{ 0, { 0, 1 } },
+                                 .dstlayers = ImageLayers{ 0, { 0, 1 } },
                                  .srcrange = { {}, { (float)srci.width, (float)srci.height, 1 } },
                                  .dstrange = { {}, { (float)dsti.width, (float)dsti.height, 1 } },
                                  .filter = ImageFilter::LINEAR });
         });
-    rgraph->add_graphics_pass<RGResourceId>(
-        "Present",
-        [copyswapchaindata](RGBuilder& b, RGResourceId& output) {
+    rgraph->add_graphics_pass<RGImage>(
+        "Present", RenderOrder::PRESENT,
+        [copyswapchaindata](RGBuilder& b, RGImage& output) {
             output = b.access_resource(copyswapchaindata.output, ImageLayout::PRESENT, PipelineStage::ALL, PipelineAccess::PRESENT_BIT);
         },
         [this](RGBuilder& b, auto& data) {
@@ -923,7 +895,6 @@ void Renderer::render_debug(const DebugGeometry& geom) { debug_bufs.add(geom); }
 
 Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, AllocateMemory allocate)
 {
-    std::scoped_lock lock{ m_make_resource_mutex };
     u32 order = 0;
     float size = (float)buffer.capacity;
     static constexpr const char* units[]{ "B", "KB", "MB", "GB" };
@@ -931,50 +902,41 @@ Handle<Buffer> Renderer::make_buffer(std::string_view name, Buffer&& buffer, All
     // ENG_LOG("Creating buffer {} [{:.2f} {}]", name, size, units[order]);
     backend->allocate_buffer(buffer, allocate);
     backend->set_debug_name(buffer, name);
-    auto h = Handle<Buffer>{ *buffers.emplace(std::move(buffer)) };
-    if(!h) { ENG_WARN("Could not create buffer {}", name); }
-    return h;
+    const auto handle = buffers.emplace(std::move(buffer));
+    if(!handle) { ENG_WARN("Could not create buffer {}", name); }
+    return handle;
+}
+
+void Renderer::queue_destroy(Handle<Buffer> buffer)
+{
+    ENG_ASSERT(buffer);
+    std::scoped_lock lock{ current_data->retired_mutex };
+    current_data->retired_resources.push_back(FrameData::RetiredResource{ buffer, current_frame });
 }
 
 Handle<Image> Renderer::make_image(std::string_view name, Image&& image, AllocateMemory allocate, void* user_data)
 {
-    std::scoped_lock lock{ m_make_resource_mutex };
     backend->allocate_image(image, allocate, user_data);
     backend->set_debug_name(image, name);
-    auto h = Handle<Image>{ *images.emplace(std::move(image)) };
-    if(!h) { ENG_WARN("Could not create image {}", name); }
-    return h;
+    const auto handle = images.emplace(std::move(image));
+    if(!handle) { ENG_WARN("Could not create image {}", name); }
+    return handle;
 }
 
-void Renderer::queue_destroy_in_n_frames(const FrameData::RetiredResource::NativeResource& resource, bool destroy_now)
+void Renderer::queue_destroy(Handle<Image>& image, bool destroy_now)
 {
-    if(auto* buf = std::get_if<Handle<Buffer>>(&resource))
+    ENG_ASSERT(image);
+    if(destroy_now)
     {
-        ENG_ASSERT(*buf);
-        if(destroy_now)
-        {
-            backend->destroy_buffer(buf->get());
-            buffers.erase(*(*buf));
-            return;
-        }
-    }
-    else if(auto* img = std::get_if<Handle<Image>>(&resource))
-    {
-        ENG_ASSERT(*img);
-        if(destroy_now)
-        {
-            backend->destroy_image(img->get());
-            images.erase(*(*img));
-            return;
-        }
+        if(descriptor_allocator) { descriptor_allocator->release(image); }
+        backend->destroy_image(image.get());
+        images.erase(image);
     }
     else
     {
-        ENG_ASSERT(false, "Invalid alternative");
-        return;
+        std::scoped_lock lock{ current_data->retired_mutex };
+        current_data->retired_resources.push_back(FrameData::RetiredResource{ image, current_frame });
     }
-
-    current_data->add_retired_resource(resource);
 }
 
 Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
@@ -986,13 +948,12 @@ Handle<Sampler> Renderer::make_sampler(Sampler&& sampler)
     return ret.handle;
 }
 
-Handle<Shader> Renderer::make_shader(const fs::Path& path, const std::vector<Shader::Macro>& defines, Compilation compilation)
+Handle<Shader> Renderer::make_shader(const fs::Path& path, Compilation compilation)
 {
-    const auto h = Handle<Shader>{ *m_shaders.emplace(Shader::init(path, defines)) };
+    const auto h = m_shaders.make_shader(path);
     ENG_ASSERT(h && h->stage != ShaderStage::NONE);
     if(compilation == Compilation::NOW) { compile_shader(h); }
     else { new_shaders.push_back(h); }
-    m_shader_manager.register_shader(h);
     return h;
 }
 
@@ -1010,11 +971,11 @@ bool Renderer::compile_shader(Handle<Shader> shader)
 
 bool Renderer::compile_shader(Shader& shader)
 {
-    const auto shhash = m_shader_manager.get_hash(ENG_HASH(shader));
-    fs::FilePtr shfile = get_engine().fs->open_file(shader.path, fs::OpenMode::TRY_READ_BYTES_BEG);
+    const auto shhash = m_shaders.get_hash(shader.path);
+    auto& fs = *get_engine().fs;
     const auto pcpath = fs::Path{ shader.path.string() + ".precompiled" };
-    fs::FilePtr pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::TRY_READ_BYTES_BEG);
-    if(!shfile && !pcfile)
+    auto pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
+    if(!fs.file_exists(shader.path) && !pcfile)
     {
         ENG_WARN("Shader {} has no source file nor precompiled binary", shader.path.string());
         return false;
@@ -1022,14 +983,13 @@ bool Renderer::compile_shader(Shader& shader)
 
     const auto compile_from_bytecode = [this, shhash, &shader, &pcfile]() -> bool {
         u64 readhash{};
-        usize n_read_bytes = 0;
-        pcfile->read((std::byte*)&readhash, 8, n_read_bytes, 0);
-        ENG_ASSERT(n_read_bytes == 8);
+        auto readb = pcfile.read((std::byte*)&readhash, 8, 0);
+        ENG_ASSERT(readb == 8);
         if(shhash == readhash)
         {
-            std::vector<u32> pcdata((pcfile->get_size() - 8) / 4);
-            pcfile->read((std::byte*)pcdata.data(), pcdata.size() * 4, n_read_bytes, 8);
-            ENG_ASSERT(n_read_bytes % 4 == 0);
+            std::vector<u32> pcdata((pcfile.size() - 8) / 4);
+            readb = pcfile.read((std::byte*)pcdata.data(), pcdata.size() * 4, 8);
+            ENG_ASSERT(readb % 4 == 0);
             auto res = backend->compile_shader(shader, std::as_bytes(std::span{ pcdata }));
             ENG_ASSERT(res);
             return true;
@@ -1037,7 +997,7 @@ bool Renderer::compile_shader(Shader& shader)
         return false;
     };
 
-    if(pcfile && pcfile->get_size() > 8)
+    if(pcfile && pcfile.size() > 8)
     {
         if(compile_from_bytecode())
         {
@@ -1064,10 +1024,8 @@ bool Renderer::compile_shader(Shader& shader)
     }();
     if(!shader_target) { return false; }
 
-    // compilation should happen from where the folder assets/ is
-    const auto include_path = get_engine().fs->make_rel_path("/").string();
-    const auto hlsl_path = get_engine().fs->make_rel_path(shader.path).string();
-    const auto pcpath_str = get_engine().fs->make_rel_path(pcpath).string();
+    const auto hlsl_path = shader.path.relative_path().string();
+    const auto pcpath_str = pcpath.relative_path().string();
     const char* args[]{
         "dxc.exe",
         "-T",
@@ -1081,51 +1039,50 @@ bool Renderer::compile_shader(Shader& shader)
         "-Zi",
 #endif
         "-I",
-        include_path.c_str(),
+        ".",
         "-Fo",
         pcpath_str.c_str(),
         hlsl_path.c_str(),
         (const char*)nullptr,
     };
-    pcfile->close();
-    get_engine().fs->delete_file(pcpath_str);
+    pcfile.close();
+    fs.delete_file(pcpath);
     auto [ret, code] = reproc::run(args, opts);
     if(ret != 0) { return false; }
 
-    pcfile->reopen();
+    pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
     if(!pcfile)
     {
         ENG_WARN("Could not open file with compiled shader code {}", pcpath.string());
         return false;
     }
 
-    std::vector<std::byte> pcdata(pcfile->get_size());
-    usize n_read_bytes = 0;
-    pcfile->read(pcdata.data(), pcdata.size(), n_read_bytes, 0);
+    std::vector<std::byte> pcdata(pcfile.size());
+    pcfile.read(pcdata.data(), pcdata.size(), 0);
+    pcfile.close();
 
-    usize n_wrote_bytes = 0;
-    pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::READ_WRITE_BYTES_CREATE_DISCARD);
-    pcfile->write((const std::byte*)&shhash, 8, n_wrote_bytes, 0);
-    pcfile->write(pcdata.data(), pcdata.size(), n_wrote_bytes, 8);
-    pcfile->close();
-    pcfile = get_engine().fs->open_file(pcpath, fs::OpenMode::TRY_READ_BYTES_BEG);
-    return compile_from_bytecode();
+    pcfile = fs.open_file(pcpath, fs::OpenMode::WRITE_CREATE_BYTES);
+    pcfile.write((const std::byte*)&shhash, 8, 0);
+    pcfile.write(pcdata.data(), pcdata.size(), 8, true);
+    pcfile.close();
+
+    pcfile = fs.open_file(pcpath, fs::OpenMode::READ_BYTES);
+    compile_from_bytecode();
+    return true;
 }
 
 Handle<DescriptorLayout> Renderer::make_layout(const DescriptorLayout& info)
 {
     DescriptorLayout layout = info;
     backend->compile_layout(layout);
-    dlayouts.push_back(std::move(layout));
-    return Handle<DescriptorLayout>{ (u32)dlayouts.size() - 1 };
+    return dlayouts.emplace(std::move(layout));
 }
 
 Handle<PipelineLayout> Renderer::make_layout(const PipelineLayout& info)
 {
     PipelineLayout layout = info;
     backend->compile_layout(layout);
-    pplayouts.push_back(std::move(layout));
-    return Handle<PipelineLayout>{ (u32)pplayouts.size() - 1 };
+    return pplayouts.emplace(std::move(layout));
 }
 
 Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compilation compilation)
@@ -1137,17 +1094,15 @@ Handle<Pipeline> Renderer::make_pipeline(const PipelineCreateInfo& info, Compila
         // with bindless, all pipeline layout should be the same
         ENG_ASSERT(p.info.layout == settings.common_layout);
     }
-    const auto it = std::ranges::find(pipelines, p);
-    const auto found_handle = it != pipelines.end();
+    const auto found_handle = pipelines.find_if([&p](const Pipeline& e) { return e == p; });
     if(!found_handle)
     {
-        auto handle = Handle<Pipeline>{ (Handle<Pipeline>::StorageType)pipelines.size() };
-        pipelines.push_back(std::move(p));
+        const auto handle = pipelines.emplace(std::move(p));
         if(compilation == Compilation::DEFERRED) { new_pipelines.push_back(handle); }
         else { compile_pipeline(handle); }
         return handle;
     }
-    return Handle<Pipeline>{ (Handle<Pipeline>::StorageType)std::distance(pipelines.begin(), it) };
+    return found_handle;
 }
 
 void Renderer::compile_pipeline(Handle<Pipeline> pipeline)
@@ -1167,6 +1122,7 @@ void Renderer::compile_pipeline(Handle<Pipeline> pipeline)
             auto it = std::ranges::find(new_shaders, sh);
             if(it != new_shaders.end()) { new_shaders.erase(it); }
         }
+        m_shaders.associate_pipeline(sh, pipeline);
     }
     backend->compile_pipeline(pp);
 }
@@ -1190,17 +1146,15 @@ Handle<Material> Renderer::make_material(const Material& desc)
     Material mat = desc;
     if(!mat.mesh_pass) { mat.mesh_pass = settings.default_meshpasses[(int)MeshPassType::OPAQUE]; }
     if(!mat.base_color_texture) { mat.base_color_texture = ImageView::init(settings.white_texture); }
-    materials.push_back(std::move(mat));
-    const auto handle = Handle<Material>{ (u32)materials.size() - 1 };
+    const auto handle = materials.emplace(std::move(mat));
     new_materials.push_back(handle);
     return handle;
 }
 
 Handle<Geometry> Renderer::make_geometry(const GeometryDescriptor& batch)
 {
-    const auto ret_handle = Handle<Geometry>{ (u32)geometries.size() };
+    const auto ret_handle = geometries.emplace();
     new_geometries.add_descriptor(ret_handle, batch);
-    geometries.emplace_back();
     return ret_handle;
 }
 
@@ -1239,11 +1193,11 @@ void Renderer::build_pending_geometries()
                         meshletize_geometry(batch, res.positions, res.attributes, res.indices, res.meshlets);
                         if(batch.geom_ready_signal)
                         {
-                            batch.geom_ready_signal->set_value(assets::ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
-                                                                                           .positions = res.positions,
-                                                                                           .attributes = res.attributes,
-                                                                                           .indices = res.indices,
-                                                                                           .meshlets = res.meshlets });
+                            batch.geom_ready_signal->set_value(ParsedGeometryData{ .vertex_layout = batch.vertex_layout,
+                                                                                   .positions = res.positions,
+                                                                                   .attributes = res.attributes,
+                                                                                   .indices = res.indices,
+                                                                                   .meshlets = res.meshlets });
                         }
                     }
                     else
@@ -1340,7 +1294,7 @@ void Renderer::build_pending_blases()
     }
 
     auto blas_scratch = make_buffer("blas scratch", Buffer::init(total_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
-    queue_destroy_in_n_frames(blas_scratch); // destroy later in frame_delay frames
+    queue_destroy(blas_scratch); // destroy later in frame_delay frames
 
     auto* cmd = current_data->cmdpool->begin();
     cmd->wait_sync(staging->flush(true), PipelineStage::AS_BUILD_BIT);
@@ -1376,12 +1330,12 @@ void Renderer::build_pending_blases()
                        std::span{ std::as_const(instance_ids) }, tlas_reqs, nullptr, nullptr, 0, nullptr, 0, nullptr, 0);
     {
         auto tlas_scratch = make_buffer("tlas scratch", Buffer::init(tlas_reqs.build_scratch_size, BufferUsage::AS_SCRATCH));
-        queue_destroy_in_n_frames(tlas_scratch); // destroy later in frame_delay frames
+        queue_destroy(tlas_scratch); // destroy later in frame_delay frames
         bufs.geom_tlas_buffer =
             make_buffer("geom tlas", Buffer::init(tlas_reqs.acceleration_structure_size, BufferUsage::AS_STORAGE));
         auto instances = make_buffer("Tlas blas instances",
                                      Buffer::init(tlas_reqs.instance_data_buffer_size, BufferUsage::AS_BUILD_INPUT));
-        queue_destroy_in_n_frames(instances);
+        queue_destroy(instances);
         bufs.geom_tlas = backend->make_tlas(std::span{ tlas_geoms }, std::span{ std::as_const(trs) },
                                             std::span{ std::as_const(instance_ids) }, tlas_reqs, cmd,
                                             &bufs.geom_tlas_buffer.get(), 0, &tlas_scratch.get(), 0, &instances.get(), 0);
@@ -1486,11 +1440,7 @@ void Renderer::meshletize_geometry(const BuildGeometryBatch& batch, std::vector<
 Handle<Mesh> Renderer::make_mesh(const MeshDescriptor& batch)
 {
     Mesh mesh{ .geometry = batch.geometry, .material = batch.material };
-    const auto found_it = std::find(meshes.begin(), meshes.end(), mesh);
-    if(found_it != meshes.end()) { return Handle<Mesh>{ (u32)std::distance(meshes.begin(), found_it) }; }
-    const u32 idx = meshes.size();
-    meshes.push_back(mesh);
-    return Handle<Mesh>{ idx };
+    return meshes.insert(mesh).handle;
 }
 
 void Renderer::make_blas(Handle<Geometry> geom)
@@ -1499,11 +1449,7 @@ void Renderer::make_blas(Handle<Geometry> geom)
     new_blases.push_back(geom);
 }
 
-Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info)
-{
-    shader_effects.push_back(info);
-    return Handle<ShaderEffect>{ (u32)shader_effects.size() - 1 };
-}
+Handle<ShaderEffect> Renderer::make_shader_effect(const ShaderEffect& info) { return shader_effects.emplace(info); }
 
 Handle<MeshPass> Renderer::make_mesh_pass(const MeshPass& info) { return mesh_passes.insert(info).handle; }
 
@@ -1529,7 +1475,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_
 
     auto dsth = make_buffer(backend->get_debug_name(handle.get()), Buffer::init(new_size, handle->usage));
     if(copy_data) { staging->copy(dsth.get(), handle.get(), 0ull, { 0ull, std::min(new_size, handle->size) }, true); }
-    queue_destroy_in_n_frames(handle);
+    queue_destroy(handle);
     handle = dsth;
 }
 
@@ -1537,7 +1483,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
 {
     if(!handle)
     {
-        ENG_ASSERT(false, "Buffer is null");
+        ENG_ERROR("Buffer is null");
         return;
     }
     const auto& buf = handle.get();
@@ -1552,7 +1498,7 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 
-Shader Shader::init(const fs::Path& path, const std::vector<Macro>& macros)
+Shader Shader::init(const fs::Path& path)
 {
     const auto stage = [&path] {
         const auto ext = fs::Path{ path }.replace_extension().extension();
@@ -1560,11 +1506,11 @@ Shader Shader::init(const fs::Path& path, const std::vector<Macro>& macros)
         if(ext == ".vs") { stage = ShaderStage::VERTEX_BIT; }
         else if(ext == ".ps") { stage = ShaderStage::PIXEL_BIT; }
         else if(ext == ".cs") { stage = ShaderStage::COMPUTE_BIT; }
-        else { ENG_ASSERT(false, "Unrecognized shader extension: {}", ext.string()); }
+        else { ENG_WARN("Unrecognized shader extension: {}", ext.string()); }
         return stage;
     }();
     if(stage == ShaderStage::NONE) { return Shader{}; }
-    Shader retshader{ path, stage, macros, {} };
+    Shader retshader{ path, stage, {} };
     return retshader;
 }
 
@@ -1626,80 +1572,113 @@ Handle<Image> Swapchain::get_image() const { return images.at(current_index); }
 
 ImageView Swapchain::get_view() const { return views.at(current_index); }
 
-void ShaderManager::register_shader(Handle<Shader> shader)
+Handle<Shader> ShaderManager::make_shader(const fs::Path& path)
 {
-    ENG_ASSERT(shader);
-    if(!shader) { return; }
-    const auto& sh = shader.get();
-    auto it = m_files_map.emplace(ENG_HASH(shader.get()), SourceFile{});
-    ENG_ASSERT(it.second, "Shader {} already registered", sh.path.string());
-    auto& sf = it.first->second;
-    sf.shader = shader;
-    sf.path = shader->path;
-    parse_includes(sf);
-    get_hash(sf);
+    auto& file = m_files_map[path];
+    if(!file.shader)
+    {
+        auto h = m_shader_alloc.emplace(Shader::init(path));
+        if(!h)
+        {
+            ENG_ASSERT(false, "Failed to create new shader {}", path.string());
+            return {};
+        }
+        file.path = path;
+        file.shader = h;
+        file.hash = 0;
+        parse_includes(file, nullptr);
+    }
+    return file.shader;
 }
 
-void ShaderManager::process_file_source_change(const fs::Path& modified_path, std::vector<Handle<Shader>>& out_shaders)
+void ShaderManager::parse_includes(File& f, File* pf)
 {
-    for(auto& [hash, file] : m_files_map)
+    if(f.hash == 0)
     {
-        if(file.path == modified_path ||
-           std::find_if(file.include_set.begin(), file.include_set.end(),
-                        [&modified_path](const SourceFile* f) { return f->path == modified_path; }) != file.include_set.end())
+        auto file = get_engine().fs->open_file(f.path, fs::OpenMode::READ_BYTES);
+        if(!file)
         {
-            if(file.shader) { out_shaders.push_back(file.shader); }
-            file.hash = 0;
-            get_hash(file);
+            ENG_WARN("Couldn't open file {}", f.path.string());
+            return;
+        }
+        f.hash = ENG_HASH(f.hash, file.get_hash());
+        const auto shader_dir = f.path.parent_path();
+        for(std::string line; file.getline(line);)
+        {
+            if(!line.starts_with("#include")) { continue; }
+            auto start = line.find('"');
+            if(start == std::string::npos) { continue; }
+            auto end = line.find('"', start + 1);
+            if(end == std::string::npos) { continue; }
+            fs::Path incpath{ line.begin() + start + 1, line.begin() + end };
+            ENG_ASSERT(!incpath.string().starts_with('/'));
+            if(!incpath.string().starts_with("assets/")) { incpath = shader_dir / incpath; }
+            else { incpath = "/" / incpath; }
+            ENG_ASSERT(fs::Path{ incpath }.extension() == ".hlsli");
+            auto& inc_file = m_files_map[incpath];
+            inc_file.path = incpath;
+            parse_includes(inc_file, &f);
+            ENG_ASSERT(inc_file.hash != 0);
         }
     }
-}
-
-void ShaderManager::parse_includes(SourceFile& f)
-{
-    auto file = get_engine().fs->open_file(f.path, fs::OpenMode::TRY_READ_BYTES_BEG);
-    ENG_ASSERT(file && file->is_open());
-    for(std::string str; file->get_line(str);)
+    if(pf)
     {
-        if(!str.starts_with("#include")) { continue; }
-        auto beg = str.find('"');
-        auto end = str.find('"', beg + 1);
-        if(beg == std::string::npos || end == std::string::npos) { continue; }
-        fs::Path include_path{ str.begin() + beg + 1, str.begin() + end };
-        ENG_ASSERT(!include_path.string().starts_with('/'));
-        if(include_path.string().starts_with("assets/")) { include_path = "/" / include_path; }
-        else { include_path = f.path.parent_path() / include_path; }
-        ENG_ASSERT(include_path.extension() == ".hlsli");
-        auto inc_it = m_files_map.emplace(ENG_HASH(include_path), SourceFile{ Handle<Shader>{}, include_path, 0, {} });
-        if(inc_it.second) { parse_includes(inc_it.first->second); }
-        f.include_set.insert(inc_it.first->second.include_set.begin(), inc_it.first->second.include_set.end());
-        f.include_set.insert(&inc_it.first->second);
+        pf->headers_set.insert(&f);
+        pf->headers_set.insert(f.headers_set.begin(), f.headers_set.end());
+        pf->hash = ENG_HASH(pf->hash, f.hash);
     }
 }
 
-u64 ShaderManager::get_hash(SourceFile& f)
+std::vector<Handle<Shader>> ShaderManager::get_affected_shaders(const fs::Path& path, std::vector<Handle<Pipeline>>* out_affected_pipelines)
 {
-    if(f.hash != 0) { return f.hash; }
-    u64 hash = 0;
-    for(auto* inc : f.include_set)
+    auto chfileit = m_files_map.find(path);
+    if(chfileit == m_files_map.end()) { return {}; }
+    auto& chfile = chfileit->second;
+
+    std::vector<Handle<Shader>> affected;
+    std::set<Handle<Pipeline>> affectedpps;
+    for(auto& [path, file] : m_files_map)
     {
-        hash = ENG_HASH(hash, get_hash(*inc));
+        if(&file == &chfile || file.headers_set.contains(&chfile))
+        {
+            file.hash = 0;
+            if(out_affected_pipelines) { affectedpps.insert(file.pipelines_set.begin(), file.pipelines_set.end()); }
+            if(file.shader) { affected.push_back(file.shader); }
+        }
     }
-    auto file = get_engine().fs->open_file(f.path, fs::OpenMode::TRY_READ_BYTES_BEG);
-    ENG_ASSERT(file && file->is_open());
-    hash = ENG_HASH(hash, file->get_hash());
-    if(f.shader) { hash = ENG_HASH(hash, f.shader.get()); }
-    f.hash = hash;
-    return hash;
+    if(out_affected_pipelines) { *out_affected_pipelines = { affectedpps.begin(), affectedpps.end() }; }
+    return affected;
 }
 
-u64 ShaderManager::get_hash(hash_t shader_hash) { return get_hash(m_files_map.at(shader_hash)); }
+u64 ShaderManager::get_hash(const fs::Path& path)
+{
+    auto it = m_files_map.find(path);
+    if(it == m_files_map.end()) { return 0; }
+    if(it->second.hash == 0) { parse_includes(it->second, nullptr); }
+    return it->second.hash;
+}
+
+void ShaderManager::associate_pipeline(Handle<Shader> sh, Handle<Pipeline> pipeline)
+{
+    if(!sh) { return; }
+    auto it = m_files_map.find(sh->path);
+    if(it == m_files_map.end()) { return; }
+    it->second.pipelines_set.insert(pipeline);
+}
+
+std::vector<Handle<Pipeline>> ShaderManager::get_associated_pipelines(Handle<Shader> sh) const
+{
+    if(!sh) { return {}; }
+    auto it = m_files_map.find(sh->path);
+    if(it == m_files_map.end()) { return {}; }
+    return std::vector<Handle<Pipeline>>(it->second.pipelines_set.begin(), it->second.pipelines_set.end());
+}
 
 float TimestampQuery::to_ms(const TimestampQuery& q)
 {
     u64 results[2];
-    get_backend().get_query_pool_results(q.pool, q.index, 2, &results);
-    return (float)(((double)(results[1] - results[0])) * get_backend().limits.timestampPeriodNs * 1e-6);
+    get_renderer().backend->get_query_pool_results(q.pool, q.index, 2, &results);
+    return (float)(((double)(results[1] - results[0])) * get_renderer().backend->limits.timestampPeriodNs * 1e-6);
 }
 
 ScopedTimestampQuery::ScopedTimestampQuery(std::string_view label, ICommandBuffer* cmd) : cmd(cmd)
@@ -1735,12 +1714,6 @@ Sync* Renderer::FrameData::get_sync()
 }
 
 void Renderer::FrameData::reset_syncs() { available_syncs = std::move(syncs); }
-
-void Renderer::FrameData::add_retired_resource(const RetiredResource::NativeResource& native)
-{
-    std::scoped_lock lock{ retired_mutex };
-    retired_resources.emplace_back(native, get_renderer().current_frame);
-}
 
 void Renderer::DebugGeomBuffers::render(CommandBufferVk* cmd, Sync* s)
 {
@@ -1839,24 +1812,7 @@ ImageView ImageView::init(Handle<Image> image, std::optional<ImageFormat> format
     return view;
 }
 
-void* ImageView::get_md() { return image->get_view_md(*this); }
-
-const void* ImageView::get_md() const { return const_cast<ImageView*>(this)->get_md(); }
-
-void* Image::get_view_md(ImageView& view)
-{
-    auto* imgmd = (ImageMetadataVk*)md.ptr;
-    const auto hash = ENG_HASH(view);
-    auto it = std::find_if(imgmd->views.begin(), imgmd->views.end(),
-                           [hash](const ImageViewMetadataVk* md) { return md->view_hash == hash; });
-    if(it != imgmd->views.end()) { return (void*)*it; }
-    void* viewmdalloc{};
-    get_backend().allocate_view(view, viewmdalloc);
-    auto*& viewmd = imgmd->views.emplace_back((ImageViewMetadataVk*)viewmdalloc);
-    viewmd->view_hash = hash;
-
-    return (void*)viewmd;
-}
+ImageView::Metadata ImageView::get_md() const { return get_renderer().backend->get_md(*this); }
 
 } // namespace gfx
 } // namespace eng
