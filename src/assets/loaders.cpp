@@ -363,8 +363,6 @@ Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::N
     node.name = gltfnode.name.c_str();
     node.transform = [&] {
         auto& transform = asset.transforms.emplace_back();
-        const auto parent_transform =
-            parent_node ? asset.transforms[parent_node->transform].to_mat4() : glm::identity<glm::mat4>();
         if(gltfnode.transform.index() == 0)
         {
             const auto& gltftrs = std::get<fastgltf::TRS>(gltfnode.transform);
@@ -372,14 +370,14 @@ Node load_node(Asset& asset, const fastgltf::Asset& gltfasset, const fastgltf::N
             trs.position = glm::vec3{ gltftrs.translation.x(), gltftrs.translation.y(), gltftrs.translation.z() };
             trs.rotation = glm::quat{ gltftrs.rotation.w(), gltftrs.rotation.x(), gltftrs.rotation.y(), gltftrs.rotation.z() };
             trs.scale = glm::vec3{ gltftrs.scale.x(), gltftrs.scale.y(), gltftrs.scale.z() };
-            transform = ecsc::Transform::init(parent_transform * trs.to_mat4());
+            transform = trs;
         }
         else
         {
             const auto& fasttrs = std::get<fastgltf::math::fmat4x4>(gltfnode.transform);
             glm::mat4 trs;
             memcpy(&trs, &fasttrs, sizeof(fasttrs));
-            transform = ecsc::Transform::init(parent_transform * trs);
+            transform = ecsc::Transform::init(trs);
         }
         return asset.transforms.size() - 1;
     }();

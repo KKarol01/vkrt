@@ -3,7 +3,6 @@
 #include <string>
 #include <cstdint>
 #include <eng/common/callback.hpp>
-#include <eng/common/indexed_hierarchy.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/engine.hpp>
 

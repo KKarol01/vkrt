@@ -2,6 +2,7 @@
 #include <barrier>
 #include <execution>
 #include <algorithm>
+#include <unordered_set>
 #include <eng/renderer/renderer.hpp>
 #include <eng/renderer/staging_buffer.hpp>
 #include <eng/engine.hpp>
@@ -570,10 +571,10 @@ void Renderer::update()
         for(auto e : qg.entities)
         {
             auto& mesh = Engine::get().ecs->get<ecsc::Mesh>(e);
-            if(mesh.gpu_resource == ~0u)
+            if(mesh.gpu_index == ~0u)
             {
-                mesh.gpu_resource = *gpu_resource_allocator.allocate();
-                new_transforms.push_back(e);
+                mesh.gpu_index = *gpu_resource_allocator.allocate();
+                m_new_transforms_vec.push_back(e);
             }
         }
         mesh_entt_hash = qg.hash;
@@ -611,23 +612,22 @@ void Renderer::update()
         }
         new_materials.clear();
     }
-    if(new_transforms.size())
+    if(m_new_transforms_vec.size())
     {
         std::swap(bufs.transforms[0], bufs.transforms[1]);
         const auto req_size = gpu_resource_allocator.size() * sizeof(glm::mat4);
         resize_buffer(bufs.transforms[0], req_size, false);
         staging->copy(bufs.transforms[0].get(), bufs.transforms[1].get(), 0, { 0, bufs.transforms[1]->size }, true);
-        for(auto i = 0u; i < new_transforms.size(); ++i)
+        for(auto i = 0u; i < m_new_transforms_vec.size(); ++i)
         {
-            const auto entity = new_transforms[i];
+            const auto entity = m_new_transforms_vec[i];
             const auto& transform = Engine::get().ecs->get<ecsc::Transform>(entity);
             const auto& mesh = Engine::get().ecs->get<ecsc::Mesh>(entity);
-            const auto trsmat4x4 = transform.to_mat4();
-            staging->copy(bufs.transforms[0].get(), &trsmat4x4[0][0], mesh.gpu_resource * sizeof(glm::mat4), sizeof(glm::mat4));
+            staging->copy(bufs.transforms[0].get(), &transform.world[0][0], mesh.gpu_index * sizeof(glm::mat4), sizeof(glm::mat4));
         }
-        new_transforms.clear();
+        m_new_transforms_vec.clear();
     }
-    if(new_lights.size())
+    if(m_new_lights_vec.size())
     {
         // ENG_ASSERT(false);
         //  std::swap(bufs.lights[0], bufs.lights[1]);
@@ -1215,9 +1215,9 @@ void Renderer::build_pending_blases()
                                                                            const ecsc::Transform& t) {
         for(auto rmh : m.render_meshes)
         {
-            instance_ids.push_back(m.gpu_resource);
+            instance_ids.push_back(m.gpu_index);
             tlas_geoms.push_back(&rmh->geometry.get());
-            glm::mat4x3 mat = t.to_mat4();
+            glm::mat4x3 mat = t.world;
             trs.push_back(glm::transpose(mat));
         }
     });
@@ -1305,6 +1305,8 @@ void Renderer::resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t 
     new_size = std::ceil(new_size);
     resize_buffer(handle, new_size, copy_data);
 }
+
+void Renderer::queue_transform_update(ecs::EntityId entity) { m_new_transforms_vec.push_back(entity); }
 
 SubmitQueue* Renderer::get_queue(QueueType type) { return backend->get_queue(type); }
 

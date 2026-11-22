@@ -31,7 +31,8 @@ class Panel
 class GamePanel : public Panel
 {
   public:
-    GamePanel(UI& ui, const ecs::EntityId* selected_node, u32* dock) : Panel("Game Panel", dock), selected_node(selected_node)
+    GamePanel(UI& ui, const ecs::EntityId* selected_node, u32* dock)
+        : Panel("Game Panel", dock), selected_node(selected_node)
     {
     }
 
@@ -73,6 +74,7 @@ class GamePanel : public Panel
     void draw_gizmo(ImVec2 pos, ImVec2 size)
     {
         auto* ecs = Engine::get().ecs;
+        auto* scene = Engine::get().scene;
         const auto e = *selected_node;
         if(!e || !ecs->has<ecsc::Transform>(e)) { return; }
 
@@ -84,9 +86,9 @@ class GamePanel : public Panel
         BoundingBox bounds{ .min = glm::vec3{ std::numeric_limits<float>::max() },
                             .max = glm::vec3{ std::numeric_limits<float>::lowest() } };
         bool has_bounds = false;
-        ecs->traverse_hierarchy(e, [ecs, &bounds, &has_bounds](ecs::EntityId child) {
+        scene->traverse(e, [ecs, &bounds, &has_bounds](ecs::EntityId child) {
             if(!ecs->has<ecsc::Transform, ecsc::Mesh>(child)) { return; }
-            const auto world = ecs->get<ecsc::Transform>(child).to_mat4();
+            const auto& world = ecs->get<ecsc::Transform>(child).world;
             for(auto rmh : ecs->get<ecsc::Mesh>(child).render_meshes)
             {
                 const auto& aabb = rmh->geometry->aabb;
@@ -102,7 +104,8 @@ class GamePanel : public Panel
             }
         });
 
-        auto matrix = ecs->get<ecsc::Transform>(e).to_mat4();
+        const auto world = ecs->get<ecsc::Transform>(e).world;
+        auto matrix = world;
         if(has_bounds) { matrix[3] = glm::vec4{ bounds.center(), 1.0f }; }
         glm::mat4 delta{ 1.0f };
         ImGuizmo::SetDrawlist();
@@ -112,12 +115,7 @@ class GamePanel : public Panel
             return;
         }
 
-        ecs->traverse_hierarchy(e, [ecs, &delta](ecs::EntityId child) {
-            if(!ecs->has<ecsc::Transform>(child)) { return; }
-            auto& transform = ecs->get<ecsc::Transform>(child);
-            transform = ecsc::Transform::init(delta * transform.to_mat4());
-            if(ecs->has<ecsc::Mesh>(child)) { gfx::get_renderer().new_transforms.push_back(child); }
-        });
+        scene->set_world_transform(e, delta * world);
     }
 
     const ecs::EntityId* selected_node{};
@@ -135,10 +133,11 @@ class ScenePanel : public Panel
         if(ImGui::Begin("Scene Panel", 0))
         {
             const auto toggle_expanded_below = [this](ecs::EntityId e, bool state) {
-                Engine::get().ecs->traverse_hierarchy(e, [this, state](ecs::EntityId e) { states[e].expanded = state; });
+                Engine::get().scene->traverse(e, [this, state](ecs::EntityId e) { states[e].expanded = state; });
             };
             const auto draw_node = [this, &toggle_expanded_below](const auto& self, ecs::EntityId e) {
                 auto* ecs = Engine::get().ecs;
+                auto* scene = Engine::get().scene;
                 const auto& node = ecs->get<ecsc::Node>(e);
                 auto& state = states[e];
                 ImGui::PushID(&node);
@@ -148,7 +147,7 @@ class ScenePanel : public Panel
                     float row_height = style.FramePadding.y / 2 + ImGui::GetTextLineHeight();
                     {
                         // align x-left, y-middle, otherwise y is bottom and looks bad
-                        if(ecs->has_children(e))
+                        if(scene->has_children(e))
                         {
                             ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, { 0.0f, 0.5f });
                             if(ImGui::ArrowButton("##arrow", state.expanded ? ImGuiDir_Down : ImGuiDir_Right))
@@ -191,13 +190,13 @@ class ScenePanel : public Panel
                     if(state.expanded)
                     {
                         ImGui::TreePush(&node);
-                        ecs->iterate_children(e, [&self](auto e) { self(self, e); });
+                        scene->iterate_children(e, [&self](auto e) { self(self, e); });
                         ImGui::TreePop();
                     }
                 }
                 ImGui::PopID();
             };
-            for(auto e : Engine::get().scene->scene)
+            for(auto e : Engine::get().scene->get_root_entities())
             {
                 draw_node(draw_node, e);
             }
@@ -347,9 +346,7 @@ class DebugPanel : public Panel
                 {
                     ImGui::Text("%s", pass.name.c_str());
                     auto it = std::ranges::find_if(gfx::get_renderer().current_data->available_tstamp_queries,
-                                                   [&pass](const gfx::TimestampQuery& q) {
-                                                       return q.label == pass.name;
-                                                   });
+                                                   [&pass](const gfx::TimestampQuery& q) { return q.label == pass.name; });
                     if(it != gfx::get_renderer().current_data->available_tstamp_queries.end())
                     {
                         auto& times = pass_times[it->label.hash()];

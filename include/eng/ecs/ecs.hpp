@@ -14,11 +14,11 @@
 #include <tuple>
 #include <algorithm>
 #include <limits>
+#include <unordered_map>
 #include <eng/common/types.hpp>
 #include "traits.hpp"
 #include <eng/common/sparseset.hpp>
 #include <eng/common/slotallocator.hpp>
-#include <eng/common/indexed_hierarchy.hpp>
 #include <eng/common/logger.hpp>
 #include <eng/common/callback.hpp>
 #include <eng/common/hash.hpp>
@@ -56,15 +56,6 @@ namespace ecs
     iterate_over_components<A, B>([](EntityId, [const] A[&], [const] B[&]) {});
 
     The syntax is the same for has<>(EntityId) and get<>(EntityId)
-
-    Entities can also be in a relationship.
-    You can make one entity a parent of another with make_child().
-    There are also get_parent(), has_children(),
-    traverse_hierarchy([](EntityId){}),
-    loop_over_children([](EntityId){}).
-
-    Traversing calls the callback with the starting entity, and traverses depth-first.
-    Looping over just calls the callback with all it's children, in-order.
 */
 
 #define ENG_ECS_DEFINE_COMPONENT_ID(Type, val)                                                                         \
@@ -163,10 +154,6 @@ class Registry
         // Checks if entity has specified components
         bool has_components(Signature csig) const { return (csig & sig) == csig; }
         Signature sig{};
-        EntityId parent{};
-        EntityId next_sib{};
-        EntityId prev_sib{};
-        EntityId first_kid{};
     };
 
     struct QueryGroup
@@ -232,7 +219,6 @@ class Registry
             return;
         }
         erase_components(eid);
-        unparent_child(eid);
         entity_alloc.erase(eid.slot());
         entities[eid.slot()] = eid.bump();
     }
@@ -286,98 +272,12 @@ class Registry
         erase_components(eid, Signature{ ~ComponentId{} });
     }
 
-    // Creates parent-child relationship.
-    void make_child(EntityId parentid, EntityId childid)
-    {
-        if(!has(parentid))
-        {
-            ENG_WARN("Parent entity {} is invalid", *parentid);
-            return;
-        }
-        if(!has(childid))
-        {
-            ENG_WARN("Child entity {} is invalid", *childid);
-            return;
-        }
-        auto* const pmd = &get_md(parentid);
-        auto* const cmd = &get_md(childid);
-        ENG_ASSERT(!cmd->parent);
-        if(!pmd->first_kid) { pmd->first_kid = childid; }
-        else
-        {
-            auto kid = pmd->first_kid;
-            auto* kmd = &get_md(pmd->first_kid);
-            while(kmd->next_sib)
-            {
-                kid = kmd->next_sib;
-                kmd = &get_md(kmd->next_sib);
-            }
-            kmd->next_sib = childid;
-            cmd->prev_sib = kid;
-        }
-        cmd->parent = parentid;
-    }
-
-    void unparent_child(EntityId childid)
-    {
-        if(!has(childid))
-        {
-            ENG_WARN("Child entity {} is invalid", *childid);
-            return;
-        }
-        auto* const cmd = &get_md(childid);
-        if(!cmd->parent) { return; }
-        auto* const pmd = &get_md(cmd->parent);
-        if(pmd->first_kid == childid) { pmd->first_kid = cmd->next_sib; }
-        else { get_md(cmd->prev_sib).next_sib = cmd->next_sib; }
-        if(cmd->next_sib) { get_md(cmd->next_sib).prev_sib = cmd->prev_sib; }
-        cmd->parent = EntityId{};
-        cmd->next_sib = EntityId{};
-        cmd->prev_sib = EntityId{};
-    }
-
-    // Gets the parent of an entity.
-    EntityId get_parent(EntityId eid) const
-    {
-        if(!has(eid))
-        {
-            ENG_WARN("Entity {} is invalid", *eid);
-            return EntityId{};
-        }
-        return get_md(eid).parent;
-    }
-
-    // Returns true if an entity is a parent to other entity
-    bool has_children(EntityId eid) const
-    {
-        if(!has(eid))
-        {
-            ENG_WARN("Entity {} is invalid", *eid);
-            return false;
-        }
-        return get_md(eid).first_kid != EntityId{};
-    }
-
     void iterate_entities(const auto& callback)
         requires(std::is_invocable_v<decltype(callback), EntityId>)
     {
         for(auto e : entities)
         {
             std::invoke(callback, e);
-        }
-    }
-
-    // Invokes a callback for every child of this entity.
-    void iterate_children(EntityId eid, const auto& callback)
-    {
-        if(!has(eid))
-        {
-            ENG_WARN("Entity {} is invalid", *eid);
-            return;
-        }
-        for(auto it = get_md(eid).first_kid; it; it = get_md(it).next_sib)
-        {
-            callback(it);
         }
     }
 
@@ -395,22 +295,6 @@ class Registry
             if(!md.has_components(sig)) { continue; }
             callback(entities[e], get<Components>(entities[e])...);
         }
-    }
-
-    // Traverses depth-first the relationship hierarchy of given entity.
-    // Callback is called at least once for any valid entity.
-    void traverse_hierarchy(EntityId eid, const auto& callback)
-    {
-        if(!has(eid))
-        {
-            ENG_ERROR("Invalid entity {}", *eid);
-            return;
-        }
-        const auto traverse = [&](EntityId id, const auto& self) -> void {
-            callback(id);
-            iterate_children(id, [&](EntityId id) { self(id, self); });
-        };
-        traverse(eid, traverse);
     }
 
     template <typename... Components> const QueryGroup& get_query_group()
@@ -503,7 +387,7 @@ class Registry
     }
 
     SlotAllocator<EntitySlot> entity_alloc;
-    std::vector<EntityId> entities;        // besides indices from hierarchy, stores versions for erase() and has()
+    std::vector<EntityId> entities;        // stores versions for erase() and has()
     std::vector<EntityMetadata> metadatas; // additional info for entities
     std::array<std::unique_ptr<IComponentPool>, MAX_COMPONENTS> pools; // component pools
     std::unordered_map<Signature, QueryGroup> m_qgroups_map;

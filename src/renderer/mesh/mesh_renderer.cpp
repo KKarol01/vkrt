@@ -67,7 +67,7 @@ MeshRenderer::InstancesVec MeshRenderer::gather_instances(MeshPassType type, std
     for(auto e : entities)
     {
         const auto& msh = Engine::get().ecs->get<ecsc::Mesh>(e);
-        ENG_ASSERT(msh.gpu_resource != ~0u);
+        ENG_ASSERT(msh.gpu_index != ~0u);
         for(auto rmsh : msh.render_meshes)
         {
             const auto& rmat = rmsh->material.get();
@@ -80,7 +80,7 @@ MeshRenderer::InstancesVec MeshRenderer::gather_instances(MeshPassType type, std
             {
                 instances.push_back(MeshletInstance{ .material = rmsh->material,
                                                      .pipeline = effect->pipeline,
-                                                     .gpu_resource = msh.gpu_resource,
+                                                     .gpu_resource = msh.gpu_index,
                                                      .meshlet = meshlets.offset + i });
             }
         }

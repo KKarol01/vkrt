@@ -708,7 +708,6 @@ class Renderer
         std::vector<Sync*> available_syncs;
         std::vector<Sync*> wait_syncs;
 
-
         struct RetiredResource
         {
             std::variant<Handle<Buffer>, Handle<Image>> resource;
@@ -856,6 +855,8 @@ class Renderer
     void resize_buffer(Handle<Buffer>& handle, size_t new_size, bool copy_data);
     void resize_buffer(Handle<Buffer>& handle, size_t upload_size, size_t offset, bool copy_data);
 
+    void queue_transform_update(ecs::EntityId entity);
+
     // void instance_blas(const BLASInstanceSettings& settingsi);
     // void update_transform(ecs::entity_id entity);
 
@@ -892,8 +893,8 @@ class Renderer
     std::vector<Handle<Shader>> new_shaders;
     std::vector<Handle<Pipeline>> new_pipelines;
     std::vector<Handle<Material>> new_materials;
-    std::vector<ecs::EntityId> new_transforms;
-    std::vector<ecs::EntityId> new_lights;
+    std::vector<ecs::EntityId> m_new_transforms_vec;
+    std::vector<ecs::EntityId> m_new_lights_vec;
 
     GeometryBuffers bufs;
     DebugGeomBuffers debug_bufs;
@@ -904,7 +905,7 @@ class Renderer
     FrameData frame_datas[2]{};
     FrameData* current_data{};
     RenderTargets targets; // graph handles for the frame being built
-    u64 current_frame{}; // monotonically increasing counter
+    u64 current_frame{};   // monotonically increasing counter
     Passes passes;
     u64 mesh_entt_hash{};
 };

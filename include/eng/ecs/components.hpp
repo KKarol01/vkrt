@@ -10,6 +10,7 @@
 #include <eng/common/logger.hpp>
 #include <eng/string/stack_string.hpp>
 #include <eng/renderer/renderer_fwd.hpp>
+#include <eng/ecs/ecs.hpp>
 #include <eng/assets/serialization.hpp>
 #include <assets/shaders/common.hlsli>
 
@@ -21,6 +22,16 @@ namespace ecsc
 struct Node
 {
     StackString<64> name;
+};
+
+// Used by the scene
+struct Hierarchy
+{
+    ecs::EntityId parent{};
+    ecs::EntityId first_child{};
+    ecs::EntityId prev_sibling{};
+    ecs::EntityId next_sibling{};
+    bool transform_dirty{};
 };
 
 struct Transform
@@ -37,9 +48,13 @@ struct Transform
     {
         return glm::translate(glm::mat4{ 1.0f }, position) * glm::mat4_cast(rotation) * glm::scale(glm::mat4{ 1.0f }, scale);
     }
+    // Local transform, relative to the parent. Write it through Scene::set_transform() (or call
+    // Scene::mark_transform_dirty() after modifying it) so world gets recomputed.
     glm::vec3 position{};
     glm::quat rotation{ glm::quat_identity<float, glm::packed_highp>() };
     glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
+    // Cached world matrix. Written only by Scene::update().
+    glm::mat4 world{ 1.0f };
 };
 
 struct Material
@@ -57,7 +72,7 @@ struct Mesh
 {
     std::string name;
     std::vector<Handle<gfx::Mesh>> render_meshes;
-    u32 gpu_resource{ ~0u }; // renderer sets this when it processeed the mesh
+    u32 gpu_index{ ~0u }; // renderer sets this when it processeed the mesh
 };
 
 struct alignas(16) Light

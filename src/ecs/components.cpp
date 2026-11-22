@@ -8,6 +8,7 @@ ENG_ECS_DEFINE_COMPONENT_ID(ecsc::Material, counter++);
 ENG_ECS_DEFINE_COMPONENT_ID(ecsc::Geometry, counter++);
 ENG_ECS_DEFINE_COMPONENT_ID(ecsc::Mesh, counter++);
 ENG_ECS_DEFINE_COMPONENT_ID(ecsc::Light, counter++);
+ENG_ECS_DEFINE_COMPONENT_ID(ecsc::Hierarchy, counter++);
 
 namespace eng::serialization
 {
@@ -23,6 +24,6 @@ void deserialize<ecsc::Transform>(ecsc::Transform& dst, std::span<const std::byt
 {
     glm::mat4 mat;
     safe_read(&mat, src.data(), out_bytes_written, sizeof(mat), src.size_bytes());
-    dst.init(mat);
+    dst = ecsc::Transform::init(mat);
 }
 } // namespace eng::serialization
