@@ -575,7 +575,6 @@ void Renderer::update()
                 mesh.gpu_resource = *gpu_resource_allocator.allocate();
                 new_transforms.push_back(e);
             }
-            mesh_renderer.instance_entity(e);
         }
         mesh_entt_hash = qg.hash;
     }

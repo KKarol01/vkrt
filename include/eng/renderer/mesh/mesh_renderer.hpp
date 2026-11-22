@@ -3,6 +3,7 @@
 #include <eng/renderer/renderer_fwd.hpp>
 #include <eng/renderer/rendergraph.hpp>
 #include <eng/ecs/components.hpp>
+#include <span>
 
 namespace eng
 {
@@ -11,32 +12,22 @@ namespace gfx
 
 class MeshRenderer
 {
+    struct MeshletInstance
+    {
+        Handle<Material> material;
+        Handle<Pipeline> pipeline;
+        u32 gpu_resource;
+        u32 meshlet;
+    };
+
     struct PassData
     {
-        struct InstacedMeshHandle
-        {
-            Handle<gfx::Mesh> mesh;
-            u32 gpu_resource;
-        };
-
-        struct MeshletInstance
-        {
-            Handle<Geometry> geometry;
-            Handle<Material> material;
-            Handle<Pipeline> pipeline;
-            u32 gpu_resource;
-            u32 meshlet;
-        };
-
         struct InstanceBatch
         {
             Handle<Pipeline> pipeline;
             u32 first_command;
             u32 command_count;
         };
-
-        u64 meshes_hash{};
-        std::vector<InstacedMeshHandle> meshes_vec;
 
         Handle<Buffer> instance_buf;
         Handle<Buffer> indirect_buf;
@@ -54,25 +45,24 @@ class MeshRenderer
 
     struct BuildPassResult
     {
+        std::vector<u32> counts_vec;
         std::vector<std::byte> cmds_vec;
         std::vector<GPUInstanceId> gpuinstanceids_vec;
-        u32 cmd_count;
     };
 
-    using InstancesVec = std::vector<PassData::MeshletInstance>;
-    using PassInstancesGroups = std::vector<Range32u>;
+    using InstancesVec = std::vector<MeshletInstance>;
 
   public:
-    void instance_entity(ecs::EntityId entity);
     void build_passes();
     SetupPassData setup(MeshPassType type, RGBuilder& b) const;
     void draw(MeshPassType type, ICommandBuffer& cmd);
 
   private:
-    static InstancesVec extract_meshlet_instances(MeshPassType type, PassData& pass);
-    static void sort_meshlet_instances(InstancesVec& vec);
-    static BuildPassResult build_pass_from_instances(PassData& pass, const InstancesVec& vec);
+    static InstancesVec gather_instances(MeshPassType type, std::span<const ecs::EntityId> entities);
+    static BuildPassResult build_pass(PassData& pass, const InstancesVec& vec);
+    static void upload(MeshPassType type, PassData& pass, const BuildPassResult& res);
 
+    u64 m_meshes_hash{};
     std::array<PassData, (int)MeshPassType::LAST_ENUM> m_pass_datas_arr;
 };
 
